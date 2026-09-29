@@ -543,23 +543,33 @@ impl<J: Journal> Server<J> {
     /// shard's knowledge, never the client's.
     ///
     /// Shrunk until it fits [`lc_proto::REPORT_LIMIT`]: [`ENTRIES_PER_REPORT`] counts systems,
-    /// and one system's file grows without bound over a long watch.
+    /// and a system that does not fit alone — the home system does not — is told a share of its
+    /// subjects at a time.
     pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, at_s: f64) -> Result<(String, Mark), Refusal> {
         let aboard = self.instruments.aboard.get(&id).ok_or(Refusal::NothingNew)?;
         let since = aboard.reporting.since(to.map_or(0, |t| t.0));
-        let mut limit = ENTRIES_PER_REPORT;
-        loop {
-            let (report, through) = aboard.knowledge.report_upto(since, at_s, limit);
+        let knowledge = &aboard.knowledge;
+        let fits = |(report, through): (Report, Option<Mark>)| {
             let through = through.ok_or(Refusal::NothingNew)?;
             let body = lc_proto::encode_report(&report);
-            if body.len() <= lc_proto::REPORT_LIMIT {
-                return Ok((body, through));
-            }
-            if limit == 1 {
-                return Err(Refusal::Impossible);
+            Ok((body.len() <= lc_proto::REPORT_LIMIT).then_some((body, through)))
+        };
+        let mut limit = ENTRIES_PER_REPORT;
+        while limit > 0 {
+            if let Some(sent) = fits(knowledge.report_upto(since, at_s, limit))? {
+                return Ok(sent);
             }
             limit /= 2;
         }
+        let mut limit = ENTRIES_PER_REPORT;
+        while limit > 0 {
+            if let Some(sent) = fits(knowledge.report_within(since, at_s, limit))? {
+                return Ok(sent);
+            }
+            limit /= 2;
+        }
+        // One body's file alone past the limit, which decimation is meant to prevent.
+        Err(Refusal::Impossible)
     }
 
     /// A report went out: this craft has now told `to` everything through `through`.
@@ -1183,6 +1193,56 @@ mod tests {
         }
         let belief = new.knowledge_of(near).and_then(|k| k.belief(secret).cloned()).expect("it landed after the restart");
         assert!(belief.learned_s > now_s + 3_000.0, "when its light got there: {}", belief.learned_s);
+    }
+
+    /// The home system has two hundred bodies and does not fit one report. It was refused as
+    /// `Impossible`, so no craft that had surveyed it could send a survey at all.
+    #[tokio::test]
+    async fn a_system_too_big_for_one_report_goes_in_several() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.load_world(World::new(sky()));
+        let (near, far) = (ShipId(40), ShipId(41));
+        server.admit(ClientId(2), crate::world::still(far, DVec3::ZERO), 0.0);
+        let star = sky()[0].id;
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let knowledge = &mut server.aboard(CraftId(far.0)).knowledge;
+        let bodies: Vec<Subject> =
+            (0..200).map(|k| Subject::Body { star, body: lc_world::knowledge::BodyId::of(star, &format!("b{k}")) }).collect();
+        for (k, &subject) in bodies.iter().enumerate() {
+            for look in 0..lc_world::knowledge::BEARINGS_KEPT {
+                let angle = (k * 100 + look) as f64 * 1.0e-3;
+                knowledge.sighted(
+                    subject,
+                    Sighting {
+                        witness: witness(CraftId(far.0)),
+                        observed_s: now_s - 1.0 - look as f64,
+                        bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::new(angle.cos(), angle.sin(), 0.0), sigma_rad: 1e-9 },
+                        size: Some((1e-6, 1e-8)),
+                        range_m: Some((1e11, 1e7)),
+                        spin_s: Some((86_400.0, 60.0)),
+                        band: em_spectra::Band::V,
+                        flux: 1e-12,
+                        flux_sigma: 1e-15,
+                        lineage: Vec::new(),
+                    },
+                );
+            }
+        }
+        let mut told = std::collections::BTreeSet::new();
+        let mut reports = 0;
+        loop {
+            let (body, through) = match server.report_for(CraftId(far.0), Some(near), now_s) {
+                Ok(sent) => sent,
+                Err(Refusal::NothingNew) => break,
+                Err(other) => panic!("refused {other:?} after {reports} reports"),
+            };
+            let report: Report = lc_proto::decode_report(&body).unwrap();
+            told.extend(report.entries.iter().flat_map(|e| e.parts.iter().map(|p| p.subject)));
+            server.reported(CraftId(far.0), Some(near), through);
+            reports += 1;
+        }
+        assert!(reports > 1, "it did not need splitting, so this tests nothing");
+        assert!(bodies.iter().all(|b| told.contains(b)), "{} of {} told", told.len(), bodies.len());
     }
 
     /// A report carrying an infinite error lands; as JSON it could not be read back.

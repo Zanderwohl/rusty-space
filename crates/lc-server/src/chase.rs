@@ -512,6 +512,7 @@ mod tests {
             temperature_k: Balance::DEFAULT.field_idle_k,
             shade: Shade::Clear,
             envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2,
+            switch: None,
         });
     }
 }

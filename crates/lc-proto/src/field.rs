@@ -61,6 +61,9 @@ pub struct Glow {
     pub shade: Shade,
     /// The field's envelope, m²: its size, which is as plain as its color.
     pub envelope_m2: f64,
+    /// Under way as the light left, sweeping across the envelope; `shade` holds until `done_s`,
+    /// coordinate seconds. One turned back has `to` equal to `shade`.
+    pub switch: Option<Switch>,
 }
 
 /// What light an emission is made of: a beam's one wavelength, or a drive face's blackbody.

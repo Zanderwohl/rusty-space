@@ -201,16 +201,22 @@ pub enum Transfer {
     Dismantle { gross_j: f64, returned_j: f64 },
 }
 
+/// Whether `from` becomes `to` only by being taken apart whole and built again: a change of kind.
+/// Size and shape change in place.
+pub fn rebuilt(from: &Part, to: &Part) -> bool {
+    from.kind != to.kind
+}
+
 impl Transfer {
-    /// `copies` of a part going from `from` to `to`, `None` where it is absent. Only size may
-    /// differ between the two: a reshape or a change of kind is a dismantle of all of `from` then
-    /// a build of all of `to`, so it is two calls. So is a change in how many copies there are:
-    /// the copies both forms have resize, and the one gained or lost is built or dismantled
+    /// `copies` of a part going from `from` to `to`, `None` where it is absent. Only size and
+    /// shape may differ between the two: a part [`rebuilt`] is a dismantle of all of `from`
+    /// then a build of all of `to`, so it is two calls. So is a change in how many copies there
+    /// are: the copies both forms have resize, and the one gained or lost is built or dismantled
     /// whole, so a mirror cannot be traded for size without the loss.
     pub fn of(from: Option<&Part>, to: Option<&Part>, copies: u32, balance: &Balance) -> Self {
         if let (Some(from), Some(to)) = (from, to) {
-            // Priced as a resize, a reshape would skip the loss on all of it.
-            debug_assert!(from.kind == to.kind && from.primitive == to.primitive, "a reshape is two transfers");
+            // Priced as a resize, a rebuild would skip the loss on all of it.
+            debug_assert!(!rebuilt(from, to), "a rebuild is two transfers");
         }
         let kg = |p: Option<&Part>| p.map_or(0.0, |p| f64::from(copies) * part_kg(p, balance));
         // Structure goes as volume^(2/3), so this is not a volume difference at one density.
@@ -390,8 +396,8 @@ mod tests {
 
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "a reshape is two transfers")]
-    fn a_reshape_is_refused_as_one_transfer() {
+    #[should_panic(expected = "a rebuild is two transfers")]
+    fn a_new_kind_is_refused_as_one_transfer() {
         let b = Balance::DEFAULT;
         let rod = part(1, Kind::Spar(SparMode::Saddle), Primitive::Cylinder { length: 8.0 }, 1.0e5);
         let strap = Part { kind: Kind::Spar(SparMode::Strap), ..rod };
@@ -399,13 +405,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "a reshape is two transfers")]
-    fn a_new_primitive_is_refused_as_one_transfer() {
-        let b = Balance::DEFAULT;
+    fn a_new_shape_is_priced_as_a_resize() {
+        let b = Balance { hull_areal_density: 80.0, ..Balance::DEFAULT };
         let rod = part(1, Kind::Storage, Primitive::Cylinder { length: 8.0 }, 1.0e5);
+        let longer = Part { primitive: Primitive::Cylinder { length: 16.0 }, volume_m3: 2.0e5, ..rod };
+        let Transfer::Build { cost_j } = Transfer::of(Some(&rod), Some(&longer), 1, &b) else { panic!("a build") };
+        assert!(close(cost_j, (part_kg(&longer, &b) - part_kg(&rod, &b)) * C2));
+        // A sphere of the same volume has less surface, so less structure to give back.
         let ball = Part { primitive: Primitive::Capsule { length: 0.0 }, ..rod };
-        Transfer::of(Some(&rod), Some(&ball), 1, &b);
+        let Transfer::Dismantle { gross_j, .. } = Transfer::of(Some(&rod), Some(&ball), 1, &b) else { panic!("a dismantle") };
+        assert!(close(gross_j, (part_kg(&rod, &b) - part_kg(&ball, &b)) * C2));
     }
 
     fn under(mut part: Part, parent: u16, mirror: bool) -> Part {

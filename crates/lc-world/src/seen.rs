@@ -209,6 +209,10 @@ impl Glowed {
         }
     }
 
+    fn switching_at(&self, t: f64) -> Option<Switch> {
+        self.switch.filter(|s| s.done_s > t)
+    }
+
     fn worn_alike(&self, other: &Glowed) -> bool {
         self.field == other.field && self.shade == other.shade && self.switch == other.switch
     }
@@ -273,18 +277,18 @@ impl Glows {
         self.kept.drain(..dropped);
     }
 
-    /// Heat, field and shade at `t`. Before the oldest sample, the oldest's, unless older ones were
+    /// Heat, field, shade and any switch under way at `t`. Before the oldest sample, the oldest's, unless older ones were
     /// forgotten: then nothing, as a form too old to remember is.
-    pub fn at(&self, t: f64) -> Option<(f64, Field, Mode)> {
+    pub fn at(&self, t: f64) -> Option<(f64, Field, Mode, Option<Switch>)> {
         let after = self.kept.partition_point(|g| g.at_s <= t);
         let Some(a) = after.checked_sub(1).map(|i| &self.kept[i]) else {
-            return self.kept.first().filter(|_| !self.forgot).map(|g| (g.heat_j, g.field, g.shade));
+            return self.kept.first().filter(|_| !self.forgot).map(|g| (g.heat_j, g.field, g.shade, g.switching_at(t)));
         };
         let heat_j = match self.kept.get(after) {
             Some(b) => a.heat_j + (b.heat_j - a.heat_j) * (t - a.at_s) / (b.at_s - a.at_s),
             None => a.heat_j,
         };
-        Some((heat_j, a.field, a.shade_at(t)))
+        Some((heat_j, a.field, a.shade_at(t), a.switching_at(t)))
     }
 }
 
@@ -330,7 +334,7 @@ mod tests {
         assert!(glows.kept.len() < 2000, "{} kept", glows.kept.len());
         for k in 0..2000 {
             let t = f64::from(k) * 10.0 + 3.3;
-            let (read, _, _) = glows.at(t).unwrap();
+            let (read, ..) = glows.at(t).unwrap();
             assert!((read / q(t) - 1.0).abs() < 2.0 * GLOW_TOLERANCE, "at {t}: {read} for {}", q(t));
         }
     }

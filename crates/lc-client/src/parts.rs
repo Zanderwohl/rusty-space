@@ -179,7 +179,7 @@ pub fn adopt_fitted(
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let form = Form::from(&hull.form);
     let forms: Vec<&Form> = std::iter::once(&form).chain(round.into_iter().flat_map(|r| [&r.from, &r.target])).collect();
-    // A form partway through a round need not place — a reshaped part's children wait for it to be
+    // A form partway through a round need not place — a rebuilt part's children wait for it to be
     // built again — but the round's ends always do. Framed by those alone, the round is still drawn
     // on a fresh launch, which has no earlier form to keep.
     let formed = OwnForm::spanning(&forms, &balance).or_else(|e| match round {
@@ -400,7 +400,7 @@ mod tests {
     }
 
     /// **Partway through a round, on a fresh launch.** A form partway through a round need not
-    /// place — a reshaped part is taken away before it is built again, and its children hang from
+    /// place — a rebuilt part is taken away before it is built again, and its children hang from
     /// nothing in between — so the shard's word on the form can be one that does not. The round's
     /// ends do, and frame the ship; the default ovoid stood in for it before.
     #[test]

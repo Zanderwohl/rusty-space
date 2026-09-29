@@ -305,7 +305,9 @@ both be right. What a craft believes is a fold over them.
 its own learning the sender has told them — and each transmission carries the oldest
 [`ENTRIES_PER_REPORT`](../../crates/lc-world/src/knowledge/report.rs) systems past that mark.
 The mark is a time and a system, so a volume of charts issued at one instant still pages, and
-nothing learned after a report was sent goes in it. The mark moves only once the transmission
+nothing learned after a report was sent goes in it. A system too big for one transmission — the
+home system, at two hundred bodies — is told a share of its subjects at a time, and the mark
+then also names the last subject sent. The mark moves only once the transmission
 exists.
 
 **A report is sent, not delivered.** It is not acknowledged, and the mark says what was sent: a
