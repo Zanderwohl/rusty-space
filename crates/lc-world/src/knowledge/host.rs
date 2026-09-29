@@ -1,16 +1,6 @@
-//! What a craft inside a system believes about its star: how far, how big, how hot, how bright
-//! and how heavy, each with one sigma. Derived from records the craft already holds, never
-//! stored, so a relayed report characterizes a star for a craft that was never there.
-//!
-//! - **Distance** is the host's own [`Distance::Measured`]: ranged looks from inside, or parallax.
-//! - **Radius** is an angular diameter times a range, from the host's sightings.
-//! - **Temperature** is the blackbody whose band ratios best fit the host's [`Colors`].
-//! - **Luminosity** is `4πR²σT⁴`, and the band flux times `4πd²` over the band's share of a
-//!   blackbody at that temperature, combined; failing both, the main sequence from the mass.
-//! - **Mass** is `n²a³` from planets fitted about the star, or the main sequence from the
-//!   luminosity.
-//!
-//! See `lightcone/docs/20-solar-power.md` §Parking.
+//! What a craft inside a system believes about its star, each value with one sigma. Derived from
+//! records the craft already holds and never stored, so a relayed report characterizes a star for
+//! a craft that was never there. The routes are in `lightcone/docs/20-solar-power.md` §Parking.
 
 use em_spectra::blackbody::{self, SIGMA};
 use em_spectra::stellar::{SOLAR_LUMINOSITY, SOLAR_MU};
@@ -29,7 +19,7 @@ pub type Measured = (f64, f64);
 const MAIN_SEQUENCE_SCATTER: f64 = 0.3;
 const MASS_LUMINOSITY_POWER: f64 = 3.5;
 
-/// The temperatures a fit searches, K: past either end no star the generator makes.
+/// The temperatures a fit searches, K: the generator makes nothing outside them.
 const COOLEST_K: f64 = 1_500.0;
 const HOTTEST_K: f64 = 60_000.0;
 
@@ -45,13 +35,12 @@ pub struct Host {
 }
 
 impl Host {
-    /// Luminosity's one sigma as a fraction of it.
     pub fn luminosity_fraction(&self) -> Option<f64> {
         self.luminosity_w.map(|(l, s)| s / l).filter(|f| f.is_finite())
     }
 
-    /// With a flux read where the craft is, W/m²: `4πd²F`, whose only error is the distance's,
-    /// combined with what was held. What a parked ship's collectors add to its telescope.
+    /// Combined with `4πd²F` for a flux read where the craft is, W/m², whose only error is the
+    /// distance's.
     pub fn with_reading(self, flux_w_m2: f64) -> Host {
         let Some((d, sd)) = self.distance_m.filter(|_| flux_w_m2 > 0.0) else { return self };
         let l = 4.0 * std::f64::consts::PI * d * d * flux_w_m2;
@@ -62,7 +51,6 @@ impl Host {
 }
 
 impl Knowledge {
-    /// The star `star` as this craft believes it, from `here_ly`.
     pub fn host(&self, star: StarId, here_ly: DVec3) -> Host {
         let file = self.file(Subject::Star(star));
         let distance_m = self.belief(Subject::Star(star)).and_then(|b| match b.distance {
@@ -93,9 +81,8 @@ impl Knowledge {
         Host { distance_m, radius_m, teff_k, luminosity_w, mass_kg }
     }
 
-    /// `n²a³` over the planets fitted about the star, the tightest of them. Only a fit to
-    /// bearings weighs it: a transit's axis was divided by a mass to begin with, and a claim has
-    /// no measurement behind it.
+    /// The tightest `n²a³` of the planets fitted about the star. Only a fit to bearings counts: a
+    /// transit's axis was divided by a mass to begin with, and a claim measured nothing.
     fn weighed_star(&self, star: StarId) -> Option<Measured> {
         self.members(star)
             .filter_map(|(_, file)| {
@@ -123,9 +110,9 @@ fn best_colors(colors: &[Colors]) -> Option<&Colors> {
         .map(|(_, c)| c)
 }
 
-/// A band flux and the range it was taken at, from the same look, the tightest-ranged of them:
-/// a flux carried to where the craft is now would be off by the square of how far it moved. Flux
-/// W/m², its sigma and its band; range m and its sigma.
+/// The tightest-ranged look's band flux (W/m², sigma, band) and its own range (m, sigma). The range
+/// must be the same look's: a flux read against where the craft is now is off by the square of how
+/// far it moved.
 fn ranged_flux(file: &File) -> Option<((f64, f64, Band), Measured)> {
     file.sightings()
         .iter()
@@ -134,8 +121,8 @@ fn ranged_flux(file: &File) -> Option<((f64, f64, Band), Measured)> {
         .min_by(|a, b| (a.1.1 / a.1.0).total_cmp(&(b.1.1 / b.1.0)))
 }
 
-/// The blackbody whose ratios to [`Colors::REFERENCE`] best fit the digest, and one sigma: where
-/// `χ²` rises by one either side. `None` with fewer than two bands.
+/// The blackbody best fitting the digest's ratios to [`Colors::REFERENCE`]; one sigma is where `χ²`
+/// rises by one.
 pub fn temperature_k(colors: &Colors) -> Option<Measured> {
     let ratios: Vec<(Band, f64, f64)> = Band::ALL
         .iter()
@@ -193,14 +180,14 @@ fn golden_min(f: &impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
-/// Stefan–Boltzmann: independent of the distance, which the radius already carried.
+/// Stefan–Boltzmann. Independent of the distance, which the radius already carried.
 fn from_radius((r, sr): Measured, (t, st): Measured) -> Measured {
     let l = blackbody::luminosity(r, t);
     (l, l * (2.0 * sr / r).hypot(4.0 * st / t))
 }
 
-/// A band's flux at the range it was taken at, over that band's share of a blackbody's output. The share moves
-/// with the temperature, so its error is taken by difference across one sigma of it.
+/// A band's flux over that band's share of a blackbody's output. The share's error is taken by
+/// difference across one sigma of temperature.
 fn from_flux((flux, flux_sigma, band): (f64, f64, Band), (d, sd): Measured, (t, st): Measured) -> Option<Measured> {
     let share = |t: f64| std::f64::consts::PI * blackbody::band_radiance(band, t) / (SIGMA * t.powi(4));
     let at = share(t);
@@ -265,7 +252,7 @@ mod tests {
         colors
     }
 
-    /// The Sun's own colors come back as the Sun's temperature, and noisier colors as a wider one.
+    /// Noisier colors must give a wider temperature, around the same one.
     #[test]
     fn colors_give_back_the_temperature_they_were_made_at() {
         let (t, sigma) = temperature_k(&sun_colors(0.01)).expect("a temperature");
@@ -284,7 +271,6 @@ mod tests {
         assert_eq!(temperature_k(&colors), None);
     }
 
-    /// Both routes give the Sun's luminosity from the Sun's radius, temperature and flux.
     #[test]
     fn the_routes_agree_on_the_sun() {
         let au = crate::system::UNIT_M;
@@ -297,7 +283,6 @@ mod tests {
         assert!((by_flux / sun - 1.0).abs() < 1e-3, "{by_flux}");
     }
 
-    /// The tighter route wins, and the two together are tighter than either.
     #[test]
     fn combining_weights_by_fractional_error() {
         let (l, s) = combine(&[(100.0, 1.0), (110.0, 11.0)]).unwrap();
@@ -306,9 +291,8 @@ mod tests {
         assert_eq!(combine(&[]), None);
     }
 
-    /// **The flux route reads the range of the look it took the flux from.** A bright look taken
-    /// near the star, read against where the craft has since gone, put the star a factor of that
-    /// ratio squared out; the newest look, unranged and from anywhere, is not used at all.
+    /// A flux taken near the star and read against a later, farther look's range would be off by
+    /// the square of the ratio.
     #[test]
     fn a_flux_is_read_at_the_range_it_was_taken_from() {
         let au = crate::system::UNIT_M;
@@ -335,7 +319,6 @@ mod tests {
         assert!((l / sun - 1.0).abs() < 1e-3, "{}", l / sun);
     }
 
-    /// A reading at a well-known distance pulls a loose luminosity to it.
     #[test]
     fn a_reading_pulls_a_loose_luminosity_to_it() {
         let au = crate::system::UNIT_M;
@@ -348,7 +331,6 @@ mod tests {
         assert_eq!(Host::default().with_reading(1.0), Host::default(), "no distance, no reading");
     }
 
-    /// The main sequence both ways is the identity, with the relation's scatter on each crossing.
     #[test]
     fn the_main_sequence_goes_both_ways() {
         let sun_kg = SOLAR_MU / super::super::body::GRAVITY;

@@ -579,8 +579,7 @@ pub fn sweep_between(
             && let Some(source) = sources.get(index)
         {
             knowledge.sighted(source.subject, seen);
-            // The one star whose temperature anything needs yet: the ship's own sun, whose heat
-            // is what a parking orbit is reckoned against.
+            // Only the host: nothing needs another star's temperature yet.
             if let Some(host) = host
                 && source.subject == Subject::Star(host)
             {
@@ -590,8 +589,7 @@ pub fn sweep_between(
     }
 }
 
-/// Every band of a star at once, folded into its colors, which is what its temperature is read
-/// from. See [`super::host`].
+/// Every band of a star at once, folded into its colors for [`super::host`]'s temperature.
 fn star_colors(
     sky: &Sky,
     knowledge: &mut Knowledge,

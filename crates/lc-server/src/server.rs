@@ -162,7 +162,7 @@ pub struct Server<J: Journal> {
     /// **Not** dropped when the pilot signs out. A ship hanging about with another goes on
     /// hanging about, and a checkpoint writes the policy down with the craft.
     pub(crate) pursuits: HashMap<CraftId, Pursuit>,
-    /// Standing parking orbits, kept as [`Server::pursuits`] are. See [`crate::park`].
+    /// See [`crate::park`].
     pub(crate) parks: HashMap<CraftId, crate::park::Park>,
     /// How fast this world runs, as a multiple of the design rate. See [`Server::set_rate`].
     rate: f64,
@@ -2238,7 +2238,6 @@ use crate::transport::Loopback;
         }
     }
 
-    /// A Park that is refused leaves a standing intercept where it was.
     #[test]
     fn a_refused_park_leaves_an_intercept_standing() {
         let mut server = Server::new(Memory::default(), 0, 1);

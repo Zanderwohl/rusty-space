@@ -792,7 +792,6 @@ mod tests {
         let knew = server.take_knowledge();
         let knew_of = |id: i64| knew.files.iter().any(|f| f.ship_id == id) || knew.samples.iter().any(|r| r.ship_id == id);
         assert!(knew_of(DYING.0), "premise: it knew something");
-        // A parking orbit dies with the ship, or the wreck would save as parked and be flown.
         server.parks.insert(CraftId(DYING.0), crate::park::Park::default());
         let at_t = until_collapse(&mut server, &mut wire).await.at_t;
         server.tick(&mut wire).await.unwrap();

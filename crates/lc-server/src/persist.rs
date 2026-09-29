@@ -50,7 +50,6 @@ pub struct Saved {
     /// The standing intercept it was flying, which outlives the process as it outlives the
     /// pilot's connection.
     pub pursuit: Option<lc_proto::Pursuit>,
-    /// Whether it holds a standing parking orbit, which does the same.
     pub parked: bool,
     /// Its form and energy, settled when saved, and the round under way as the recipe it was
     /// planned from, which solves to the same plan on load. The balance in it measures the form it
@@ -73,7 +72,6 @@ pub struct Saved {
     pub afterglow: Option<Afterglow>,
 }
 
-/// A craft's standing flight orders.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Standing {
     pub pursuit: Option<lc_proto::Pursuit>,
@@ -369,7 +367,7 @@ impl<J: Journal> Server<J> {
                             last_seen: None,
                         });
                     }
-                    // Flown again on the next tick, which has no orbit to compare against.
+                    // No orbit held, so the next check flies it.
                     if saved.as_ref().is_some_and(|saved| saved.parked) {
                         self.parks.insert(craft.id, crate::park::Park::default());
                     }

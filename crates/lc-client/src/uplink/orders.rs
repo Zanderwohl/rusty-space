@@ -20,8 +20,7 @@ pub(super) fn fold(
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
             let at_s = at_t as f64 * 1e-6;
-            // The server drops a standing intercept or parking orbit on any flight order, so the
-            // one the interface shows is over too.
+            // The server drops a standing intercept or parking orbit on any flight order.
             let flies = matches!(
                 order,
                 Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive | Order::Burn { .. }
@@ -103,8 +102,7 @@ pub(super) fn fold(
                         Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness, approach: *approach });
                     Some(format!("closing on {}", ship_id.0))
                 }
-                // Like an intercept, what it flies arrives as a motive: the course is solved from
-                // what the shard knows of the star, which this copy may be behind.
+                // What it flies arrives as a motive, since this copy of the knowledge may be behind.
                 Order::Park => {
                     uplink.chasing = None;
                     uplink.parked = true;

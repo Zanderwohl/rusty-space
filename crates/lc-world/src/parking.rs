@@ -1,10 +1,8 @@
 //! The parking orbit: how far from its star a ship fills fastest while its field stays below where
 //! Auto turns Clear. See `lightcone/docs/20-solar-power.md` §Parking.
 //!
-//! Filling Black, the field takes conversion's loss and the drain, `(1 − η) P + drain`, while the
-//! arriving `P` is under the engines' rating, and the whole of any excess past it. Closer than where
-//! `P` meets the rating buys heat and no speed, so that is the nearest worth going; the ceiling can
-//! only push the orbit out from there.
+//! Closer than where arriving starlight meets the engines' rating buys heat and no speed, so that
+//! is the nearest worth going; the heat ceiling can only push the orbit out from there.
 
 use crate::field::Mode;
 use crate::fitting::{Fitting, Setting};
@@ -12,16 +10,14 @@ use crate::navigation::{Course, Plane};
 use crate::solar;
 use crate::system::LocalSystem;
 
-/// The most the star's luminosity may be in doubt, as a fraction, before a parking orbit is offered:
-/// the distance goes as its root, so this is two and a half percent on where to park.
+/// The most the star's luminosity may be in doubt, as a fraction, before a parking orbit is offered.
+/// Distance goes as its root, so this is 2.5% on where to park.
 pub const CHARACTERIZED: f64 = 0.05;
 
-/// How far the orbit a parked ship holds may be from the one it would choose now, as a fraction,
-/// before it flies a correction. A deadband, as a pursuit's drift allowance is: without one a
-/// belief that moves by a hair would be flown every time it moved.
+/// How far the orbit held may be from the one wanted, as a fraction, before a correction is flown.
+/// Without a deadband every small change of belief would be flown.
 pub const REPARK: f64 = 0.01;
 
-/// Where to park, if the star is known to [`CHARACTERIZED`].
 pub fn for_host(fitting: &Fitting, now_s: f64, host: &crate::knowledge::Host) -> Option<Parking> {
     if host.luminosity_fraction()? > CHARACTERIZED {
         return None;
@@ -32,24 +28,22 @@ pub fn for_host(fitting: &Fitting, now_s: f64, host: &crate::knowledge::Host) ->
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Parking {
     pub distance_m: f64,
-    /// Watts arriving there, broadside and Black.
+    /// W, broadside and Black.
     pub arriving_w: f64,
-    /// Where the heat of a ship filling there settles, J.
+    /// Where a filling ship's heat settles, J.
     pub heat_j: f64,
-    /// Into storage, net of the drain, W.
+    /// Into storage net of the drain, W.
     pub filling_w: f64,
 }
 
-/// The arriving power to park at: the rating, or less if the heat at the rating would pass
-/// `ceiling_w`, the heat power whose equilibrium is the ceiling. `None` when the drain alone reaches
-/// it, since no distance is cool enough.
+/// The arriving power to park at: the rating, or less if the heat there would pass `ceiling_w`, the
+/// heat power whose equilibrium is the ceiling. `None` when the drain alone reaches it.
 pub fn arriving_w(rating_w: f64, efficiency: f64, drain_w: f64, ceiling_w: f64) -> Option<f64> {
     let cooled_w = (ceiling_w - drain_w) / (1.0 - efficiency);
     (cooled_w > 0.0 && rating_w > 0.0).then(|| cooled_w.min(rating_w))
 }
 
-/// For `fitting` as it stands at `now_s`, about a star believed to put out `luminosity_w`. The
-/// ceiling is the Auto order's `clear_above`, or the balance's default when the field is not in Auto.
+/// The ceiling is the Auto order's `clear_above`, or the balance's default when not in Auto.
 pub fn of(fitting: &Fitting, now_s: f64, luminosity_w: f64) -> Option<Parking> {
     let balance = fitting.balance();
     let caps = fitting.capacities_at(now_s);
@@ -80,7 +74,6 @@ pub fn of(fitting: &Fitting, now_s: f64, luminosity_w: f64) -> Option<Parking> {
     })
 }
 
-/// An orbit about the star at `distance_m`, in its equator. `None` inside the star.
 pub fn course(system: &LocalSystem, distance_m: f64) -> Option<Course> {
     let primary = system.primary();
     let radius_m = system.sim().radius(primary);
@@ -112,8 +105,8 @@ mod tests {
         fitting
     }
 
-    /// At the default ceiling the starting ship is rating-bound: it parks where starlight meets its
-    /// engines, a little inside the rated-load anchor, and settles below Auto's switch.
+    /// At the default ceiling the starting ship is rating-bound, inside the rated-load anchor, and
+    /// settles below Auto's switch.
     #[test]
     fn the_starting_ship_parks_where_starlight_meets_its_rating() {
         let fitting = starting(Balance::DEFAULT.auto_clear_above);
@@ -127,7 +120,7 @@ mod tests {
         assert!(parking.filling_w > 0.0);
     }
 
-    /// A lower ceiling moves the orbit out until the filling ship's heat settles on it exactly.
+    /// A lower ceiling moves the orbit out until the filling heat settles on it.
     #[test]
     fn a_low_ceiling_moves_the_orbit_out_to_it() {
         let rating_bound = of(&starting(Balance::DEFAULT.auto_clear_above), 0.0, sol_w()).unwrap();
@@ -138,7 +131,6 @@ mod tests {
         assert!((parking.heat_j / ceiling_j - 1.0).abs() < 1e-9, "{} against {ceiling_j}", parking.heat_j);
     }
 
-    /// A brighter star puts the same power further out, by the square root.
     #[test]
     fn distance_goes_as_the_root_of_luminosity() {
         let fitting = starting(Balance::DEFAULT.auto_clear_above);

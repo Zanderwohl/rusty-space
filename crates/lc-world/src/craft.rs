@@ -548,9 +548,8 @@ impl Craft {
         Some((at - star).length() * crate::system::M_PER_LY)
     }
 
-    /// The starlight where it is at `t`, W/m², as its collectors read it: a reading of the place
-    /// rather than of the star, so it needs no belief. `None` under way, between systems, and with
-    /// no fitting.
+    /// The starlight where it is at `t`, W/m², as its collectors read it. A reading of the place,
+    /// so it needs no belief about the star. `None` under way, between systems, or unfitted.
     pub fn flux_w_m2_at(&self, t: f64) -> Option<f64> {
         let system = self.system.as_deref()?;
         if self.fitting.is_none() || self.motion.is_under_way() {

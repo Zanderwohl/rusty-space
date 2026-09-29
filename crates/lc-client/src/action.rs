@@ -186,7 +186,7 @@ pub enum Action {
     /// Give up a standing intercept, with no further corrections: the drive is cut and the ship
     /// keeps whatever velocity it has.
     BreakOff,
-    /// Hold a parking orbit, standing on a shard; offline, where nothing stands, flown once.
+    /// Offline, where nothing stands, the course is flown once.
     Park(Course),
     Emit(crate::emit_panel::Emission),
     /// Clear, Black or Auto with its thresholds. The shard refuses it while a switch runs.

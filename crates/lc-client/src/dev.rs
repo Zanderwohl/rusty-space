@@ -71,7 +71,7 @@ pub struct DevEntry {
     /// second reason it survived the phase that stopped calling it. The charting office kept as
     /// a dev tool.
     pub charted: bool,
-    /// Survey the system once `--station` has put the ship in one; asked before, there is none.
+    /// Asked after `--station` has placed the ship: before, there is no system to survey.
     pub survey: bool,
     /// Hold the beauty shots on one [`crate::beauty::Subject::kind`].
     pub beauty_kind: Option<String>,

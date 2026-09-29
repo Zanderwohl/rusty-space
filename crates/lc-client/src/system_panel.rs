@@ -26,12 +26,10 @@ use crate::panels::{SystemTab, ask, range_to, ships, span, span_m, station};
 /// measurement.
 const WORTH_LISTING: f64 = 0.05;
 
-/// The body list's most, points: the detail column beside it is about this tall with a planet's
-/// courses open.
+/// Points: about the detail column's height with a planet's courses open.
 const LIST_HEIGHT: f32 = 420.0;
 
-/// The list's column and the detail's, points. Side by side so the whole window fits a 1080p
-/// screen: stacked, a planet with every course open ran past the bottom of it.
+/// Points. Side by side so the window fits a 1080p screen.
 const LIST_WIDTH: f32 = 250.0;
 const DETAIL_WIDTH: f32 = 290.0;
 
@@ -75,7 +73,6 @@ pub(crate) fn system(
     });
 }
 
-/// The left column: the tabs, and the bodies or the ships under them.
 #[allow(clippy::too_many_arguments)]
 fn list(
     ui: &mut egui::Ui,
@@ -194,7 +191,6 @@ fn list(
     });
 }
 
-/// The right column: what is picked, and the courses it offers.
 #[allow(clippy::too_many_arguments)]
 fn focused(
     ui: &mut egui::Ui,
@@ -278,8 +274,7 @@ fn focused(
     });
 }
 
-/// The courses a target offers. Orbits are a grid of plane by height, and libration points one
-/// of kind by point, since six rows of "equatorial orbit, low" were most of the window's height.
+/// Orbits as a grid of plane by height and libration points of kind by point, to save height.
 fn courses(
     ui: &mut egui::Ui,
     state: &Ui,
@@ -337,7 +332,6 @@ fn courses(
     }
 }
 
-/// What is believed about the star, each with its error, in the Sun's units.
 fn star_details(ui: &mut egui::Ui, host: &lc_world::knowledge::Host) {
     use em_spectra::stellar::{SOLAR_LUMINOSITY, SOLAR_RADIUS};
     let solar_kg = em_spectra::stellar::SOLAR_MU / lc_world::knowledge::body::GRAVITY;
@@ -355,9 +349,7 @@ fn star_details(ui: &mut egui::Ui, host: &lc_world::knowledge::Host) {
     }
 }
 
-/// The parking orbit as a course, once the star is known to [`parking::CHARACTERIZED`]. The distance
-/// is rounded to what the label shows, so the course armed is the one read and stays armed while
-/// the belief under it moves by less than that.
+/// Rounded to what the label shows, so the armed course stays armed while the belief moves by less.
 fn parking(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) -> Option<(String, Course)> {
     let at = parking::for_host(game.ship.fitting()?, game.coordinate_time_s(), &host(game, system, parked))?;
     let au = significant(at.distance_m / lc_world::navigation::AU, 3);
@@ -365,8 +357,7 @@ fn parking(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) ->
     Some((format!("parking orbit, {au} AU"), course))
 }
 
-/// The star as this craft believes it, and, once `parked` holds its parking orbit, with its
-/// collectors' reading there, as the shard parks by. See `lc_server::park`.
+/// With the collectors' reading only while `parked`, as the shard parks by. See `lc_server::park`.
 fn host(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) -> lc_world::knowledge::Host {
     let now_s = game.coordinate_time_s();
     let host = game.knowledge.host(system.star, game.ship.motion.position_ly);
@@ -376,7 +367,6 @@ fn host(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) -> lc
     }
 }
 
-/// `value` to `digits` significant figures.
 fn significant(value: f64, digits: i32) -> f64 {
     if !(value.abs() > 0.0) || !value.is_finite() {
         return value;

@@ -1,11 +1,6 @@
-//! The standing parking orbit: flown to where the craft believes it should be, and flown again
-//! whenever what it learns of its star moves that by more than [`parking::REPARK`]. See
-//! `lightcone/docs/20-solar-power.md` §Parking.
-//!
-//! Once it holds the orbit its collectors read the starlight there, and a star brighter or
-//! dimmer than believed shows as more or less of it: the reading joins the belief and the orbit
-//! moves with it. That is the heat running ahead of or behind what was planned, read at its
-//! source rather than waited for.
+//! The standing parking orbit: flown to where the craft believes it belongs, and again whenever
+//! that moves by more than [`parking::REPARK`]. Once held, the collectors' reading joins the
+//! belief, which is how a misjudged star is found. See `lightcone/docs/20-solar-power.md` §Parking.
 
 use lc_proto::{Order, Refusal};
 use lc_world::craft::{Craft, CraftId};
@@ -19,7 +14,6 @@ use crate::journal::Journal;
 use crate::transport::Transport;
 use crate::world::{Event, Scheduled};
 
-/// A standing parking orbit, and the orbit it last flew to.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Park {
     pub checked_t: Option<i64>,
@@ -27,8 +21,8 @@ pub struct Park {
     pub radius_m: Option<f64>,
 }
 
-/// Where `craft` would park now, meters from its star, and the course there. `parked` is whether
-/// it holds its parking orbit, which is when its collectors' reading joins what it believes.
+/// Meters from the star, and the course there. `parked`: whether it holds its parking orbit, the
+/// only place its collectors' reading counts.
 pub fn target(craft: &Craft, knowledge: &Knowledge, now_s: f64, parked: bool) -> Option<(f64, lc_world::navigation::Course)> {
     let system = craft.system.as_deref()?;
     let fitting = craft.fitting()?;
@@ -45,19 +39,16 @@ fn holding(craft: &Craft) -> bool {
     matches!(craft.motion.motive, lc_world::motion::Motive::Holding(_))
 }
 
-/// Whether an orbit of `held_m` is far enough from `wanted_m` to fly again.
 pub fn wants_repark(held_m: Option<f64>, wanted_m: f64) -> bool {
     held_m.is_none_or(|held| (wanted_m / held - 1.0).abs() > parking::REPARK)
 }
 
 impl<J: Journal> Server<J> {
-    /// Fly `id` to its parking orbit now, at the most its budget allows. What [`Order::Park`] does,
-    /// and each correction after it.
+    /// [`Order::Park`], and each correction after it.
     pub(crate) fn fly_to_park(&mut self, id: CraftId, at_s: f64) -> Result<f64, Refusal> {
         let knowledge = self.instruments.aboard.get(&id).map(|a| &a.knowledge);
         let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
-        // The order's own gates, here so a correction meets them too: nothing lights while a
-        // refit runs or anything else is lit.
+        // Here rather than in `act`, so a correction meets them too.
         if craft.is_refitting(at_s) {
             return Err(Refusal::Refitting);
         }
@@ -79,9 +70,8 @@ impl<J: Journal> Server<J> {
         Ok(drive.accel_g)
     }
 
-    /// Check every standing parking orbit once a solar segment, and fly a correction where the
-    /// orbit wanted has moved past the deadband. A correction that cannot be paid for waits for
-    /// the next check; the order stands.
+    /// Once a solar segment. A correction that is refused waits for the next check; the order
+    /// stands.
     pub(crate) fn steer_parks(&mut self, wire: &mut impl Transport, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
@@ -108,7 +98,6 @@ impl<J: Journal> Server<J> {
     }
 }
 
-/// Whether `order`, applied, ends a standing parking orbit: any other order that flies the ship.
 pub fn ends_parking(order: &Order) -> bool {
     matches!(
         order,

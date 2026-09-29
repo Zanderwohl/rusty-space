@@ -86,7 +86,7 @@ pub struct Uplink {
     /// is its motive, and the server drops the pursuit without saying so when the quarry goes
     /// out of sight — which is why this is cleared by a refusal and by losing the contact.
     pub chasing: Option<lc_proto::Pursuit>,
-    /// Whether this ship holds a standing parking orbit: the same kind of copy as `chasing`.
+    /// The same kind of copy as `chasing`.
     pub parked: bool,
     /// The shelf, as the shard last stated it: its base and its books. Taken once.
     pub shelf: Option<(String, Vec<lc_proto::Book>)>,

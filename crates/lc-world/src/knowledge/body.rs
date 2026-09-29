@@ -416,7 +416,7 @@ impl Knowledge {
 /// Newton's constant, for turning a measured `mu` into a mass anyone can read.
 pub const GRAVITY: f64 = 6.674_30e-11;
 
-/// What an orbit weighs its primary at, kg, and one sigma: `n²a³` over `G`.
+/// The primary's mass an orbit implies, kg and one sigma.
 pub(super) fn mass_of(orbit: &Orbit) -> Option<(f64, f64)> {
     let (au, sigma_au) = orbit.semi_major_au;
     let (period_s, sigma_s) = orbit.period_s;
