@@ -278,8 +278,12 @@ impl Session {
     /// system and a straight line between them. All three are *read* at the new time rather
     /// than integrated from the old one, so nothing drifts with the frame rate.
     pub fn advance(&mut self, real_seconds: f64) {
-        let elapsed = real_seconds * TIME_RATE;
-        let micros = (elapsed * 1e6) as i64;
+        self.advance_us((real_seconds * TIME_RATE * 1e6) as i64);
+    }
+
+    /// [`Session::advance`] by a span of coordinate time.
+    pub fn advance_us(&mut self, micros: i64) {
+        let elapsed = micros as f64 * 1e-6;
         self.observer.t = self.observer.t + Span::new(micros);
         let now = self.coordinate_time_s();
         // Before anything is placed against it: a station and a conic are both positions in a

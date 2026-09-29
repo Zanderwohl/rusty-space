@@ -33,7 +33,7 @@ pub use connection::{Demo, Joined, LocalShard, Note, ServerAddress, State, conne
 #[cfg(not(target_arch = "wasm32"))]
 pub use connection::start_local;
 pub use orders::refused;
-pub use welcome::{CLOCK_SLACK_US, SERVER_RATE, clock_slack_us};
+pub use welcome::{MAX_SLEW, SERVER_RATE, Slew, clock_snap_us};
 
 /// What a ship with no account behind it is called.
 ///
@@ -105,6 +105,8 @@ pub struct Uplink {
     asked_at: Option<f64>,
     /// How long the last order took to come back.
     pub round_trip_s: Option<f64>,
+    /// The clock error still being absorbed. See [`Slew`].
+    pub slew: Slew,
     /// Drive events per craft, oldest first. Kept across statements, which replace contacts.
     drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
     /// The last account the server stated, re-applied with the placement for the same reason.

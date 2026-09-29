@@ -20,25 +20,50 @@ use super::{Joined, Placement, State, Uplink};
 /// this is the value a deployment sends, not the value a client assumes.
 pub const SERVER_RATE: f64 = 1.0;
 
-/// How far the clock may be out before it is pulled back, in coordinate microseconds.
-///
-/// One coordinate hour, which is about four tenths of a real second at the design rate. It has
-/// to be comfortably more than a statement's own age — a tick plus the network, so a thousand
-/// coordinate seconds or so — or every statement would drag the clock backwards by however long
-/// it spent in flight. Below this the difference is smaller than the frames either side draws;
-/// above it, positions disagree.
-pub const CLOCK_SLACK_US: i64 = 3_600 * 1_000_000;
+/// The most a slew changes the clock's rate by, as a fraction of it. Too little to see a moon's
+/// orbit hurry, and it absorbs a coordinate hour — four tenths of a real second — in four seconds.
+pub const MAX_SLEW: f64 = 0.1;
 
-/// The same, against a world running at `rate` times the design rate.
+/// Real seconds a slew may take before a jump is the better answer: an error slewing cannot
+/// absorb in this long is a background tab coming back, not drift.
+const SLEW_WITHIN_S: f64 = 20.0;
+
+/// How far the clock may be out before it is jumped rather than slewed, in coordinate
+/// microseconds: two real seconds of the world's time at `rate`, about five coordinate hours at
+/// the design rate. Scaled so it stays far above a statement's own age, which is a tick and a
+/// network hop, at any rate.
+pub fn clock_snap_us(rate: f64) -> i64 {
+    (MAX_SLEW * SLEW_WITHIN_S * rate.max(0.0) * crate::session::TIME_RATE * 1e6) as i64
+}
+
+/// A clock error being absorbed by running a little fast or slow, rather than jumped.
 ///
-/// A fixed hour stops being comfortably more than a statement's age as soon as the world runs
-/// faster than one: at sixty, a single server tick is seven coordinate hours, so *every*
-/// statement is further out than the slack and the client snaps back seven hours twenty times
-/// a second, for ever, without the clock ever having drifted. Three ticks is the same margin
-/// the fixed hour was, expressed in the thing it was always really measuring.
-pub fn clock_slack_us(rate: f64) -> i64 {
-    let tick = lc_server_tick_us(rate);
-    CLOCK_SLACK_US.max(tick.saturating_mul(3))
+/// Replaced, not added to, by each statement: the error is measured against the clock as it
+/// already stands, so it already counts whatever was absorbed since the last. It carries the
+/// statement's flight time with it, so the client settles that far behind the shard, which is
+/// where a welcome puts it anyway.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Slew {
+    owed_us: i64,
+}
+
+impl Slew {
+    pub fn owe(&mut self, us: i64) {
+        self.owed_us = us;
+    }
+
+    pub fn owed_us(&self) -> i64 {
+        self.owed_us
+    }
+
+    /// The coordinate time to advance by instead of `span_us`, paying off up to [`MAX_SLEW`] of
+    /// it. Never below nine tenths of it, so the clock never stops or runs backwards.
+    pub fn take(&mut self, span_us: i64) -> i64 {
+        let limit = (span_us.max(0) as f64 * MAX_SLEW) as i64;
+        let paid = self.owed_us.clamp(-limit, limit);
+        self.owed_us -= paid;
+        span_us + paid
+    }
 }
 
 /// Coordinate microseconds a server tick covers at `rate`. Mirrors `lc_server::server::TICK_US`,
@@ -74,6 +99,7 @@ pub(super) fn fold(
             // See `Placement` for what goes wrong when it is only applied once.
             uplink.placement = Some(Placement { now_t, ship });
             uplink.place(&mut game.0);
+            uplink.slew = Slew::default();
             // A pursuit that outlived the last connection is stated straight after this.
             uplink.chasing = None;
             uplink.parked = false;
@@ -110,15 +136,17 @@ pub(super) fn fold(
             // the case, and a client still ticking at the old one runs away from the world
             // exactly as an unstated rate did.
             ui.0.time_rate = rate;
-            // Only when it matters. Snapping to every statement would pull the clock back by
-            // the statement's flight time, once a second, forever.
             let out_by = now_t - (game.0.coordinate_time_s() * 1e6) as i64;
-            if out_by.abs() > clock_slack_us(rate) {
+            if out_by.abs() > clock_snap_us(rate) {
                 game.0.correct_coordinate_time_us(now_t);
+                uplink.slew = Slew::default();
                 let hours = out_by.abs() as f64 / 3.6e9;
+                let was = if out_by < 0 { "ahead" } else { "behind" };
                 // Said out loud, because the world jumps when this happens and a jump nobody
                 // explained reads as a bug in the physics.
-                uplink.applied = Some(format!("clock corrected by {hours:.1} hours"));
+                uplink.applied = Some(format!("clock corrected: was {hours:.1} hours {was}"));
+            } else {
+                uplink.slew.owe(out_by);
             }
         }
         // Routed elsewhere by `super::fold`.
@@ -319,23 +347,23 @@ mod tests {
     }
 
     /// **The correction storm.** At sixty times the design rate one server tick is seven
-    /// coordinate hours, and a fixed one-hour slack makes every statement look like a runaway:
-    /// the client snaps back seven hours twenty times a second, for ever, having never drifted.
+    /// coordinate hours, and a fixed one-hour slack made every statement look like a runaway:
+    /// the client snapped back seven hours twenty times a second, for ever, having never drifted.
     #[test]
-    fn a_fast_clock_is_not_corrected_by_every_statement() {
+    fn a_fast_clock_is_not_jumped_by_every_statement() {
         let (mut uplink, mut game, mut ui) = app();
         let drifting = lc_proto::Motive::Drifting { from_ly: [0.0; 3], since_t: 0.0 };
         fold(&mut uplink, &mut game, &mut ui, welcome_running_at(60.0, 0, [0.0; 3], drifting));
 
         let before = game.0.coordinate_time_s();
-        // One tick of a world running at sixty, which is what a healthy statement is behind by.
-        let tick_us = (50.0 * 8766.0 * 1_000.0 * 60.0) as i64;
-        assert!(tick_us > CLOCK_SLACK_US, "premise: a tick outruns the fixed slack");
-        let now_t = (before * 1e6) as i64 + tick_us;
+        // A statement three ticks of a world running at sixty out, far past a stale statement.
+        let tick_us = lc_server_tick_us(60.0);
+        assert!(tick_us > 3_600 * 1_000_000, "premise: a tick outruns an hour");
+        let now_t = (before * 1e6) as i64 + 3 * tick_us;
 
         fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t, rate: 60.0 });
 
-        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
+        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset jumped the clock");
         assert!(uplink.applied.is_none(), "it complained about nothing");
     }
 
@@ -357,21 +385,44 @@ mod tests {
         );
     }
 
-    /// A clock statement in step with the client changes nothing. Snapping to every one would
-    /// drag the clock backwards by the statement's own flight time, once a second, forever.
+    /// **A small error is slewed, not jumped.** The clock does not move when the statement
+    /// arrives; it runs slow until it has given back what it was ahead, and no faster than
+    /// [`MAX_SLEW`] allows.
     #[test]
-    fn a_clock_in_step_is_left_alone() {
+    fn a_clock_a_little_ahead_runs_slow_until_it_agrees() {
         let (mut uplink, mut game, mut ui) = app();
-        fold(&mut uplink, &mut game, &mut ui, welcome_at(10 * CLOCK_SLACK_US, [0.0; 3]));
-        let before = game.0.coordinate_time_s();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
+        let hour_us = 3_600 * 1_000_000;
+        game.0.correct_coordinate_time_us(hour_us);
 
-        // A statement a fraction of the slack away, which is what a healthy connection looks
-        // like: the message spent a tick and a network hop getting here.
-        let close = (before * 1e6) as i64 - CLOCK_SLACK_US / 4;
-        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: close, rate: SERVER_RATE });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0, rate: SERVER_RATE });
+        assert_eq!(game.0.coordinate_time_s(), 3_600.0, "the clock jumped");
+        assert!(uplink.applied.is_none(), "a slew is not news");
 
-        assert_eq!(game.0.coordinate_time_s(), before, "a healthy offset moved the clock");
-        assert!(uplink.applied.is_none(), "it complained about nothing");
+        // Frames of a sixtieth of a real second, as `advance_clock` sees them.
+        let frame_us = (crate::session::TIME_RATE * 1e6 / 60.0) as i64;
+        let (mut real_us, mut frames) = (hour_us, 0);
+        while uplink.slew.owed_us() != 0 {
+            let step = uplink.slew.take(frame_us);
+            assert!(step >= (frame_us as f64 * (1.0 - MAX_SLEW)) as i64, "slewed harder than allowed");
+            game.0.advance_us(step);
+            real_us += frame_us;
+            frames += 1;
+            assert!(frames < 60 * 10, "never caught up");
+        }
+        let at_us = (game.0.coordinate_time_s() * 1e6).round() as i64;
+        assert_eq!(at_us, real_us - hour_us, "it slewed to the wrong place");
+    }
+
+    /// Each statement replaces what is owed: the error is measured against the clock as it
+    /// stands, which already counts what the last one paid.
+    #[test]
+    fn a_statement_replaces_what_was_owed() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 1_000_000_000, rate: SERVER_RATE });
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 400_000_000, rate: SERVER_RATE });
+        assert_eq!(uplink.slew.owed_us(), 400_000_000);
     }
 
     /// **The bug behind the teleporting.** A client whose clock has run away — a warp, or a
@@ -381,14 +432,16 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
 
-        // A day of coordinate time ahead of the server, which a warp reaches in seconds.
+        // A day of coordinate time ahead of the server, which a background tab reaches in ten
+        // real seconds.
         let server_t = 0;
-        game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
+        game.0.correct_coordinate_time_us(24 * 3_600 * 1_000_000);
         fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: server_t, rate: SERVER_RATE });
 
         assert_eq!(game.0.coordinate_time_s(), 0.0, "the client kept its own clock");
         let said = uplink.applied.clone().expect("a jump nobody explained reads as a bug");
-        assert!(said.contains("clock corrected"), "{said}");
+        assert!(said.contains("clock corrected") && said.contains("ahead"), "{said}");
+        assert_eq!(uplink.slew, Slew::default(), "a jump left a slew behind it");
     }
 
     /// A correction moves the world's clock and **not** the crew's. The ship's proper time is
@@ -400,7 +453,7 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, welcome_at(0, [0.0; 3]));
         game.0.ship.motion.clock_s = 12_345.0;
 
-        game.0.correct_coordinate_time_us(24 * CLOCK_SLACK_US);
+        game.0.correct_coordinate_time_us(24 * 3_600 * 1_000_000);
         fold(&mut uplink, &mut game, &mut ui, Outbound::Clock { now_t: 0, rate: SERVER_RATE });
 
         assert_eq!(game.0.ship.motion.clock_s, 12_345.0, "the crew was un-aged");

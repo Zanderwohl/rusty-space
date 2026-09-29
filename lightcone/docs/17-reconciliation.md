@@ -207,17 +207,20 @@ Two halves, both needed:
   it at 143.7 coordinate hours a real second with nobody touching a key. Joining adopts the
   server's rate. A multiplier of one is exactly the 8766 the server advances by, and a test pins
   that correspondence rather than leaving it to be remembered in two crates.
-- **The server states its clock**, about once a real second, and the client corrects when it is
-  more than an hour of coordinate time out. Not every statement: snapping to each one would drag
-  the clock backwards by however long that message spent in flight, once a second, forever.
+- **The server states its clock**, about once a real second, and the client **slews** to it:
+  it runs up to ten percent fast or slow until the error is paid off (`uplink::Slew`), so the
+  world never jumps for drift. Only an error slewing could not absorb in twenty real seconds —
+  about five coordinate hours — is jumped, and said out loud. The slew aims at the statement as
+  it arrives, so the client settles a network hop behind the shard, which is where a welcome
+  puts it anyway; estimating that hop is the next step, if it turns out to matter.
 
-A correction that fires **every second and never fixes anything** is not drift — it is a rate
+A jump that fires **every second and never fixes anything** is not drift — it is a rate
 mismatch, because the client re-diverges as fast as it is pulled back. That is the alarm working
 and is worth recognizing on sight; the size of the correction names the ratio.
 
-The slack exists for the honest case, which is not cheating: a browser tab in the background has
-its frames throttled, so its clock nearly stops while the world does not. It comes back hours
-behind and is pulled straight.
+The jump exists for the honest case a slew cannot cover, which is not cheating: a machine that
+slept, or a shard that stalled past what one tick may cover. The client comes back hours out and
+is pulled straight.
 
 Both ends keep to the **wall clock**, and neither counts steps. A shard tick covers the real
 time since the last one (`lc_server::timing::Pacer`) rather than a nominal fifty milliseconds,

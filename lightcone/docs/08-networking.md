@@ -435,10 +435,10 @@ minutes — chosen against the light delay across a system, which it is indeed m
 is fourteen thousand kilometers of travel for a craft in high orbit of Jupiter, and an orbital
 rendezvous spent the whole approach flying at a ten-minute-old position.
 
-What does depend on the rate is the clock the client runs between statements, and the deadband
-that clock is corrected against. A fixed one-hour slack is comfortably more than a statement's own
-age at the design rate and is less than a single tick at sixty, so it has to scale or the
-correction fires on every statement for ever without the clock ever having drifted.
+What does depend on the rate is the clock the client runs between statements, and the threshold
+past which it jumps rather than slews. That is two real seconds of the world's time, so it scales
+with the rate and stays far above a statement's own age, a tick and a network hop; a fixed hour
+was less than a single tick at sixty and jumped on every statement for ever.
 
 A client's cursor starts *before* everything rather than at the current time. "Told everything
 up to now" would swallow an event stamped at exactly now — a ship's own act, on the tick it

@@ -712,8 +712,12 @@ pub(crate) fn dispatch(
 ///
 /// Real, not virtual: Bevy clamps the virtual clock to a quarter second a frame, and a hitch past
 /// that is time lost against the shard, which keeps to the wall clock (`lc_server::timing::Pacer`).
-fn advance_clock(time: Res<Time<Real>>, ui: Res<Ui>, mut game: ResMut<Game>) {
-    game.advance(time.delta_secs_f64() * ui.time_rate.max(0.0));
+///
+/// A joined client runs a little fast or slow while it absorbs a clock error the shard stated;
+/// see [`crate::uplink::Slew`].
+fn advance_clock(time: Res<Time<Real>>, ui: Res<Ui>, mut game: ResMut<Game>, mut uplink: ResMut<crate::uplink::Uplink>) {
+    let span_us = (time.delta_secs_f64() * ui.time_rate.max(0.0) * crate::session::TIME_RATE * 1e6) as i64;
+    game.advance_us(uplink.slew.take(span_us));
 }
 
 /// Run whatever the telescope is committed to.
