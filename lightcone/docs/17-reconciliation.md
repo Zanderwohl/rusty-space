@@ -153,11 +153,18 @@ Craft are durable. A shard given `--db` checkpoints its whole fleet every twenty
 and on the way out, and reads it back at boot — the clock included, without which every saved
 motive, stamped in absolute coordinate time, would read as one that has not happened yet.
 
-The stored form is [`lc_proto::Motion`] in **postcard, not JSON**, and that is not a taste.
+The stored form is [`lc_proto::Motion`] in **CBOR, not JSON**, and that is not a taste.
 `serde_json` does not round-trip every f64: `-1.8149592025296526e-22` comes back
 `-1.8149592025296529e-22`, and that value is a real coordinate of a real crossing. A checkpoint
 that moved a ship by one place every restart would be a slow leak in the exact property this
-whole document is about.
+whole document is about. CBOR writes an f64 as its bits, narrowed to an f32 or f16 only when that
+converts back to the same bits.
+
+It was postcard until `SAVE_FORMAT` 18, which is as exact and was dropped because it is
+positional: a field appended to the saved craft shifted every byte after it, so each one made
+every row there was unreadable. CBOR names its fields, and a field added with `#[serde(default)]`
+reads from an older row as its default and needs no bump. The wire stays postcard, because a
+client and its shard deploy together and nothing old is ever decoded there.
 
 Within one shard's life, though, a signed-out ship keeps flying. The tick advances the whole
 fleet and `disconnected` drops only the connection, so a course set before signing out is flown
