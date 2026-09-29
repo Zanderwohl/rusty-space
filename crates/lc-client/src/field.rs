@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
@@ -568,6 +568,11 @@ impl Wrecks {
         })
     }
 
+    /// Every collapse whose light has arrived and been drawn, as `(event, where)`.
+    pub fn arrived(&self) -> impl Iterator<Item = (i64, DVec3)> + '_ {
+        self.fell.iter().filter(|w| w.shown_at.is_some()).map(|w| (w.event_id, w.at_ly))
+    }
+
     /// Every wreck drawn as a point whose light has arrived, at `real_s`.
     pub fn far<'a>(&'a self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool + 'a) -> impl Iterator<Item = Far> + 'a {
         let fade_s = played_s(afterglow_s, rate) as f32;
@@ -828,7 +833,7 @@ fn spawn_node(
                 MeshMaterial3d(materials.add(layer)),
                 Transform::IDENTITY,
                 NoFrustumCulling,
-                RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                crate::app::craft_layers(craft),
             ))
             .id()
     });

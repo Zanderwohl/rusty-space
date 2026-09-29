@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
@@ -463,7 +463,7 @@ pub fn draw_hulls(
                     commands.entity(old).despawn();
                 }
                 let paint = |kind| lit(session, star, want.at_ly, crate::parts::paint(kind), glow, enveloped);
-                let parts = spawn_placeholders(&mut commands, &want.form.form, want.balance, &mut meshes, &mut flat, &surfaces, paint);
+                let parts = spawn_placeholders(&mut commands, want.craft, &want.form.form, want.balance, &mut meshes, &mut flat, &surfaces, paint);
                 commands.entity(parts).insert(ChildOf(root));
                 hull.placeholders = Some((want.form.hash, parts));
             }
@@ -537,7 +537,7 @@ fn spawn(commands: &mut Commands, want: &Wanted) {
             Transform::IDENTITY,
             Visibility::Hidden,
             NoFrustumCulling,
-            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            crate::app::craft_layers(want.craft),
             HullMesh,
         ))
         .id();
@@ -553,6 +553,7 @@ fn spawn(commands: &mut Commands, want: &Wanted) {
 
 fn spawn_placeholders(
     commands: &mut Commands,
+    craft: Option<ShipId>,
     form: &Form,
     balance: Balance,
     meshes: &mut Assets<Mesh>,
@@ -569,7 +570,7 @@ fn spawn_placeholders(
             MeshMaterial3d(materials.add(surfaces.flat.material(paint(piece.kind)))),
             crate::parts::local(piece, scale),
             NoFrustumCulling,
-            RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+            crate::app::craft_layers(craft),
             Placeholder(crate::parts::paint(piece.kind)),
             ChildOf(root),
         ));

@@ -550,7 +550,7 @@ pub fn draw_craft_drones(
                 Transform::IDENTITY,
                 Visibility::Inherited,
                 NoFrustumCulling,
-                RenderLayers::layer(crate::app::SKY_ONLY_LAYER),
+                crate::app::craft_layers(Some(craft)),
                 CraftSwarm { craft, material, quads: n, origin_s: contact.emitted_s },
                 ChildOf(hull),
             ));
