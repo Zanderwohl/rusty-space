@@ -179,9 +179,16 @@ pub fn adopt_fitted(
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let form = Form::from(&hull.form);
     let forms: Vec<&Form> = std::iter::once(&form).chain(round.into_iter().flat_map(|r| [&r.from, &r.target])).collect();
-    match OwnForm::spanning(&forms, &balance) {
+    // A form partway through a round need not place — a reshaped part's children wait for it to be
+    // built again — but the round's ends always do. Framed by those alone, the round is still drawn
+    // on a fresh launch, which has no earlier form to keep.
+    let formed = OwnForm::spanning(&forms, &balance).or_else(|e| match round {
+        Some(r) => OwnForm::spanning(&[&r.from, &r.target], &balance),
+        None => Err(e),
+    });
+    match formed {
         Ok(formed) => *own = formed,
-        // A form partway through a round may not place. The last one that did stays drawn.
+        // The last one that did stays drawn.
         Err(e) => debug!("the ship's form does not place yet: {e}"),
     }
 }
@@ -390,6 +397,41 @@ mod tests {
             let expected = OwnForm::new(&form, &Balance::DEFAULT).unwrap();
             assert_eq!(own.length_m(), expected.length_m());
         }
+    }
+
+    /// **Partway through a round, on a fresh launch.** A form partway through a round need not
+    /// place — a reshaped part is taken away before it is built again, and its children hang from
+    /// nothing in between — so the shard's word on the form can be one that does not. The round's
+    /// ends do, and frame the ship; the default ovoid stood in for it before.
+    #[test]
+    fn a_ship_joined_partway_through_a_round_is_still_formed() {
+        use lc_world::refit::rounds::Round;
+        let from = Form::starting();
+        let mut target = from.clone();
+        target.parts.iter_mut().find(|p| p.id == PartId(5)).unwrap().placement.as_mut().unwrap().twist = 0.5;
+        let fitting = lc_world::fitting::Fitting::full(from.clone(), Balance::DEFAULT, 0.0);
+        let round = Round { from: from.clone(), target, stored_j: fitting.hull().capacities.storage_j, start_s: 0.0 };
+        let plan = round.solve(&Balance::DEFAULT).unwrap();
+        // What the log said: part 2 hangs from part 1, which does not exist.
+        let partway = Form { parts: from.parts.iter().filter(|p| p.id != PartId(1)).copied().collect() };
+        assert!(partway.validate().is_err(), "premise: the stated form does not place");
+
+        let mut hull = lc_proto::Hull::from(&fitting);
+        hull.form = (&partway).into();
+        let mut uplink = crate::uplink::Uplink::default();
+        (uplink.fitting, uplink.hull) = (Some((&fitting).into()), Some(hull));
+        let mut app = App::new();
+        app.init_resource::<crate::dev::DevEntry>()
+            .init_resource::<OwnForm>()
+            .insert_resource(uplink)
+            .insert_resource(Refit { plan, balance: Balance::DEFAULT, clock: crate::construction::Clock::Coordinate, canceled: None })
+            .add_systems(Update, adopt_fitted);
+        app.update();
+
+        let own = app.world().resource::<OwnForm>();
+        let ends = OwnForm::spanning(&[&round.from, &round.target], &Balance::DEFAULT).unwrap();
+        assert!(own.is_formed(), "the default stood in for the ship");
+        assert_eq!(own.length_m(), ends.length_m());
     }
 
     /// Every vertex of `shape`'s mesh, in the part's frame.
