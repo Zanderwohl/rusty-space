@@ -637,11 +637,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::Park(course) => effects.extend(session.set_course(&course).map(|label| Effect::Notify(format!("course: {label}")))),
         Action::Emit(emission) => effects.extend(session.remote.then(|| Effect::Send(emission.order()))),
         Action::SetField(mode) => {
-            let now = session.coordinate_time_s();
-            let switching = session.ship.fitting().is_some_and(|f| f.posture().switching_at(now).is_some());
-            if switching {
-                effects.push(Effect::Notify(crate::uplink::refused(lc_proto::Refusal::Switching)));
-            } else if session.remote {
+            if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::FieldMode { mode }));
             } else {
                 effects.push(Effect::Notify("no shard to set the field at".into()));

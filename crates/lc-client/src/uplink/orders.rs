@@ -206,7 +206,6 @@ pub fn refused(reason: Refusal) -> String {
         Refusal::NothingNew => "nothing new to report since the last one".into(),
         Refusal::NotBuilt => "this shard cannot do that yet".into(),
         Refusal::Uncharacterized => "the star is not yet known well enough to park by".into(),
-        Refusal::Switching => "the field is already switching".into(),
         Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
         Refusal::OverRating => "more power than those apertures are rated for".into(),
         Refusal::Form(fault) => crate::refit_panel::form_fault(fault),

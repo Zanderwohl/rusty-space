@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn dropping_a_marker_orders_auto_with_both_gaps_open() {
-        use lc_world::fitting::{Balance, Posture, Switch};
+        use lc_world::fitting::{Balance, Posture};
         let b = Balance::DEFAULT;
         let (mut ui, mut s) = heated(0.1, 0.0, Posture::new_ship(&b));
         s.remote = true;
@@ -930,12 +930,18 @@ mod tests {
 
         let (_, black) = heated(0.1, 0.0, Posture::BLACK);
         assert_eq!(drop_marker(&field_of(&black, &ui), Marker::ClearAbove, 0.6), None, "no markers outside Auto");
+    }
 
+    #[test]
+    fn an_order_during_a_switch_is_sent() {
+        use lc_world::fitting::{Balance, Posture, Switch};
+        let b = Balance::DEFAULT;
+        let (_, s) = heated(0.1, 0.0, Posture::new_ship(&b));
         let done_s = s.coordinate_time_s() + b.field_switch_s;
         let (mut ui, mut s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..Posture::new_ship(&b) });
         s.remote = true;
-        let refused = apply(Action::SetField(lc_proto::FieldMode::Black), &mut ui, &mut s);
-        assert_eq!(refused, vec![crate::action::Effect::Notify("the field is already switching".into())]);
+        let turn = apply(Action::SetField(lc_proto::FieldMode::Clear), &mut ui, &mut s);
+        assert_eq!(turn, vec![crate::action::Effect::Send(lc_proto::Order::FieldMode { mode: lc_proto::FieldMode::Clear })]);
     }
 
     #[test]
