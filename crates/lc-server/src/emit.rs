@@ -527,7 +527,7 @@ impl<J: Journal> Server<J> {
             return self.after_landing(observer, arrive_t, wire, events, deliveries);
         }
 
-        let lit = emitted.cone().covers(offset) && emitted.power_w > 0.0;
+        let lit = emitted.cone().reaches(offset, crate::field::radius_us(shadow_m2)) && emitted.power_w > 0.0;
         let was = self.emissions.lit_by.get(&observer).and_then(|beams| beams.iter().find(|b| b.beam == emitted.beam)).copied();
         let was_w = was.map_or(0.0, |b| b.arriving_w);
         let arriving_w = if lit { emitted.power_w * fraction } else { 0.0 };

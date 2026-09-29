@@ -103,8 +103,29 @@ impl Beam {
     /// A receiver at the transmitter itself is inside anything: the offset has no direction to
     /// compare, and a signal you are standing in is one you hear.
     pub fn covers(&self, offset: DVec3) -> bool {
-        let Some(toward) = offset.try_normalize() else { return true };
-        toward.dot(self.axis) >= self.half_angle_rad.cos()
+        self.reaches(offset, 0.0)
+    }
+
+    /// Whether any of a receiver `radius` across its middle, `offset` from where the beam left,
+    /// is inside the cone: a spot narrower than the receiver lands on it wherever the axis
+    /// passes within it. `radius` is in `offset`'s unit.
+    pub fn reaches(&self, offset: DVec3, radius: f64) -> bool {
+        self.is_omni() || self.margin_rad(offset, radius) >= 0.0
+    }
+
+    /// How far inside the cone's edge a receiver `radius` across at `offset` reaches, radians;
+    /// negative outside it.
+    ///
+    /// The angle off the axis is `atan2(|a × o|, a · o)`. Compared as cosines, a
+    /// diffraction-limited beam's nanoradian rounds to a cosine of exactly one, and only a
+    /// receiver dead on the axis in every bit was inside it.
+    pub fn margin_rad(&self, offset: DVec3, radius: f64) -> f64 {
+        let distance = offset.length();
+        if distance <= radius {
+            return std::f64::consts::PI;
+        }
+        let off_axis = self.axis.cross(offset).length().atan2(self.axis.dot(offset));
+        self.half_angle_rad + (radius / distance).asin() - off_axis
     }
 
     /// How much louder the cone is than the same power spread over a sphere.
@@ -209,6 +230,20 @@ mod tests {
         assert!(beam.covers(DVec3::new(1.0, 0.05, 0.0)));
         assert!(!beam.covers(DVec3::new(1.0, 0.2, 0.0)));
         assert!(!beam.covers(-DVec3::X));
+    }
+
+    /// A diffraction-limited beam covers the axis, and a receiver whose middle the axis misses
+    /// by less than its own radius. Compared as cosines, a nanoradian was exact alignment.
+    #[test]
+    fn a_needle_lands_on_a_receiver_it_passes_through() {
+        let beam = Beam::along(DVec3::new(1.0, 1.0e-3, 0.0), 1.6e-9);
+        let (along, across) = (beam.axis * 1.0e4, beam.axis.cross(DVec3::Z).normalize());
+        assert!(beam.covers(along + across * 1.0e-5), "a nanoradian off, inside 1.6");
+        let at = along + across * 1.0e-4;
+        assert!(!beam.covers(at), "ten nanoradians off is outside 1.6");
+        assert!(beam.reaches(at, 10.0), "inside a receiver ten across");
+        assert!(!beam.reaches(along + across * 11.0, 10.0));
+        assert!(beam.reaches(DVec3::X * 5.0, 10.0), "a receiver around the transmitter");
     }
 
     /// A still target is aimed at directly: the advanced solve has nothing to lead.

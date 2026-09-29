@@ -172,9 +172,13 @@ async fn a_craft_flying_across_a_beam_is_fed_only_while_inside_it() {
     let reach_m = lc_world::emit::distance_at_flux_m(power_w, half, lc_world::courtesy::cooking_flux_w_m2(&Balance::DEFAULT) * 1.0e-6);
     assert!(d * LIGHT_MICROSECOND_M < reach_m, "premise: within reach");
 
-    // Found here by walking the cone test on its own, not by the shard's search.
+    // Found here by walking the cone test on its own, not by the shard's search: in from the
+    // instant its shadow's edge reaches the cone.
     let cone = lc_world::signal::Beam::along(DVec3::X, half);
-    let inside = |t: i64| cone.covers(track.position_at(t as f64));
+    let inside = |t: i64| {
+        let at = track.position_at(t as f64);
+        cone.reaches(at, crate::field::shadow_radius_us(&track, -at, t as f64 * 1.0e-6))
+    };
     let edge = |from: i64, want: bool| {
         let mut b = from;
         while inside(b) != want {

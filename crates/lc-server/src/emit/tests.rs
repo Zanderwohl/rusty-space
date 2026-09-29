@@ -713,4 +713,42 @@ async fn a_burn_emit_is_stated_at_the_end_it_leaves() {
     assert!(seen.last().is_some_and(|s| s.2 == 0.0), "it went out");
 }
 
+/// Aimed at a craft 30 km off with the spread left at its floor, as the emit window sends it, the
+/// beam lands and stays on until it goes out, though both are moving. Its nanoradian is micrometers wide there, finer than
+/// a position light-years from the origin keeps, so only a cone that reaches the receiver's shadow,
+/// and not merely its middle, can say it did.
+#[tokio::test]
+async fn a_diffraction_limited_beam_at_a_craft_lands_on_it_until_it_goes_out() {
+    let here = DVec3::new(4.2, 0.3, 0.0) * LIGHT_US_PER_LY;
+    let at = here + DVec3::new(3.0, 1.0, 0.5).normalize() * 3.0e4 * US_PER_M;
+    // Short enough that its recoil, along the led axis, does not walk it off the receiver.
+    let duration_s = 4.0 * crate::server::TICK_US as f64 * 1.0e-6;
+    // Both on one orbit's velocity, so the aim is led.
+    let moving = |id: i64, at: DVec3| {
+        let mut craft = crate::world::coasting(ShipId(id), at, DVec3::new(-0.6, 0.8, 0.0) * 1.0e-4, 0);
+        craft.fit(ship(id, at, Form::starting()).fitting().cloned());
+        hold_black(&mut craft);
+        craft
+    };
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.admit(EMITTING, moving(1, here), 0.0);
+    server.admit(ClientId(2), moving(2, at), 0.0);
+    let mut wire = Loopback::new();
+    wire.client_says(EMITTING, emit(Aim::Ship(ShipId(2)), Apertures::Aft, 1.0e17, 5.51e-7, 0.0, duration_s));
+    server.tick(&mut wire).await.unwrap();
+    let floor = wire.take(EMITTING).iter().find_map(|m| match m {
+        Outbound::Accepted { order: Order::Emit { spread_rad, .. }, .. } => Some(*spread_rad),
+        _ => None,
+    });
+    assert!(floor.is_some_and(|s| s < 1.0e-8), "premise: a nanoradian, {floor:?}");
+    let mut told = Vec::new();
+    for _ in 0..8 {
+        server.tick(&mut wire).await.unwrap();
+        told.extend(illuminated(&wire.take(ClientId(2))));
+    }
+    let [.., (_, off_w, _)] = told[..] else { panic!("never lit: {told:?}") };
+    assert_eq!(off_w, 0.0, "it went out: {told:?}");
+    assert!(told[..told.len() - 1].iter().all(|(_, w, _)| *w > 0.0), "went dark while lit: {told:?}");
+}
+
 mod drives;

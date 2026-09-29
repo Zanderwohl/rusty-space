@@ -45,6 +45,17 @@ pub fn shadow_toward_m2(craft: &Craft, to_source: DVec3, t: f64) -> f64 {
     lc_world::solar::shadow_m2(fitting.geometry(), nose.dot(to_source.normalize_or_zero()))
 }
 
+/// How far off `craft`'s middle a beam's axis may pass and still land on it, light-microseconds:
+/// the radius of a disk as large as its shadow toward `to_source` at `t`.
+pub fn shadow_radius_us(craft: &Craft, to_source: DVec3, t: f64) -> f64 {
+    radius_us(shadow_toward_m2(craft, to_source, t))
+}
+
+/// The radius of a disk of `shadow_m2`, light-microseconds.
+pub fn radius_us(shadow_m2: f64) -> f64 {
+    (shadow_m2.max(0.0) / std::f64::consts::PI).sqrt() / LIGHT_MICROSECOND_M
+}
+
 /// Of `energy_j` let go of isotropically at `from`, what arrives at `craft`'s field meeting it at
 /// `arrive_t`: onto its shadow toward `from`, from where it is then.
 pub fn received_j(craft: &Craft, from: DVec3, energy_j: f64, arrive_t: i64) -> f64 {

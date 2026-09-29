@@ -272,7 +272,11 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   that flies into a far beam is fed from the next statement's light. A drive a light-year off
   glares at its observers this way.
 - **A landing takes its share from where the receiver is when the light lands**: the cone is tested
-  there, so a target that maneuvered after the beam left is missed, and the share is
+  there, so a target that maneuvered after the beam left is missed. It is tested against the
+  receiver's extent, not its middle: a beam lands when its axis passes within the radius of a disk
+  as large as the receiver's shadow toward the emitter, so a diffraction-limited emit a few
+  micrometers across lands on the hull it is aimed at. The angle off the axis is taken as
+  `atan2(|a × o|, a · o)`, because the cosine of a nanoradian rounds to one. The share is
   `P · min(1, A_shadow / (Ω d²))` onto its shadow toward the emitter. It is held as intake, beside
   the neighbors' glow, until the next instant it is taken again. The receiver's owner is told with
   `Illuminated` whenever what arrives changes.

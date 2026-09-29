@@ -318,7 +318,7 @@ pub fn schedule(event: &Event, beam: &Beam, observer: &Craft) -> Option<Schedule
     // system exists to prevent, however small.
     let arrive_t = arrive.ceil() as i64;
     let offset = line.position_at(arrive) - event.at;
-    if !beam.covers(offset) {
+    if !beam.reaches(offset, crate::field::shadow_radius_us(observer, -offset, arrive * 1.0e-6)) {
         return None;
     }
     Some(Scheduled {
