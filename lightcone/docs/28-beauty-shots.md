@@ -25,7 +25,7 @@ Everything that applies now, in turn, one per shot:
 | below | the same, over the day side | straight down |
 | rings | any ring system wider than 150 microradians, from far enough out to frame it whole | the rings, framed, lying level |
 | ringside | within six of its outer radii of a ring system | the nearest stretch of it, across its whole width |
-| craft | another craft within 10 km, nearest first | that craft, framed on its length |
+| craft | another craft within 10 km that the sky resolves, nearest first | that craft, framed on its length |
 | neighbor | any other body wider than 150 microradians on the sky | one of them at random, framed |
 
 **Some things are queued ahead of the rotation** and taken as soon as the shutter is free, without
@@ -110,8 +110,7 @@ framed from inside its own system is sharp and one framed from a light-year away
 - A survey plate is mostly empty. The sky draws the nearest 6000 stars (`app::SKY_LIMIT`), about
   one for every two two-degree fields, so most plates hold nothing whatever their exposure.
 - A craft the sky draws as a point (`distant`) has its hull hidden, and is a point in its
-  photograph too.
-
+  photograph too, so it is left out of the rotation.
 - Spikes are drawn by the interface over the photograph, at the middle of the frame, and only
   for a star shot. A field's stars have none.
 - The band mapping is the view's. A Hubble palette per shot would need the starfield's band

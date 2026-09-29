@@ -14,7 +14,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
-use bevy_egui::{EguiContexts, EguiUserTextures, egui};
+use bevy_egui::{EguiUserTextures, egui};
 use em_render::render_space::sim_to_render;
 use glam::DVec3;
 use lc_proto::ShipId;
@@ -299,6 +299,7 @@ fn put_away(
 ) {
     camera.is_active = false;
     shot.name = None;
+    beauty.queue.clear();
     beauty.phase = Phase::Waiting { at_s: 0.0 };
 }
 
@@ -312,6 +313,7 @@ fn shoot(
     eye: Res<crate::hull::Eye>,
     uplink: Res<crate::uplink::Uplink>,
     wrecks: Res<crate::field::Wrecks>,
+    distant: Res<crate::distant::Distant>,
     dev: Res<crate::dev::DevEntry>,
     mut beauty: ResMut<Beauty>,
     mut shot_body: ResMut<ShotBody>,
@@ -360,7 +362,8 @@ fn shoot(
         }
         // Seeded from the clock as well, so two sessions do not visit the neighbors in step.
         let seed = beauty.taken ^ time.elapsed().as_nanos() as u64;
-        let mut list = subjects(&game.0, &bodies.drawn, &uplink.contacts, eye.at_ly, seed);
+        let resolved = uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id)));
+        let mut list = subjects(&game.0, &bodies.drawn, resolved, eye.at_ly, seed);
         list.retain(held_on);
         beauty.idle = list.is_empty();
         let Some(subject) = list.get((beauty.turn % list.len().max(1) as u64) as usize) else {
@@ -464,10 +467,11 @@ fn shoot(
 ///
 /// Anything that would come out mostly hidden or mostly dark is left out; see [`MAX_COVERED`]
 /// and [`MIN_LIT`].
-pub fn subjects(
+pub fn subjects<'a>(
     session: &Session,
     drawn: &[Drawable],
-    contacts: &[Contact],
+    // Those the sky resolves: one it draws as a point has its hull hidden.
+    contacts: impl Iterator<Item = &'a Contact>,
     eye_ly: DVec3,
     seed: u64,
 ) -> Vec<Subject> {
@@ -554,14 +558,6 @@ pub fn subjects(
         }
     }
 
-    let mut near: Vec<(ShipId, f64)> = contacts
-        .iter()
-        .map(|c| (c.ship_id, c.position_ly.distance(eye_ly) * M_PER_LY))
-        .filter(|(_, distance)| *distance < NEAR_CRAFT_M)
-        .collect();
-    near.sort_by(|a, b| a.1.total_cmp(&b.1));
-    out.extend(near.into_iter().map(|(id, _)| Subject::Craft(id)));
-
     for body in drawn {
         let Some(rings) = body.rings else { continue };
         if crate::envelope::ring_opacity(rings.system) < MIN_RING_OPACITY {
@@ -569,9 +565,6 @@ pub fn subjects(
         }
         let outer = rings.system.outer_m();
         let distance = body.position_ly.distance(eye_ly) * M_PER_LY;
-        if distance < RINGSIDE_RADII * outer {
-            out.push(Subject::Ringside(body.name.clone()));
-        }
         // Framed whole only from far enough out that the frame holds them.
         let wide = 2.0 * (outer / distance.max(outer)).asin();
         if wide > NEIGHBOR_MIN_RAD
@@ -580,7 +573,17 @@ pub fn subjects(
         {
             out.push(Subject::Rings(body.name.clone()));
         }
+        if distance < RINGSIDE_RADII * outer {
+            out.push(Subject::Ringside(body.name.clone()));
+        }
     }
+
+    let mut near: Vec<(ShipId, f64)> = contacts
+        .map(|c| (c.ship_id, c.position_ly.distance(eye_ly) * M_PER_LY))
+        .filter(|(_, distance)| *distance < NEAR_CRAFT_M)
+        .collect();
+    near.sort_by(|a, b| a.1.total_cmp(&b.1));
+    out.extend(near.into_iter().map(|(id, _)| Subject::Craft(id)));
 
     let neighbors: Vec<&Drawable> = drawn
         .iter()
@@ -805,11 +808,17 @@ fn brightest(session: &Session, forward: DVec3, field_rad: f64) -> Option<crate:
 /// set each plate by that one and left the rest black, and one holding none kept the view's
 /// window, which near a star is twenty stops over everything interstellar.
 fn plate(session: &Session) -> Option<f32> {
-    let mut stops: Vec<f32> =
-        session.stars.iter().filter_map(|s| shaded(session, s)).map(|s| s.stops).collect();
-    stops.sort_by(f32::total_cmp);
-    let at = ((stops.len().checked_sub(1)?) as f32 * PLATE_PERCENTILE).round() as usize;
-    Some(stops[at])
+    percentile(
+        session.stars.iter().filter_map(|s| shaded(session, s)).map(|s| s.stops).collect(),
+        PLATE_PERCENTILE,
+    )
+}
+
+/// The value `fraction` of the way up `values`, nearest rank.
+fn percentile(mut values: Vec<f32>, fraction: f32) -> Option<f32> {
+    values.sort_by(f32::total_cmp);
+    let at = (values.len().checked_sub(1)? as f32 * fraction).round() as usize;
+    values.get(at).copied()
 }
 
 /// The field actually taken, widened to hold [`MIN_SIDE_PX`] resolution elements, and as many
@@ -1056,6 +1065,27 @@ mod tests {
         let (forward, _, _) =
             ringside(DVec3::new(0.0, 0.0, -outer), inner, outer, DVec3::Z, DVec3::Y).unwrap();
         assert!(forward.y > 0.0 && forward.x.abs() < 1e-12, "{forward}");
+    }
+
+    #[test]
+    fn a_plate_is_metered_near_the_top_of_the_stars_not_on_the_brightest() {
+        assert_eq!(percentile(Vec::new(), PLATE_PERCENTILE), None);
+        assert_eq!(percentile(vec![-3.0], PLATE_PERCENTILE), Some(-3.0));
+        let mut stops: Vec<f32> = (0..20).map(|i| -(i as f32)).collect();
+        stops.push(40.0);
+        stops.reverse();
+        assert_eq!(percentile(stops, PLATE_PERCENTILE), Some(0.0), "the one outlier does not set it");
+    }
+
+    /// Nothing the player's own ship draws may reach the telescope, which is behind its hull.
+    #[test]
+    fn only_another_crafts_hull_is_in_a_photograph() {
+        let shot = RenderLayers::layer(SHOT_LAYER);
+        assert!(!crate::app::craft_layers(None).intersects(&shot));
+        assert!(crate::app::craft_layers(Some(ShipId(7))).intersects(&shot));
+        let sky = RenderLayers::layer(crate::app::SKY_ONLY_LAYER);
+        assert!(crate::app::craft_layers(None).intersects(&sky));
+        assert!(crate::app::craft_layers(Some(ShipId(7))).intersects(&sky));
     }
 
     #[test]
