@@ -15,6 +15,7 @@
 pub mod ability;
 pub mod archive;
 pub mod admin;
+pub(crate) mod cbor;
 pub mod chase;
 pub mod command;
 pub mod director;

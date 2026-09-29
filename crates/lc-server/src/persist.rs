@@ -13,12 +13,13 @@
 //! representation a reconnect is handed, because a checkpoint and a re-acquire are the same
 //! question asked by different things. See [`lc_world::resume`].
 //!
-//! It is written with **postcard, not JSON**, and that is not a taste. `serde_json` does not
-//! round-trip every f64 — `-1.8149592025296526e-22` comes back `-1.8149592025296529e-22` — and
-//! this model rests on two machines folding the same numbers and agreeing to the bit. A
-//! checkpoint that perturbs a coordinate by one place every restart would be a slow leak in
-//! exactly the property everything else is built to preserve. Postcard writes an f64 as its
-//! eight bytes and reads them back.
+//! It is written with **CBOR, not JSON and not postcard** ([`crate::cbor`]). Not JSON because
+//! `serde_json` does not round-trip every f64 — `-1.8149592025296526e-22` comes back
+//! `-1.8149592025296529e-22` — and this model rests on two machines folding the same numbers and
+//! agreeing to the bit: a checkpoint that moved a coordinate by one place every restart would be
+//! a slow leak in exactly the property everything else is built to preserve. Not postcard, which
+//! is as exact, because it is positional: a field appended to [`Saved`] made every row there was
+//! unreadable. CBOR names its fields, so an added one reads from an older row as its default.
 
 use std::collections::HashMap;
 
@@ -36,7 +37,9 @@ use crate::journal::Journal;
 use crate::radio::Owed;
 use crate::server::{Server, TICK_US};
 
-/// A craft, as JSON in [`Ship::state`].
+/// A craft, as CBOR in [`Ship::state`].
+///
+/// **A field added here takes `#[serde(default)]`**, so rows written before it still read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Saved {
     pub kind: u8,
@@ -69,6 +72,7 @@ pub struct Saved {
     /// the journal instead: see [`crate::emit`].
     pub light: Light,
     /// A wreck's collapse, whose afterglow outlasts the light of its end.
+    #[serde(default)]
     pub afterglow: Option<Afterglow>,
 }
 
@@ -92,23 +96,24 @@ pub struct SavedInstruments {
     pub reporting: lc_world::knowledge::Reporting,
 }
 
-/// What wrote a row's bytes, and a contract rather than a note.
+/// What wrote a row's bytes, and a contract rather than a note. A row whose format is not this
+/// one is refused.
 ///
-/// Postcard is positional: it cannot notice that it is reading an older shape, so it would read
-/// one wrong rather than fail. A row whose format is not this one is refused.
-///
-/// **Bump it when [`Saved`] or anything inside [`lc_proto::Motion`] changes shape, and never
-/// otherwise** — deliberately not [`lc_proto::PROTOCOL_VERSION`], which moves for reasons that
-/// have nothing to do with how a craft is stored. Bumping it makes every existing row
-/// unreadable, which is the point and is also the cost.
+/// **Bump it when a field of [`Saved`], or of anything inside it, is renamed or removed or comes
+/// to mean something else, and never otherwise.** A field *added* with `#[serde(default)]` does
+/// not bump it: the format names its fields, and a row without one reads as the default. Nor does
+/// [`lc_proto::PROTOCOL_VERSION`] move it, which changes for reasons that have nothing to do with
+/// how a craft is stored. Bumping it makes every existing row unreadable, which is the point and
+/// is also the cost.
 ///
 /// 10 is a ship kept as its form. Every older row held a loadout, which no ship is any more, so
 /// none is read: there are no players, and a row refused names its format rather than coming
 /// back as some other ship. 12 adds a wreck's end, 13 the craft's light and a field's lit
 /// emissions, 14 the drive's waste heat, 15 what a craft's beams have said and which of its
-/// lightings are drives, 16 drops the drive's exhaust speed, and 17 adds a wreck's afterglow and a
-/// stare at a place or a craft. 18 adds a standing parking orbit.
-pub const SAVE_FORMAT: i32 = 18;
+/// lightings are drives, 16 drops the drive's exhaust speed, 17 adds a wreck's afterglow and a
+/// stare at a place or a craft, 18 a standing parking orbit, and 19 is the move from postcard to
+/// CBOR.
+pub const SAVE_FORMAT: i32 = 19;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -178,7 +183,7 @@ pub fn save(
         ship_id: craft.id.0,
         account: account.filter(|_| craft.ended_s().is_none()).map(Into::into),
         saved_t,
-        state: lc_proto::encode(&saved),
+        state: crate::cbor::encode(&saved),
         format: SAVE_FORMAT,
     }
 }
@@ -219,7 +224,7 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
 /// A row's bytes. Only [`SAVE_FORMAT`] is read.
 pub fn decode(row: &Ship) -> Result<Saved, String> {
     match row.format {
-        SAVE_FORMAT => lc_proto::decode(&row.state).map_err(|why| why.to_string()),
+        SAVE_FORMAT => crate::cbor::decode(&row.state),
         other => Err(format!("format {other} is not {SAVE_FORMAT}")),
     }
 }
@@ -515,14 +520,35 @@ mod tests {
         assert_eq!(json.to_bits(), awkward.to_bits(), "serde_json lost float_roundtrip");
     }
 
-    /// A row written by an older shape is refused, not misread. Postcard is positional and
-    /// would happily read the wrong fields out of the right bytes.
+    /// A row written at another format is refused, not guessed at.
     #[test]
     fn a_row_from_another_format_is_refused() {
         let mut row = save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
+    }
+
+    /// A row written before a field was added still reads, as the field's default. What the move
+    /// from postcard bought: every such addition used to cost every row there was.
+    #[test]
+    fn a_row_without_an_added_field_reads_as_its_default() {
+        use ciborium::Value;
+        let mut craft = a_craft();
+        craft.end(12.5);
+        let afterglow = Afterglow { from: [1.0, 2.0, 3.0], at_s: 12.5, spike_j: 1.0e30, spike_k: 4.0e6, energy_j: 2.0e29, duration_s: 3.0, limit_k: 1.0e4 };
+        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), Some(afterglow), 0);
+        assert_eq!(decode(&row).unwrap().afterglow, Some(afterglow), "premise: it is written");
+
+        let Value::Map(mut fields) = crate::cbor::decode::<Value>(&row.state).unwrap() else { panic!("a map") };
+        let before = fields.len();
+        fields.retain(|(key, _)| key.as_text() != Some("afterglow"));
+        assert_eq!(fields.len(), before - 1, "premise: the field was there to take out");
+        let older = Ship { state: crate::cbor::encode(&Value::Map(fields)), ..row.clone() };
+
+        let read = decode(&older).expect("an older row reads");
+        assert_eq!(read.afterglow, None);
+        assert_eq!(read, Saved { afterglow: None, ..decode(&row).unwrap() }, "and the rest of it is as written");
     }
 
     /// A pursuit is written down with the craft, so a ship hanging about with another is still
@@ -644,7 +670,7 @@ mod tests {
             ship_id: 5,
             account: None,
             saved_t: 0,
-            state: b"not postcard, and too short for this shape".to_vec(),
+            state: b"not CBOR, and not this shape".to_vec(),
             format: SAVE_FORMAT,
         };
         assert!(load(&row, None).is_err());

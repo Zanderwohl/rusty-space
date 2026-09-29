@@ -1,7 +1,8 @@
 //! Presets, as the shard holds them: every account's, in memory, checkpointed beside the bookmarks.
 //!
 //! Not part of the world, so nothing here is cleared. A form is checked only for size; its
-//! geometry is validated when a preset is applied, like any other target. See
+//! geometry is validated when a preset is applied, like any other target. A row holds its form as
+//! CBOR, like every record the shard stores: see [`crate::cbor`]. See
 //! `lightcone/docs/29-ship-form.md` §Your own presets.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -76,7 +77,7 @@ impl Presets {
     pub fn adopt(&mut self, rows: Vec<lc_store::presets::Preset>) -> Vec<String> {
         let mut problems = Vec::new();
         for row in rows {
-            match lc_proto::decode::<Form>(&row.form) {
+            match crate::cbor::decode::<Form>(&row.form) {
                 Ok(form) => {
                     self.kept.entry(row.account).or_default().insert(row.name, form);
                 }
@@ -124,7 +125,7 @@ pub fn rows(changes: &[Change]) -> (Vec<lc_store::presets::Preset>, Vec<(String,
             Some(form) => saved.push(lc_store::presets::Preset {
                 account: account.clone(),
                 name: name.clone(),
-                form: lc_proto::encode(form),
+                form: crate::cbor::encode(form),
             }),
             None => deleted.push((account.clone(), name.clone())),
         }

@@ -36,6 +36,7 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # One GET at boot, for the broker's published keys. Blocking, before the runtime matters, and
 # not worth an async HTTP stack.
 ureq = { version = "2", features = ["json", "tls"] }
+ciborium = "0.2"
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
