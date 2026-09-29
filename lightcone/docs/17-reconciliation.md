@@ -160,7 +160,7 @@ that moved a ship by one place every restart would be a slow leak in the exact p
 whole document is about. CBOR writes an f64 as its bits, narrowed to an f32 or f16 only when that
 converts back to the same bits.
 
-It was postcard until `SAVE_FORMAT` 18, which is as exact and was dropped because it is
+It was postcard until `SAVE_FORMAT` 19, which is as exact and was dropped because it is
 positional: a field appended to the saved craft shifted every byte after it, so each one made
 every row there was unreadable. CBOR names its fields, and a field added with `#[serde(default)]`
 reads from an older row as its default and needs no bump. The wire stays postcard, because a
