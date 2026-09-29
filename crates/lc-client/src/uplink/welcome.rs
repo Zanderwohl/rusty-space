@@ -68,6 +68,7 @@ impl Slew {
 
 /// Coordinate microseconds a server tick covers at `rate`. Mirrors `lc_server::server::TICK_US`,
 /// which the browser build cannot see.
+#[cfg(test)]
 pub(super) fn lc_server_tick_us(rate: f64) -> i64 {
     const DESIGN_TICK_US: f64 = 50.0 * 8766.0 * 1_000.0;
     (DESIGN_TICK_US * rate.max(0.0)) as i64
@@ -137,6 +138,9 @@ pub(super) fn fold(
             // exactly as an unstated rate did.
             ui.0.time_rate = rate;
             let out_by = now_t - (game.0.coordinate_time_s() * 1e6) as i64;
+            // Coordinate seconds, and what they are in real milliseconds at this rate.
+            let real_ms = out_by as f64 * 1e-3 / (rate.max(f64::MIN_POSITIVE) * crate::session::TIME_RATE);
+            debug!(out_by_s = out_by as f64 * 1e-6, real_ms, "clock stated");
             if out_by.abs() > clock_snap_us(rate) {
                 game.0.correct_coordinate_time_us(now_t);
                 uplink.slew = Slew::default();
