@@ -1114,7 +1114,7 @@ mod tests {
                         duration_s: 86_400.0,
                         reversing: true,
                     }),
-                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear, envelope_m2: 1.3e6 }),
+                    glow: Some(Glow { temperature_k: 2_400.0, shade: Shade::Clear, envelope_m2: 1.3e6, switch: Some(Switch { to: Shade::Black, done_s: 0.9 }) }),
                     glare: Some(Glare { spectrum: Spectrum::Line { wavelength_m: 1.0e-6 }, flux_w_m2: 3.5e12 }),
                 },
                 1_000_000,

@@ -83,7 +83,7 @@ impl Afterglow {
     /// As its light left at `t_s`.
     pub fn glow_at(&self, t_s: f64) -> Option<Glow> {
         let temperature_k = temperature_k(self.limit_k, self.duration_s, t_s - self.at_s)?;
-        Some(Glow { temperature_k, shade: Mode::Black, envelope_m2: self.area_m2() })
+        Some(Glow { temperature_k, shade: Mode::Black, envelope_m2: self.area_m2(), switch: None })
     }
 
     /// W, as its light left at `t_s`.

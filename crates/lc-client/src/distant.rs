@@ -743,7 +743,7 @@ mod tests {
         let session = session();
         let au_ly = lc_world::navigation::AU / M_PER_LY;
         let star = Some((DVec3::ZERO, em_spectra::stellar::SOLAR_RADIUS, 5772.0));
-        let glow = lc_proto::Glow { temperature_k: 900.0, shade: lc_proto::Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 };
+        let glow = lc_proto::Glow { temperature_k: 900.0, shade: lc_proto::Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2, switch: None };
         let at = DVec3::X * au_ly;
         let toward = DVec3::new(-1.0, 0.3, 0.0);
         let sent = crate::hull::radiance_at(&session, star, at, toward, glow);

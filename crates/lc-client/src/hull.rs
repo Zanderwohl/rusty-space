@@ -631,7 +631,7 @@ mod tests {
         Session::new(&lc_world::sky::AuthoredStars::sample(), 3)
     }
 
-    const IDLE: Glow = Glow { temperature_k: 400.0, shade: Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 };
+    const IDLE: Glow = Glow { temperature_k: 400.0, shade: Shade::Clear, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2, switch: None };
 
     /// A night side is metered for its lights, a day side for its starlight.
     #[test]
@@ -671,7 +671,7 @@ mod tests {
     /// The thermal term follows the field, not a fixed hull: past the Draper point it reaches V.
     #[test]
     fn a_hot_field_is_seen_in_v() {
-        let v = |k| radiance_at(&session(), None, DVec3::ZERO, DVec3::ZERO, Glow { temperature_k: k, shade: Shade::Black, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2 }).thermal[em_spectra::Band::V];
+        let v = |k| radiance_at(&session(), None, DVec3::ZERO, DVec3::ZERO, Glow { temperature_k: k, shade: Shade::Black, envelope_m2: lc_world::fitting::STARTING_ENVELOPE_M2, switch: None }).thermal[em_spectra::Band::V];
         assert!(v(2400.0) > 1.0e10 * v(400.0));
         assert!(v(4600.0) > 1.0e2 * v(2400.0));
     }

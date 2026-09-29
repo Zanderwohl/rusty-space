@@ -7,7 +7,7 @@
 use em_spectra::{Band, PerBand, blackbody};
 
 use crate::field::Mode;
-use crate::fitting::Balance;
+use crate::fitting::{Balance, Switch};
 use crate::instrument::Instrument;
 
 /// A field as its light left it.
@@ -16,18 +16,25 @@ pub struct Glow {
     pub temperature_k: f64,
     pub shade: Mode,
     pub envelope_m2: f64,
+    /// Under way: `shade` holds until its `done_s`.
+    pub switch: Option<Switch>,
 }
 
 impl Glow {
     /// What a craft with no fitting is taken to wear: the starting field at rest.
     pub fn unfitted(balance: &Balance) -> Glow {
-        Glow { temperature_k: balance.field_idle_k, shade: Mode::Clear, envelope_m2: crate::fitting::STARTING_ENVELOPE_M2 }
+        Glow { temperature_k: balance.field_idle_k, shade: Mode::Clear, envelope_m2: crate::fitting::STARTING_ENVELOPE_M2, switch: None }
     }
 }
 
 impl From<Glow> for lc_proto::Glow {
     fn from(g: Glow) -> Self {
-        lc_proto::Glow { temperature_k: g.temperature_k, shade: g.shade.into(), envelope_m2: g.envelope_m2 }
+        lc_proto::Glow {
+            temperature_k: g.temperature_k,
+            shade: g.shade.into(),
+            envelope_m2: g.envelope_m2,
+            switch: g.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s }),
+        }
     }
 }
 
@@ -122,7 +129,7 @@ mod tests {
     }
 
     fn glow(temperature_k: f64, shade: Mode) -> Glow {
-        Glow { temperature_k, shade, envelope_m2: crate::fitting::STARTING_ENVELOPE_M2 }
+        Glow { temperature_k, shade, envelope_m2: crate::fitting::STARTING_ENVELOPE_M2, switch: None }
     }
 
     /// 30's anchor: an idle field, a thousand kilometers off, broadside in sunlight at 1 AU.

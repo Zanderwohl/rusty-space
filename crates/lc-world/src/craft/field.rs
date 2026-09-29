@@ -35,8 +35,8 @@ impl Craft {
     /// Its field as its light left it at `t`, coordinate seconds. A wreck answers from what it wore
     /// until it ended; `None` for a craft that never had a fitting.
     pub fn glow_at(&self, t: f64) -> Option<Glow> {
-        let (heat_j, field, shade) = self.worn_at(t)?;
-        Some(Glow { temperature_k: field.temperature_k(heat_j), shade, envelope_m2: field.area_m2 })
+        let (heat_j, field, shade, switch) = self.worn_at(t)?;
+        Some(Glow { temperature_k: field.temperature_k(heat_j), shade, envelope_m2: field.area_m2, switch })
     }
 
     /// Its star as it lit it at `t`, seen from along `to_observer`. `None` between systems.
@@ -55,16 +55,17 @@ impl Craft {
 
     /// Its field's heat as its light left it at `t`, J.
     pub fn heat_seen_j_at(&self, t: f64) -> Option<f64> {
-        self.worn_at(t).map(|(heat_j, _, _)| heat_j)
+        self.worn_at(t).map(|(heat_j, ..)| heat_j)
     }
 
     /// The live account from its settlement on; before it, or once the craft has ended, what the
     /// settlements left.
-    fn worn_at(&self, t: f64) -> Option<(f64, Field, Mode)> {
+    fn worn_at(&self, t: f64) -> Option<(f64, Field, Mode, Option<Switch>)> {
         if let Some(fitting) = &self.fitting
             && t >= fitting.since_s()
         {
-            return Some((fitting.heat_j_at(&self.motion, t), fitting.field(), fitting.shade_at(t)));
+            let switch = fitting.posture().switching_at(t);
+            return Some((fitting.heat_j_at(&self.motion, t), fitting.field(), fitting.shade_at(t), switch));
         }
         self.glows.at(t)
     }
@@ -115,7 +116,10 @@ mod tests {
         assert!(vented.temperature_k > 1.2 * then.temperature_k, "{vented:?}");
         assert!(craft.glow_at(999.0).unwrap().temperature_k < 1.0001 * then.temperature_k);
         assert_eq!(craft.glow_at(done_s - 1.0).unwrap().shade, Mode::Black);
+        assert_eq!(craft.glow_at(done_s - 1.0).unwrap().switch.map(|s| (s.to, s.done_s)), Some((Mode::Clear, done_s)), "a switch shows as it runs");
+        assert_eq!(craft.glow_at(1999.0).unwrap().switch, None);
         assert_eq!(craft.glow_at(done_s).unwrap().shade, Mode::Clear);
+        assert_eq!(craft.glow_at(done_s).unwrap().switch, None);
         assert!(craft.heat_seen_j_at(999.0).unwrap() < craft.heat_seen_j_at(1000.0).unwrap());
     }
 

@@ -1020,7 +1020,7 @@ mod tests {
             arrive_t: 1_000_000,
             form: (&two_ended()).into(),
             building: None,
-            glow: Some(lc_proto::Glow { temperature_k: 300.0, shade: Shade::Clear, envelope_m2: 2.0e6 }),
+            glow: Some(lc_proto::Glow { temperature_k: 300.0, shade: Shade::Clear, envelope_m2: 2.0e6, switch: None }),
             glare: None,
         };
         let contact = Contact::seen(presence.clone(), None);
