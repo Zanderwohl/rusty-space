@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::fitting::{Balance, C2};
-use crate::form::capacity::{Capacities, Transfer, part_kg};
+use crate::form::capacity::{Capacities, Transfer, part_kg, rebuilt};
 use crate::form::{rules, Form, FormError, Kind, Part, PartId, Placement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,12 +20,14 @@ pub enum Phase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
+    /// Also a change of shape that adds mass, or none.
     Grow,
+    /// Also a change of shape that takes mass away.
     Shrink,
     /// Also a copy gained, when the part stays.
     Add,
-    /// Also the first half of a reshape or a change of kind, whose second is an `Add` of the same
-    /// part, and a copy lost, when the part stays.
+    /// Also the first half of a change of kind, whose second is an `Add` of the same part, and a
+    /// copy lost, when the part stays.
     Remove,
     /// Carries everything that hung from the part when the round began.
     Move,
@@ -91,7 +93,7 @@ pub enum Refusal {
     Form(FormError),
     /// The target's Mind is not the ship's Mind.
     Mind(PartId),
-    /// A step would begin with no drone to do it, as when every drone is being reshaped.
+    /// A step would begin with no drone to do it, as when every drone is being rebuilt.
     NoDrones { part: PartId },
     /// The build phase costs more than the dismantle phase leaves in storage.
     Energy { short_j: f64 },
@@ -178,18 +180,25 @@ struct Pending {
     change: Change,
     kind: Kind,
     transfer: Transfer,
+    /// Its shape changes, which [`Balance::reshape_work_factor`] times.
+    reshaped: bool,
     after: Option<Part>,
 }
 
 impl Pending {
     fn remove(part: &Part, copies: u32, balance: &Balance) -> Self {
         let transfer = Transfer::of(Some(part), None, copies, balance);
-        Self { part: part.id, change: Change::Remove, kind: part.kind, transfer, after: None }
+        Self { part: part.id, change: Change::Remove, kind: part.kind, transfer, reshaped: false, after: None }
     }
 
     fn add(part: &Part, copies: u32, balance: &Balance) -> Self {
         let transfer = Transfer::of(None, Some(part), copies, balance);
-        Self { part: part.id, change: Change::Add, kind: part.kind, transfer, after: Some(*part) }
+        Self { part: part.id, change: Change::Add, kind: part.kind, transfer, reshaped: false, after: Some(*part) }
+    }
+
+    fn duration_s(&self, gross_j: f64, power_w: f64, balance: &Balance) -> f64 {
+        let reshape = if self.reshaped { balance.reshape_work_factor } else { 1.0 };
+        gross_j * reshape * work_factor(self.kind, balance) / power_w
     }
 }
 
@@ -221,14 +230,16 @@ fn diff(from_form: &Form, target_form: &Form, balance: &Balance) -> Diff {
                     continue;
                 }
                 let (cf, ct) = (from_copies[&id], target_copies[&id]);
-                if f.kind != t.kind || f.primitive != t.primitive {
+                if rebuilt(f, t) {
                     dismantles.push(Pending::remove(f, cf, balance));
                     builds.push(Pending::add(t, ct, balance));
                 } else {
                     let mut kept = *f;
-                    if f.volume_m3 != t.volume_m3 {
-                        let resized = Part { volume_m3: t.volume_m3, ..*f };
-                        let transfer = Transfer::of(Some(f), Some(t), cf.min(ct), balance);
+                    if f.volume_m3 != t.volume_m3 || f.primitive != t.primitive {
+                        let resized = Part { volume_m3: t.volume_m3, primitive: t.primitive, ..*f };
+                        let copies = cf.min(ct);
+                        let transfer = Transfer::of(Some(f), Some(t), copies, balance);
+                        let reshaped = f.primitive != t.primitive;
                         let (change, after, list) = match transfer {
                             Transfer::Build { .. } => (Change::Grow, *t, &mut builds),
                             Transfer::Dismantle { .. } => {
@@ -236,16 +247,16 @@ fn diff(from_form: &Form, target_form: &Form, balance: &Balance) -> Diff {
                                 (Change::Shrink, resized, &mut dismantles)
                             }
                         };
-                        list.push(Pending { part: id, change, kind: f.kind, transfer, after: Some(after) });
+                        list.push(Pending { part: id, change, kind: f.kind, transfer, reshaped, after: Some(after) });
                     }
                     // A copy lost goes at the size it had, and one gained comes at the size it will have.
                     if cf > ct {
                         let transfer = Transfer::of(Some(f), None, cf - ct, balance);
                         let after = Some(with_mirror(kept, mirror(t)));
-                        dismantles.push(Pending { part: id, change: Change::Remove, kind: f.kind, transfer, after });
+                        dismantles.push(Pending { part: id, change: Change::Remove, kind: f.kind, transfer, reshaped: false, after });
                     } else if ct > cf {
                         let transfer = Transfer::of(None, Some(t), ct - cf, balance);
-                        builds.push(Pending { part: id, change: Change::Add, kind: f.kind, transfer, after: Some(*t) });
+                        builds.push(Pending { part: id, change: Change::Add, kind: f.kind, transfer, reshaped: false, after: Some(*t) });
                         gaining.insert(id);
                     }
                 }
@@ -307,7 +318,7 @@ impl Plan {
         for p in dismantles {
             let power = building_w(&parts, balance, p.part)?;
             let Transfer::Dismantle { gross_j, returned_j } = p.transfer else { unreachable!() };
-            let duration_s = gross_j * work_factor(p.kind, balance) / power;
+            let duration_s = p.duration_s(gross_j, power, balance);
             apply(&mut parts, p.part, p.after);
             let kept = returned_j.min((left_j - stored).max(0.0));
             stored += kept;
@@ -396,7 +407,7 @@ impl Plan {
         for p in builds {
             let power = building_w(&parts, balance, p.part)?;
             let gross_j = cost_j(&p);
-            let duration_s = gross_j * work_factor(p.kind, balance) / power;
+            let duration_s = p.duration_s(gross_j, power, balance);
             apply(&mut parts, p.part, p.after);
             steps.push(Step {
                 part: p.part,
@@ -638,14 +649,14 @@ mod tests {
         let target = with(&adding(&without(&ship(), &[4]), &[part(5, Kind::Data, ROD, 0.5, 1)]), 1, |p| {
             p.volume_m3 *= 1.5;
         });
-        let target = with(&target, 3, |p| p.primitive = TANK);
+        let target = with(&target, 3, |p| p.kind = Kind::Storage);
         let target = with(&target, 2, |p| p.placement.as_mut().unwrap().twist = 0.5);
         let mut planned = changes(&solve(&ship(), &target, capacity(&target)).unwrap());
         let mut listed: Vec<(u16, Change)> = super::changes(&ship(), &target, &B).iter().map(|&(id, c)| (id.0, c)).collect();
         planned.sort_by_key(|&(id, c)| (id, c as u8));
         listed.sort_by_key(|&(id, c)| (id, c as u8));
         assert_eq!(listed, planned);
-        assert!(listed.contains(&(3, Change::Remove)) && listed.contains(&(3, Change::Add)), "a reshape");
+        assert!(listed.contains(&(3, Change::Remove)) && listed.contains(&(3, Change::Add)), "a new kind");
         assert!(matches!(solve(&ship(), &target, 0.0), Err(Refusal::Energy { .. })));
         assert_eq!(super::changes(&ship(), &ship(), &B), vec![]);
     }
@@ -727,21 +738,75 @@ mod tests {
     }
 
     #[test]
-    fn a_reshape_loses_five_percent_of_all_of_it() {
+    fn a_full_store_stretched_grows_in_place_and_vents_nothing() {
+        let from = ship();
+        let full = capacity(&from);
+        let longer = Primitive::Ellipsoid { axes: DVec3::new(10.0, 3.0, 1.0) };
+        let target = with(&from, 1, |p| {
+            p.primitive = longer;
+            p.volume_m3 *= 2.0;
+        });
+        let plan = solve(&from, &target, full).unwrap();
+        assert_eq!(changes(&plan), [(1, Change::Grow)]);
+        assert_eq!(plan.vented_j(), 0.0);
+        let step = plan.steps()[0];
+        assert!(close(step.gross_j, energy(&get(&target, 1)) - energy(&get(&from, 1))));
+        assert!(close(step.duration_s, step.gross_j / power(&from)));
+        let slow = Balance { reshape_work_factor: 2.0, ..B };
+        let plan = solve_with(&slow, &from, &target, full).unwrap();
+        assert!(close(plan.steps()[0].duration_s, 2.0 * step.gross_j / power(&from)));
+        assert_eq!(sorted(&plan.at(1.0e30).form), sorted(&target));
+
+        // Stretched back, it shrinks in place, and a store left fuller than it can hold spills.
+        let plan = solve(&target, &from, capacity(&target)).unwrap();
+        assert_eq!(changes(&plan), [(1, Change::Shrink)]);
+        let step = plan.steps()[0];
+        assert!(close(step.spilled_j, capacity(&target) - full));
+        assert_eq!(sorted(&plan.at(1.0e30).form), sorted(&from));
+    }
+
+    /// The only drone, grown, shrunk or stretched, keeps working through its own step.
+    #[test]
+    fn the_only_drone_resizes_itself() {
+        let from = ship();
+        let stretched = |p: &mut Part| p.primitive = Primitive::Capsule { length: 8.0 };
+        let targets = [
+            (with(&from, 2, |p| p.volume_m3 *= 2.0), Change::Grow),
+            (with(&from, 2, |p| p.volume_m3 *= 0.75), Change::Shrink),
+            (with(&from, 2, stretched), Change::Grow),
+            (with(&from, 2, |p| { stretched(p); p.volume_m3 *= 0.75 }), Change::Shrink),
+            (with(&from, 2, |p| p.primitive = Primitive::Cylinder { length: 2.0 }), Change::Shrink),
+        ];
+        for (target, change) in targets {
+            let plan = solve(&from, &target, capacity(&from)).unwrap();
+            assert_eq!(changes(&plan), [(2, change)]);
+        }
+    }
+
+    /// A new primitive is a new shape like any other: only the mass that changes is built or
+    /// taken apart. A new kind is priced whole, and loses 5% of all of it.
+    #[test]
+    fn a_new_shape_is_resized_in_place_and_a_new_kind_rebuilt() {
         let from = ship();
         let target = with(&from, 3, |p| p.primitive = Primitive::Cylinder { length: 3.0 });
         // Without structure the two shapes weigh the same.
         let bare = Balance { hull_areal_density: 0.0, ..B };
         let plan = solve_with(&bare, &from, &target, 0.5 * capacity(&from)).unwrap();
-        assert_eq!(changes(&plan), [(3, Change::Remove), (3, Change::Add)]);
-        assert!(close(plan.net_j(), 0.05 * part_kg(&get(&from, 3), &bare) * C2));
+        assert_eq!(changes(&plan), [(3, Change::Grow)]);
+        assert_eq!(plan.net_j(), 0.0);
 
-        // With it, each is priced whole.
+        // With it, the cylinder has less surface, and gives back the difference.
         let b = Balance { hull_areal_density: 500.0, ..B };
-        let whole = |p: &Part| part_kg(p, &b) * C2;
         let plan = solve_with(&b, &from, &target, 0.5 * capacity(&from)).unwrap();
-        let want = whole(&get(&target, 3)) - 0.95 * whole(&get(&from, 3));
-        assert!(close(plan.net_j(), want), "{} vs {want}", plan.net_j());
+        assert_eq!(changes(&plan), [(3, Change::Shrink)]);
+        let want = Transfer::of(Some(&get(&from, 3)), Some(&get(&target, 3)), 1, &b).net_j();
+        assert!(want > 0.0 && close(-plan.net_j(), want), "{} vs {want}", plan.net_j());
+
+        // The only store, full, turned into a slab: nothing leaves it, so nothing vents.
+        let slab = with(&from, 1, |p| p.primitive = Primitive::Slab { edges: DVec3::new(5.0, 3.0, 1.0), corner: 0.2 });
+        let plan = solve(&from, &slab, capacity(&from)).unwrap();
+        assert_eq!(plan.steps().len(), 1);
+        assert_eq!(plan.vented_j(), 0.0);
 
         let rekind = with(&from, 3, |p| p.kind = Kind::Storage);
         let plan = solve(&from, &rekind, 0.5 * capacity(&from)).unwrap();
@@ -989,9 +1054,6 @@ mod tests {
         // Replacing the only drone with a new one leaves nothing to build it with.
         let replaced = adding(&without(&from, &[2]), &[part(8, Kind::Drone, ROD, 1.0, 1)]);
         assert_eq!(solve(&from, &replaced, capacity(&from)).unwrap_err(), Refusal::NoDrones { part: PartId(8) });
-        // Nor does reshaping it.
-        let reshaped = with(&from, 2, |p| p.primitive = Primitive::Cylinder { length: 2.0 });
-        assert_eq!(solve(&from, &reshaped, capacity(&from)).unwrap_err(), Refusal::NoDrones { part: PartId(2) });
     }
 
     #[test]
