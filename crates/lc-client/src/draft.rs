@@ -82,7 +82,7 @@ pub enum Mark {
     /// Smaller, or a mirrored copy fewer, and still there.
     Shrink,
     Move,
-    /// A reshape or a change of kind.
+    /// A change of kind.
     Rebuild,
 }
 
@@ -540,7 +540,8 @@ pub fn staged_edits(ship: &Form, balance: &Balance) -> Option<Vec<Edit>> {
     let mut out = Vec::new();
     let by_kind = |d: &Draft, kind: Kind| d.form.parts.iter().find(|p| p.kind == kind).copied();
     let edits = [
-        by_kind(&d, Kind::Drone).map(|p| d.reshape(p.id, PRIMITIVES[0])),
+        by_kind(&d, Kind::Drone).map(|p| d.twist(p.id, 0.5)),
+        by_kind(&d, Kind::Living).map(|p| d.set_kind(p.id, Kind::Data)),
         by_kind(&d, Kind::Engine).map(|p| d.resize(p.id, snap::volume(p.volume_m3 * 0.6, balance.min_part_m3, false))),
         by_kind(&d, Kind::Data).map(|p| d.remove(p.id)),
         by_kind(&d, Kind::Storage).map(|p| d.add(p.id, Kind::Bay, PRIMITIVES[3], DVec3::new(0.0, -1.0, 0.0), balance)),
@@ -799,7 +800,7 @@ mod tests {
         let grow = d.resize(PartId(1), 3.0e6).unwrap();
         d.apply(&grow, &B).unwrap();
         d.apply(&d.twist(PartId(4), 0.5).unwrap(), &B).unwrap();
-        d.apply(&d.reshape(PartId(5), PRIMITIVES[0]).unwrap(), &B).unwrap();
+        d.apply(&d.set_kind(PartId(5), Kind::Bay).unwrap(), &B).unwrap();
         d.apply(&d.remove(PartId(2)).unwrap(), &B).unwrap();
         d.apply(&d.add(PartId(1), Kind::Living, PRIMITIVES[2], DVec3::Y, &B).unwrap(), &B).unwrap();
         d.apply(&d.resize(PartId(3), 5.0e5).unwrap(), &B).unwrap();

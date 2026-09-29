@@ -332,13 +332,13 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 A refit takes the ship from its form to a target form. It is one **round** of edits, and a round runs
 in three phases, strictly in order:
 
-1. **Dismantle.** Every part that shrinks, disappears or is being reshaped gives up what it loses.
+1. **Dismantle.** Every part that shrinks, disappears or is being rebuilt gives up what it loses.
    Drones go last. Each return is 95% of the mass-energy removed and lands in storage **if there is
    room**, where "room" means capacity left after this phase's own storage losses. **What does not fit
    is vented into the field as heat**, a burst at the end of the step that frees it. A return that
    finds the room already filled by starlight is heat as it arrives instead ([30](30-the-field.md#the-inputs)).
 2. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
-3. **Build.** Every part that grows, is new or is being reshaped is built, drones first. Each takes its
+3. **Build.** Every part that grows, is new or is being rebuilt is built, drones first. Each takes its
    added mass-energy, structure included, from storage.
 
 | change to a part | phase | energy | time |
@@ -347,7 +347,8 @@ in three phases, strictly in order:
 | smaller, same proportions | dismantle the difference | 95% back | energy ÷ drone power |
 | new | build | its mass-energy | energy ÷ drone power |
 | removed | dismantle | 95% back | energy ÷ drone power |
-| **proportions, primitive, or a spar's mode** | dismantle all, then build all | the 5% loss on all of it | both |
+| **proportions or primitive** | grow or shrink in place by the mass it gains or loses, hull included | as bigger or smaller | `reshape_work_factor` times that of the resize |
+| **a spar's mode** | dismantle all, then build all | the 5% loss on all of it | both |
 | **anchor, mount, twist, tilt, standoff, blend or parent** | move, carrying its subtree | none | `move_work_factor` of what building the subtree would take |
 | **mirror**, or a new parent, that adds a copy or takes one away | build or dismantle that copy, for each part in the subtree whose count changes | as new or removed | as new or removed |
 | **kind**, other than a spar's mode | removed, then new | as those two | as those two |
@@ -370,7 +371,7 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 - **Within a phase, parts go in id order**, drones apart as above, and moves by depth in the tree
   the round began with.
 - **A move carries what hung from the part when the round began**, as much of it as the dismantle
-  phase left, weighted by each part's work factor. A part both reshaped and moved still moves,
+  phase left, weighted by each part's work factor. A part both rebuilt and moved still moves,
   carrying its children, and is rebuilt in its new place.
 - **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
   step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
@@ -382,7 +383,7 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
   What the builds still have to take is held out of free storage, as a burn's commitment is, so
   the drain runs out before a build does.
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
-  are removed, replaced by new parts or reshaped, since the build phase would begin with none.
+  are removed, replaced by new parts or rebuilt, since the build phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 - **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
   part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
@@ -401,7 +402,9 @@ difference into the field, which may kill the ship. Done properly it takes round
 3. If you like, shrink the extra storage away again.
 
 Each round is visible and survivable, and the editor says so before each Apply. Emptying a full
-storage part before reshaping it follows from the same rule, with nothing special added.
+storage part before changing its kind follows from the same rule, with nothing special added.
+Resizing or reshaping one does not need it: a change of shape is done in place, so a full store
+gives up only what its new volume cannot hold.
 
 ### Cancel
 
@@ -696,12 +699,12 @@ the ship.
 | handle | looks like | does |
 |---|---|---|
 | carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing |
-| axes | a red, green and blue line along the part's own axes, square ends | that one dimension, the volume going with it. Shift keeps the volume and lets the others give way. Snapped as a ratio. A reshape, so the part is rebuilt |
+| axes | a red, green and blue line along the part's own axes, square ends | that one dimension, the volume going with it. Shift keeps the volume and lets the others give way. Snapped as a ratio. A reshape, done in place |
 | size | a line along the part's diagonal, ending in a ball | grows or shrinks it **at fixed proportions**, snapped |
 | twist | one ring | twist, about what twist turns the part about: its parent's normal through its foot, or its parent's axis when it encloses. Not its own axis, which a tilt takes off it |
 | standoff | an arrow into the parent along its normal at the anchor | sinks the part, and back out no further than it still touches its parent. A positive standoff is not by itself floating, since a tilt swings a part back into its parent: the starting form's drone pod hangs at +0.38 |
 | mount | a button | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
-| spar mode | a button | saddle or strap. A reshape: the cut changes, the charged volume does not |
+| spar mode | a button | saddle or strap. A change of kind, so the spar is rebuilt: the cut changes, the charged volume does not |
 | mirror | a button | for the subtree |
 | add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above |
 | delete | a button, `Delete`, or a drop on the palette | the part and its subtree. Refused for the Mind. The last drones may go: a draft may pass through none on the way to a design, and Apply refuses a target with too few |
@@ -867,6 +870,7 @@ are quoted per.
 | `spar_gap` | 0.5 m | how far a saddle stands off the neighbor it is cut to |
 | `spar_thickness` | 2% of the parent's smallest dimension | a strap's depth |
 | `move_work_factor` | 0.25 | a move's time over building what it carries |
+| `reshape_work_factor` | 1 | a change of shape's time over a resize by the same mass |
 | `hull_areal_density` | *anchored*: 1 215 kg/m² | structure per m² of part surface |
 | `envelope_margin` | 0.05 | what the envelope adds to each semi-axis, over the cube root of hull volume |
 | `engine_clear_half_angle_rad` | 15° | |

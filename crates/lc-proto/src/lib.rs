@@ -1366,6 +1366,7 @@ mod tests {
                     spar_gap: 0.5,
                     spar_thickness: 0.02,
                     move_work_factor: 0.25,
+                    reshape_work_factor: 1.0,
                     hull_areal_density: 120.0,
                     envelope_margin: 0.05,
                     engine_clear_half_angle_rad: 0.26,

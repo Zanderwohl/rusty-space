@@ -581,6 +581,33 @@ mod tests {
         assert_eq!(decode(&row).expect("it reads").radio, radio);
     }
 
+    /// A ship saved before `reshape_work_factor` existed reads with it at 1, as the shard's is.
+    #[test]
+    fn a_balance_saved_without_the_reshape_factor_reads_as_one() {
+        use ciborium::Value;
+        use lc_world::fitting::Balance;
+        use lc_world::form::Form;
+        fn strip(value: &mut Value) -> usize {
+            match value {
+                Value::Map(fields) => {
+                    let before = fields.len();
+                    fields.retain(|(key, _)| key.as_text() != Some("reshape_work_factor"));
+                    before - fields.len() + fields.iter_mut().map(|(_, v)| strip(v)).sum::<usize>()
+                }
+                Value::Array(items) => items.iter_mut().map(strip).sum(),
+                _ => 0,
+            }
+        }
+        let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
+        craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+        let row = save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0);
+        let mut state = crate::cbor::decode::<Value>(&row.state).unwrap();
+        assert!(strip(&mut state) > 0, "premise: the balance is saved");
+        let older = Ship { state: crate::cbor::encode(&state), ..row };
+        let back = load(&older, None).expect("an older row reads");
+        assert_eq!(back.fitting().unwrap().balance().reshape_work_factor, 1.0);
+    }
+
     /// A round under way is saved as its recipe and comes back running: the same plan, as far
     /// through as it was, and finishing where it would have.
     #[test]

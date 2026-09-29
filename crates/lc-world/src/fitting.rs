@@ -85,6 +85,8 @@ pub struct Balance {
     /// Of the parent's smallest dimension.
     pub spar_thickness: f64,
     pub move_work_factor: f64,
+    /// A change of shape's time over resizing by the same mass. One prices it as a resize.
+    pub reshape_work_factor: f64,
     /// kg/m² of part surface.
     pub hull_areal_density: f64,
     /// Of the cube root of hull volume.
@@ -186,6 +188,7 @@ impl Balance {
             spar_gap: 0.5,
             spar_thickness: 0.02,
             move_work_factor: 0.25,
+            reshape_work_factor: 1.0,
             // `Form::starting()` weighs [`STARTING_DRY_KG`]. Solved there, since the areas are not
             // `const`, and pinned by `form::presets`' anchor test.
             hull_areal_density: 1214.530767193309,
@@ -796,6 +799,7 @@ impl From<lc_proto::Balance> for Balance {
             spar_gap: b.spar_gap,
             spar_thickness: b.spar_thickness,
             move_work_factor: b.move_work_factor,
+            reshape_work_factor: b.reshape_work_factor,
             hull_areal_density: b.hull_areal_density,
             envelope_margin: b.envelope_margin,
             engine_clear_half_angle_rad: b.engine_clear_half_angle_rad,
@@ -840,6 +844,7 @@ impl From<Balance> for lc_proto::Balance {
             spar_gap: b.spar_gap,
             spar_thickness: b.spar_thickness,
             move_work_factor: b.move_work_factor,
+            reshape_work_factor: b.reshape_work_factor,
             hull_areal_density: b.hull_areal_density,
             envelope_margin: b.envelope_margin,
             engine_clear_half_angle_rad: b.engine_clear_half_angle_rad,
@@ -1001,6 +1006,7 @@ mod tests {
             spar_gap: 24.0,
             spar_thickness: 25.0,
             move_work_factor: 26.0,
+            reshape_work_factor: 45.0,
             hull_areal_density: 27.0,
             envelope_margin: 28.0,
             engine_clear_half_angle_rad: 29.0,

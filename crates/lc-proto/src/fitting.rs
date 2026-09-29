@@ -37,6 +37,9 @@ pub struct Balance {
     pub spar_gap: f64,
     pub spar_thickness: f64,
     pub move_work_factor: f64,
+    /// Defaulted, since a saved ship holds its balance and rows from before it must still read.
+    #[serde(default = "one")]
+    pub reshape_work_factor: f64,
     pub hull_areal_density: f64,
     pub envelope_margin: f64,
     pub engine_clear_half_angle_rad: f64,
@@ -55,6 +58,10 @@ pub struct Balance {
     pub rcs_accel_g: f64,
     pub rcs_spread_rad: f64,
     pub courtesy_fraction: f64,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 /// A refit as the recipe it was planned from: `lc_world::refit::rounds::Round`, which both ends

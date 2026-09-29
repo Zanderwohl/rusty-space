@@ -267,7 +267,8 @@ impl Frame {
                 let from = part(before, s.part).expect("a resize has a part to resize");
                 let to = s.after.expect("a resize leaves the part");
                 let volume_m3 = from.volume_m3 + fraction * (to.volume_m3 - from.volume_m3);
-                let pieces = stand.place(&applied(before, s.part, Some(Part { volume_m3, ..to })));
+                let primitive = between(from.primitive, to.primitive, fraction);
+                let pieces = stand.place(&applied(before, s.part, Some(Part { volume_m3, primitive, ..to })));
                 let of = |placed: &[Piece]| placed.iter().filter(|p| p.part == s.part).copied().collect::<Vec<_>>();
                 let (big, small) = if s.change == Change::Grow { (&placed_after, &placed_before) } else { (&placed_before, &placed_after) };
                 let below = subtree(before, s.part);
@@ -384,6 +385,26 @@ impl Stand<'_> {
     }
 }
 
+/// The shape partway through a resize. A new primitive has no shape between, so it turns over
+/// halfway.
+fn between(from: Primitive, to: Primitive, fraction: f64) -> Primitive {
+    let mix = |a: f64, b: f64| a + fraction * (b - a);
+    match (from, to) {
+        (Primitive::Ellipsoid { axes: a }, Primitive::Ellipsoid { axes: b }) => Primitive::Ellipsoid { axes: a.lerp(b, fraction) },
+        (Primitive::Capsule { length: a }, Primitive::Capsule { length: b }) => Primitive::Capsule { length: mix(a, b) },
+        (Primitive::Slab { edges: a, corner: c }, Primitive::Slab { edges: b, corner: d }) => {
+            Primitive::Slab { edges: a.lerp(b, fraction), corner: mix(c, d) }
+        }
+        (Primitive::Cylinder { length: a }, Primitive::Cylinder { length: b }) => Primitive::Cylinder { length: mix(a, b) },
+        (Primitive::Torus { major: a }, Primitive::Torus { major: b }) => Primitive::Torus { major: mix(a, b) },
+        (Primitive::Frustum { length: a, taper: c }, Primitive::Frustum { length: b, taper: d }) => {
+            Primitive::Frustum { length: mix(a, b), taper: mix(c, d) }
+        }
+        _ if fraction < 0.5 => from,
+        _ => to,
+    }
+}
+
 fn part(form: &Form, id: PartId) -> Option<Part> {
     form.parts.iter().find(|p| p.id == id).copied()
 }
@@ -495,8 +516,7 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
 /// What `--demo refit` builds on the starting form, and the pace its clock runs at.
 ///
 /// Not the Cluster preset, which the planner refuses from the starting form: its ids put an engine
-/// where the only drone was, and reshaping the storage core would vent everything the build phase
-/// needs. This stages one of each step instead: the data core taken apart, the deck moved aft,
+/// where the only drone was, which leaves nothing to build with. This stages one of each step instead: the data core taken apart, the deck moved aft,
 /// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods
 /// on spars built together.
 ///
