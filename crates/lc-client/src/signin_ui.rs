@@ -77,12 +77,17 @@ impl Signin {
             (Ok(base), Ok(shard)) if !base.is_empty() => Some(Broker::new(&base, &shard)),
             _ => None,
         };
+        // No broker, no sign-in, and so no reason to go near the keychain.
+        let (vault, grant) = match broker {
+            Some(_) => Vault::best(config_dir),
+            None => (Vault::memory(), None),
+        };
         let (to_main, from_tasks) = channel();
         Self {
             broker,
-            vault: Vault::best(config_dir),
+            vault,
             session: Session::default(),
-            grant: None,
+            grant,
             form: None,
             from_tasks: Mutex::new(from_tasks),
             to_main,
@@ -165,8 +170,8 @@ fn config_dir() -> PathBuf {
 /// before they reach the menu, and never sees this module at all.
 fn resume(mut signin: ResMut<Signin>) {
     let Some(broker) = signin.broker.clone() else { return };
-    let Ok(Some(grant)) = signin.vault.read() else { return };
-    signin.grant = Some(grant.clone());
+    // Read when the vault was chosen; see `Vault::best`.
+    let Some(grant) = signin.grant.clone() else { return };
     signin.session = Session::Working;
     let to_main = signin.to_main.clone();
     let attempt = signin.attempt;
@@ -305,7 +310,10 @@ fn take_reports(signin: &mut Signin) {
         }
         match report {
             Report::Granted { grant, identity } => {
-                if let Err(why) = signin.vault.write(&grant) {
+                // A resumed grant is already kept, and rewriting it is one more keychain prompt.
+                if signin.grant.as_ref() != Some(&grant)
+                    && let Err(why) = signin.vault.write(&grant)
+                {
                     warn!("could not keep the sign-in: {why}");
                 }
                 signin.grant = Some(grant);

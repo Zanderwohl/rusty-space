@@ -35,21 +35,23 @@ pub enum Vault {
 }
 
 impl Vault {
-    /// The keychain if there is one, a file if there is not.
+    /// The keychain if there is one, a file if there is not — and what it holds.
     ///
     /// Decided by *trying* it rather than by inspecting the platform: a desktop Linux with a
     /// running secret service and a container without one are the same target triple, and only
-    /// one of them has anywhere to put this.
-    pub fn best(config_dir: PathBuf) -> Self {
-        match keyring::Entry::new(SERVICE, ACCOUNT).and_then(|entry| match entry.get_password() {
+    /// one of them has anywhere to put this. The try is a read, and its answer is returned so
+    /// it is the only one: macOS may ask the player's leave for every keychain access, and an
+    /// unsigned development build is a new binary every time it is built.
+    pub fn best(config_dir: PathBuf) -> (Self, Option<String>) {
+        match keyring::Entry::new(SERVICE, ACCOUNT).and_then(|entry| entry.get_password()) {
+            Ok(secret) => (Vault::Keychain, Some(secret)),
             // Not finding one is the ordinary first-run case, and proves the keychain works.
-            Err(keyring::Error::NoEntry) => Ok(()),
-            other => other.map(|_| ()),
-        }) {
-            Ok(()) => Vault::Keychain,
+            Err(keyring::Error::NoEntry) => (Vault::Keychain, None),
             Err(why) => {
                 bevy::log::warn!("no keychain ({why}); keeping the sign-in in a file instead");
-                Vault::file(config_dir)
+                let vault = Vault::file(config_dir);
+                let kept = vault.read().ok().flatten();
+                (vault, kept)
             }
         }
     }
