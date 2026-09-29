@@ -14,7 +14,7 @@ lc-world = { path = "../lc-world", default-features = false }
 # The band a stored photometric sample was taken in.
 em-foundations = { path = "../em-foundations" }
 em-spectra = { path = "../em-spectra" }
-lc-store = { path = "../lc-store" }
+lc-store = { path = "../lc-store", default-features = false }
 glam = "0.32"
 # Verifying game tickets. The server depends on a JWT library and a public key, never on the
 # identity broker: see lightcone/docs/16-identity.md.
@@ -24,19 +24,26 @@ thiserror = "2"
 # Exact: a report or a knowledge page that moved a bearing by one place in the last digit
 # would be a different measurement, and deduplication is by the bits.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-tokio-postgres = "0.7"
+tokio-postgres = { version = "0.7", optional = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
 tokio-tungstenite = "0.24"
-# The administration console reads  over this. A format rather than a shared crate:
+# The administration console reads the status over this. A format rather than a shared crate:
 # the console is in another workspace and may not link a game crate. See src/status.rs.
-ron = "0.10"
+ron = { version = "0.10", optional = true }
 # One read-only route for the administration console, on its own port. See src/admin.rs.
-axum = "0.8"
+axum = { version = "0.8", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "alloc"] }
 # One GET at boot, for the broker's published keys. Blocking, before the runtime matters, and
 # not worth an async HTTP stack.
 ureq = { version = "2", features = ["json", "tls"] }
-ciborium = "0.2"
+# Every stored record. See src/cbor.rs.
+ciborium = { version = "0.2", optional = true }
+
+[features]
+default = ["storage"]
+# Checkpoints, knowledge, presets, the Postgres journal and the admin routes that read them. Off
+# for the client's single-player shard, which never saves.
+storage = ["dep:ciborium", "dep:tokio-postgres", "dep:axum", "dep:ron", "lc-store/postgres"]
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
@@ -46,3 +53,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 [[bin]]
 name = "lightcone-server"
 path = "src/bin/lightcone-server.rs"
+required-features = ["storage"]
+
+[[test]]
+name = "checkpoint"
+required-features = ["storage"]
+
+[[test]]
+name = "shard_writes"
+required-features = ["storage"]

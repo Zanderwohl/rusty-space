@@ -79,7 +79,8 @@ base64 = "0.22"
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # The server in the box, for `--local`. The desktop build contains a server because its
 # single-player mode is a server with one player; the browser build has none. See `src/local.rs`.
-lc-server = { path = "../lc-server" }
+# Without `storage`: that shard never saves, so no Postgres, no checkpoints and no admin routes.
+lc-server = { path = "../lc-server", default-features = false }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 # The browser build. `getrandom` needs its wasm backend named here as well as in

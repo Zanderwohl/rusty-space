@@ -163,6 +163,7 @@ mod tests {
 
     /// The afterglow comes back with its wreck, and the wreck is kept until the afterglow's light,
     /// not its end's, has passed.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn an_afterglow_outlives_a_restart() {
         let Some((mut server, mut wire)) = scene() else { return };

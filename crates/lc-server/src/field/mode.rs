@@ -375,6 +375,7 @@ mod tests {
 
     /// The mode, the shade and a switch under way come back from a checkpoint, and the flip fires
     /// when it would have.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn mode_shade_and_switch_survive_a_restart() {
         let Some((mut server, mut wire)) = apart() else { return };

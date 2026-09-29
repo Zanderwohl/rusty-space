@@ -50,6 +50,17 @@ jobs:
             exit 1
           fi
 
+      # The client's single-player shard never saves, so it links no storage. `cargo test
+      # --workspace` unifies features and builds the server with it, so this is the only check
+      # that lc-server still builds without.
+      - name: The desktop client carries no storage
+        run: |
+          cargo check -p lc-server --no-default-features --all-targets
+          if cargo tree -p lc-client -e normal | grep -E 'ciborium|tokio-postgres'; then
+            echo "lc-client links the shard's storage" >&2
+            exit 1
+          fi
+
   # The browser build.
   #
   # A PR gets the cheap half: does it compile for wasm, and is every shader its materials
@@ -93,6 +104,15 @@ jobs:
           if cargo tree -p lc-client --no-default-features \
                --target wasm32-unknown-unknown | grep -qE '^[[:space:]]*csv '; then
             echo "the browser build links a CSV reader" >&2
+            exit 1
+          fi
+
+      # Single-player is the desktop's alone: the browser build has no server in it at all.
+      - name: No server in the browser build
+        run: |
+          if cargo tree -p lc-client --no-default-features \
+               --target wasm32-unknown-unknown | grep -qE '^[[:space:]]*lc-server '; then
+            echo "the browser build links lc-server" >&2
             exit 1
           fi
 

@@ -6,6 +6,10 @@
 //! the type the event channel carries is the gate.
 //!
 //! Nothing here is optimized. The filter's correctness is what is being built.
+//!
+//! What outlives the process — checkpoints, knowledge, presets, the Postgres journal and the
+//! admin routes over them — is behind the `storage` feature, on by default and off for the
+//! client's single-player shard, which never saves.
 
 #![forbid(unsafe_code)]
 // Nothing in the game loop panics: startup may, and past it a wire message, a row or another
@@ -13,8 +17,11 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic))]
 
 pub mod ability;
+#[cfg(feature = "storage")]
 pub mod archive;
+#[cfg(feature = "storage")]
 pub mod admin;
+#[cfg(feature = "storage")]
 pub(crate) mod cbor;
 pub mod chase;
 pub mod command;
@@ -28,13 +35,16 @@ pub(crate) mod instruments;
 pub mod journal;
 pub mod library;
 pub mod park;
+#[cfg(feature = "storage")]
 pub mod persist;
 pub mod planets;
 pub mod presets;
 pub mod radio;
 pub mod rate;
 pub mod server;
+#[cfg(feature = "storage")]
 pub mod status;
+#[cfg(feature = "storage")]
 pub mod systems;
 #[cfg(test)]
 pub mod testing;

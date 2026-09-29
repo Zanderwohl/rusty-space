@@ -191,6 +191,7 @@ impl Emissions {
         Some(Glare { spectrum: brightest.spectrum, flux_w_m2: beams.map(|b| b.flux_w_m2).sum() })
     }
 
+    #[cfg(feature = "storage")]
     pub(crate) fn light_of(&self, id: CraftId) -> Light {
         Light {
             emitting: self.emitting.get(&id).cloned().unwrap_or_default(),
@@ -199,6 +200,7 @@ impl Emissions {
         }
     }
 
+    #[cfg(feature = "storage")]
     pub(crate) fn restore(&mut self, id: CraftId, light: Light) {
         if !light.emitting.is_empty() {
             self.emitting.insert(id, light.emitting);

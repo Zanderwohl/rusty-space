@@ -74,6 +74,7 @@ impl Presets {
     }
 
     /// Adopt what was saved, returning a line for each row that would not read.
+    #[cfg(feature = "storage")]
     pub fn adopt(&mut self, rows: Vec<lc_store::presets::Preset>) -> Vec<String> {
         let mut problems = Vec::new();
         for row in rows {
@@ -117,6 +118,7 @@ impl<J: Journal> Server<J> {
 }
 
 /// Split changes into the rows to write and the `(account, name)` pairs to delete.
+#[cfg(feature = "storage")]
 pub fn rows(changes: &[Change]) -> (Vec<lc_store::presets::Preset>, Vec<(String, String)>) {
     let mut saved = Vec::new();
     let mut deleted = Vec::new();
@@ -283,6 +285,7 @@ mod tests {
         assert_eq!(presets(&said).unwrap().len(), MAX_PRESETS, "replacing one when full is not a 65th");
     }
 
+    #[cfg(feature = "storage")]
     #[test]
     fn a_checkpoint_writes_the_last_change_to_each_name_and_reads_back() {
         let mut shard = Presets::default();

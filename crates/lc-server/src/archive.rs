@@ -101,15 +101,6 @@ pub fn read_log(row: &LogRow) -> Result<Logged, String> {
 }
 
 impl<J: Journal> Server<J> {
-    /// For the console, and for tests that compare a shard before and after a restart.
-    pub fn knowledge_of(&self, ship: lc_proto::ShipId) -> Option<&Knowledge> {
-        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.knowledge)
-    }
-
-    pub fn duty_of(&self, ship: lc_proto::ShipId) -> Option<&lc_world::knowledge::survey::Duty> {
-        self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.observatory.duty)
-    }
-
     /// Everything every craft has learned since this was last called.
     pub fn take_knowledge(&mut self) -> Remembered {
         let saved_t = self.now_t;

@@ -450,6 +450,7 @@ async fn radio_is_charged_from_storage() {
 }
 
 /// The shard as it comes back from `server`'s checkpoint and journal.
+#[cfg(feature = "storage")]
 async fn restart(server: &Server<Memory>, rate: f64, resume: bool) -> Server<Memory> {
     let journal = Memory { events: server.journal().events.clone(), deliveries: server.journal().deliveries.clone(), ..Default::default() };
     let mut restarted = Server::new(journal, 0, 2);
@@ -464,6 +465,7 @@ async fn restart(server: &Server<Memory>, rate: f64, resume: bool) -> Server<Mem
 /// Restarted with a collapse's spike and a beam both in flight, the shard lands each at its
 /// arrival: the spike kills a neighbor inside its lethal radius, and the beam feeds its target. A
 /// shard that did not rebuild landings from the journal loses the spike.
+#[cfg(feature = "storage")]
 #[tokio::test]
 async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
     // Ticks of 44 µs, so both lights are still on their way when the first tick ends.
@@ -522,6 +524,7 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
 
 /// A beam that has landed stays on across a restart, and goes out when the light of its end
 /// arrives: what a craft has lit and what lands on it come back with the checkpoint.
+#[cfg(feature = "storage")]
 #[tokio::test]
 async fn a_beam_landing_across_a_restart_stays_on_until_its_end_arrives() {
     let at = DVec3::X * LIGHT_SECOND_US;
@@ -577,6 +580,7 @@ async fn cutting_the_drive_puts_a_beam_out_early() {
 
 /// Through the store a shard really comes back from: its position rounded to the grid, and no
 /// power stored, a beam in flight still lands where and when it would have.
+#[cfg(feature = "storage")]
 #[tokio::test]
 async fn a_beam_in_flight_comes_back_through_the_store() {
     use crate::journal::Postgres;

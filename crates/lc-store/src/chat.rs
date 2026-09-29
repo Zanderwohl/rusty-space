@@ -9,6 +9,7 @@
 //! is a boolean it never acts on, and redacting one for a receiver who may not read it is the
 //! server's business — by the time a row reaches here it is a record, not a decision.
 
+#[cfg(feature = "postgres")]
 use tokio_postgres::{Client, Error};
 
 /// What a transmission holds. Never redacted in the store.
@@ -21,6 +22,7 @@ pub enum Content {
     Key,
 }
 
+#[cfg(feature = "postgres")]
 impl Content {
     fn column(&self) -> (&'static str, Option<&str>) {
         match self {
@@ -87,6 +89,7 @@ pub const BACKLOG_LIMIT: i64 = 500;
 /// and `unnest` flattens a two-dimensional one into a single column.
 ///
 /// Cheap regardless: these arrive at the rate a person types, not at the rate the world ticks.
+#[cfg(feature = "postgres")]
 pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64, Error> {
     let mut written = 0;
     for m in messages {
@@ -115,6 +118,7 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
 }
 
 /// Write receipts. One statement whatever the count: a loud message lands on everyone in range.
+#[cfg(feature = "postgres")]
 pub async fn save_receipts(client: &Client, receipts: &[Receipt]) -> Result<u64, Error> {
     if receipts.is_empty() {
         return Ok(0);
@@ -135,6 +139,7 @@ pub async fn save_receipts(client: &Client, receipts: &[Receipt]) -> Result<u64,
 
 /// Write keyring rows. The first offer to arrive is the one that counts: a second copy of a key
 /// somebody already holds teaches them nothing, and would move the date they learned it.
+#[cfg(feature = "postgres")]
 pub async fn save_keys(client: &Client, keys: &[Held]) -> Result<u64, Error> {
     if keys.is_empty() {
         return Ok(0);
@@ -152,6 +157,7 @@ pub async fn save_keys(client: &Client, keys: &[Held]) -> Result<u64, Error> {
         .await
 }
 
+#[cfg(feature = "postgres")]
 fn message_from(row: &tokio_postgres::Row) -> Message {
     Message {
         event_id: row.get(0),
@@ -165,9 +171,11 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
     }
 }
 
+#[cfg(feature = "postgres")]
 const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem";
 
 /// Everything this ship transmitted, oldest first.
+#[cfg(feature = "postgres")]
 pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> {
     // Newest by the index, then turned round: the tail of a long conversation is what a
     // sign-in wants, and ordering ascending would make the limit take the wrong end.
@@ -186,6 +194,7 @@ pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> 
 }
 
 /// Everything that reached this ship, oldest arrival first, with when it landed and how loudly.
+#[cfg(feature = "postgres")]
 pub async fn heard_by(
     client: &Client,
     ship: i64,
@@ -208,6 +217,7 @@ pub async fn heard_by(
 }
 
 /// Whose keys this ship holds.
+#[cfg(feature = "postgres")]
 pub async fn keys_of(client: &Client, ship: i64) -> Result<Vec<i64>, Error> {
     let rows = client
         .query("SELECT subject FROM lc_keyring WHERE holder = $1 ORDER BY learned_t", &[&ship])
@@ -220,6 +230,7 @@ pub async fn keys_of(client: &Client, ship: i64) -> Result<Vec<i64>, Error> {
 /// Whole rather than per ship, because a shard coming back needs all of them at once and there
 /// is one row per pair of craft that have ever exchanged a key — a far smaller number than the
 /// messages that carried them.
+#[cfg(feature = "postgres")]
 pub async fn all_keys(client: &Client) -> Result<Vec<Held>, Error> {
     let rows = client
         .query("SELECT holder, subject, learned_t FROM lc_keyring", &[])
@@ -235,6 +246,7 @@ pub async fn all_keys(client: &Client) -> Result<Vec<Held>, Error> {
 /// What a reply acknowledges, rebuilt after a restart. Without it the first message anybody
 /// sends when a shard comes back acknowledges nothing, and the other end reads that as its own
 /// messages having been lost — which is the one thing an acknowledgment exists to rule out.
+#[cfg(feature = "postgres")]
 pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, i64)>, Error> {
     let rows = client
         .query(
@@ -253,7 +265,7 @@ pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, 
     Ok(rows.iter().map(|row| (row.get(0), row.get(1), row.get(2))).collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "postgres"))]
 mod tests {
     use super::*;
 

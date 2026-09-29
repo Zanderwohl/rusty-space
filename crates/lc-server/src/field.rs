@@ -256,7 +256,7 @@ impl<J: Journal> Server<J> {
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
-    use lc_proto::{ClientId, Inbound, Intent, Order, Refusal, Sighting};
+    use lc_proto::{ClientId, Inbound, Intent, Order, Sighting};
     use lc_world::fitting::{Account, Balance, Fitting, RATED_LOAD_AU};
     use lc_world::form::{Form, PartId};
     use lc_world::motion::LIGHT_US_PER_LY;
@@ -319,6 +319,7 @@ mod tests {
     }
 
     /// The ship as it was on the last tick before its collapse, and what its owner was told.
+    #[cfg_attr(not(feature = "storage"), allow(dead_code))]
     pub(super) struct Collapsed {
         before: Craft,
         pub(super) at_t: i64,
@@ -472,6 +473,7 @@ mod tests {
 
     /// Its owner flies a new starting ship at the spawn point, knowing nothing, and the wreck is
     /// no longer theirs to order about or saved.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn the_owner_is_given_a_new_starting_ship() {
         let Some((mut server, mut wire)) = scene() else { return };
@@ -494,7 +496,7 @@ mod tests {
         wire.client_says(OWNER, act(successor, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(OWNER);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: Refusal::NotYours } if *ship_id == DYING)), "{said:?}");
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: lc_proto::Refusal::NotYours } if *ship_id == DYING)), "{said:?}");
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { ship_id, .. } if *ship_id == successor)), "{said:?}");
 
         let saved: Vec<i64> = server.checkpoint().ships.iter().map(|s| s.ship_id).collect();
@@ -564,6 +566,7 @@ mod tests {
     }
 
     /// Nothing but the account comes back from a checkpoint, and it collapses on time from it.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_collapse_survives_a_restart() {
         let Some((mut server, mut wire)) = scene() else { return };
@@ -758,6 +761,7 @@ mod tests {
     }
 
     /// The shard as it comes back from a checkpoint of `server`, on the same world and rate.
+    #[cfg(feature = "storage")]
     pub(super) fn restart(server: &Server<Memory>) -> Server<Memory> {
         let checkpoint = server.checkpoint();
         let mut restarted = Server::new(Memory::default(), 0, 2);
@@ -769,6 +773,7 @@ mod tests {
 
     /// Nothing about a restored wreck is anyone's, nothing is resumed for it, and it has no field
     /// to collapse again.
+    #[cfg(feature = "storage")]
     fn assert_inert(server: &Server<Memory>, id: CraftId) {
         let wreck = server.fleet.get(id).expect("the wreck came back");
         assert!(wreck.ended_s().is_some() && wreck.fitting().is_none());
@@ -781,6 +786,7 @@ mod tests {
     /// Restarted after the collapse and before its light reaches a ship three light-days off, the
     /// shard goes on showing that ship the wreck until the light arrives, and deletes its row once
     /// the afterglow's has passed too.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_wreck_outlives_a_restart_until_its_light_arrives() {
         let Some((mut server, mut wire)) = scene() else { return };
@@ -842,6 +848,7 @@ mod tests {
 
     /// Signed out through the collapse and a restart, the owner signs in to the successor; the
     /// wreck's row claims no account, and ordering it is refused.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn after_a_restart_the_owner_still_flies_the_successor() {
         use crate::testing::Broker;
@@ -902,11 +909,12 @@ mod tests {
         wire.client_says(again, act(first, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         restarted.tick(&mut wire).await.unwrap();
         let said = wire.take(again);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: Refusal::NotYours } if *ship_id == first)), "{said:?}");
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: lc_proto::Refusal::NotYours } if *ship_id == first)), "{said:?}");
     }
 
     /// Four ships collapse hours apart; every wreck comes back from one restart, and each is swept
     /// on the tick the last of its afterglow passes the watcher.
+    #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_cascade_of_wrecks_restores_and_sweeps_one_by_one() {
         let Some((mut server, mut wire)) = scene() else { return };
