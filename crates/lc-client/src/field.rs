@@ -171,16 +171,16 @@ pub fn own_state(session: &Session) -> FieldState {
     }
 }
 
-/// Another craft's field as its light left it at `emitted_s`: a switch is swept that far and no
-/// further, as a refit step is, and the next statement carries it on.
+/// Another craft's field as its light left it at `emitted_s`, which the contact reckons on past
+/// its last statement: a switch it has run past is in its new shade, not the stated one, until
+/// the statement that says so arrives.
 pub fn seen_state(glow: Glow, balance: &Balance, emitted_s: f64) -> FieldState {
-    let switch = glow.switch.map(|s| swept(s.to.into(), s.done_s, emitted_s, balance)).filter(|(_, p)| *p < 1.0);
-    FieldState {
-        kelvin: glow.temperature_k,
-        fill: fill_at(glow.temperature_k, balance),
-        shade: switch.map_or(glow.shade.into(), |(to, _)| to.other()),
-        switch,
-    }
+    let (shade, switch) = match glow.switch.map(|s| swept(s.to.into(), s.done_s, emitted_s, balance)) {
+        Some((to, p)) if p >= 1.0 => (to, None),
+        Some((to, p)) => (to.other(), Some((to, p))),
+        None => (glow.shade.into(), None),
+    };
+    FieldState { kelvin: glow.temperature_k, fill: fill_at(glow.temperature_k, balance), shade, switch }
 }
 
 /// A switch into `to` done at `done_s`, and how far through it is at `now_s`.
@@ -997,7 +997,7 @@ mod tests {
     }
 
     /// Another craft's switch is swept as far as it had run when its light left, turned back
-    /// included, and a done one is its new shade.
+    /// included, and one reckoned past its end is in its new shade before any statement says so.
     #[test]
     fn a_seen_switch_is_swept_to_its_light() {
         let glow = |shade, to, done_s| Glow {
@@ -1017,6 +1017,9 @@ mod tests {
 
         let still = seen_state(Glow { switch: None, ..glow(lc_proto::Shade::Black, lc_proto::Shade::Black, 0.0) }, &B, 1000.0);
         assert_eq!((still.shade, still.switch), (Mode::Black, None));
+
+        let past = seen_state(glow(lc_proto::Shade::Clear, lc_proto::Shade::Black, 1000.0), &B, 1000.5);
+        assert_eq!((past.shade, past.switch), (Mode::Black, None), "reckoned past done, it stays where it was going");
     }
 
     /// A beam restated stays one hot spot at its newest power, an older statement changes nothing,
