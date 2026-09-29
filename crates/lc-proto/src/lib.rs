@@ -902,8 +902,6 @@ pub enum Refusal {
     /// The shard does not do this yet. X1 of `lightcone/docs/plans/forms-and-fields.md` deletes
     /// it, once every order that answers with it is built.
     NotBuilt,
-    /// A field switch is done and its flip not yet taken.
-    Switching,
     /// Both apertures asked of a ship with engines at one end only.
     NoAperture,
     /// More power than the chosen apertures are rated for.
@@ -1727,7 +1725,6 @@ mod tests {
                 }),
             },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NotBuilt },
-            Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Switching },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoAperture },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::OverRating },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Form(FormFault::TooManyParts { found: 257 }) },

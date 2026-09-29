@@ -225,8 +225,8 @@ only the heat the beam leaves behind.
 - **A mode order against a switch under way turns it back**: its `to` becomes the shade it never left,
   and its `done_s` is as far ahead as the switch had run. Its flip is taken like any other and states
   no event, since nothing about the field's light changed. An order at the instant a switch began
-  cancels it. `Switching` is left for a switch done and not yet taken, which the order path takes
-  first.
+  cancels it. A switch done and not yet taken is taken first, so no mode order is refused for a
+  switch.
 - **Auto ordered outside its thresholds switches at once**, judged against the shade the field is
   heading for: `Fitting::set_setting` checks both conditions where the account is settled rather than
   waiting for the shard's next solve.
@@ -564,7 +564,7 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`, `Refusal::Switching`. `kind::SHADE`, a completed switch, carrying `ShadeChange` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature, shade and envelope |
+| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`. `kind::SHADE`, a completed switch, carrying `ShadeChange` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature, shade and envelope |
 | `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [32-ship-rendering.md](32-ship-rendering.md) |
 
@@ -663,7 +663,8 @@ puts a countdown in the text.
 - **Burst versus rate.** A beam under the conversion rating with storage empty adds only its
   conversion loss. The same energy as a burst adds all of it.
 - **Modes.** A Clear field takes `clear_absorptivity` of a beam and a Black one all of it. A switch
-  changes nothing until `field_switch_s` has passed, and a second switch meanwhile is refused.
+  changes nothing until `field_switch_s` has passed; an order meanwhile turns it back, home in as long
+  as it had run.
 - **Auto.** A ship in Auto at 0.1 AU switches at the predicted instants, stepped finely and in one
   leap, and a ship with no client connected does the same. Set both thresholds equal on purpose and
   check the hysteresis test fails.

@@ -112,9 +112,10 @@ impl<J: Journal> Server<J> {
         let at = if since_s > at as f64 * 1.0e-6 { ((since_s * 1.0e6).ceil() as i64).min(self.now_t()) } else { at };
         let at_s = at as f64 * 1.0e-6;
         // Only when a switch is shorter than a tick: every other is taken before orders are read.
+        // Either way none done by `at_s` is left, which is all `set_field` refuses.
         self.flip(id, at_s, at - 1, events, deliveries);
         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
-        craft.set_field(setting, at_s).map_err(|_| Refusal::Switching)?;
+        craft.set_field(setting, at_s).map_err(|_| Refusal::Impossible)?;
         Ok(at)
     }
 
@@ -314,6 +315,7 @@ mod tests {
         assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })), "{said:?}");
         let posture = *server.ship(SHIP).unwrap().fitting().unwrap().posture();
         assert_eq!((posture.setting, posture.shade, posture.switch), (Setting::Clear, lc_world::field::Mode::Clear, None), "home, and flipped");
+        assert!(flips(&server).is_empty(), "a switch run home states nothing");
     }
 
     /// Clear at a tenth of an AU with half its store: Auto goes Black at once, fills, and turns

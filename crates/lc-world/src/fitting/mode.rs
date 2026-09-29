@@ -161,7 +161,7 @@ impl Fitting {
     }
 
     /// Whether Auto, heading for `heading`, would turn at the settlement: [`clear_due`] and
-    /// [`black_due`] at their first instant.
+    /// [`black_due`] at their first instant, whose edges these must keep.
     fn auto_due_now(&self, heading: Mode, thresholds: &Thresholds) -> bool {
         let max_j = self.field().heat_max_j();
         let capacity_j = self.capacities_at(self.since_s).storage_j;
@@ -226,7 +226,7 @@ fn stretches(field: &Field, part: &Part) -> impl Iterator<Item = (f64, f64, Stre
     })
 }
 
-/// Heat rises to `above_j`, or storage fills.
+/// Heat rises to `above_j`, or storage fills. At its first instant, `Fitting::auto_due_now`.
 fn clear_due(field: &Field, part: &Part, above_j: f64, capacity_j: f64) -> Option<f64> {
     for (at_s, room_j, s) in stretches(field, part) {
         if room_j <= FULL * capacity_j {
@@ -242,7 +242,8 @@ fn clear_due(field: &Field, part: &Part, above_j: f64, capacity_j: f64) -> Optio
 }
 
 /// Heat at or under `below_j` while storage is under `refill_j`. Over a stretch both move
-/// monotonically, so each condition holds over one interval touching an end.
+/// monotonically, so each condition holds over one interval touching an end. At its first instant,
+/// `Fitting::auto_due_now`.
 fn black_due(field: &Field, part: &Part, below_j: f64, refill_j: f64, capacity_j: f64) -> Option<f64> {
     for (at_s, room_j, s) in stretches(field, part) {
         let heat = if s.heat_j <= below_j {
