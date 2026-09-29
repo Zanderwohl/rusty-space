@@ -286,10 +286,11 @@ pub fn collapse(far: &crate::field::Far, distance_m: f64, balance: &Balance, wra
     Point { at_ly: far.at_ly, terms: [Term::Dark; TERMS], event: Some((event, far.since_s)) }
 }
 
-/// A burn or an emission from its sightings.
+/// A burn or an emission from its sightings: what leaves each end's faces, the drive's aft, or an
+/// observer's glare from inside a beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Lit {
-    Drive(f64),
+    Faces(Ends),
     Glare(Glare),
 }
 
@@ -359,7 +360,8 @@ impl Flares {
             let arrive_s = sighting.arrive_t as f64 * 1e-6;
             let (beam, lit) = if sighting.kind == lc_proto::kind::DRIVE {
                 let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else { continue };
-                (None, (change.power_w > 0.0).then_some(Lit::Drive(change.power_w)))
+                let ends = Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w }.with_drive(change.power_w);
+                (None, (!ends.is_dark()).then_some(Lit::Faces(ends)))
             } else {
                 let Ok(Carrying { emission }) = serde_json::from_str::<Carrying>(&sighting.payload) else { continue };
                 if emission.burst_j > 0.0 {
@@ -394,16 +396,17 @@ impl Flares {
         });
     }
 
-    /// What `source`'s drive is sending by its sightings now, if it is lit by them.
-    pub fn drive_w(&mut self, source: ShipId, now_s: f64, real_s: f32) -> Option<f64> {
+    /// What `source`'s drive and emits are sending out of each end by its sightings now, if they
+    /// are lit by them.
+    pub fn faces(&mut self, source: ShipId, now_s: f64, real_s: f32) -> Option<Ends> {
         self.flares
             .iter_mut()
             .filter(|f| f.source == source)
             .filter_map(|f| match f.lit {
-                Lit::Drive(w) => f.lit(now_s, real_s).then_some(w),
+                Lit::Faces(ends) => f.lit(now_s, real_s).then_some(ends),
                 Lit::Glare(_) => None,
             })
-            .reduce(f64::max)
+            .reduce(|a, b| Ends { fore_w: a.fore_w.max(b.fore_w), aft_w: a.aft_w.max(b.aft_w) })
     }
 
     /// `source` as its light reaches this ship from inside its beams: what its presence stated, or
@@ -415,7 +418,7 @@ impl Flares {
             .filter(|f| f.source == source)
             .filter_map(|f| match f.lit {
                 Lit::Glare(g) => f.lit(now_s, real_s).then_some(g),
-                Lit::Drive(_) => None,
+                Lit::Faces(_) => None,
             })
             .collect();
         let brightest = lit.iter().max_by(|a, b| a.flux_w_m2.total_cmp(&b.flux_w_m2));
@@ -519,9 +522,13 @@ pub fn draw_points(
             envelope_sr: 0.25 * glow.envelope_m2 / (distance_m * distance_m),
         };
         let glare = flares.glare(contact.ship_id, contact.glare, now_s, real_s);
-        let drive_w = flares.drive_w(contact.ship_id, now_s, real_s).unwrap_or(0.0).max(contact.drive_w);
+        let stated = contact.emit.with_drive(contact.drive_w);
+        let ends = flares.faces(contact.ship_id, now_s, real_s).map_or(stated, |seen| Ends {
+            fore_w: seen.fore_w.max(stated.fore_w),
+            aft_w: seen.aft_w.max(stated.aft_w),
+        });
         let rotation = roots.iter().find(|(h, ..)| h.craft() == Some(contact.ship_id)).map(|(_, t, _)| t.rotation);
-        let lit = lit_faces(contact.emit.with_drive(drive_w), faces.apertures(Some(contact.ship_id)), rotation);
+        let lit = lit_faces(ends, faces.apertures(Some(contact.ship_id)), rotation);
         let emission = emission(glare.as_ref(), &lit, sim_to_render(toward), distance_m);
         points.push(craft(contact.position_ly, &seen, emission, doppler_of_source(contact.beta, toward)));
     }
@@ -791,7 +798,7 @@ mod tests {
     }
 
     fn drive(power_w: f64) -> String {
-        serde_json::to_string(&lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] }).unwrap()
+        serde_json::to_string(&lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: 0.0, emit_spread_rad: 0.0 }).unwrap()
     }
 
     /// **A burn seen only in its DRIVE sightings still shows**, though it lit and went out between
@@ -807,19 +814,19 @@ mod tests {
         flares.take(&seen, DVec3::ZERO, 20.0);
         flares.take(&seen, DVec3::ZERO, 20.0);
         let source = ShipId(4);
-        assert_eq!(flares.drive_w(source, 20.0, 100.0), Some(4.0e19), "the burn between the presences");
-        assert_eq!(flares.drive_w(source, 20.0, 100.0 + 0.9 * FLARE_S), Some(4.0e19));
-        let faces = plate(DVec3::X, Ends::default().with_drive(flares.drive_w(source, 20.0, 100.1).unwrap()));
+        assert_eq!(flares.faces(source, 20.0, 100.0).map(|e| e.aft_w), Some(4.0e19), "the burn between the presences");
+        assert_eq!(flares.faces(source, 20.0, 100.0 + 0.9 * FLARE_S).map(|e| e.aft_w), Some(4.0e19));
+        let faces = plate(DVec3::X, Ends::default().with_drive(flares.faces(source, 20.0, 100.1).unwrap().aft_w));
         assert!(emission(None, &faces, sim_to_render(-DVec3::X), LY_M) != Term::Dark, "drawn");
-        assert_eq!(flares.drive_w(source, 20.0, 100.0 + 1.1 * FLARE_S), None, "held past its flare");
+        assert_eq!(flares.faces(source, 20.0, 100.0 + 1.1 * FLARE_S).map(|e| e.aft_w), None, "held past its flare");
         flares.sweep(20.0, 100.0 + 1.1 * FLARE_S, |_| true);
         assert!(flares.flares.is_empty());
 
         // Still burning: shown for as long as it is lit.
         let mut flares = Flares::default();
         flares.take(&[sighting(3, lc_proto::kind::DRIVE, 3_000_000, 10_000_000, drive(1.0e19))], DVec3::ZERO, 20.0);
-        assert_eq!(flares.drive_w(source, 20.0, 0.0), Some(1.0e19));
-        assert_eq!(flares.drive_w(source, 20.0, 1.0e3), Some(1.0e19));
+        assert_eq!(flares.faces(source, 20.0, 0.0).map(|e| e.aft_w), Some(1.0e19));
+        assert_eq!(flares.faces(source, 20.0, 1.0e3).map(|e| e.aft_w), Some(1.0e19));
     }
 
     /// An emission seen only in its EMIT sightings is a glare at the flux its cone carries over the
@@ -871,6 +878,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),

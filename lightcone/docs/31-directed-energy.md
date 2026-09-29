@@ -285,14 +285,20 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
 - **`Presence` states the main drive's `F c`** (R17), `lc_world::emit::drive_w`: the `Jet::Drive`
   of the same `exhaust` the emission is lit from, at the instant the light left, and `Drive::exhaust_w`
   is the one formula both reach. Not the thrusters, whose wider spread no cone draws, and not an
-  emit flown as a burn, which is its own emission and reaches an observer as `Glare`. The drive's
-  waste is not in it, as it is not in the emission.
+  emit, which is stated beside it. The drive's waste is not in it, as it is not in the emission.
 - **`Presence` states each end's emit beside it** (R13): `emit_fore_w` and `emit_aft_w`,
   `lc_world::emit::emit_w` at the instant the light left: an emit flown as a burn from the end it
   was ordered from, at the rocket law's throttle, and a balanced one's `power_w` from each. It is
   what an observer's view of the faces is lit by, so every face an emission leaves through glows
   whatever lit it. A balanced emit is kept by its craft once it is out, as its field is, since the
-  fitting forgets it and an observer far off has not yet seen it go out.
+  fitting forgets it and an observer far off has not yet seen it go out. `emit_spread_rad` is the
+  half-angle it was lit at, kept on the `Boost` and the balanced `Lit`, so an observer draws its
+  cone as it draws a drive's.
+- **A burn is an emit and an emit a burn, and each is stated alike.** Where either lights, goes
+  out or steps in power, a `DRIVE` event says so to everyone who can see the craft, with the
+  drive's `F c` and each end's emit and its spread, so a burn shorter than a tick is seen by
+  everyone and not only by whoever a statement happens to sample it for. A balanced emit's
+  lighting and going out are among those instants.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore
   engines and against it from the aft ones, and draws twice it. Each end's rating is its engines'
   together, and the diffraction floor is `λ / 2D` for its widest face; a balanced emit's two beams

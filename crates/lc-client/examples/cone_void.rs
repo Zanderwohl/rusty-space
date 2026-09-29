@@ -199,7 +199,7 @@ fn stage(
     commands.spawn((
         Mesh3d(meshes.add(ExhaustConeMaterial::proxy(burn.half_angle_rad as f32))),
         MeshMaterial3d(cones.add(ExhaustConeMaterial {
-            uniforms: cone_uniform(burn.power_w, &Balance::DEFAULT, burn.courtesy_m),
+            uniforms: cone_uniform(burn.power_w, Balance::DEFAULT.drive_spread_rad, &Balance::DEFAULT, burn.courtesy_m),
         })),
         Transform::default(),
         NoFrustumCulling,

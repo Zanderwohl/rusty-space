@@ -46,6 +46,9 @@ pub struct Lit {
     pub from_s: f64,
     pub until_s: f64,
     pub power_w: f64,
+    /// Of the cone each end sends it in.
+    #[serde(default)]
+    pub half_angle_rad: f64,
 }
 
 /// Another craft's field, as its light shows it.

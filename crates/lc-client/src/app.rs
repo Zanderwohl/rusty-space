@@ -785,7 +785,7 @@ mod tests {
         world.spawn(crate::envelope::EnvelopeMesh(0));
         world.spawn(crate::envelope::RingMesh { body: 0, radius: 1.0 });
         world.spawn(crate::hull::Hull(None));
-        world.spawn(crate::plume::Cone(None));
+        world.spawn(crate::plume::Cone(None, crate::plume::Jet::Drive));
         let mesh = world.spawn(Name::new("a hull's mesh")).id();
         let hull = world.spawn(crate::ship_hull::ShipHull::bare(Some(lc_proto::ShipId(1)), mesh)).id();
         world.entity_mut(mesh).insert(ChildOf(hull));

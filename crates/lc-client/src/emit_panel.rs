@@ -308,7 +308,7 @@ fn source_j(ship: &Craft, now_s: f64, drawn_w: f64, duration_s: f64) -> f64 {
     let mut dark = fitting.clone();
     dark.settle(&ship.motion, now_s);
     let mut lit = dark.clone();
-    lit.light(Lit { from_s: now_s, until_s: now_s + duration_s, power_w: drawn_w });
+    lit.light(Lit { from_s: now_s, until_s: now_s + duration_s, power_w: drawn_w, half_angle_rad: 0.0 });
     let end_s = now_s + duration_s;
     (dark.stored_j_at(&ship.motion, end_s) - lit.stored_j_at(&ship.motion, end_s)).max(0.0)
 }
@@ -382,6 +382,12 @@ pub struct Watch {
     pub lit: bool,
 }
 
+/// Whether what `presence` states was pushing it: its drive, or an emit out of one end more than
+/// the other.
+fn pushed(presence: &lc_proto::Presence) -> bool {
+    presence.drive_w > 0.0 || presence.emit_fore_w != presence.emit_aft_w
+}
+
 impl Watch {
     /// Its proper acceleration, light-seconds per second squared, as an escort measures its
     /// quarry's: only while its plume is lit.
@@ -405,7 +411,7 @@ impl Beams {
                     let latest = sighting_of(presence);
                     let watch = match self.watched.get(&presence.ship_id) {
                         Some(held) if held.latest.emitted_s >= latest.emitted_s => *held,
-                        held => Watch { latest, previous: held.map(|h| h.latest), lit: presence.drive_w > 0.0 },
+                        held => Watch { latest, previous: held.map(|h| h.latest), lit: pushed(presence) },
                     };
                     watched.insert(presence.ship_id, watch);
                 }
@@ -512,8 +518,10 @@ pub fn on_map(
     now_s: f64,
     reach_m: f64,
 ) -> Vec<(OnMap, Drawn)> {
+    // Keyed on the map by `OnMap`, so the jet is never read.
     let cone = |apex_ly: DVec3, axis: DVec3, length_m: f64, half_angle_rad: f64| Drawn {
         craft: None,
+        jet: crate::plume::Jet::EmitAft,
         apex_ly,
         aft: axis,
         length_m,
@@ -1016,6 +1024,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 1_000_000,
             form: (&two_ended()).into(),
@@ -1182,7 +1191,7 @@ mod tests {
         let mut craft = ship(two_ended(), None);
         assert!(!is_lit(&craft, 5.0));
         let mut fitting = craft.fitting().unwrap().clone();
-        fitting.light(Lit { from_s: 0.0, until_s: 10.0, power_w: 2.0e15 });
+        fitting.light(Lit { from_s: 0.0, until_s: 10.0, power_w: 2.0e15, half_angle_rad: 0.01 });
         craft.fit(Some(fitting));
         assert!(is_lit(&craft, 5.0) && !is_lit(&craft, 10.0));
         assert_eq!(preview(&draft(Apertures::Both, 1.0e15), &craft, 5.0, None).refusal, Some(Refusal::UnderWay));
@@ -1192,7 +1201,7 @@ mod tests {
     /// out with the burn.
     #[test]
     fn a_one_ended_beam_lights_with_its_burn() {
-        let boost = Boost::plan(DVec3::ZERO, DVec3::ZERO, 10.0, DVec3::X, DVec3::NEG_X, 0.05, 50.0, DVec3::Y, 0.05);
+        let boost = Boost::plan(DVec3::ZERO, DVec3::ZERO, 10.0, DVec3::X, DVec3::NEG_X, 0.05, 50.0, 0.01, DVec3::Y, 0.05);
         assert!(boost.turn_s() > 1.0, "premise: the nose has to come about");
         let mut beams = Beams::default();
         beams.sent.push(Sent {
@@ -1233,6 +1242,7 @@ mod tests {
             drive_w,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: (emitted_s * 1.0e6) as i64,
             arrive_t: (emitted_s * 1.0e6) as i64,
             form: lc_proto::Form::default(),

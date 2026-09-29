@@ -28,7 +28,7 @@ const AXIS_RAD: f64 = 1.0e-4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Key {
-    Exhaust(Option<ShipId>),
+    Exhaust(Option<ShipId>, crate::plume::Jet),
     Beam(OnMap),
 }
 
@@ -124,7 +124,7 @@ pub(crate) fn lay_cones(
     let cones: Vec<(Key, &Drawn)> = exhausts
         .cones
         .iter()
-        .map(|c| (Key::Exhaust(c.craft), c))
+        .map(|c| (Key::Exhaust(c.craft, c.jet), c))
         .chain(beams.iter().map(|(key, c)| (Key::Beam(*key), c)))
         .collect();
 
@@ -179,6 +179,7 @@ mod tests {
         let eye_ly = DVec3::new(1.0e-5, 0.0, 0.0);
         let cone = Drawn {
             craft: None,
+            jet: crate::plume::Jet::Drive,
             apex_ly: eye_ly + DVec3::new(0.0, 3.0e4, 0.0) / M_PER_LY,
             aft: DVec3::NEG_Z,
             length_m: 2.1e4,

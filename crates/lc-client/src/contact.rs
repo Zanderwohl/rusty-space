@@ -27,6 +27,8 @@ pub struct Contact {
     pub drive_w: f64,
     /// What its emits were sending out of each end, watts, as last stated.
     pub emit: lc_world::emit::Ends,
+    /// The half-angle they were sent in, radians.
+    pub emit_spread_rad: f64,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -38,12 +40,30 @@ pub struct Contact {
     /// Its light as this ship sees it from inside one of its beams, as last stated.
     pub glare: Option<lc_proto::Glare>,
     reckoning: Reckoning,
-    /// What the statement said the drive was doing, at the statement's own instant.
-    stated_power_w: f64,
+    /// What the statement said the drive and emits were doing, at the statement's own instant.
+    stated: DriveAt,
 }
 
-/// A drive event, as a contact's plume reads it: coordinate seconds, and the power from then.
-pub type DriveAt = (f64, f64);
+/// A drive event, as a contact's plume reads it: what its drive and emits send from `at_s`,
+/// coordinate seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DriveAt {
+    pub at_s: f64,
+    pub drive_w: f64,
+    pub emit: lc_world::emit::Ends,
+    pub emit_spread_rad: f64,
+}
+
+impl DriveAt {
+    pub fn of(at_s: f64, change: &lc_proto::DriveChange) -> Self {
+        Self {
+            at_s,
+            drive_w: change.power_w,
+            emit: lc_world::emit::Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w },
+            emit_spread_rad: change.emit_spread_rad,
+        }
+    }
+}
 
 impl Contact {
     /// A contact from a statement. `system` is the one this ship is in, which a contact inside
@@ -52,6 +72,8 @@ impl Contact {
         let position_ly = DVec3::from_array(presence.at_ly);
         let beta = DVec3::from_array(presence.beta);
         let emitted_s = presence.emitted_t as f64 * 1.0e-6;
+        let emit = lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w };
+        let stated = DriveAt { at_s: emitted_s, drive_w: presence.drive_w, emit, emit_spread_rad: presence.emit_spread_rad };
         let sighting = lc_world::pursuit::Sighting {
             target: lc_world::motion::ShipId(presence.ship_id.0),
             position_ly,
@@ -67,14 +89,15 @@ impl Contact {
             beta,
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             drive_w: presence.drive_w,
-            emit: lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w },
+            emit,
+            emit_spread_rad: presence.emit_spread_rad,
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
             glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
             glare: presence.glare,
             reckoning: Reckoning::new(system, sighting),
-            stated_power_w: presence.drive_w,
+            stated,
         }
     }
 
@@ -91,15 +114,19 @@ impl Contact {
         self.position_ly = seen.position_ly;
         self.beta = seen.beta;
         self.emitted_s = seen.emitted_s;
-        // The latest word on the drive at the instant drawn, statement or event. The statement
-        // stands when nothing has been said since, including when this clock is behind it.
+        // The latest word on the drive and emits at the instant drawn, statement or event. The
+        // statement stands when nothing has been said since, including when this clock is behind it.
         let stated_s = self.reckoning.seen.emitted_s;
-        self.drive_w = drives
+        let latest = drives
             .iter()
             .rev()
-            .find(|(at_s, _)| *at_s <= seen.emitted_s)
-            .filter(|(at_s, _)| *at_s > stated_s || seen.emitted_s < stated_s)
-            .map_or(self.stated_power_w, |(_, power_w)| *power_w);
+            .find(|d| d.at_s <= seen.emitted_s)
+            .filter(|d| d.at_s > stated_s || seen.emitted_s < stated_s)
+            .copied()
+            .unwrap_or(self.stated);
+        self.drive_w = latest.drive_w;
+        self.emit = latest.emit;
+        self.emit_spread_rad = latest.emit_spread_rad;
     }
 }
 

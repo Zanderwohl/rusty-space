@@ -31,8 +31,8 @@ impl<J: Journal> Server<J> {
                 let until_s = craft.ended_s().map_or(now_s, |end_s| end_s.min(now_s));
                 lc_world::ignition::transitions(craft, balance, after_s, until_s)
                     .into_iter()
-                    // Only the main drive is stated; the rest are E4's instants to look at.
-                    .filter(|transition| transition.drive_stepped())
+                    // The main drive and the emits are stated; the thrusters are E4's instants to look at.
+                    .filter(|transition| transition.drive_stepped() || transition.emit_stepped())
                     .map(move |transition| (craft.id, transition))
             })
             .collect();
@@ -40,10 +40,14 @@ impl<J: Journal> Server<J> {
             let change = DriveChange {
                 power_w: transition.power_w,
                 facing: transition.facing.to_array(),
+                emit_fore_w: transition.emit.fore_w,
+                emit_aft_w: transition.emit.aft_w,
+                emit_spread_rad: transition.emit_spread_rad,
             };
             let payload = serde_json::to_string(&change).unwrap_or_else(|_| "{}".into());
             // A plume going out is as visible as the plume was, so a cut carries what it cut.
-            let power_w = transition.power_w.max(transition.was_w);
+            let total = |drive_w: f64, emit: lc_world::emit::Ends| drive_w + emit.fore_w + emit.aft_w;
+            let power_w = total(transition.power_w, transition.emit).max(total(transition.was_w, transition.was_emit));
             // Rounded up, never into the tick before: that is where the cursor already stands.
             let at_t = ((transition.at_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
             self.emit(id, KIND_DRIVE, power_w, payload, at_t, events, deliveries);

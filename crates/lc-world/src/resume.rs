@@ -304,6 +304,7 @@ impl From<&Snapshot> for lc_proto::Motion {
                     lit_s: boost.lit_s,
                     turn_s: boost.turn_s(),
                     clock_base_s: *clock_base_s,
+                    half_angle_rad: boost.half_angle_rad,
                 },
             },
         }
@@ -444,7 +445,7 @@ impl From<&lc_proto::Motion> for Snapshot {
                     from_ly: DVec3::from_array(*from_ly),
                     since_t: *since_t,
                 },
-                lc_proto::Motive::Boosting { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s, clock_base_s } => {
+                lc_proto::Motive::Boosting { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s, clock_base_s, half_angle_rad } => {
                     Recipe::Boosting {
                         boost: crate::emit::Boost::resume(
                             DVec3::from_array(*from_ly),
@@ -455,6 +456,7 @@ impl From<&lc_proto::Motion> for Snapshot {
                             *accel_g,
                             *lit_s,
                             *turn_s,
+                            *half_angle_rad,
                         ),
                         clock_base_s: *clock_base_s,
                     }

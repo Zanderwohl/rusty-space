@@ -228,6 +228,7 @@ pub fn contacts(
                 drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
                 emit_fore_w: emit.fore_w,
                 emit_aft_w: emit.aft_w,
+                emit_spread_rad: lc_world::emit::emit_spread_rad(craft, sighted.emitted_s).unwrap_or(0.0),
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.

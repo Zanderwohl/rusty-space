@@ -296,7 +296,7 @@ impl<J: Journal> Server<J> {
 
         let lit = match apertures {
             Apertures::Both => {
-                let lit = Lit { from_s: at_s, until_s: at_s + duration_s, power_w: 2.0 * power_w };
+                let lit = Lit { from_s: at_s, until_s: at_s + duration_s, power_w: 2.0 * power_w, half_angle_rad: spread_rad };
                 if lit.power_w * duration_s > craft.free_j_at(at_s) {
                     return Err(Refusal::NoEnergy);
                 }
@@ -312,7 +312,7 @@ impl<J: Journal> Server<J> {
                 let accel_g = Drive::accel_g_at(craft.mass_kg_at(at_s), power_w);
                 let nose = if apertures == Apertures::Fore { axis } else { -axis };
                 let attitude0 = craft.facing_at(at_s).unwrap_or(nose);
-                let boost = Boost::plan(from_ly, beta0, at_s, -axis, nose, accel_g, duration_s, attitude0, craft.slew_rate_rad_s());
+                let boost = Boost::plan(from_ly, beta0, at_s, -axis, nose, accel_g, duration_s, spread_rad, attitude0, craft.slew_rate_rad_s());
                 let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                 let before = craft.clone();
                 craft.boost(boost, at_s);

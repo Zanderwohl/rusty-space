@@ -259,6 +259,15 @@ pub fn emit_w(craft: &Craft, now_s: f64) -> Ends {
     ends
 }
 
+/// The half-angle `craft`'s emit is sent in at `now_s`, whichever end it leaves. `None` while none
+/// is lit.
+pub fn emit_spread_rad(craft: &Craft, now_s: f64) -> Option<f64> {
+    match &craft.motion_at(now_s).motive {
+        Motive::Boosting(boost) if boost.thrust_at(now_s) != DVec3::ZERO => Some(boost.half_angle_rad),
+        _ => craft.balanced_spread_at(now_s),
+    }
+}
+
 /// Everything leaving `craft`'s open faces at `now_s`: its emits, and its main drive aft.
 pub fn faces_w(craft: &Craft, balance: &Balance, now_s: f64) -> Ends {
     emit_w(craft, now_s).with_drive(drive_w(craft, balance, now_s))
@@ -292,6 +301,8 @@ pub struct Boost {
     pub accel_g: f64,
     pub lit_s: f64,
     turn_s: f64,
+    /// Of the cone it is sent in.
+    pub half_angle_rad: f64,
 }
 
 impl Boost {
@@ -305,12 +316,14 @@ impl Boost {
         nose: DVec3,
         accel_g: f64,
         lit_s: f64,
+        half_angle_rad: f64,
         attitude0: DVec3,
         slew_rate_rad_s: f64,
     ) -> Self {
         let nose = nose.normalize_or(DVec3::X);
         let turn_s = crate::attitude::turn_time_s(attitude0, nose, slew_rate_rad_s);
-        Self { from_ly, beta0, start_s, thrust: thrust.normalize_or(-nose), nose, accel_g, lit_s: lit_s.max(0.0), turn_s }
+        let thrust = thrust.normalize_or(-nose);
+        Self { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s: lit_s.max(0.0), turn_s, half_angle_rad }
     }
 
     /// Exactly as planned, the turn included: what a recipe carries.
@@ -324,8 +337,9 @@ impl Boost {
         accel_g: f64,
         lit_s: f64,
         turn_s: f64,
+        half_angle_rad: f64,
     ) -> Self {
-        Self { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s }
+        Self { from_ly, beta0, start_s, thrust, nose, accel_g, lit_s, turn_s, half_angle_rad }
     }
 
     pub fn turn_s(&self) -> f64 {
@@ -556,7 +570,7 @@ mod tests {
     fn a_boost_turns_then_pushes_along_its_thrust_and_drifts_after() {
         let thrust = DVec3::new(0.6, -0.8, 0.0);
         let beta0 = DVec3::new(0.0, 0.0, 1.0e-3);
-        let boost = Boost::plan(DVec3::ZERO, beta0, 100.0, thrust, -thrust, 5.0, 3_600.0, DVec3::X, 0.01);
+        let boost = Boost::plan(DVec3::ZERO, beta0, 100.0, thrust, -thrust, 5.0, 3_600.0, 0.01, DVec3::X, 0.01);
         assert!(boost.turn_s() > 0.0 && boost.lights_s() == 100.0 + boost.turn_s());
         assert_eq!(boost.thrust_at(boost.lights_s() - 1.0e-3), DVec3::ZERO);
         assert_eq!(boost.thrust_at(boost.lights_s()), thrust);
@@ -580,7 +594,7 @@ mod tests {
     #[test]
     fn a_boost_comes_back_from_its_recipe_unchanged() {
         let mut state = crate::motion::ShipState::at(DVec3::new(1.0e-6, 0.0, 0.0));
-        state.begin_boosting(Boost::plan(state.position_ly, DVec3::ZERO, 10.0, DVec3::Y, -DVec3::Y, 0.5, 600.0, DVec3::X, 0.01));
+        state.begin_boosting(Boost::plan(state.position_ly, DVec3::ZERO, 10.0, DVec3::Y, -DVec3::Y, 0.5, 600.0, 0.01, DVec3::X, 0.01));
         let wire = lc_proto::Motion::from(&state.snapshot());
         let back = crate::resume::Snapshot::from(&wire).restore(None, 10.0);
         assert_eq!(back.motive, state.motive);
@@ -593,7 +607,7 @@ mod tests {
         use crate::fitting::Lit;
         let motion = crate::motion::ShipState::at(DVec3::ZERO);
         let mut fitting = Fitting::full(Form::starting(), Balance::DEFAULT, 0.0);
-        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19 });
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19, half_angle_rad: 0.01 });
         assert_eq!(fitting.committed_j_at(&motion, 0.0), 1.0e21);
         assert!((fitting.committed_j_at(&motion, 40.0) - 6.0e20).abs() < 1.0e6);
         fitting.settle(&motion, 40.0);

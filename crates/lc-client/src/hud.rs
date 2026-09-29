@@ -703,6 +703,7 @@ mod tests {
                 drive_w: 0.0,
                 emit_fore_w: 0.0,
                 emit_aft_w: 0.0,
+                emit_spread_rad: 0.0,
                 emitted_t: 0,
                 arrive_t: 0,
                 form: lc_proto::Form::default(),

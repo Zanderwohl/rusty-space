@@ -126,8 +126,8 @@ pub(super) fn fold(
                     continue;
                 };
                 let drives = uplink.drives.entry(ShipId(sighting.source_id)).or_default();
-                let at = (sighting.emitted_t as f64 * 1e-6, change.power_w);
-                let place = drives.partition_point(|(at_s, _)| *at_s <= at.0);
+                let at = crate::contact::DriveAt::of(sighting.emitted_t as f64 * 1e-6, &change);
+                let place = drives.partition_point(|d| d.at_s <= at.at_s);
                 drives.insert(place, at);
                 let excess = drives.len().saturating_sub(REMEMBERED_DRIVES);
                 drives.drain(..excess);
@@ -169,6 +169,7 @@ mod tests {
             drive_w: 4.2e17,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 500_000,
             arrive_t: 1_000_000,
             form: lc_proto::Form::default(),
@@ -235,6 +236,7 @@ mod tests {
                 drive_w: 0.0,
                 emit_fore_w: 0.0,
                 emit_aft_w: 0.0,
+                emit_spread_rad: 0.0,
                 emitted_t: (emitted_s * 1e6) as i64,
                 arrive_t: (emitted_s * 1e6) as i64,
                 form: lc_proto::Form::default(),
@@ -488,6 +490,7 @@ mod tests {
             drive_w: burning,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
@@ -502,7 +505,7 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, present(presence.clone()));
 
         let drive = |event_id, at_s: f64, power_w| {
-            let change = lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0] };
+            let change = lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: 0.0, emit_spread_rad: 0.0 };
             let sighting = Sighting {
                 event_id,
                 source_id: 2,
@@ -547,6 +550,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 0,
             form: lc_proto::Form::default(),
@@ -561,7 +565,7 @@ mod tests {
             Outbound::Present(vec![Cleared::<lc_proto::Presence>::clear(presence, 0).unwrap()]),
         );
         let drive = |source_id: i64| {
-            let change = lc_proto::DriveChange { power_w: 1.0, facing: [1.0, 0.0, 0.0] };
+            let change = lc_proto::DriveChange { power_w: 1.0, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: 0.0, emit_spread_rad: 0.0 };
             let sighting = Sighting {
                 event_id: source_id,
                 source_id,

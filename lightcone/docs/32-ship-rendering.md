@@ -597,11 +597,14 @@ its color ([Materials by kind](#materials-by-kind)), and the aperture glow
 root. A craft too far to resolve reads the same faces and temperatures for its point rather than
 work them out again.
 
-The cone is the main drive's alone, at `drive_spread_rad`, so it is drawn from `drive_w` and its
-apex is the aft faces' power-weighted middle, or a formless craft's stern. The thrusters spread
-wider and draw no cone. An emit draws none either: its spread is its own, and its light inside it
-reaches an observer as `Glare`. Another craft is drawn where its light shows it, and whether you
-are inside its radius is measured to that place.
+A burn is an emit and an emit a burn, so each thing lit is one cone, `plume::Jet`: the main drive's
+at `drive_spread_rad` from `drive_w`, and an emit's at its own spread from what leaves each end, out
+of the end it leaves. Its apex is that end's faces' power-weighted middle, or a formless craft's
+stern or bow, and it runs to the courtesy radius at its own spread. A balanced emit is two cones,
+one from each end. The thrusters spread wider and draw no cone. A diffraction-limited emit's cone
+is its axis: nanoradians are under a pixel at any length, as the map's lines say. Another craft is
+drawn where its light shows it, from its `Presence` and the `DRIVE` events since, and whether you are
+inside its radius is measured to that place.
 
 `emit <fore|aft|both>` at the console ([27-console.md](27-console.md#emit)) lights them for a
 photograph, and `refit-magic plate fore:1` makes a ship with engines at both ends.

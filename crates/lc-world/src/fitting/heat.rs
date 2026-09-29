@@ -21,6 +21,8 @@ pub struct Lit {
     pub from_s: f64,
     pub until_s: f64,
     pub power_w: f64,
+    /// Of the cone each end sends it in.
+    pub half_angle_rad: f64,
 }
 
 /// Since the settlement: the heat reached, the drive's waste within it, and storage's net change.
@@ -904,7 +906,7 @@ mod tests {
     fn an_emit_makes_no_waste() {
         let b = wasteful(quiet());
         let mut fitting = hot(b, 20.0 * me(&b), 0.0, &rest()).0;
-        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18 });
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18, half_angle_rad: 0.01 });
         let flow = fitting.flow(Some(&rest()), 200.0);
         assert_eq!((flow.heat_j, flow.waste_j), (0.0, 0.0));
         assert!(close(-flow.income_j, 1.0e20, 1e-12), "{}", flow.income_j);

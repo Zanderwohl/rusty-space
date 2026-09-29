@@ -1,4 +1,4 @@
-//! When a craft's drive lights, goes out or changes power, to the instant.
+//! When a craft's drive or emit lights, goes out or changes power, to the instant.
 //!
 //! What another ship's plume shows used to be sampled once a server tick, and a tick is 438
 //! coordinate seconds at the design rate: the sixty-second flip in the middle of a crossing
@@ -12,7 +12,7 @@
 use glam::DVec3;
 
 use crate::craft::Craft;
-use crate::emit::{Jet, exhaust};
+use crate::emit::{Ends, Jet, emit_spread_rad, emit_w, exhaust};
 use crate::fitting::Balance;
 use crate::flight::Drive;
 use crate::motion::{self, Motive, ShipState};
@@ -34,6 +34,11 @@ pub struct Transition {
     /// only the thrusters or an emit flown as a burn changed.
     pub power_w: f64,
     pub was_w: f64,
+    /// What its emits send out of each end from this instant, and just before: [`emit_w`].
+    pub emit: Ends,
+    pub was_emit: Ends,
+    /// The half-angle they are sent in from this instant.
+    pub emit_spread_rad: f64,
     /// Unit vector the nose pointed along.
     pub facing: DVec3,
 }
@@ -42,6 +47,11 @@ impl Transition {
     /// Whether the main drive's power moved here, by the tolerance that decides every transition.
     pub fn drive_stepped(&self) -> bool {
         stepped(self.was_w, self.power_w)
+    }
+
+    /// Whether what leaves either end for an emit moved here.
+    pub fn emit_stepped(&self) -> bool {
+        stepped(self.was_emit.fore_w, self.emit.fore_w) || stepped(self.was_emit.aft_w, self.emit.aft_w)
     }
 }
 
@@ -54,6 +64,7 @@ pub fn transitions(craft: &Craft, balance: &Balance, after_s: f64, until_s: f64)
         candidates.extend(phase_changes_s(doing).into_iter().filter(|t| *t >= began && *t < until));
         began = until;
     }
+    candidates.extend(craft.balanced_changes_s());
     candidates.retain(|t| *t > after_s && *t <= until_s);
     candidates.sort_by(f64::total_cmp);
     candidates.dedup_by(|a, b| (*a - *b).abs() < STRADDLE_S);
@@ -61,15 +72,20 @@ pub fn transitions(craft: &Craft, balance: &Balance, after_s: f64, until_s: f64)
     candidates
         .into_iter()
         .filter_map(|at_s| {
-            let was = lit_w(craft, balance, at_s - STRADDLE_S);
-            let now = lit_w(craft, balance, at_s + STRADDLE_S);
-            let changed = was.iter().zip(&now).any(|(was_w, now_w)| stepped(*was_w, *now_w));
-            changed.then(|| Transition {
+            let (before_s, after_s) = (at_s - STRADDLE_S, at_s + STRADDLE_S);
+            let was = lit_w(craft, balance, before_s);
+            let now = lit_w(craft, balance, after_s);
+            let transition = Transition {
                 at_s,
                 power_w: now[0],
                 was_w: was[0],
+                emit: emit_w(craft, after_s),
+                was_emit: emit_w(craft, before_s),
+                emit_spread_rad: emit_spread_rad(craft, after_s).unwrap_or(0.0),
                 facing: motion::facing_at(craft.motion_at(at_s), craft.length_m, at_s),
-            })
+            };
+            let changed = was.iter().zip(&now).any(|(was_w, now_w)| stepped(*was_w, *now_w)) || transition.emit_stepped();
+            changed.then_some(transition)
         })
         .collect()
 }

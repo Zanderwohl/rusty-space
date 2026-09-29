@@ -596,6 +596,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 3_600_000_000,
             form: form.into(),
