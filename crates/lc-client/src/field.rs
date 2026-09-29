@@ -2,8 +2,8 @@
 //! R11's envelope in R6's material. 32 §The field; 30 §What an observer sees, §Collapse.
 //!
 //! The player's field is read from the account (`Fitted`), anyone else's from `Presence.glow`, as
-//! its light left it: temperature and shade, with the fill worked back from `T⁴` and no switch,
-//! which nothing tells an observer about until it is done. Once a craft's envelope is up it carries
+//! its light left it: temperature, shade and any switch under way, with the fill worked back from
+//! `T⁴`. Once a craft's envelope is up it carries
 //! the field's heat, and the hull only what it reflects ([`Envelopes`]). Metering is unchanged:
 //! [`crate::hull::Sent`] counts the thermal term once whether the envelope or the hull draws it.
 //! A craft too far to resolve is a point instead ([`crate::distant`]), and has no envelope drawn.
@@ -152,8 +152,7 @@ pub fn own_state(session: &Session) -> FieldState {
     let (state, balance) = match session.ship.fitting() {
         Some(fitting) => {
             let posture = fitting.posture();
-            let switch_s = fitting.balance().field_switch_s.max(f64::MIN_POSITIVE);
-            let switch = posture.switching_at(now).map(|s| (s.to, (1.0 - (s.done_s - now) / switch_s).clamp(0.0, 1.0)));
+            let switch = posture.switching_at(now).map(|s| swept(s.to, s.done_s, now, fitting.balance()));
             let heat_j = fitting.heat_j_at(&session.ship.motion, now);
             let state = FieldState {
                 kelvin: fitting.field().temperature_k(heat_j),
@@ -164,7 +163,7 @@ pub fn own_state(session: &Session) -> FieldState {
             };
             (state, *fitting.balance())
         }
-        None => (seen_state(crate::hull::own_glow(session), &Balance::DEFAULT), Balance::DEFAULT),
+        None => (seen_state(crate::hull::own_glow(session), &Balance::DEFAULT, now), Balance::DEFAULT),
     };
     match session.held_field {
         Some(held) => held.apply(state, &balance),
@@ -172,9 +171,22 @@ pub fn own_state(session: &Session) -> FieldState {
     }
 }
 
-/// Another craft's field as its light left it.
-pub fn seen_state(glow: Glow, balance: &Balance) -> FieldState {
-    FieldState { kelvin: glow.temperature_k, fill: fill_at(glow.temperature_k, balance), shade: glow.shade.into(), switch: None }
+/// Another craft's field as its light left it at `emitted_s`: a switch is swept that far and no
+/// further, as a refit step is, and the next statement carries it on.
+pub fn seen_state(glow: Glow, balance: &Balance, emitted_s: f64) -> FieldState {
+    let switch = glow.switch.map(|s| swept(s.to.into(), s.done_s, emitted_s, balance)).filter(|(_, p)| *p < 1.0);
+    FieldState {
+        kelvin: glow.temperature_k,
+        fill: fill_at(glow.temperature_k, balance),
+        shade: switch.map_or(glow.shade.into(), |(to, _)| to.other()),
+        switch,
+    }
+}
+
+/// A switch into `to` done at `done_s`, and how far through it is at `now_s`.
+fn swept(to: Mode, done_s: f64, now_s: f64, balance: &Balance) -> (Mode, f64) {
+    let switch_s = balance.field_switch_s.max(f64::MIN_POSITIVE);
+    (to, (1.0 - (done_s - now_s) / switch_s).clamp(0.0, 1.0))
 }
 
 fn code(mode: Mode) -> f32 {
@@ -689,7 +701,7 @@ pub fn draw_fields(
             None => (own.form().cloned().unwrap_or_default(), own.balance()),
         });
         let (at_ly, state) = match contact {
-            Some(c) => (c.position_ly, seen_state(c.glow, &contact_balance)),
+            Some(c) => (c.position_ly, seen_state(c.glow, &contact_balance, c.emitted_s)),
             None if craft.is_none() => (observer_ly, own_state(session)),
             None => continue,
         };
@@ -982,6 +994,29 @@ mod tests {
         let state = own_state(&s);
         assert_eq!((state.shade, state.switch.map(|(to, _)| to)), (Mode::Black, Some(Mode::Clear)), "turned back, it runs back");
         assert!((state.switch.unwrap().1 - 0.25).abs() < 1e-6);
+    }
+
+    /// Another craft's switch is swept as far as it had run when its light left, turned back
+    /// included, and a done one is its new shade.
+    #[test]
+    fn a_seen_switch_is_swept_to_its_light() {
+        let glow = |shade, to, done_s| Glow {
+            temperature_k: 400.0,
+            shade,
+            envelope_m2: 1.0e6,
+            switch: Some(lc_proto::Switch { to, done_s }),
+        };
+        let state = seen_state(glow(lc_proto::Shade::Clear, lc_proto::Shade::Black, 1000.0), &B, 1000.0 - 0.25 * B.field_switch_s);
+        let (to, progress) = state.switch.expect("under way");
+        assert_eq!((state.shade, to), (Mode::Clear, Mode::Black));
+        assert!((progress - 0.75).abs() < 1e-6, "{progress}");
+
+        let home = seen_state(glow(lc_proto::Shade::Clear, lc_proto::Shade::Clear, 1000.0), &B, 1000.0 - 0.75 * B.field_switch_s);
+        assert_eq!((home.shade, home.switch.map(|(to, _)| to)), (Mode::Black, Some(Mode::Clear)), "turned back, it runs back");
+        assert!((home.switch.unwrap().1 - 0.25).abs() < 1e-6);
+
+        let still = seen_state(Glow { switch: None, ..glow(lc_proto::Shade::Black, lc_proto::Shade::Black, 0.0) }, &B, 1000.0);
+        assert_eq!((still.shade, still.switch), (Mode::Black, None));
     }
 
     /// A beam restated stays one hot spot at its newest power, an older statement changes nothing,

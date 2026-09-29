@@ -473,9 +473,9 @@ collapse whose light has arrived.
   (`form::grid::Envelope`), and a UV sphere scaled to it is the mesh, made again only when a craft's
   stated form changes. The switch sweeps from the Mind.
 - **Your field is the account's** (`Fitted`): the bar's temperature and fill, the shade, and a switch
-  with its progress. **Anyone else's is `Presence.glow`**, as its light left it: temperature and
-  shade, the fill worked back as `(T/T_limit)⁴`, and no switch, which an observer learns of only once
-  it is done.
+  with its progress. **Anyone else's is `Presence.glow`**, as its light left it: temperature,
+  shade, the fill worked back as `(T/T_limit)⁴`, and any switch under way, swept as far as it had
+  run when the light left. Each tick's statement carries it on, as a refit step's does.
 - **The heat is the envelope's, not the hull's.** Once a craft's envelope is drawn its hull carries
   only what it reflects and its windows (`hull::lit`'s `enveloped`), so the heat is drawn once. The
   metering is unchanged: `hull::Sent` sums the thermal term once whoever draws it. A craft too far

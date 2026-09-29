@@ -60,7 +60,7 @@ pub const ACCEPTED: &[u8] = &[
     4, 84, 18, 128, 137, 122, 2, 1, 5, 69, 97, 114, 116, 104, 0, 0, 0, 0, 0, 0, 0, 64,
     1, 0, 0, 0, 0, 0, 0, 8, 64, 0, 0, 0, 0, 0, 0, 208, 63,
 ];
-/// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y, burning and emitting from both ends, a step running back }])`
+/// `Outbound::Present([Presence { ship 42 "Ada", 500 m, at [4.2, 0, 0], nose +y, burning and emitting from both ends, a step running back, its field switching to Black }])`
 ///
 /// Pinned because it is the one message that says where somebody *else* is. A field moving
 /// here is a client drawing a contact somewhere its light never came from.
@@ -83,8 +83,9 @@ pub const PRESENT: &[u8] = &[
     191, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 208, 191, 0,
     0, 0, 0, 0, 0, 224, 63, 0, 0, 0, 0, 0, 0, 192, 63, 0, 0, 0, 0, 0, 0, 208, 191, 154,
     153, 153, 153, 153, 153, 185, 63, 1, 0, 0, 0, 0, 0, 0, 208, 63, 0, 0, 0, 0, 0, 24,
-    245, 64, 1, 1, 0, 0, 0, 0, 0, 192, 162, 64, 0, 0, 0, 0, 0, 32, 214, 51, 65, 1, 0, 141,
-    237, 181, 160, 247, 198, 176, 62, 0, 0, 192, 13, 66, 119, 137, 66,
+    245, 64, 1, 1, 0, 0, 0, 0, 0, 192, 162, 64, 0, 0, 0, 0, 0, 32, 214, 51, 65, 1, 1,
+    205, 204, 204, 204, 204, 204, 236, 63, 1, 0, 141, 237, 181, 160, 247, 198, 176, 62,
+    0, 0, 192, 13, 66, 119, 137, 66,
 ];
 
 /// `Inbound::Act(Intent { ship 42, Say { to 7, aim Ship(7), sealed, "well?" }, .. })`
