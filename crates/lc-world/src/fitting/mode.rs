@@ -118,10 +118,8 @@ impl Fitting {
         self.shade_at(t).absorptivity(self.balance.clear_absorptivity)
     }
 
-    /// The player's order. Clear or Black heads the field that way, beginning a switch or turning
-    /// one under way back; Auto does whatever its thresholds call for now, and leaves the next
-    /// switch to [`Fitting::auto_s`]. Refused only while a switch is done and not yet taken. Settle
-    /// first.
+    /// The player's order. A switch under way is turned back, not refused, and Auto switches at
+    /// once if its thresholds call for it. Settle first.
     pub fn set_setting(&mut self, setting: Setting) -> Result<(), Switching> {
         let now_s = self.since_s;
         if self.posture.switch.is_some_and(|s| s.done_s <= now_s) {
@@ -142,14 +140,12 @@ impl Fitting {
         Ok(())
     }
 
-    /// The shade the field is in, or the one a switch under way is taking it to.
     fn heading(&self) -> Mode {
         self.posture.switch.map_or(self.posture.shade, |s| s.to)
     }
 
-    /// Toward `to`, from wherever the field is: a switch under way runs back over what it has done,
-    /// so one turned at a quarter is back in a quarter of `field_switch_s`. Returning to the shade
-    /// it never left is still a switch, so what shows it can run it back; its flip changes nothing.
+    /// A switch back to the shade the field never left is kept, not dropped, so it can be drawn
+    /// running back; its flip changes nothing.
     fn head(&mut self, to: Mode) {
         let now_s = self.since_s;
         let switch_s = self.balance.field_switch_s;
@@ -160,8 +156,7 @@ impl Fitting {
         self.posture.switch = (done_s > now_s).then_some(Switch { to, done_s });
     }
 
-    /// Whether Auto, heading for `heading`, would turn at the settlement: [`clear_due`] and
-    /// [`black_due`] at their first instant, whose edges these must keep.
+    /// Must agree with [`clear_due`] and [`black_due`] at their first instant.
     fn auto_due_now(&self, heading: Mode, thresholds: &Thresholds) -> bool {
         let max_j = self.field().heat_max_j();
         let capacity_j = self.capacities_at(self.since_s).storage_j;

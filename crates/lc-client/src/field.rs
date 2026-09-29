@@ -158,8 +158,7 @@ pub fn own_state(session: &Session) -> FieldState {
             let state = FieldState {
                 kelvin: fitting.field().temperature_k(heat_j),
                 fill: heat_j / fitting.field().heat_max_j(),
-                // From the other shade even when turned back toward the one it never left, so a
-                // switch turned back is drawn running back.
+                // Not `posture.shade`: a switch turned back is heading to that shade.
                 shade: switch.map_or(posture.shade_at(now), |(to, _)| to.other()),
                 switch,
             };
