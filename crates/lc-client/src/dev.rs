@@ -482,6 +482,7 @@ pub(crate) fn type_at_the_console(
 pub(crate) fn emit_at_selected(
     dev: Res<DevEntry>,
     ui: Res<Ui>,
+    game: Res<Game>,
     uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
     mut done: Local<bool>,
@@ -489,7 +490,10 @@ pub(crate) fn emit_at_selected(
     if !dev.emit || *done || uplink.joined().is_none() {
         return;
     }
-    let Some(id) = ui.selected_craft.filter(|id| uplink.contacts.iter().any(|c| c.ship_id == *id)) else { return };
+    // Not while it is where this ship is, as two fresh ships are, which gives a beam no axis.
+    let here = game.0.ship.motion.position_ly;
+    let apart = |c: &crate::uplink::Contact| c.position_ly != here;
+    let Some(id) = ui.selected_craft.filter(|id| uplink.contacts.iter().any(|c| c.ship_id == *id && apart(c))) else { return };
     *done = true;
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Emit)));
     out.write(Requested(Action::Emit(crate::emit_panel::Emission {
