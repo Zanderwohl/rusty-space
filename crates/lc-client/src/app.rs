@@ -299,6 +299,7 @@ impl Plugin for ClientPlugin {
             // Absent unless something inserted one: the browser build reads it off the page
             // before the app is built, and the desktop mints one from its device grant.
             .init_resource::<crate::Ticket>()
+            .init_resource::<crate::TicketRequired>()
             .add_plugins(crate::pick::PickPlugin)
             .add_plugins(crate::drones::DronesPlugin)
             .add_plugins(crate::uplink::UplinkPlugin)
@@ -494,8 +495,8 @@ fn boot(
     dev: Res<crate::dev::DevEntry>,
     ticket: Res<crate::Ticket>,
 ) {
-    // Once, here, because this is where the ticket is. It does not change while the client
-    // runs: a sign-in that produced a different one would be a different session.
+    // Here for a browser, whose ticket came with the page. A desktop's is minted later and
+    // decides this again then; see `signin_ui::mint_ticket`.
     #[cfg(feature = "godview")]
     {
         ui.may_see_everything = crate::map_source::may_see_everything(ticket.0.as_deref());

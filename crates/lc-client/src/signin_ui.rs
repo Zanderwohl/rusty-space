@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
@@ -44,6 +44,8 @@ pub struct Signin {
     /// Which sign-in a report must belong to. Starting, cancelling and signing out each begin
     /// a new one, so a broker that answers late cannot sign back in a player who left.
     attempt: u64,
+    /// A ticket being minted for the connection. See [`mint_ticket`].
+    minting: Mutex<Option<Receiver<Result<String, BrokerError>>>>,
 }
 
 /// What the player has typed.
@@ -85,6 +87,7 @@ impl Signin {
             from_tasks: Mutex::new(from_tasks),
             to_main,
             attempt: 0,
+            minting: Mutex::new(None),
         }
     }
 
@@ -108,8 +111,15 @@ pub struct SigninPlugin;
 
 impl Plugin for SigninPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Signin::new(config_dir()))
+        let signin = Signin::new(config_dir());
+        app.insert_resource(crate::TicketRequired(signin.broker.is_some()))
+            .insert_resource(signin)
             .add_systems(Startup, resume)
+            // Not gated on a state, like the connection it feeds.
+            .add_systems(
+                Update,
+                mint_ticket.in_set(crate::app::Stage::Link).before(crate::uplink::connect),
+            )
             .add_systems(OnEnter(AppState::MainMenu), open_dev_form)
             .add_systems(
                 Update,
@@ -176,6 +186,64 @@ fn resume(mut signin: ResMut<Signin>) {
                 Err(why) => Report::Failed(why.to_string()),
             };
             let _ = to_main.send((attempt, report));
+        })
+        .detach();
+}
+
+/// Trade the grant for a ticket once there is a shard to join, and hand it to the connection.
+///
+/// Per connection and not at sign-in: a ticket is single use and lives sixty seconds, and the
+/// socket may open long after the sign-in did. See `lightcone/docs/16-identity.md`.
+fn mint_ticket(
+    mut signin: ResMut<Signin>,
+    mut ticket: ResMut<crate::Ticket>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
+    address: Res<crate::uplink::ServerAddress>,
+    mut ui: ResMut<Ui>,
+) {
+    #[cfg(not(feature = "godview"))]
+    let _ = &mut ui;
+    let signin = &mut *signin;
+    let minting = signin.minting.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(from_task) = minting {
+        let answer = match from_task.try_recv() {
+            Err(TryRecvError::Empty) => return,
+            Ok(answer) => answer,
+            Err(TryRecvError::Disconnected) => Err(BrokerError::Unreachable("the ticket request died".into())),
+        };
+        *minting = None;
+        match answer {
+            Ok(minted) => {
+                #[cfg(feature = "godview")]
+                {
+                    ui.may_see_everything = crate::map_source::may_see_everything(Some(&minted));
+                }
+                ticket.0 = Some(minted);
+            }
+            // The grant was revoked since it was last good. Signed out, as at startup.
+            Err(BrokerError::Refused) => {
+                let _ = signin.vault.clear();
+                signin.grant = None;
+                signin.session = Session::SignedOut;
+                uplink.state = crate::uplink::State::Refused("this sign-in is no longer good; sign in again".into());
+            }
+            Err(why) => uplink.state = crate::uplink::State::Refused(format!("could not get a ticket: {why}")),
+        }
+        return;
+    }
+    let wanted = ticket.0.is_none()
+        && address.0.is_some()
+        && uplink.state == crate::uplink::State::Offline
+        && signin.session.is_ready();
+    let (Some(broker), Some(grant)) = (signin.broker.clone(), signin.grant.clone()) else { return };
+    if !wanted {
+        return;
+    }
+    let (to_main, from_task) = channel();
+    *minting = Some(from_task);
+    IoTaskPool::get()
+        .spawn(async move {
+            let _ = to_main.send(broker.ticket(&grant));
         })
         .detach();
 }
@@ -584,6 +652,7 @@ mod tests {
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
             attempt: 0,
+            minting: Mutex::new(None),
         };
         assert!(signin.may_observe());
     }
@@ -600,6 +669,7 @@ mod tests {
             from_tasks: Mutex::new(channel().1),
             to_main: channel().0,
             attempt: 0,
+            minting: Mutex::new(None),
         };
         assert!(!with(Session::SignedOut).may_observe());
         assert!(!with(Session::Working).may_observe());
@@ -688,6 +758,7 @@ mod tests {
             from_tasks: Mutex::new(from_tasks),
             to_main,
             attempt: 0,
+            minting: Mutex::new(None),
         };
         let granted = || Report::Granted {
             grant: "late".into(),

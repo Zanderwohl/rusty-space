@@ -85,11 +85,16 @@ pub fn out_of_reach(state: &State, address: Option<&str>) -> Option<String> {
 }
 
 /// Open a connection when one is configured and there is not one.
-pub fn connect(mut uplink: ResMut<Uplink>, address: Res<ServerAddress>) {
+pub fn connect(
+    mut uplink: ResMut<Uplink>,
+    address: Res<ServerAddress>,
+    ticket: Res<crate::Ticket>,
+    required: Res<crate::TicketRequired>,
+) {
     let Some(address) = address.0.as_deref() else {
         return;
     };
-    if uplink.state != State::Offline {
+    if uplink.state != State::Offline || (required.0 && ticket.0.is_none()) {
         return;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -197,6 +202,25 @@ mod tests {
     use crate::uplink::*;
     use crate::uplink::fold;
     use crate::link::{Offline, Status};
+
+    /// **A desktop with a broker waits for its ticket.** Opening first greeted the shard with
+    /// an empty one, and every signed-in player was refused.
+    #[test]
+    fn a_socket_that_needs_a_ticket_waits_for_one() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(Uplink::default());
+        world.insert_resource(ServerAddress(Some("ws://127.0.0.1:1".into())));
+        world.insert_resource(crate::Ticket(None));
+        world.insert_resource(crate::TicketRequired(true));
+
+        world.run_system_once(connect).unwrap();
+        assert_eq!(world.resource::<Uplink>().state, State::Offline, "opened without a ticket");
+
+        world.resource_mut::<crate::Ticket>().0 = Some("minted".into());
+        world.run_system_once(connect).unwrap();
+        assert_eq!(world.resource::<Uplink>().state, State::Connecting, "the ticket did not open it");
+    }
 
     /// The socket closing after a refusal must not overwrite the reason: "connection closed"
     /// is true and tells a person nothing about what to do.

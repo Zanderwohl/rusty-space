@@ -107,3 +107,9 @@ pub mod watch;
 /// `None` on a deployment with no sign-in, which is the development and offline case.
 #[derive(bevy::prelude::Resource, Default)]
 pub struct Ticket(pub Option<String>);
+
+/// Whether a socket waits for a [`Ticket`] before it opens: true on a desktop with a broker,
+/// which mints one per connection once signed in. A browser arrives with its ticket, and a build
+/// with no broker has none to wait for.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct TicketRequired(pub bool);
