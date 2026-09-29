@@ -176,13 +176,15 @@ absorptivity applies when the switch completes, which is a settlement boundary l
 beam arrives with its own warning, so a switch started when it lands is too late. Mode is posture,
 chosen beforehand.
 
-A switch can be ordered at any time, under way or refitting, and is refused only while another is
-running.
+A switch can be ordered at any time, under way or refitting. One ordered against a switch still
+running turns it back: the field never left its shade, and it gets there again in as long as it had
+been switching.
 
 ### Auto
 
 The third setting is **Auto**: a thermostat that switches between the two. It is what a player sets
-before logging off, and a new ship starts in it.
+before logging off, and a new ship starts in it. Ordered while outside its thresholds, it begins the
+switch they call for at once, turning back one under way if that is heading the wrong way.
 
 - **Clear** when heat rises to `auto_clear_above` of `Q_max`, or storage fills.
 - **Black** when heat falls to `auto_black_below` and storage is under `auto_refill_below` of capacity.
@@ -220,8 +222,14 @@ only the heat the beam leaves behind.
 - **Thresholds without both gaps are refused** as `Impossible`: `black_below` at or above
   `clear_above`, or `auto_refill_below` at 1. A field with either gap closed switches back as soon as
   a switch completes.
-- **Every mode order is refused `Switching` while a switch runs**, one that only moves Auto's
-  thresholds included.
+- **A mode order against a switch under way turns it back**: its `to` becomes the shade it never left,
+  and its `done_s` is as far ahead as the switch had run. Its flip is taken like any other and states
+  no event, since nothing about the field's light changed. An order at the instant a switch began
+  cancels it. `Switching` is left for a switch done and not yet taken, which the order path takes
+  first.
+- **Auto ordered outside its thresholds switches at once**, judged against the shade the field is
+  heading for: `Fitting::set_setting` checks both conditions where the account is settled rather than
+  waiting for the shard's next solve.
 - **A new ship starts Clear**, the shade Auto keeps a full store in, rather than switching on its
   first day.
 - The console's `field clear|black|auto` gives the same order.
@@ -618,7 +626,8 @@ puts a countdown in the text.
   so both gaps stay open and Clear never waits for collapse itself. With no room, a drag moves
   nothing. `auto_refill_below` is storage, not heat, and is not on the bar; it travels
   with the order unchanged.
-- **A mode order during a switch is refused before it is sent**, with the shard's own words.
+- **A mode order during a switch is sent like any other**, and a switch turned back is drawn running
+  back from where it had reached.
 - **The countdown is never dropped for width.** The narrowest header shows the bar alone, as it
   does energy, but keeps `collapse in …` beside it.
 

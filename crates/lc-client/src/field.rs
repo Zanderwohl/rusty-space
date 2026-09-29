@@ -158,7 +158,9 @@ pub fn own_state(session: &Session) -> FieldState {
             let state = FieldState {
                 kelvin: fitting.field().temperature_k(heat_j),
                 fill: heat_j / fitting.field().heat_max_j(),
-                shade: if switch.is_some() { posture.shade } else { posture.shade_at(now) },
+                // From the other shade even when turned back toward the one it never left, so a
+                // switch turned back is drawn running back.
+                shade: switch.map_or(posture.shade_at(now), |(to, _)| to.other()),
                 switch,
             };
             (state, *fitting.balance())
@@ -970,6 +972,12 @@ mod tests {
         assert!((progress - 0.75).abs() < 1e-6, "{progress}");
         let u = uniform(&state, &shell(), &B, &light(&s.mapping), [Vec4::ZERO; HOT_SPOTS], STANDING);
         assert_eq!((u.mode.x, u.mode.y), (BLACK, CLEAR));
+
+        let home = Switch { to: Mode::Clear, done_s: now + 0.75 * B.field_switch_s };
+        let s = heated(0.1, Posture { switch: Some(home), ..Posture::new_ship(&B) });
+        let state = own_state(&s);
+        assert_eq!((state.shade, state.switch.map(|(to, _)| to)), (Mode::Black, Some(Mode::Clear)), "turned back, it runs back");
+        assert!((state.switch.unwrap().1 - 0.25).abs() < 1e-6);
     }
 
     /// A beam restated stays one hot spot at its newest power, an older statement changes nothing,

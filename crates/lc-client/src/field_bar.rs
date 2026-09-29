@@ -67,8 +67,7 @@ pub fn draw(ui: &mut egui::Ui, field: &hud::Field, text: Option<&str>) -> Vec<Ac
             if grip.drag_stopped()
                 && let Some(action) = pointer.and_then(|pos| hud::drop_marker(&shown_field, marker, dropped_at(pos)))
             {
-                // A switch under way refuses it before it is sent, so there is nothing to wait for.
-                if let (false, Action::SetField(mode)) = (field.switch.is_some(), &action)
+                if let Action::SetField(mode) = &action
                     && let Setting::Auto(ordered) = Setting::from(*mode)
                 {
                     ui.data_mut(|d| d.insert_temp(pending, hud::Dropped { thresholds: ordered, at_s: now_s }));

@@ -934,8 +934,8 @@ mod tests {
         let done_s = s.coordinate_time_s() + b.field_switch_s;
         let (mut ui, mut s) = heated(0.1, 0.0, Posture { switch: Some(Switch { to: Mode::Black, done_s }), ..Posture::new_ship(&b) });
         s.remote = true;
-        let refused = apply(Action::SetField(lc_proto::FieldMode::Black), &mut ui, &mut s);
-        assert_eq!(refused, vec![crate::action::Effect::Notify("the field is already switching".into())]);
+        let turn = apply(Action::SetField(lc_proto::FieldMode::Clear), &mut ui, &mut s);
+        assert_eq!(turn, vec![crate::action::Effect::Send(lc_proto::Order::FieldMode { mode: lc_proto::FieldMode::Clear })], "a switch under way is the shard's to turn");
     }
 
     #[test]

@@ -407,7 +407,7 @@ pub enum Order {
     /// Rebuild toward this form, in one round. Refused while under way or already refitting, and
     /// for a target that breaks a rule of 29 §Placement rules, as [`Refusal::Form`] naming the part.
     Refit { target: Form },
-    /// Set the field. The change takes `field_switch_s`, and is refused while one is running.
+    /// Set the field. The change takes `field_switch_s`; one against a switch under way turns it back.
     FieldMode { mode: FieldMode },
     /// Put light out on purpose: to dump heat, feed an ally, or attack.
     ///
@@ -902,7 +902,7 @@ pub enum Refusal {
     /// The shard does not do this yet. X1 of `lightcone/docs/plans/forms-and-fields.md` deletes
     /// it, once every order that answers with it is built.
     NotBuilt,
-    /// A field switch is already running.
+    /// A field switch is done and its flip not yet taken.
     Switching,
     /// Both apertures asked of a ship with engines at one end only.
     NoAperture,

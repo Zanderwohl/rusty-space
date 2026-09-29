@@ -83,7 +83,7 @@ impl Posture {
     }
 }
 
-/// Refused: another switch is running.
+/// Refused: a switch is kept, under way or done and not yet taken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Switching;
 
@@ -118,27 +118,62 @@ impl Fitting {
         self.shade_at(t).absorptivity(self.balance.clear_absorptivity)
     }
 
-    /// The player's order. Clear or Black begins a switch unless already in that shade; Auto leaves
-    /// the next switch to [`Fitting::auto_s`]. Settle first.
+    /// The player's order. Clear or Black heads the field that way, beginning a switch or turning
+    /// one under way back; Auto does whatever its thresholds call for now, and leaves the next
+    /// switch to [`Fitting::auto_s`]. Refused only while a switch is done and not yet taken. Settle
+    /// first.
     pub fn set_setting(&mut self, setting: Setting) -> Result<(), Switching> {
         let now_s = self.since_s;
-        if self.posture.switching_at(now_s).is_some() {
+        if self.posture.switch.is_some_and(|s| s.done_s <= now_s) {
             return Err(Switching);
         }
-        let to = match setting {
-            Setting::Clear => Some(Mode::Clear),
-            Setting::Black => Some(Mode::Black),
-            Setting::Auto(_) => None,
-        };
-        if let Some(to) = to.filter(|&to| to != self.shade_at(now_s)) {
-            self.begin_switch(to)?;
-        }
         self.posture.setting = setting;
+        let to = match setting {
+            Setting::Clear => Mode::Clear,
+            Setting::Black => Mode::Black,
+            Setting::Auto(thresholds) => {
+                let heading = self.heading();
+                if self.auto_due_now(heading, &thresholds) { heading.other() } else { heading }
+            }
+        };
+        if to != self.heading() {
+            self.head(to);
+        }
         Ok(())
     }
 
-    /// Toward `to`, done `field_switch_s` from the settlement. Settle first. Refused while any switch
-    /// is kept, done or not: overwriting one not yet taken would lose its flip.
+    /// The shade the field is in, or the one a switch under way is taking it to.
+    fn heading(&self) -> Mode {
+        self.posture.switch.map_or(self.posture.shade, |s| s.to)
+    }
+
+    /// Toward `to`, from wherever the field is: a switch under way runs back over what it has done,
+    /// so one turned at a quarter is back in a quarter of `field_switch_s`. Returning to the shade
+    /// it never left is still a switch, so what shows it can run it back; its flip changes nothing.
+    fn head(&mut self, to: Mode) {
+        let now_s = self.since_s;
+        let switch_s = self.balance.field_switch_s;
+        let done_s = match self.posture.switch {
+            Some(s) => now_s + (switch_s - (s.done_s - now_s)).clamp(0.0, switch_s),
+            None => now_s + switch_s,
+        };
+        self.posture.switch = (done_s > now_s).then_some(Switch { to, done_s });
+    }
+
+    /// Whether Auto, heading for `heading`, would turn at the settlement: [`clear_due`] and
+    /// [`black_due`] at their first instant.
+    fn auto_due_now(&self, heading: Mode, thresholds: &Thresholds) -> bool {
+        let max_j = self.field().heat_max_j();
+        let capacity_j = self.capacities_at(self.since_s).storage_j;
+        match heading {
+            Mode::Black => self.heat_j >= thresholds.clear_above * max_j || self.stored_j >= (1.0 - FULL) * capacity_j,
+            Mode::Clear => self.heat_j <= thresholds.black_below * max_j && self.stored_j < thresholds.refill_below * capacity_j,
+        }
+    }
+
+    /// Toward `to`, done `field_switch_s` from the settlement, as Auto begins one. Settle first.
+    /// Refused while any switch is kept, done or not: overwriting one not yet taken would lose its
+    /// flip.
     pub fn begin_switch(&mut self, to: Mode) -> Result<(), Switching> {
         let now_s = self.since_s;
         if self.posture.switch.is_some() {
@@ -386,23 +421,66 @@ mod tests {
     }
 
     #[test]
-    fn a_second_switch_meanwhile_is_refused() {
+    fn an_order_against_a_switch_under_way_turns_it_back() {
         let b = Balance::DEFAULT;
+        let switch_s = b.field_switch_s;
         let mut f = Fitting::full(Form::starting(), b, 0.0);
+        let from = f.shade_at(0.0);
         f.set_setting(Setting::Clear).unwrap();
-        let running = f.posture;
-        assert_eq!(f.set_setting(Setting::Black), Err(Switching));
-        assert_eq!(f.set_setting(Setting::Auto(Thresholds::of(&b))), Err(Switching));
-        assert_eq!(f.begin_switch(Mode::Black), Err(Switching));
-        assert_eq!(f.posture, running, "a refusal changes nothing");
-        f.settle(&rest(), 0.5 * b.field_switch_s);
-        assert_eq!(f.set_setting(Setting::Black), Err(Switching));
-        f.settle(&rest(), b.field_switch_s);
+        assert_eq!(f.posture.switch.map(|s| s.to), Some(from.other()), "premise: a full fitting is not Clear");
+        f.settle(&rest(), 0.25 * switch_s);
+        f.set_setting(Setting::Black).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: from, done_s: 0.5 * switch_s }), "back in the quarter it took");
+        assert_eq!(f.posture.shade, from, "it never left");
+        f.set_setting(Setting::Black).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: from, done_s: 0.5 * switch_s }), "already heading there");
+        f.settle(&rest(), 0.375 * switch_s);
+        f.set_setting(Setting::Clear).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: from.other(), done_s: 1.25 * switch_s }), "turned again at an eighth left");
+
+        f.settle(&rest(), 1.25 * switch_s);
         assert_eq!(f.set_setting(Setting::Black), Err(Switching), "done, but its flip not yet taken");
         assert_eq!(f.begin_switch(Mode::Black), Err(Switching));
         assert!(f.take_flip().is_some());
         assert_eq!(f.set_setting(Setting::Black), Ok(()));
-        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Black, done_s: 2.0 * b.field_switch_s }));
+        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Black, done_s: 2.25 * switch_s }));
+    }
+
+    #[test]
+    fn turned_back_at_once_it_is_no_switch() {
+        let b = Balance::DEFAULT;
+        let mut f = Fitting::full(Form::starting(), b, 0.0);
+        let before = f.posture;
+        f.set_setting(Setting::Clear).unwrap();
+        f.set_setting(Setting::Black).unwrap();
+        assert_eq!(f.posture, before);
+    }
+
+    #[test]
+    fn auto_outside_its_thresholds_switches_when_ordered() {
+        let b = Balance::DEFAULT;
+        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let (auto, done_s) = (Setting::Auto(Thresholds::of(&b)), b.field_switch_s);
+        let hot = |shade| ship(b, half_j, Some(0.9 * max_j), Posture { setting: Setting::Black, shade, switch: None });
+        let cold = |shade| ship(b, half_j, Some(0.1 * max_j), Posture { setting: Setting::Clear, shade, switch: None });
+
+        let mut f = hot(Mode::Black);
+        f.set_setting(auto).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Clear, done_s }));
+        let mut f = cold(Mode::Clear);
+        f.set_setting(auto).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Black, done_s }));
+        for mut inside in [hot(Mode::Clear), cold(Mode::Black)] {
+            inside.set_setting(auto).unwrap();
+            assert_eq!(inside.posture.switch, None);
+        }
+
+        let mut f = hot(Mode::Clear);
+        f.set_setting(Setting::Black).unwrap();
+        f.settle(&rest(), 0.25 * done_s);
+        f.set_setting(auto).unwrap();
+        assert_eq!(f.posture.switch, Some(Switch { to: Mode::Clear, done_s: 0.5 * done_s }), "turned back to Clear");
     }
 
     /// Radiation and drain off, storage full: all that is absorbed is heat.

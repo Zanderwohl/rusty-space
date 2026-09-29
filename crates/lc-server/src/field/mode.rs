@@ -74,7 +74,12 @@ impl<J: Journal> Server<J> {
         let Some(done_s) = craft.fitting().and_then(|f| f.posture().switch).map(|s| s.done_s).filter(|&t| t <= by_s) else {
             return false;
         };
+        let was = craft.fitting().map(|f| f.posture().shade);
         let Some(switch) = craft.take_flip(done_s) else { return false };
+        // A switch turned back and run home: nothing about the field's light changed.
+        if was == Some(switch.to) {
+            return true;
+        }
         let clear_absorptivity = craft.fitting().map_or(0.0, |f| f.balance().clear_absorptivity);
         // What changes is the starlight it reflects.
         let power_w = craft.starlight_w_at(done_s) * (1.0 - clear_absorptivity);
@@ -86,7 +91,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// `Order::FieldMode` at `at`, or at the settlement if that is later, which is returned. Refused
-    /// while a switch runs, and for Auto thresholds without both gaps open.
+    /// for Auto thresholds without both gaps open; a switch under way is turned, not refused.
     pub(crate) fn order_field_mode(
         &mut self,
         id: CraftId,
@@ -280,21 +285,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_second_order_while_one_switches_is_refused() {
+    async fn an_order_against_a_switch_under_way_turns_it_back() {
         let Some((mut server, mut wire)) = apart() else { return };
         server.tick(&mut wire).await.unwrap();
         wire.client_says(OWNER, act(Order::FieldMode { mode: FieldMode::Black }));
+        let accepted_s = |said: &[Outbound]| {
+            said.iter().find_map(|m| match m {
+                Outbound::Accepted { at_t, .. } => Some(*at_t as f64 * 1.0e-6),
+                _ => None,
+            })
+        };
         server.tick(&mut wire).await.unwrap();
-        let _ = wire.take(OWNER);
-        let running = *server.ship(SHIP).unwrap().fitting().unwrap().posture();
+        let begun_s = accepted_s(&wire.take(OWNER)).expect("accepted");
+        wire.client_says(OWNER, act(Order::FieldMode { mode: FieldMode::Clear }));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(OWNER);
+        let turned_s = accepted_s(&said).unwrap_or_else(|| panic!("{said:?}"));
+        let posture = *server.ship(SHIP).unwrap().fitting().unwrap().posture();
+        assert_eq!(posture.shade, lc_world::field::Mode::Clear, "never left Clear");
+        let switch = posture.switch.expect("running home");
+        assert_eq!(switch.to, lc_world::field::Mode::Clear);
+        assert!((switch.done_s - (2.0 * turned_s - begun_s)).abs() < 1.0e-6, "{switch:?} {begun_s} {turned_s}");
+
         let equal = FieldMode::Auto { clear_above: 0.4, black_below: 0.4, refill_below: 0.95 };
-        for (mode, reason) in [(FieldMode::Clear, Refusal::Switching), (equal, Refusal::Impossible)] {
-            wire.client_says(OWNER, act(Order::FieldMode { mode }));
-            server.tick(&mut wire).await.unwrap();
-            let said = wire.take(OWNER);
-            assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: r, .. } if *r == reason)), "{mode:?}: {said:?}");
-        }
-        assert_eq!(*server.ship(SHIP).unwrap().fitting().unwrap().posture(), running);
+        wire.client_says(OWNER, act(Order::FieldMode { mode: equal }));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(OWNER);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })), "{said:?}");
+        let posture = *server.ship(SHIP).unwrap().fitting().unwrap().posture();
+        assert_eq!((posture.setting, posture.shade, posture.switch), (Setting::Clear, lc_world::field::Mode::Clear, None), "home, and flipped");
     }
 
     /// Clear at a tenth of an AU with half its store: Auto goes Black at once, fills, and turns
@@ -442,10 +461,10 @@ mod tests {
                 _ => None,
             }));
         }
-        let [(true, began), (false, refused)] = &answers[..] else { panic!("{answers:?}") };
+        let [(true, began), (true, turned)] = &answers[..] else { panic!("{answers:?}") };
         assert!(began.contains("Black in 1.0 days"), "{began}");
-        assert!(refused.contains("Switching"), "{refused}");
+        assert!(turned.contains("Clear in 0.0 days"), "{turned}");
         let switch = server.ship(SHIP).unwrap().fitting().unwrap().posture().switch;
-        assert_eq!(switch.map(|s| s.to), Some(lc_world::field::Mode::Black));
+        assert_eq!(switch.map(|s| s.to), Some(lc_world::field::Mode::Clear));
     }
 }
