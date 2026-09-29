@@ -270,6 +270,9 @@ impl Observatory {
                         self.pointing = Some(id);
                         photometry(sky, knowledge, at, id, elapsed, now_s);
                         fix(sky, knowledge, at, id, elapsed, now_s);
+                        if system.is_some_and(|s| s.star == id) {
+                            star_colors(sky, knowledge, &at.optics(), id, at.position_ly, elapsed, now_s);
+                        }
                     } else {
                         glow_photometry(sky, lights, knowledge, at, gaze, self.sampled_s, now_s);
                     }
@@ -298,7 +301,7 @@ impl Observatory {
             Duty::Sweep(sweep) => {
                 self.pointing = None;
                 self.observed = None;
-                sweep_between(sky, knowledge, at, &sweep, self.swept_s, now_s);
+                sweep_between(sky, knowledge, system.map(|s| s.star), at, &sweep, self.swept_s, now_s);
                 self.swept_s = now_s;
             }
             duty @ Duty::Survey { star, .. } => {
@@ -372,6 +375,7 @@ pub fn survey_between(
         )
     {
         knowledge.sighted(Subject::Star(system.star), seen);
+        star_colors(sky, knowledge, &optics, system.star, at.position_ly, survey::SURVEY_DWELL_S, to_s);
     }
 
     let look = |knowledge: &mut Knowledge, slot: usize| -> Option<Subject> {
@@ -544,6 +548,7 @@ pub fn fix(sky: &mut Sky, knowledge: &mut Knowledge, at: Station, id: StarId, ex
 pub fn sweep_between(
     sky: &mut Sky,
     knowledge: &mut Knowledge,
+    host: Option<StarId>,
     at: Station,
     sweep: &Sweep,
     from_s: f64,
@@ -574,8 +579,33 @@ pub fn sweep_between(
             && let Some(source) = sources.get(index)
         {
             knowledge.sighted(source.subject, seen);
+            // Only the host: nothing needs another star's temperature yet.
+            if let Some(host) = host
+                && source.subject == Subject::Star(host)
+            {
+                star_colors(sky, knowledge, &optics, host, at.position_ly, sweep.exposure_s(), when);
+            }
         }
     }
+}
+
+/// Every band of a star at once, folded into its colors for [`super::host`]'s temperature.
+fn star_colors(
+    sky: &Sky,
+    knowledge: &mut Knowledge,
+    optics: &Optics,
+    id: StarId,
+    here: DVec3,
+    exposure_s: f64,
+    at_s: f64,
+) {
+    let Some(star) = sky.index_of(id).and_then(|i| sky.stars().get(i)) else { return };
+    let distance_m = star.position_ly.distance(here) * M_PER_LY;
+    let arriving = PerBand::splat(0.0).map(|band, _| survey::flux_from(&star.star, band, distance_m));
+    let witness = knowledge.owner;
+    let seed = rng::hash(&[witness.0, id.get(), at_s.to_bits()]);
+    let colors = survey::colors(optics, &arriving, exposure_s, seed);
+    knowledge.measured_colors(Subject::Star(id), witness, at_s, &colors);
 }
 
 /// The charting office's designation for a star, the same for every ship. The catalog name is

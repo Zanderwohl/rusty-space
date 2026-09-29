@@ -318,7 +318,9 @@ impl<J: Journal> Server<J> {
                     *craft = before;
                     return Err(Refusal::NoEnergy);
                 }
+                // Unlike an emit from both ends, a boost moves the ship off its parking orbit.
                 self.pursuits.remove(&id);
+                self.parks.remove(&id);
                 vec![lighting(axis, to_us(boost.lights_s()).max(at), to_us(boost.out_s()))]
             }
         };

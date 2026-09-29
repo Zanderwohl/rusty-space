@@ -50,6 +50,7 @@ pub struct Saved {
     /// The standing intercept it was flying, which outlives the process as it outlives the
     /// pilot's connection.
     pub pursuit: Option<lc_proto::Pursuit>,
+    pub parked: bool,
     /// Its form and energy, settled when saved, and the round under way as the recipe it was
     /// planned from, which solves to the same plan on load. The balance in it measures the form it
     /// loads as, and the shard then stamps its own over it.
@@ -69,6 +70,12 @@ pub struct Saved {
     pub light: Light,
     /// A wreck's collapse, whose afterglow outlasts the light of its end.
     pub afterglow: Option<Afterglow>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Standing {
+    pub pursuit: Option<lc_proto::Pursuit>,
+    pub parked: bool,
 }
 
 /// A craft's standing radio orders, which outlive the pilot's connection and the process.
@@ -100,8 +107,8 @@ pub struct SavedInstruments {
 /// back as some other ship. 12 adds a wreck's end, 13 the craft's light and a field's lit
 /// emissions, 14 the drive's waste heat, 15 what a craft's beams have said and which of its
 /// lightings are drives, 16 drops the drive's exhaust speed, and 17 adds a wreck's afterglow and a
-/// stare at a place or a craft.
-pub const SAVE_FORMAT: i32 = 17;
+/// stare at a place or a craft. 18 adds a standing parking orbit.
+pub const SAVE_FORMAT: i32 = 18;
 
 /// Everything a shard needs to come back: the clock, the counter, and the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -130,7 +137,7 @@ pub struct Unreadable {
 pub fn save(
     craft: &Craft,
     account: Option<&str>,
-    pursuit: Option<lc_proto::Pursuit>,
+    standing: Standing,
     instruments: Option<SavedInstruments>,
     radio: Radio,
     light: Light,
@@ -157,7 +164,8 @@ pub fn save(
         noise_floor: craft.noise_floor,
         length_m: craft.length_m,
         motion: (&motion.snapshot()).into(),
-        pursuit,
+        pursuit: standing.pursuit,
+        parked: standing.parked,
         fitting: craft.fitting().map(Into::into),
         field: craft.fitting().map(Into::into),
         instruments,
@@ -255,11 +263,14 @@ impl<J: Journal> Server<J> {
                 .iter()
                 .map(|craft| {
                     let account = account_of.get(&ShipId(craft.id.0)).copied();
-                    let pursuit = self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
-                        quarry: p.quarry,
-                        closeness: p.closeness.into(),
-                        approach: p.approach,
-                    });
+                    let standing = Standing {
+                        pursuit: self.pursuits.get(&craft.id).map(|p| lc_proto::Pursuit {
+                            quarry: p.quarry,
+                            closeness: p.closeness.into(),
+                            approach: p.approach,
+                        }),
+                        parked: self.parks.contains_key(&craft.id),
+                    };
                     let instruments = self.instruments.aboard.get(&craft.id).map(|a| SavedInstruments {
                         observatory: a.observatory.clone(),
                         reporting: a.reporting.clone(),
@@ -273,7 +284,7 @@ impl<J: Journal> Server<J> {
                         owed: self.owed.get(&craft.id).cloned().unwrap_or_default(),
                     };
                     let afterglow = self.afterglows.get(&craft.id).copied();
-                    save(craft, account, pursuit, instruments, radio, self.emissions.light_of(craft.id), afterglow, self.now_t)
+                    save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), afterglow, self.now_t)
                 })
                 .collect(),
         }
@@ -355,6 +366,10 @@ impl<J: Journal> Server<J> {
                             last_plan_t: i64::MIN,
                             last_seen: None,
                         });
+                    }
+                    // No orbit held, so the next check flies it.
+                    if saved.as_ref().is_some_and(|saved| saved.parked) {
+                        self.parks.insert(craft.id, crate::park::Park::default());
                     }
                     // Its knowledge comes back in `adopt_knowledge`; what its telescope was doing
                     // comes back here, with the craft. Put in place directly rather than through
@@ -441,7 +456,7 @@ mod tests {
     #[test]
     fn a_craft_saved_and_read_back_is_the_same_craft() {
         let craft = a_craft();
-        let row = save(&craft, Some("acct-1"), None, None, Radio::default(), Light::default(), None, 7_000_000);
+        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, 7_000_000);
         assert_eq!(row.ship_id, 5);
         assert_eq!(row.account.as_deref(), Some("acct-1"));
 
@@ -483,7 +498,7 @@ mod tests {
         craft.motion.position_ly = DVec3::new(4.200079062537049, awkward, 0.0);
         craft.motion.beta = DVec3::new(awkward, 0.0, 1.0e-9);
 
-        let back = load(&save(&craft, None, None, None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.beta, craft.motion.beta);
         assert_eq!(
@@ -504,7 +519,7 @@ mod tests {
     /// would happily read the wrong fields out of the right bytes.
     #[test]
     fn a_row_from_another_format_is_refused() {
-        let mut row = save(&a_craft(), None, None, None, Radio::default(), Light::default(), None, 0);
+        let mut row = save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
@@ -519,8 +534,14 @@ mod tests {
             closeness: lc_proto::Closeness::Intimate,
             approach: lc_proto::Approach::Direct,
         };
-        let row = save(&a_craft(), None, Some(pursuit), None, Radio::default(), Light::default(), None, 0);
+        let row = save(&a_craft(), None, Standing { pursuit: Some(pursuit), parked: false }, None, Radio::default(), Light::default(), None, 0);
         assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));
+    }
+
+    #[test]
+    fn a_standing_parking_orbit_survives_the_round_trip() {
+        let row = save(&a_craft(), None, Standing { pursuit: None, parked: true }, None, Radio::default(), Light::default(), None, 0);
+        assert!(decode(&row).expect("it reads").parked);
     }
 
     #[test]
@@ -529,7 +550,7 @@ mod tests {
             auto_ack: vec![ShipId(7)],
             owed: vec![Owed { due_t: 9, from: ShipId(7), idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
         };
-        let row = save(&a_craft(), None, None, None, radio.clone(), Light::default(), None, 0);
+        let row = save(&a_craft(), None, Standing::default(), None, radio.clone(), Light::default(), None, 0);
         assert_eq!(decode(&row).expect("it reads").radio, radio);
     }
 
@@ -542,7 +563,7 @@ mod tests {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
         craft.drain(3.0e25, 5.0);
-        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), Light::default(), None, 20_000_000), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert_eq!(back.length_m, craft.length_m);
 
@@ -554,7 +575,7 @@ mod tests {
         let mid_s = 10.0 + 0.5 * (plan.steps()[0].ends_s() + plan.steps()[1].ends_s());
         craft.settle(mid_s);
         let saved_t = (mid_s * 1.0e6) as i64;
-        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), Light::default(), None, saved_t), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, saved_t), None).expect("it reads");
         assert!(back.is_refitting(mid_s));
         assert_eq!(back.fitting(), craft.fitting());
         assert_ne!(back.fitting().unwrap().form(), &Form::starting(), "premise: a step had finished");
@@ -575,7 +596,7 @@ mod tests {
         let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), waste_j: b.module_energy_j(), ..full.account() }, b)));
-        let back = load(&save(&craft, Some("acct"), None, None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(&back.motion, 0.0), 3.0 * b.module_energy_j());
         assert_eq!(back.fitting().unwrap().account().waste_j, b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
@@ -587,10 +608,10 @@ mod tests {
     fn a_wreck_comes_back_ended_and_owning_nothing() {
         let mut craft = a_craft();
         craft.end(12.5);
-        let row = save(&craft, Some("acct-1"), None, None, Radio::default(), Light::default(), None, 20_000_000);
+        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, 20_000_000);
         assert_eq!(row.account, None);
         assert_eq!(load(&row, None).expect("it reads").ended_s(), Some(12.5));
-        assert_eq!(load(&save(&a_craft(), None, None, None, Radio::default(), Light::default(), None, 0), None).unwrap().ended_s(), None);
+        assert_eq!(load(&save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).unwrap().ended_s(), None);
     }
 
     /// Its crossing arrived after it was destroyed and before the save: it comes back where it
@@ -610,7 +631,7 @@ mod tests {
         let end_t = end_s * 1.0e6;
         let died = craft.position_at(end_t);
 
-        let row = save(&craft, None, None, None, Radio::default(), Light::default(), None, (2.0 * arrive_s * 1.0e6) as i64);
+        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, (2.0 * arrive_s * 1.0e6) as i64);
         let back = load(&row, None).expect("it reads");
         assert!(back.position_at(end_t).distance(died) < 1.0e-3, "{} {died}", back.position_at(end_t));
         assert!(back.worldline().velocity_at(end_t).distance(craft.worldline().velocity_at(end_t)) < 1.0e-12);
@@ -635,7 +656,7 @@ mod tests {
     fn the_crews_clock_survives_the_round_trip() {
         let mut craft = a_craft();
         craft.motion.clock_s = 86_400.0 * 365.0;
-        let back = load(&save(&craft, None, None, None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
         assert_eq!(back.motion.clock_s, craft.motion.clock_s);
     }
 
@@ -644,7 +665,7 @@ mod tests {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
         craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
-        let back = load(&save(&craft, None, None, None, Radio::default(), Light::default(), None, 5_000_000), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(9.0, 0.0, 0.0));

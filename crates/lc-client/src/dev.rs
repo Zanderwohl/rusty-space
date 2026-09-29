@@ -71,6 +71,8 @@ pub struct DevEntry {
     /// second reason it survived the phase that stopped calling it. The charting office kept as
     /// a dev tool.
     pub charted: bool,
+    /// Asked after `--station` has placed the ship: before, there is no system to survey.
+    pub survey: bool,
     /// Hold the beauty shots on one [`crate::beauty::Subject::kind`].
     pub beauty_kind: Option<String>,
     /// Save every beauty shot into this directory, numbered and named by kind.
@@ -174,6 +176,7 @@ pub(crate) fn place_on_station(
     dev: Res<DevEntry>,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
+    mut out: MessageWriter<Requested>,
     mut done: Local<bool>,
 ) {
     if *done {
@@ -219,6 +222,9 @@ pub(crate) fn place_on_station(
     game.0.place_at(at);
     game.0.ship.motion.begin_holding(waypoint);
     ui.notify(format!("on station: {label}"), game.coordinate_time_s());
+    if dev.survey {
+        out.write(Requested(Action::SurveySystem));
+    }
     *done = true;
 }
 

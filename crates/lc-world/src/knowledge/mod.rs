@@ -22,6 +22,7 @@ pub mod body;
 pub mod called;
 pub mod conclusion;
 pub mod follow_up;
+pub mod host;
 pub mod innovation;
 pub mod formats;
 pub mod moments;
@@ -45,6 +46,7 @@ pub mod turns;
 
 pub use astrometry::{Bearing, Distance};
 pub use body::{BodyBelief, SystemPlane};
+pub use host::Host;
 pub use placed::{PlaceError, Placed, Track};
 pub use conclusion::{Conclusion, Consumed, Digest};
 pub use names::designation;

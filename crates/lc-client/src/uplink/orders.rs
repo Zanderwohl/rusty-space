@@ -20,13 +20,17 @@ pub(super) fn fold(
             // and neither is what was sent, so folding what was sent instead is how a client
             // ends up somewhere the server does not have it.
             let at_s = at_t as f64 * 1e-6;
-            // The server drops a standing intercept on any flight order, so the pursuit the
-            // interface shows is over too.
-            if matches!(
+            // The server drops a standing intercept or parking orbit on any flight order.
+            let flies = matches!(
                 order,
                 Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive | Order::Burn { .. }
-            ) {
+            );
+            if flies {
                 uplink.chasing = None;
+            }
+            let boosts = matches!(order, Order::Emit { apertures: lc_proto::Apertures::Fore | lc_proto::Apertures::Aft, .. });
+            if flies || boosts || matches!(order, Order::Intercept { .. } | Order::BreakOff) {
+                uplink.parked = false;
             }
             let said = match &order {
                 Order::SendReport { to, .. } => Some(match to.map(|t| uplink.name_of(t)) {
@@ -97,6 +101,12 @@ pub(super) fn fold(
                     uplink.chasing =
                         Some(lc_proto::Pursuit { quarry: *ship_id, closeness: *closeness, approach: *approach });
                     Some(format!("closing on {}", ship_id.0))
+                }
+                // What it flies arrives as a motive, since this copy of the knowledge may be behind.
+                Order::Park => {
+                    uplink.chasing = None;
+                    uplink.parked = true;
+                    Some("parking".into())
                 }
                 // The server cut the drive of a ship that was flying the pursuit, and this folds
                 // the same cut at the same instant.
@@ -195,6 +205,7 @@ pub fn refused(reason: Refusal) -> String {
         Refusal::NoKey => "no key for them yet; send yours and ask for theirs".into(),
         Refusal::NothingNew => "nothing new to report since the last one".into(),
         Refusal::NotBuilt => "this shard cannot do that yet".into(),
+        Refusal::Uncharacterized => "the star is not yet known well enough to park by".into(),
         Refusal::Switching => "the field is already switching".into(),
         Refusal::NoAperture => "engines at one end only: emit fore or aft".into(),
         Refusal::OverRating => "more power than those apertures are rated for".into(),

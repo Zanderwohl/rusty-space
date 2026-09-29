@@ -76,6 +76,7 @@ pub(super) fn fold(
             uplink.place(&mut game.0);
             // A pursuit that outlived the last connection is stated straight after this.
             uplink.chasing = None;
+            uplink.parked = false;
             // **The server's rate, adopted.** Refusing to *change* the rate was not enough:
             // the client's own default is sixty times the server's, so a joined client ran
             // away from it at a hundred and forty coordinate hours a second without anybody

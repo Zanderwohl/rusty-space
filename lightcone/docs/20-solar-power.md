@@ -304,10 +304,58 @@ storage, in which case the excess is lost, the same rule as any full ship.
 - **Persistence.** A save in format 4 loads with no settled solar, and the next settlement starts
   collecting.
 
+## Parking
+
+**Status: built.** A ship that knows its star can be told to park: to hold the orbit where it fills
+fastest without running hot. `lc_world::parking` is the distance, `lc_world::knowledge::host` what
+the ship believes of its star, and `lc_server::park` the standing order.
+
+### Where
+
+Filling Black, the field takes conversion's loss and the drain, `(1 − η) P + drain`, while the
+arriving `P` is under the engines' rating, and all of any excess past it. Closer than where `P`
+meets the rating buys heat and no speed, so that is the nearest worth going. It is pushed out only if
+the heat there would settle past Auto's switch to Clear, the order's own `clear_above` or the
+balance's when the field is not in Auto:
+
+**P = min(rating, (clear_above · Q_max/τ − drain) / (1 − η))**, and **d = √(G L★ A / 4π P)**
+
+with `A` the broadside. The starting ship is rating-bound at the defaults: 0.042 AU from a Sun-like
+star, settling below Auto's switch. A lower ceiling moves it out until the filling heat sits on it.
+
+### Knowing the star
+
+`L★` is a belief, never the arena's. `Knowledge::host` derives it, with an error, from records the
+craft already holds, so a relayed report characterizes a star for a ship that was never there:
+
+| | from |
+|---|---|
+| distance | the host's own ranged looks from inside, or parallax |
+| radius | angular diameter × range, from the same looks |
+| temperature | the blackbody whose band ratios best fit the host's colors, which a system survey, a sweep crossing its sector and a stare at it now fold |
+| luminosity | `4πR²σT⁴`, and a look's band flux × `4π·range²` of the same look over that band's share of the blackbody, combined; failing both, the main sequence from the mass |
+| mass | `n²a³` from planets fitted to bearings about the star (a transit's axis was divided by a mass to begin with); failing that, the main sequence from the luminosity |
+
+The option is offered once the luminosity is known to 5%, which is 2.5% on where to park, since the
+distance goes as its root. A survey from inside characterizes Sol to a tenth of a percent in seconds.
+
+### Standing
+
+`Order::Park` is standing, as an intercept is. The shard flies it to where the craft believes it
+belongs, then checks once a solar segment and flies a correction when the orbit wanted is more than
+1% (`parking::REPARK`) from the orbit held. Once the ship holds its parking orbit, its collectors'
+reading of the starlight there joins the belief as `4πd²F`, whose only error is the distance's. A
+star brighter or dimmer than believed is a ship heating faster or slower than planned, and the
+reading is that heat read at its source rather than waited for. Only there: a reading anywhere at
+rest would characterize the star on its own, and the offer is the telescope's to earn.
+
+A correction meets the order's own gates, so none is flown while a refit runs or anything else is
+lit; it waits for the next check, as one that cannot be paid for does. Any other flight order ends
+it, and so do a boost from an emit and a collapse; a checkpoint keeps it (`SAVE_FORMAT` 18) and flies
+it afresh on load, and a client signing in is told with `Outbound::Parked`.
+
 ## Open
 
-- **Heat.** The mechanic's missing counter-pressure. Closer is always better until it exists.
-  Designed in [30-the-field.md](30-the-field.md), where collection becomes the field's intake.
 - **Multiple stars.** Only the primary is counted. A binary's companion contributes nothing.
 - **Eclipses.** A planet between ship and star does not shade it. A ship in low orbit is in shadow
   for up to half of each orbit, which is a real effect and a small one against a segment a day

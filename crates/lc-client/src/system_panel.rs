@@ -11,7 +11,8 @@ use lc_world::knowledge::conclusion::{Kind, SETTLED};
 use lc_world::knowledge::record::{Method, Orientation};
 use lc_world::knowledge::sort::Measured;
 use lc_world::knowledge::{BodyBelief, BodyId, Placed, Subject, SystemPlane};
-use lc_world::navigation::Target;
+use lc_world::navigation::{ALTITUDES, Course, Plane, Target};
+use lc_world::parking;
 use lc_world::sky::StarId;
 
 use crate::action::Action;
@@ -24,6 +25,13 @@ use crate::panels::{SystemTab, ask, range_to, ships, span, span_m, station};
 /// Below this the search has barely started on it and the number is noise dressed as a
 /// measurement.
 const WORTH_LISTING: f64 = 0.05;
+
+/// Points: about the detail column's height with a planet's courses open.
+const LIST_HEIGHT: f32 = 420.0;
+
+/// Points. Side by side so the window fits a 1080p screen.
+const LIST_WIDTH: f32 = 250.0;
+const DETAIL_WIDTH: f32 = 290.0;
 
 /// The system window: what is believed to be here, and where the ship can be sent.
 ///
@@ -48,6 +56,37 @@ pub(crate) fn system(
         ui.label("Between systems. There is nothing local to go to.");
         return;
     };
+    *picked = settle_pick(state.focus.as_ref(), *picked, &held.bodies, held);
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(LIST_WIDTH);
+            list(ui, state, game, system, held, uplink, tab, show_all, picked, revealed, out);
+        });
+        ui.separator();
+        ui.vertical(|ui| {
+            ui.set_width(DETAIL_WIDTH);
+            station(ui, game, uplink.parked, out);
+            ui.separator();
+            let parked = uplink.parked && game.station().is_some();
+            focused(ui, state, game, system, held, *picked, parked, draft, out);
+        });
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn list(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    system: &lc_world::system::LocalSystem,
+    held: &crate::beliefs::Held,
+    uplink: &crate::uplink::Uplink,
+    tab: &mut SystemTab,
+    show_all: &mut bool,
+    picked: &mut Option<BodyId>,
+    revealed: &mut Option<BodyId>,
+    out: &mut MessageWriter<Requested>,
+) {
     let known = &held.bodies;
     ui.horizontal(|ui| {
         ui.selectable_value(tab, SystemTab::Bodies, match known.len() {
@@ -62,7 +101,6 @@ pub(crate) fn system(
             n => format!("{n} ships"),
         });
     });
-    station(ui, game, out);
     ui.separator();
     if *tab == SystemTab::Ships {
         ships(ui, game, uplink, out);
@@ -89,9 +127,7 @@ pub(crate) fn system(
         ask(out, Action::FocusTarget((!star_picked).then_some(here).flatten()));
     }
 
-    *picked = settle_pick(state.focus.as_ref(), *picked, known, held);
-
-    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().max_height(LIST_HEIGHT).show(ui, |ui| {
         if known.is_empty() {
             ui.weak("Nothing known here yet. What the telescope finds appears in this list.");
         }
@@ -153,10 +189,22 @@ pub(crate) fn system(
             }
         }
     });
-    ui.separator();
+}
 
+#[allow(clippy::too_many_arguments)]
+fn focused(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    game: &Game,
+    system: &lc_world::system::LocalSystem,
+    held: &crate::beliefs::Held,
+    picked: Option<BodyId>,
+    parked: bool,
+    draft: &mut String,
+    out: &mut MessageWriter<Requested>,
+) {
     // A body's detail is its belief, whether or not anything in the arena answers to it.
-    if let Some(belief) = picked.and_then(|body| known.iter().find(|b| b.body == body)) {
+    if let Some(belief) = picked.and_then(|body| held.bodies.iter().find(|b| b.body == body)) {
         details(ui, belief, game, system, draft, out);
     }
     let Some(target) = state.focus.as_ref() else {
@@ -178,13 +226,11 @@ pub(crate) fn system(
             // about the one body the craft is sitting inside.
             lc_world::navigation::Kind::Star => {
                 ui.heading(game.name_of(system.star));
-                ui.weak(match game.knowledge.belief(system.star) {
-                    Some(belief) => format!(
-                        "star — {}",
-                        crate::range::short(Some(belief), game.ship.motion.position_ly)
-                    ),
-                    None => "star — nothing measured".to_string(),
-                });
+                let host = host(game, system, parked);
+                if host == lc_world::knowledge::Host::default() {
+                    ui.weak("star — nothing measured");
+                }
+                star_details(ui, &host);
             }
             lc_world::navigation::Kind::Band => {
                 let Target::Band(index) = entry.target else { return };
@@ -205,22 +251,128 @@ pub(crate) fn system(
         }
     }
 
-    for (label, course) in crate::navigation::options_for(system, target) {
-        let armed = state.course.as_ref() == Some(&course);
-        if ui.selectable_label(armed, &label).clicked() {
-            ask(out, Action::ChooseCourse((!armed).then_some(course)));
+    ui.separator();
+    let offered = (entry.kind == lc_world::navigation::Kind::Star).then(|| parking(game, system, parked)).flatten();
+    if let Some((label, course)) = offered.clone() {
+        let on = state.course.as_ref() == Some(&course);
+        let row = ui.selectable_label(on, label).on_hover_text("Optimal solar collection distance");
+        if row.clicked() {
+            ask(out, Action::ChooseCourse((!on).then_some(course)));
         }
     }
+    courses(ui, state, crate::navigation::options_for(system, target), out);
     ui.separator();
     ui.horizontal(|ui| {
         let ready = state.course.is_some();
         if ui.add_enabled(ready, egui::Button::new("Go")).clicked() {
             if let Some(course) = state.course.clone() {
-                ask(out, Action::SetCourse(course));
+                let parking = offered.as_ref().is_some_and(|(_, p)| *p == course);
+                ask(out, if parking { Action::Park(course) } else { Action::SetCourse(course) });
             }
         }
         ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
     });
+}
+
+/// Orbits as a grid of plane by height and libration points of kind by point, to save height.
+fn courses(
+    ui: &mut egui::Ui,
+    state: &Ui,
+    options: Vec<(String, Course)>,
+    out: &mut MessageWriter<Requested>,
+) {
+    let armed = |course: &Course| state.course.as_ref() == Some(course);
+    let mut choose = |ui: &mut egui::Ui, label: &str, course: &Course| {
+        let on = armed(course);
+        if ui.selectable_label(on, label).clicked() {
+            ask(out, Action::ChooseCourse((!on).then(|| course.clone())));
+        }
+    };
+    let orbits: Vec<_> = options.iter().filter(|(_, c)| matches!(c, Course::Orbit { .. })).collect();
+    if !orbits.is_empty() {
+        egui::Grid::new("orbits").num_columns(ALTITUDES.len() + 1).show(ui, |ui| {
+            for plane in [Plane::Equatorial, Plane::Polar] {
+                ui.weak(match plane {
+                    Plane::Equatorial => "equatorial",
+                    Plane::Polar => "polar",
+                });
+                for (_, course) in orbits.iter().filter(|(_, c)| matches!(c, Course::Orbit { plane: p, .. } if *p == plane)) {
+                    let Course::Orbit { altitude_radii, .. } = course else { continue };
+                    let height = ALTITUDES.iter().find(|(a, _)| a == altitude_radii).map_or("", |(_, h)| h);
+                    choose(ui, height, course);
+                }
+                ui.end_row();
+            }
+        });
+    }
+    let points: Vec<_> = options
+        .iter()
+        .filter(|(_, c)| matches!(c, Course::Lagrange { .. } | Course::Hangout { .. }))
+        .collect();
+    if !points.is_empty() {
+        egui::Grid::new("libration").num_columns(3).show(ui, |ui| {
+            for (kind, companion) in [("companion", true), ("hangout", false)] {
+                ui.weak(kind);
+                for (_, course) in &points {
+                    let point = match course {
+                        Course::Lagrange { point, .. } if companion => point,
+                        Course::Hangout { point, .. } if !companion => point,
+                        _ => continue,
+                    };
+                    choose(ui, &format!("{point:?}"), course);
+                }
+                ui.end_row();
+            }
+        });
+    }
+    for (label, course) in &options {
+        if !matches!(course, Course::Orbit { .. } | Course::Lagrange { .. } | Course::Hangout { .. }) {
+            choose(ui, label, course);
+        }
+    }
+}
+
+fn star_details(ui: &mut egui::Ui, host: &lc_world::knowledge::Host) {
+    use em_spectra::stellar::{SOLAR_LUMINOSITY, SOLAR_RADIUS};
+    let solar_kg = em_spectra::stellar::SOLAR_MU / lc_world::knowledge::body::GRAVITY;
+    let rows = [
+        ("Distance", host.distance_m, lc_world::navigation::AU, "AU"),
+        ("Radius", host.radius_m, SOLAR_RADIUS, "R☉"),
+        ("Temperature", host.teff_k, 1.0, "K"),
+        ("Luminosity", host.luminosity_w, SOLAR_LUMINOSITY, "L☉"),
+        ("Mass", host.mass_kg, solar_kg, "M☉"),
+    ];
+    for (name, value, unit, symbol) in rows {
+        if let Some((v, sigma)) = value {
+            ui.label(format!("{name}: {}", with_error(v / unit, sigma / unit, symbol)));
+        }
+    }
+}
+
+/// Rounded to what the label shows, so the armed course stays armed while the belief moves by less.
+fn parking(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) -> Option<(String, Course)> {
+    let at = parking::for_host(game.ship.fitting()?, game.coordinate_time_s(), &host(game, system, parked))?;
+    let au = significant(at.distance_m / lc_world::navigation::AU, 3);
+    let course = parking::course(system, au * lc_world::navigation::AU)?;
+    Some((format!("parking orbit, {au} AU"), course))
+}
+
+/// With the collectors' reading only while `parked`, as the shard parks by. See `lc_server::park`.
+fn host(game: &Game, system: &lc_world::system::LocalSystem, parked: bool) -> lc_world::knowledge::Host {
+    let now_s = game.coordinate_time_s();
+    let host = game.knowledge.host(system.star, game.ship.motion.position_ly);
+    match game.ship.flux_w_m2_at(now_s).filter(|_| parked) {
+        Some(flux) => host.with_reading(flux),
+        None => host,
+    }
+}
+
+fn significant(value: f64, digits: i32) -> f64 {
+    if !(value.abs() > 0.0) || !value.is_finite() {
+        return value;
+    }
+    let scale = 10f64.powi(digits - 1 - value.abs().log10().floor() as i32);
+    (value * scale).round() / scale
 }
 
 /// What is believed about one body, and on whose word.

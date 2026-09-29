@@ -772,7 +772,7 @@ pub(crate) fn ships(
 }
 
 /// Where the ship is holding, if it is holding anywhere.
-pub(crate) fn station(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>) {
+pub(crate) fn station(ui: &mut egui::Ui, game: &Game, parked: bool, out: &mut MessageWriter<Requested>) {
     let Some(system) = game.system.as_ref() else { return };
     let Some(waypoint) = game.station() else {
         match game.coast() {
@@ -790,7 +790,8 @@ pub(crate) fn station(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Re
         }
         return;
     };
-    ui.label(format!("holding: {}", waypoint.label(&game.home_labels())));
+    let holding = if parked { "parked" } else { "holding" };
+    ui.label(format!("{holding}: {}", waypoint.label(&game.home_labels())));
     if let Some(period) = waypoint.period_s(system, game.coordinate_time_s()) {
         ui.weak(format!("one turn in {}", duration(period)));
     }

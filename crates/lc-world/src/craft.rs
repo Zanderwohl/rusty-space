@@ -548,6 +548,16 @@ impl Craft {
         Some((at - star).length() * crate::system::M_PER_LY)
     }
 
+    /// The starlight where it is at `t`, W/m², as its collectors read it. A reading of the place,
+    /// so it needs no belief about the star. `None` under way, between systems, or unfitted.
+    pub fn flux_w_m2_at(&self, t: f64) -> Option<f64> {
+        let system = self.system.as_deref()?;
+        if self.fitting.is_none() || self.motion.is_under_way() {
+            return None;
+        }
+        Some(solar::flux_w_m2(system.star_luminosity_w(), self.star_distance_m_at(t)?))
+    }
+
     /// Watts arriving at its field at `t`, over its shadow in the attitude it holds then. Zero under
     /// way, between systems, and with no fitting.
     pub fn starlight_w_at(&self, t: f64) -> f64 {

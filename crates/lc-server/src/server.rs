@@ -162,6 +162,8 @@ pub struct Server<J: Journal> {
     /// **Not** dropped when the pilot signs out. A ship hanging about with another goes on
     /// hanging about, and a checkpoint writes the policy down with the craft.
     pub(crate) pursuits: HashMap<CraftId, Pursuit>,
+    /// See [`crate::park`].
+    pub(crate) parks: HashMap<CraftId, crate::park::Park>,
     /// How fast this world runs, as a multiple of the design rate. See [`Server::set_rate`].
     rate: f64,
     /// Whether a client may stage a scene. See [`Server::directing`].
@@ -243,6 +245,7 @@ impl<J: Journal> Server<J> {
             open: false,
             blocked: HashMap::new(),
             pursuits: HashMap::new(),
+            parks: HashMap::new(),
             keys: HashMap::new(),
             heard: HashMap::new(),
             said: Vec::new(),
@@ -290,7 +293,7 @@ impl<J: Journal> Server<J> {
 
     /// Coordinate microseconds this server's nominal tick covers.
     #[cfg(test)]
-    fn tick_us(&self) -> i64 {
+    pub(crate) fn tick_us(&self) -> i64 {
         self.span_us(std::time::Duration::from_millis(TICK_MS as u64))
     }
 
@@ -510,6 +513,7 @@ impl<J: Journal> Server<J> {
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
         self.steer_pursuits(wire, &mut events, &mut deliveries);
+        self.steer_parks(wire, &mut events, &mut deliveries);
         // After the intents, so an auto-ack switched off this tick answers nothing more.
         self.answer_owed(after_t, &mut events, &mut deliveries);
         self.announce_drives(after_t, &mut events, &mut deliveries);
@@ -589,7 +593,7 @@ impl<J: Journal> Server<J> {
                     Ok(applied) => {
                         // An intercept is a policy, so what it *did* — the first approach —
                         // is not something the client can work out from the order coming back.
-                        if matches!(applied.order, Order::Intercept { .. } | Order::Emit { .. }) {
+                        if matches!(applied.order, Order::Intercept { .. } | Order::Emit { .. } | Order::Park) {
                             self.tell_flying(wire, CraftId(ship_id.0));
                         }
                         wire.send(from, Outbound::Accepted {
@@ -642,6 +646,9 @@ impl<J: Journal> Server<J> {
         // After the welcome, which is the message a client has to have first.
         if let Some(pursuit) = pursuing {
             wire.send(from, Outbound::Pursuing { ship_id, pursuit });
+        }
+        if self.parks.contains_key(&CraftId(ship_id.0)) {
+            wire.send(from, Outbound::Parked { ship_id });
         }
         self.tell_fitted(wire, CraftId(ship_id.0));
         self.tell_observing(wire, from, CraftId(ship_id.0));
@@ -708,7 +715,7 @@ impl<J: Journal> Server<J> {
         }
         let lights_the_drive = matches!(
             intent.order,
-            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. }
+            Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::Intercept { .. } | Order::Park
         );
         if lights_the_drive && self.fleet.get(id).is_some_and(|craft| craft.is_refitting(at_s)) {
             return Err(Refusal::Refitting);
@@ -907,6 +914,11 @@ impl<J: Journal> Server<J> {
                 }
                 (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
             }
+            Order::Park => {
+                let accel_g = self.fly_to_park(id, at_s)?;
+                self.pursuits.remove(&id);
+                (KIND_BURN, BURN_POWER_W, format!("{{\"accel_g\":{accel_g}}}"), Order::Park)
+            }
             Order::Refit { target } => {
                 self.refit(id, target, at_s)?;
                 // Drones are quiet. What a refit does to the hull is seen when its light arrives,
@@ -949,6 +961,9 @@ impl<J: Journal> Server<J> {
             Order::Burn { .. } | Order::SetCourse { .. } | Order::Cross { .. } | Order::CutDrive
         ) {
             self.pursuits.remove(&id);
+        }
+        if crate::park::ends_parking(&applied) {
+            self.parks.remove(&id);
         }
 
         let event_id = self.put_on_air(
@@ -1338,7 +1353,7 @@ fn adrift_at_the_origin() -> lc_proto::Motion {
     (&lc_world::motion::ShipState::at(DVec3::ZERO).snapshot()).into()
 }
 
-fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
+pub(crate) fn motion_id(id: CraftId) -> lc_world::motion::ShipId {
     lc_world::motion::ShipId(id.0)
 }
 
@@ -2221,6 +2236,23 @@ use crate::transport::Loopback;
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_refused_park_leaves_an_intercept_standing() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.admit(ClientId(1), crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.pursuits.insert(CraftId(1), Pursuit {
+            quarry: ShipId(2),
+            closeness: lc_world::pursuit::Closeness::Company,
+            approach: lc_proto::Approach::Direct,
+            last_plan_t: 0,
+            last_seen: None,
+        });
+        let intent = Intent { ship_id: ShipId(1), order: Order::Park, issued_at_client_t: 0 };
+        let refused = server.act(ClientId(1), intent, &mut Vec::new(), &mut Vec::new());
+        assert_eq!(refused.err(), Some(Refusal::Uncharacterized));
+        assert!(server.pursuits.contains_key(&CraftId(1)), "a refused order ended the pursuit");
     }
 
     #[tokio::test]
