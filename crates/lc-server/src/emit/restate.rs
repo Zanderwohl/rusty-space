@@ -76,11 +76,11 @@ fn seen(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, t: i64) -> Opt
     let offset = here - from;
     let emitted = Emitted { from: from.to_array(), ..s.emitted };
     let shadow_m2 = shadow_toward_m2(receiver, -offset, t as f64 * 1.0e-6);
-    let margin_rad = emitted.cone().margin_rad(offset, radius_us(shadow_m2));
-    let lit = emitted.power_w > 0.0 && (emitted.cone().is_omni() || margin_rad >= 0.0);
+    let (cone, radius) = (emitted.cone(), radius_us(shadow_m2));
+    let lit = emitted.power_w > 0.0 && cone.reaches(offset, radius);
     let distance_m = offset.length() * LIGHT_MICROSECOND_M;
     let share_w = if lit { emitted.power_w * emitted.fraction(shadow_m2, distance_m) } else { 0.0 };
-    let to_edge_rad = margin_rad.abs();
+    let to_edge_rad = cone.margin_rad(offset, radius).abs();
     Some(Seen { said_t: s.t, emitted, lit, share_w, distance: offset.length(), to_edge_rad })
 }
 

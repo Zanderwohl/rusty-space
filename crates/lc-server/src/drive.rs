@@ -1,4 +1,4 @@
-//! Every craft's drive transitions, stated as events.
+//! Every craft's drive and emit transitions, stated as events: a burn is an emit.
 //!
 //! Found after the fact, once a tick, over the tick just finished — see [`lc_world::ignition`]
 //! for why that and not a schedule of the plan's future. Each is stamped at the instant it

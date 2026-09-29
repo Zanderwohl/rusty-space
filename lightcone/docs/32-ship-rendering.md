@@ -568,7 +568,8 @@ things:
   candidates wins.
 
 The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
-inside, and for a selected ship. Clicking a ship in either view selects it, and `--focus craft:<id>`
+inside, and for a selected ship. An emit's is drawn for another ship only if you are inside the cone
+as well: a narrow emit's courtesy radius spans a system. A spread of zero draws nothing. Clicking a ship in either view selects it, and `--focus craft:<id>`
 does so for a photograph. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s palette,
 and is brightest where it would cook. The map draws the same cone as lines: eight generators, the
 rim at the courtesy radius, and a ring at the cooking distance.

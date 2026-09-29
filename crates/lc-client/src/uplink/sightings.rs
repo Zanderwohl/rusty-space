@@ -533,6 +533,29 @@ mod tests {
         let later = lc_proto::Presence { drive_w: 0.0, emitted_t: 400_000_000, arrive_t: 400_000_000, ..presence };
         fold(&mut uplink, &mut game, &mut ui, present(later));
         assert_eq!(power_at(&mut uplink, 410.0), 0.0, "an older event outranked a newer statement");
+
+        // An emit is stated as a burn is: lit out of its end, at its spread, until it goes out.
+        let emit = |event_id, at_s: f64, aft_w| {
+            let change = lc_proto::DriveChange { power_w: 0.0, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: aft_w, emit_spread_rad: 0.02 };
+            let sighting = Sighting {
+                event_id,
+                source_id: 2,
+                arrive_t: (at_s * 1e6) as i64,
+                emitted_t: (at_s * 1e6) as i64,
+                direction: [1.0, 0.0, 0.0],
+                strength: 1.0,
+                kind: lc_proto::kind::DRIVE,
+                payload: serde_json::to_string(&change).unwrap(),
+            };
+            Cleared::<Sighting>::clear(sighting, (at_s * 1e6) as i64, 0.0).unwrap()
+        };
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Sightings(vec![emit(3, 420.0, burning), emit(4, 480.0, 0.0)]));
+        let emit_at = |uplink: &mut Uplink, now_s: f64| {
+            uplink.reckon(None, DVec3::X * 1e3 / lc_world::system::M_PER_LY, now_s);
+            (uplink.contacts[0].emit.aft_w, uplink.contacts[0].emit_spread_rad)
+        };
+        assert_eq!(emit_at(&mut uplink, 450.0), (burning, 0.02), "lit");
+        assert_eq!(emit_at(&mut uplink, 490.0).0, 0.0, "out");
     }
 
     /// Past [`REMEMBERED_DRIVERS`], only the contacts in sight keep their drive histories.

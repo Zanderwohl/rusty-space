@@ -114,12 +114,15 @@ and a system whose traffic is all elsewhere look the same from inside.
 
 A plume is not an appearance a tick can sample. The flip in the middle of every crossing is a
 minute of coasting, and a tick is 438 coordinate seconds at the design rate, so a `Presence`
-once a tick missed it almost every time. So **the drive lighting, going out or changing power
-is an event** (`kind::DRIVE`, payload `DriveChange`), stamped at the instant it happened.
+once a tick missed it almost every time. So **the drive or an emit lighting, going out or
+changing power is an event** (`kind::DRIVE`, payload `DriveChange`: the drive's `F c`, each end's
+emit and its spread), stamped at the instant it happened. A burn is an emit and an emit a burn,
+and each is stated alike.
 
 The shard finds them after the fact, once a tick, for the tick just finished
-(`lc_world::ignition`): from each plan's phase boundaries and from every change of motive the
-craft's history recorded. Never scheduled ahead, because a plan replaced before it lit never
+(`lc_world::ignition`): from each plan's phase boundaries, from every change of motive the
+craft's history recorded, and from where each balanced emit the craft remembers lit and went
+out, since a balanced emit changes no motive. Never scheduled ahead, because a plan replaced before it lit never
 lit and there is then nothing to withdraw. Stamped inside the tick just finished, so the
 cursor still has them in range when they are released at light delay like anything else. That
 costs up to a tick of delivery; it never costs the transition.
@@ -127,8 +130,8 @@ costs up to a tick of delivery; it never costs the transition.
 A cut carries the power it cut, not zero: a plume going dark is exactly as visible as the plume
 was. The order to cut is still silent, and so is the ship afterwards.
 
-The client draws a contact's plume from whichever is later at the instant its light left: the
-last drive event, or the last statement.
+The client draws a contact's plume and emits from whichever is later at the instant its light
+left: the last drive event, or the last statement.
 
 ### Intercept: a standing order
 

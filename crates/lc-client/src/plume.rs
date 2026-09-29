@@ -68,7 +68,7 @@ pub struct Lit {
     /// `None` for the player's own.
     pub craft: Option<ShipId>,
     pub jet: Jet,
-    /// `F c` for the drive, watts.
+    /// What leaves through this jet's end, watts.
     pub power_w: f64,
     pub half_angle_rad: f64,
     pub at_ly: DVec3,
@@ -86,13 +86,18 @@ fn jets(drive_w: f64, emit: Ends, spread_rad: f64, balance: &Balance) -> [(Jet, 
     ]
 }
 
-/// The cone's length, the courtesy radius, if it is drawn for an observer at `here_ly`.
+/// The cone's length, the courtesy radius, if it is drawn for an observer at `here_ly`: inside the
+/// radius, and for an emit inside its cone too, since a narrow one's radius spans a system.
 pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Balance) -> Option<f64> {
-    if lit.power_w <= 0.0 {
+    // A spread of zero is a cone of no solid angle, whose courtesy radius is infinite.
+    if lit.power_w <= 0.0 || lit.half_angle_rad <= 0.0 {
         return None;
     }
     let radius_m = courtesy_radius_m(balance, lit.power_w, lit.half_angle_rad);
-    let inside = lit.at_ly.distance(here_ly) * M_PER_LY <= radius_m;
+    let offset = here_ly - lit.at_ly;
+    let out = if lit.jet.fore() { lit.facing } else { -lit.facing };
+    let in_cone = lit.jet == Jet::Drive || lc_world::signal::Beam::along(out, lit.half_angle_rad).covers(offset);
+    let inside = offset.length() * M_PER_LY <= radius_m && in_cone;
     let chosen = lit.craft.is_some() && lit.craft == selected;
     (lit.craft.is_none() || inside || chosen).then_some(radius_m)
 }
@@ -361,6 +366,9 @@ pub fn draw_exhaust(
         ));
     }
 
+    // Only the spreads drawn this frame: an emit's is its own, and each new one is a new mesh.
+    let drawn: Vec<u64> = want_cones.iter().map(|(_, _, half_angle, _, _)| half_angle.to_bits()).collect();
+    exhausts.cone_proxies.retain(|(bits, _)| drawn.contains(bits));
     let mut proxy_for = |half_angle: f64| {
         let bits = half_angle.to_bits();
         match exhausts.cone_proxies.iter().find(|(b, _)| *b == bits) {
@@ -468,6 +476,23 @@ mod tests {
         assert_eq!(cone(lit(other, power, far), Some(ShipId(5))), None, "another selected");
         assert_eq!(cone(lit(None, 0.0, here), None), None, "coasting");
         assert_eq!(cone(lit(other, 0.0, here), other), None, "selected and coasting");
+    }
+
+    /// Another ship's emit is drawn for an observer inside its radius only if inside its cone as
+    /// well, since a narrow emit's radius spans a system; selected, it is drawn anyway. A spread of
+    /// zero, a cone of no solid angle, is never drawn.
+    #[test]
+    fn an_emit_is_coned_for_whoever_is_inside_it() {
+        let other = Some(ShipId(4));
+        let emit = |jet, half_angle_rad| Lit { jet, half_angle_rad, ..lit(other, 1.0e17, DVec3::ZERO) };
+        let behind = -DVec3::X * 1.0e3;
+        let cone = |l: Lit, at: DVec3, selected| cone_m(&l, at / M_PER_LY, selected, &B);
+        assert!(cone(emit(Jet::EmitAft, 0.01), behind, None).is_some(), "behind an aft emit");
+        assert!(cone(emit(Jet::EmitFore, 0.01), behind, None).is_none(), "behind a fore emit");
+        assert!(cone(emit(Jet::EmitAft, 0.01), DVec3::Y * 1.0e3, None).is_none(), "beside it");
+        assert!(cone(emit(Jet::EmitFore, 0.01), behind, other).is_some(), "selected");
+        assert!(cone(emit(Jet::EmitAft, 0.0), behind, other).is_none(), "no spread");
+        assert!(cone(Lit { half_angle_rad: 0.0, ..lit(None, 1.0e17, DVec3::ZERO) }, behind, None).is_none());
     }
 
     /// The cone runs out at the courtesy radius, which grows as the root of the power.

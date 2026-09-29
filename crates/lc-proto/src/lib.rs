@@ -523,7 +523,6 @@ pub struct Presence {
     pub emit_fore_w: f64,
     pub emit_aft_w: f64,
     /// The half-angle those emits were sent in, radians: the cone each end's light fills.
-    #[serde(default)]
     pub emit_spread_rad: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
