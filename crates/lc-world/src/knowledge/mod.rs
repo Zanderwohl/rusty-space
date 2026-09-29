@@ -1613,6 +1613,44 @@ mod tests {
         assert!(tied.report_upto(mark, 100.0, 4).1.is_none(), "and then nothing");
     }
 
+    /// The home system is learned in one tick and does not fit one transmission, so a report
+    /// can stop partway through a system and pick up there.
+    #[test]
+    fn a_system_too_big_for_one_report_is_told_over_several() {
+        let star = star_id(50);
+        let mut probe = Knowledge::new(Witness(2));
+        probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 1.0));
+        let bodies: Vec<Subject> = (0..20).map(|k| planet(star, &format!("b{k}")).1).collect();
+        for &subject in &bodies {
+            probe.sighted(subject, sighting(2, DVec3::ZERO, DVec3::Y, 1.0));
+        }
+        let later = star_id(51);
+        probe.sighted(later, sighting(2, DVec3::ZERO, DVec3::Z, 2.0));
+
+        let mut mark = Mark::default();
+        let mut told = std::collections::BTreeSet::new();
+        let mut reports = 0;
+        loop {
+            let (report, next) = probe.report_within(mark, 10.0, 6);
+            let Some(next) = next else { break };
+            assert!(report.entries.iter().map(|e| e.parts.len()).sum::<usize>() <= 6);
+            for part in report.entries.iter().flat_map(|e| &e.parts) {
+                assert!(told.insert(part.subject), "{:?} told twice", part.subject);
+            }
+            mark = next;
+            reports += 1;
+        }
+        assert_eq!(told.len(), 22, "the star, its twenty bodies and the next star");
+        assert_eq!(reports, 5, "four shares of the big system, then the next star");
+
+        let mut saved = Reporting::default();
+        let (_, partway) = probe.report_within(Mark::default(), 10.0, 6);
+        saved.sent(9, partway.unwrap());
+        assert!(saved.since(9).within.is_some());
+        let (rest, _) = probe.report_upto(saved.since(9), 10.0, 64);
+        assert_eq!(rest.entries.iter().map(|e| e.parts.len()).sum::<usize>(), 16, "resumed where it stopped");
+    }
+
     #[test]
     fn a_series_belongs_to_the_witness_that_took_it() {
         let star = star_id(4);

@@ -103,31 +103,47 @@ impl Reporting {
 }
 
 /// How far through a backlog something has got: everything learned before `at_s`, and at
-/// exactly `at_s` everything about systems up to `after`.
+/// exactly `at_s` everything about systems up to `after` — of `after` itself, only its subjects
+/// up to `within`, when it has one.
 ///
 /// A time alone is not enough: a sweep finds a hundred stars in one tick, and a page that could
-/// only cut between times would have to carry all of them or none.
+/// only cut between times would have to carry all of them or none. A system alone is not enough
+/// either: the home system's two hundred bodies are learned in one tick and do not fit one
+/// transmission.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Mark {
     pub at_s: f64,
     pub after: Option<Subject>,
+    #[serde(default)]
+    pub within: Option<Subject>,
 }
 
 impl Default for Mark {
     fn default() -> Self {
-        Self { at_s: f64::NEG_INFINITY, after: None }
+        Self { at_s: f64::NEG_INFINITY, after: None, within: None }
     }
+}
+
+/// How much of a mark's system it has reached. Every subject sorts before the whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Upto {
+    Only(Subject),
+    Whole,
 }
 
 impl Mark {
     /// Everything learned at or before `at_s`.
     pub fn through(at_s: f64) -> Self {
-        Self { at_s, after: Some(Subject::Place([i64::MAX; 3])) }
+        Self { at_s, after: Some(Subject::Place([i64::MAX; 3])), within: None }
     }
 
-    fn key(&self) -> (At, Option<Subject>) {
-        (At(self.at_s), self.after)
+    fn key(&self) -> (At, Option<Subject>, Upto) {
+        (At(self.at_s), self.after, self.within.map_or(Upto::Whole, Upto::Only))
     }
+}
+
+fn item_key(at_s: f64, system: Subject, subject: Subject) -> (At, Option<Subject>, Upto) {
+    (At(at_s), Some(system), Upto::Only(subject))
 }
 
 impl PartialOrd for Mark {
@@ -261,7 +277,7 @@ impl Backlog {
         let from = (At(since.at_s), since.after.unwrap_or(least), least);
         self.items
             .range(from..)
-            .filter(move |(at, system, _)| (*at, Some(*system)) > since.key())
+            .filter(move |(at, system, subject)| item_key(at.0, *system, *subject) > since.key())
             .take_while(move |(at, _, _)| at.0 <= until_s)
             .map(|(at, system, subject)| (at.0, *system, *subject))
     }
@@ -305,34 +321,50 @@ impl Knowledge {
     /// from (`None` when there is nothing to send). A planet rides with its star, and nothing
     /// learned after `sent_s` goes.
     pub fn report_upto(&self, since: Mark, sent_s: f64, limit: usize) -> (Report, Option<Mark>) {
+        self.drain(since, sent_s, limit, usize::MAX)
+    }
+
+    /// The oldest system alone, as much of it as `limit` subjects will carry: for a system too big
+    /// for one transmission, which is then told over several.
+    pub fn report_within(&self, since: Mark, sent_s: f64, limit: usize) -> (Report, Option<Mark>) {
+        self.drain(since, sent_s, 1, limit)
+    }
+
+    fn drain(&self, since: Mark, sent_s: f64, system_limit: usize, subject_limit: usize) -> (Report, Option<Mark>) {
         let mut systems: BTreeSet<Subject> = BTreeSet::new();
         let mut subjects: BTreeSet<Subject> = BTreeSet::new();
-        let mut cut: Option<(At, Subject)> = None;
+        let mut cut: Option<(f64, Subject, Subject)> = None;
+        let mut split = false;
         for (t, system, subject) in self.backlog.after(since, sent_s) {
-            if !systems.contains(&system) && systems.len() >= limit {
+            if !systems.contains(&system) && systems.len() >= system_limit {
+                break;
+            }
+            if !subjects.contains(&subject) && subjects.len() >= subject_limit {
+                split = true;
                 break;
             }
             systems.insert(system);
             subjects.insert(subject);
-            cut = Some((At(t), system));
+            cut = Some((t, system, subject));
         }
         let empty = Report { from: self.owner, sent_s, entries: Vec::new() };
-        let Some(cut) = cut else { return (empty, None) };
-        let within = |t: f64, system: Subject| {
-            let key = (At(t), Some(system));
-            key > since.key() && key <= (cut.0, Some(cut.1))
+        let Some((at_s, system, last)) = cut else { return (empty, None) };
+        let mark = Mark { at_s, after: Some(system), within: split.then_some(last) };
+        let within = |t: f64, system: Subject, subject: Subject| {
+            let key = item_key(t, system, subject);
+            key > since.key() && key <= mark.key()
         };
         let mut parts: BTreeMap<Subject, Vec<Part>> = BTreeMap::new();
         for subject in subjects {
             let system = subject.system();
-            if let Some(part) = self.files.get(&subject).and_then(|f| f.part(subject, |t| within(t, system))) {
+            if let Some(part) = self.files.get(&subject).and_then(|f| f.part(subject, |t| within(t, system, subject))) {
                 parts.entry(system).or_default().push(part);
             }
         }
         let mut entries: Vec<Entry> = parts.into_iter().map(|(system, parts)| Entry { system, parts }).collect();
         entries.sort_by(|a, b| a.learned_through().total_cmp(&b.learned_through()));
         let report = Report { entries, ..empty };
-        (report, Some(Mark { at_s: cut.0 .0, after: Some(cut.1) }))
+        (report, Some(mark))
     }
 
     /// Fold in what somebody else sent, as of the moment its light landed. Every item gains a
