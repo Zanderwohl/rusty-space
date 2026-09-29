@@ -21,7 +21,7 @@ use crate::fitting::Balance;
 use crate::flight::{Aim, C_M_S, Drive, G0, JULIAN_YEAR_S};
 use crate::form::capacity::Aperture;
 use crate::motion::{self, Motive};
-use crate::signal::cone_solid_angle_sr;
+use crate::signal::{Beam, cone_solid_angle_sr};
 
 /// What every emit is sent at until wavelength is a choice worth offering: the middle of V, the one
 /// band every default mapping shows, so an observer inside a beam sees it. 31 §Emitting on purpose.
@@ -259,13 +259,24 @@ pub fn emit_w(craft: &Craft, now_s: f64) -> Ends {
     ends
 }
 
-/// The half-angle `craft`'s emit is sent in at `now_s`, whichever end it leaves. `None` while none
-/// is lit.
-pub fn emit_spread_rad(craft: &Craft, now_s: f64) -> Option<f64> {
+/// How far outside a cone's edge it is still seen, radians: the light its edge scatters. Anyone
+/// further out sees the faces it leaves and not the cone.
+pub const SCATTER_RAD: f64 = 0.035;
+
+/// The cone `craft`'s emit fills out of its fore end at `now_s`; the aft end's is the other way.
+/// `None` while none is lit. An emit flown as a burn is lit only once the nose has come about, so
+/// its fore end points along the nose whichever end it leaves.
+pub fn emit_cone(craft: &Craft, now_s: f64) -> Option<Beam> {
     match &craft.motion_at(now_s).motive {
-        Motive::Boosting(boost) if boost.thrust_at(now_s) != DVec3::ZERO => Some(boost.half_angle_rad),
-        _ => craft.balanced_spread_at(now_s),
+        Motive::Boosting(boost) if boost.thrust_at(now_s) != DVec3::ZERO => Some(Beam::along(boost.nose, boost.half_angle_rad)),
+        _ => craft.balanced_at(now_s).map(|lit| Beam::along(lit.axis, lit.half_angle_rad)),
     }
+}
+
+/// Whether an observer `offset` from where `cone` leaves sees it: inside it, or near enough its edge
+/// to see what the edge scatters. Nothing is seen of a cone of no width.
+pub fn glanced(cone: &Beam, offset: DVec3) -> bool {
+    cone.half_angle_rad > 0.0 && Beam::along(cone.axis, cone.half_angle_rad + SCATTER_RAD).covers(offset)
 }
 
 /// Everything leaving `craft`'s open faces at `now_s`: its emits, and its main drive aft.
@@ -607,7 +618,7 @@ mod tests {
         use crate::fitting::Lit;
         let motion = crate::motion::ShipState::at(DVec3::ZERO);
         let mut fitting = Fitting::full(Form::starting(), Balance::DEFAULT, 0.0);
-        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19, half_angle_rad: 0.01 });
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19, half_angle_rad: 0.01, axis: DVec3::X });
         assert_eq!(fitting.committed_j_at(&motion, 0.0), 1.0e21);
         assert!((fitting.committed_j_at(&motion, 40.0) - 6.0e20).abs() < 1.0e6);
         fitting.settle(&motion, 40.0);

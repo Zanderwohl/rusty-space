@@ -291,12 +291,16 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   was ordered from, at the rocket law's throttle, and a balanced one's `power_w` from each. It is
   what an observer's view of the faces is lit by, so every face an emission leaves through glows
   whatever lit it. A balanced emit is kept by its craft once it is out, as its field is, since the
-  fitting forgets it and an observer far off has not yet seen it go out. `emit_spread_rad` is the
-  half-angle it was lit at, kept on the `Boost` and the balanced `Lit`, so an observer draws its
-  cone as it draws a drive's.
+  fitting forgets it and an observer far off has not yet seen it go out.
+- **Its cone only to those it glances.** Anyone who can see a craft sees the faces an emission
+  leaves through. The cone it fills is seen only from inside it, or within `SCATTER_RAD`, 2°, past
+  its edge, where the edge scatters: `lc_world::emit::glanced`. So `Presence` states `emit_axis`
+  and `emit_spread_rad`, the fore end's cone, kept on the `Boost` and the balanced `Lit`, only to an
+  observer it glances as its light left, and zero to everyone else. A drive's cone is seen by the
+  same rule, from its facing and the drive's spread, which everyone knows.
 - **A burn is an emit and an emit a burn, and each is stated alike.** Where either lights, goes
   out or steps in power, a `DRIVE` event says so to everyone who can see the craft, with the
-  drive's `F c` and each end's emit and its spread, so a burn shorter than a tick is seen by
+  drive's `F c` and each end's emit, and not the cone, so a burn shorter than a tick is seen by
   everyone and not only by whoever a statement happens to sample it for. A balanced emit's
   lighting and going out are among those instants.
 - **`power_w` is what each end sends.** A balanced emit sends it along the aim from the fore

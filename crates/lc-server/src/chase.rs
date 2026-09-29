@@ -210,6 +210,12 @@ pub fn contacts(
             };
             let then = craft.seen_at(sighted.emitted_s);
             let emit = lc_world::emit::emit_w(craft, sighted.emitted_s);
+            // Its cone only to an observer it glances, out of either end it leaves; the rest see its faces.
+            let offset = observer.position_at(now_t as f64) / LIGHT_US_PER_LY - sighted.position_ly;
+            let cone = lc_world::emit::emit_cone(craft, sighted.emitted_s).filter(|fore| {
+                let aft = lc_world::signal::Beam::along(-fore.axis, fore.half_angle_rad);
+                (emit.fore_w > 0.0 && lc_world::emit::glanced(fore, offset)) || (emit.aft_w > 0.0 && lc_world::emit::glanced(&aft, offset))
+            });
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
                 name: craft.designation(),
@@ -228,7 +234,8 @@ pub fn contacts(
                 drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
                 emit_fore_w: emit.fore_w,
                 emit_aft_w: emit.aft_w,
-                emit_spread_rad: lc_world::emit::emit_spread_rad(craft, sighted.emitted_s).unwrap_or(0.0),
+                emit_axis: cone.map_or([0.0; 3], |c| c.axis.to_array()),
+                emit_spread_rad: cone.map_or(0.0, |c| c.half_angle_rad),
                 emitted_t: (sighted.emitted_s * 1.0e6) as i64,
                 // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
                 // construction, so this is the light landing at this instant.

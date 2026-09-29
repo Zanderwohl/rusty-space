@@ -115,8 +115,8 @@ and a system whose traffic is all elsewhere look the same from inside.
 A plume is not an appearance a tick can sample. The flip in the middle of every crossing is a
 minute of coasting, and a tick is 438 coordinate seconds at the design rate, so a `Presence`
 once a tick missed it almost every time. So **the drive or an emit lighting, going out or
-changing power is an event** (`kind::DRIVE`, payload `DriveChange`: the drive's `F c`, each end's
-emit and its spread), stamped at the instant it happened. A burn is an emit and an emit a burn,
+changing power is an event** (`kind::DRIVE`, payload `DriveChange`: the drive's `F c` and each
+end's emit, but not an emit's cone, which only those it glances are told), stamped at the instant it happened. A burn is an emit and an emit a burn,
 and each is stated alike.
 
 The shard finds them after the fact, once a tick, for the tick just finished

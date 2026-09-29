@@ -751,45 +751,61 @@ async fn a_diffraction_limited_beam_at_a_craft_lands_on_it_until_it_goes_out() {
     assert!(told[..told.len() - 1].iter().all(|(_, w, _)| *w > 0.0), "went dark while lit: {told:?}");
 }
 
-/// Every `Presence` of the emitter the observer was told while `apertures` were lit, by the spread
-/// it stated, and each DRIVE event the emitter wrote.
-async fn stated_emit(apertures: Apertures, power_w: f64, spread_rad: f64) -> (Vec<f64>, Vec<lc_proto::DriveChange>) {
+/// What each observer was told of the emitter's cone in every `Presence` of it lit, one along the
+/// aim and one beside it, and each DRIVE event the emitter wrote.
+struct Stated {
+    along: Vec<([f64; 3], f64)>,
+    beside: Vec<([f64; 3], f64)>,
+    drives: Vec<lc_proto::DriveChange>,
+}
+
+async fn stated_emit(apertures: Apertures, power_w: f64, spread_rad: f64) -> Stated {
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_SECOND_US, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::X * LIGHT_SECOND_US, Form::starting()), 0.0);
+    server.admit(ClientId(3), ship(3, DVec3::Y * LIGHT_SECOND_US, Form::starting()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), apertures, power_w, 1.0e-6, spread_rad, 3.0 * HOUR_S));
-    let mut spreads = Vec::new();
+    let (mut along, mut beside) = (Vec::new(), Vec::new());
     while (server.now_t() as f64) < 12.0 * HOUR_S * 1.0e6 {
         server.tick(&mut wire).await.unwrap();
-        for message in wire.take(ClientId(2)) {
-            if let Outbound::Present(list) = message {
-                let of = list.iter().map(|p| p.get()).filter(|p| p.ship_id == EMITTER && p.emit_fore_w > 0.0);
-                spreads.extend(of.map(|p| p.emit_spread_rad));
+        for (client, told) in [(ClientId(2), &mut along), (ClientId(3), &mut beside)] {
+            for message in wire.take(client) {
+                if let Outbound::Present(list) = message {
+                    let of = list.iter().map(|p| p.get()).filter(|p| p.ship_id == EMITTER && p.emit_fore_w > 0.0);
+                    told.extend(of.map(|p| (p.emit_axis, p.emit_spread_rad)));
+                }
             }
         }
     }
-    let stated = server
+    let drives = server
         .journal()
         .events
         .iter()
         .filter(|e| e.kind == crate::server::KIND_DRIVE && e.source == EMITTER)
         .map(|e| serde_json::from_str(&e.payload).unwrap())
         .collect();
-    (spreads, stated)
+    Stated { along, beside, drives }
+}
+
+/// Along the aim an observer is told the cone; beside it, one sees the faces lit and is told no
+/// cone, which it has no way to know.
+fn assert_cone_told_only_along(stated: &Stated, spread_rad: f64) {
+    assert!(!stated.along.is_empty() && stated.along.iter().all(|t| *t == ([1.0, 0.0, 0.0], spread_rad)), "{:?}", stated.along);
+    assert!(!stated.beside.is_empty() && stated.beside.iter().all(|t| *t == ([0.0; 3], 0.0)), "{:?}", stated.beside);
 }
 
 /// A burn is an emit and an emit a burn: a one-ended emit is stated as a drive is, with a DRIVE
-/// event where it lights and one where it goes out, each saying the end it leaves and its
-/// spread, and every `Presence` of it while lit states that spread.
+/// event where it lights and one where it goes out, each saying the end it leaves, and its cone is
+/// stated to whoever it glances.
 #[tokio::test]
 async fn a_burn_emit_is_stated_as_a_burn_is() {
     let (power_w, spread_rad) = (1.0e17, 0.02);
-    let (spreads, stated) = stated_emit(Apertures::Fore, power_w, spread_rad).await;
-    assert!(!spreads.is_empty() && spreads.iter().all(|s| *s == spread_rad), "{spreads:?}");
-    let [lit, out] = stated[..] else { panic!("{stated:?}") };
+    let stated = stated_emit(Apertures::Fore, power_w, spread_rad).await;
+    assert_cone_told_only_along(&stated, spread_rad);
+    let [lit, out] = stated.drives[..] else { panic!("{:?}", stated.drives) };
     assert!((lit.emit_fore_w / power_w - 1.0).abs() < 0.01, "{lit:?}");
-    assert_eq!((lit.emit_aft_w, lit.power_w, lit.emit_spread_rad), (0.0, 0.0, spread_rad));
+    assert_eq!((lit.emit_aft_w, lit.power_w), (0.0, 0.0));
     assert_eq!((out.emit_fore_w, out.emit_aft_w), (0.0, 0.0));
 }
 
@@ -798,10 +814,10 @@ async fn a_burn_emit_is_stated_as_a_burn_is() {
 #[tokio::test]
 async fn a_balanced_emit_is_stated_as_a_burn_is() {
     let (power_w, spread_rad) = (1.0e17, 0.02);
-    let (spreads, stated) = stated_emit(Apertures::Both, power_w, spread_rad).await;
-    assert!(!spreads.is_empty() && spreads.iter().all(|s| *s == spread_rad), "{spreads:?}");
-    let [lit, out] = stated[..] else { panic!("{stated:?}") };
-    assert_eq!((lit.emit_fore_w, lit.emit_aft_w, lit.emit_spread_rad), (power_w, power_w, spread_rad));
+    let stated = stated_emit(Apertures::Both, power_w, spread_rad).await;
+    assert_cone_told_only_along(&stated, spread_rad);
+    let [lit, out] = stated.drives[..] else { panic!("{:?}", stated.drives) };
+    assert_eq!((lit.emit_fore_w, lit.emit_aft_w), (power_w, power_w));
     assert_eq!((out.emit_fore_w, out.emit_aft_w), (0.0, 0.0));
 }
 

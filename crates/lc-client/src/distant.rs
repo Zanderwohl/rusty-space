@@ -798,7 +798,7 @@ mod tests {
     }
 
     fn drive(power_w: f64) -> String {
-        serde_json::to_string(&lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: 0.0, emit_spread_rad: 0.0 }).unwrap()
+        serde_json::to_string(&lc_proto::DriveChange { power_w, facing: [1.0, 0.0, 0.0], emit_fore_w: 0.0, emit_aft_w: 0.0 }).unwrap()
     }
 
     /// **A burn seen only in its DRIVE sightings still shows**, though it lit and went out between
@@ -878,6 +878,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_axis: [0.0; 3],
             emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 0,

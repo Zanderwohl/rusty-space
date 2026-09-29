@@ -24,9 +24,9 @@ impl Craft {
         self.lits.iter().filter(|lit| lit.from_s <= t && t < lit.until_s).map(|lit| lit.power_w).sum()
     }
 
-    /// The half-angle its balanced emit was sent in at `t`, as its light left it. `None` while none was lit.
-    pub fn balanced_spread_at(&self, t: f64) -> Option<f64> {
-        self.lits.iter().find(|lit| lit.from_s <= t && t < lit.until_s).map(|lit| lit.half_angle_rad)
+    /// The balanced emit lit at `t`, as its light left it.
+    pub fn balanced_at(&self, t: f64) -> Option<&Lit> {
+        self.lits.iter().find(|lit| lit.from_s <= t && t < lit.until_s)
     }
 
     /// Every instant a balanced emit it remembers lit or went out, coordinate seconds.
@@ -71,7 +71,7 @@ mod tests {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(turned_fore(Builtin::Plate.form(), 1), Balance::DEFAULT, 0.0)));
         assert_eq!(emit_w(&craft, 10.0), Ends::default());
-        craft.adjust(100.0, |f| f.light(Lit { from_s: 100.0, until_s: 1000.0, power_w: 2.0e18, half_angle_rad: 0.01 }));
+        craft.adjust(100.0, |f| f.light(Lit { from_s: 100.0, until_s: 1000.0, power_w: 2.0e18, half_angle_rad: 0.01, axis: DVec3::X }));
         let both = Ends { fore_w: 1.0e18, aft_w: 1.0e18 };
         assert_eq!(emit_w(&craft, 500.0), both);
         craft.adjust(400.0, |f| f.darken());

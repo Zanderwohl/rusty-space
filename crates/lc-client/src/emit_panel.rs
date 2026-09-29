@@ -308,7 +308,7 @@ fn source_j(ship: &Craft, now_s: f64, drawn_w: f64, duration_s: f64) -> f64 {
     let mut dark = fitting.clone();
     dark.settle(&ship.motion, now_s);
     let mut lit = dark.clone();
-    lit.light(Lit { from_s: now_s, until_s: now_s + duration_s, power_w: drawn_w, half_angle_rad: 0.0 });
+    lit.light(Lit { from_s: now_s, until_s: now_s + duration_s, power_w: drawn_w, half_angle_rad: 0.0, axis: DVec3::X });
     let end_s = now_s + duration_s;
     (dark.stored_j_at(&ship.motion, end_s) - lit.stored_j_at(&ship.motion, end_s)).max(0.0)
 }
@@ -1024,6 +1024,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_axis: [0.0; 3],
             emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 1_000_000,
@@ -1191,7 +1192,7 @@ mod tests {
         let mut craft = ship(two_ended(), None);
         assert!(!is_lit(&craft, 5.0));
         let mut fitting = craft.fitting().unwrap().clone();
-        fitting.light(Lit { from_s: 0.0, until_s: 10.0, power_w: 2.0e15, half_angle_rad: 0.01 });
+        fitting.light(Lit { from_s: 0.0, until_s: 10.0, power_w: 2.0e15, half_angle_rad: 0.01, axis: DVec3::X });
         craft.fit(Some(fitting));
         assert!(is_lit(&craft, 5.0) && !is_lit(&craft, 10.0));
         assert_eq!(preview(&draft(Apertures::Both, 1.0e15), &craft, 5.0, None).refusal, Some(Refusal::UnderWay));
@@ -1242,6 +1243,7 @@ mod tests {
             drive_w,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_axis: [0.0; 3],
             emit_spread_rad: 0.0,
             emitted_t: (emitted_s * 1.0e6) as i64,
             arrive_t: (emitted_s * 1.0e6) as i64,

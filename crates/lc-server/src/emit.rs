@@ -296,7 +296,7 @@ impl<J: Journal> Server<J> {
 
         let lit = match apertures {
             Apertures::Both => {
-                let lit = Lit { from_s: at_s, until_s: at_s + duration_s, power_w: 2.0 * power_w, half_angle_rad: spread_rad };
+                let lit = Lit { from_s: at_s, until_s: at_s + duration_s, power_w: 2.0 * power_w, half_angle_rad: spread_rad, axis };
                 if lit.power_w * duration_s > craft.free_j_at(at_s) {
                     return Err(Refusal::NoEnergy);
                 }

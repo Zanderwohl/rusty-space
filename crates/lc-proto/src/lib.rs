@@ -446,14 +446,12 @@ pub struct DriveChange {
     pub power_w: f64,
     /// Unit vector the nose pointed along.
     pub facing: [f64; 3],
-    /// What its emits send out of each end from this instant, watts, and the half-angle they are
-    /// sent in, as [`Presence`] says them. A burn is an emit, and each is stated alike.
+    /// What its emits send out of each end from this instant, watts, as [`Presence`] says them. A
+    /// burn is an emit, and each is stated alike. Not the cone they fill: this reaches everyone.
     #[serde(default)]
     pub emit_fore_w: f64,
     #[serde(default)]
     pub emit_aft_w: f64,
-    #[serde(default)]
-    pub emit_spread_rad: f64,
 }
 
 /// What a field became at a [`kind::SHADE`] event.
@@ -522,7 +520,10 @@ pub struct Presence {
     /// which is [`Presence::drive_w`] and leaves aft beside these.
     pub emit_fore_w: f64,
     pub emit_aft_w: f64,
-    /// The half-angle those emits were sent in, radians: the cone each end's light fills.
+    /// The cone those emits fill out of the fore end, the aft end's being the other way: its axis,
+    /// unit, world axes, and its half-angle. Stated only to an observer it glances
+    /// (`lc_world::emit::glanced`); zero to everyone else, who see the faces and not the cone.
+    pub emit_axis: [f64; 3],
     pub emit_spread_rad: f64,
     /// Coordinate microseconds the light left. Always earlier than [`Presence::arrive_t`].
     pub emitted_t: i64,
@@ -1115,6 +1116,7 @@ mod tests {
                     drive_w: 1.1e20,
                     emit_fore_w: 3.0e18,
                     emit_aft_w: 3.0e18,
+                    emit_axis: [0.0; 3],
                     emit_spread_rad: 0.0,
                     emitted_t: 500_000,
                     arrive_t: 1_000_000,
@@ -1436,7 +1438,7 @@ mod tests {
                 mode: FieldMode::Auto { clear_above: 0.5, black_below: 0.3, refill_below: 0.95 },
                 shade: Shade::Black,
                 switch: Some(Switch { to: Shade::Clear, done_s: 1.0864e6 }),
-                lit: vec![Lit { from_s: 1.0e6, until_s: 1.0036e6, power_w: 2.2e20, half_angle_rad: 1.0e-3 }],
+                lit: vec![Lit { from_s: 1.0e6, until_s: 1.0036e6, power_w: 2.2e20, half_angle_rad: 1.0e-3, axis: [1.0, 0.0, 0.0] }],
             }),
         }
     }
@@ -1900,6 +1902,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_axis: [0.0; 3],
             emit_spread_rad: 0.0,
             emitted_t: arrive_t - 1_000,
             arrive_t,

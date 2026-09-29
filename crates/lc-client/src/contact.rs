@@ -27,8 +27,9 @@ pub struct Contact {
     pub drive_w: f64,
     /// What its emits were sending out of each end, watts, as last stated.
     pub emit: lc_world::emit::Ends,
-    /// The half-angle they were sent in, radians.
-    pub emit_spread_rad: f64,
+    /// The cone they fill out of the fore end, the aft end's being the other way, as last stated:
+    /// only to an observer it glances, and `None` to everyone else.
+    pub emit_cone: Option<lc_world::signal::Beam>,
     /// Coordinate seconds the light left.
     pub emitted_s: f64,
     /// Its form and the refit step it had under way, as the statement's light left it, with when
@@ -51,7 +52,6 @@ pub struct DriveAt {
     pub at_s: f64,
     pub drive_w: f64,
     pub emit: lc_world::emit::Ends,
-    pub emit_spread_rad: f64,
 }
 
 impl DriveAt {
@@ -60,7 +60,6 @@ impl DriveAt {
             at_s,
             drive_w: change.power_w,
             emit: lc_world::emit::Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w },
-            emit_spread_rad: change.emit_spread_rad,
         }
     }
 }
@@ -73,7 +72,7 @@ impl Contact {
         let beta = DVec3::from_array(presence.beta);
         let emitted_s = presence.emitted_t as f64 * 1.0e-6;
         let emit = lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w };
-        let stated = DriveAt { at_s: emitted_s, drive_w: presence.drive_w, emit, emit_spread_rad: presence.emit_spread_rad };
+        let stated = DriveAt { at_s: emitted_s, drive_w: presence.drive_w, emit };
         let sighting = lc_world::pursuit::Sighting {
             target: lc_world::motion::ShipId(presence.ship_id.0),
             position_ly,
@@ -90,7 +89,8 @@ impl Contact {
             facing: DVec3::from_array(presence.facing).normalize_or_zero(),
             drive_w: presence.drive_w,
             emit,
-            emit_spread_rad: presence.emit_spread_rad,
+            emit_cone: (presence.emit_spread_rad > 0.0)
+                .then(|| lc_world::signal::Beam::along(DVec3::from_array(presence.emit_axis), presence.emit_spread_rad)),
             emitted_s,
             form: presence.form,
             building: presence.building.map(|b| (emitted_s, b)),
@@ -126,7 +126,6 @@ impl Contact {
             .unwrap_or(self.stated);
         self.drive_w = latest.drive_w;
         self.emit = latest.emit;
-        self.emit_spread_rad = latest.emit_spread_rad;
     }
 }
 

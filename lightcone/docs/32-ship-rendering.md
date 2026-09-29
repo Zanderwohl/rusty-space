@@ -567,10 +567,12 @@ things:
   So the ends of the ray's segment are always tried as well, and the smallest of the three
   candidates wins.
 
-The cone is drawn for your own ship whenever it burns, for any ship whose courtesy radius you are
-inside, and for a selected ship. An emit's is drawn for another ship only if you are inside the cone
-as well: a narrow emit's courtesy radius spans a system. A spread of zero draws nothing. Clicking a ship in either view selects it, and `--focus craft:<id>`
-does so for a photograph. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s palette,
+The cone is drawn for your own ship whenever it burns, and for another only when you are inside its
+courtesy radius and it glances you: you are inside it, or within `SCATTER_RAD` of its edge, as its
+light left ([31](31-directed-energy.md)). Nothing else can be known of it, so selecting a ship
+does not draw it. Everyone sees the faces glow. A drive's cone runs down the hull as drawn, an
+emit's along the axis it was aimed at, which only those it glances are told. A spread of zero draws
+nothing. It uses the hazard color from [18-ui-style.md](18-ui-style.md)'s palette,
 and is brightest where it would cook. The map draws the same cone as lines: eight generators, the
 rim at the courtesy radius, and a ring at the cooking distance.
 
@@ -619,7 +621,6 @@ photograph, and `refit-magic plate fore:1` makes a ship with engines at both end
 
 ![your own burn from beside: the bell's face white-hot, the cone running aft](../images/r12-own-beside.jpg)
 ![from behind, just off the axis](../images/r12-own-behind.jpg)
-![a selected ship's cone, 2 000 km out and past its courtesy radius](../images/r12-selected.jpg)
 ![the same cone on the map](../images/r12-map.jpg)
 ![`--demo kzinti`: a Direct approach burning toward you from outside its radius draws no cone](../images/r12-kzinti-outside.jpg)
 ![and its brake, with you inside its radius and its cone](../images/r12-kzinti-inside.jpg)

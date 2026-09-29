@@ -12,7 +12,7 @@
 use glam::DVec3;
 
 use crate::craft::Craft;
-use crate::emit::{Ends, Jet, emit_spread_rad, emit_w, exhaust};
+use crate::emit::{Ends, Jet, emit_w, exhaust};
 use crate::fitting::Balance;
 use crate::flight::Drive;
 use crate::motion::{self, Motive, ShipState};
@@ -34,11 +34,10 @@ pub struct Transition {
     /// only the thrusters or an emit flown as a burn changed.
     pub power_w: f64,
     pub was_w: f64,
-    /// What its emits send out of each end from this instant, and just before: [`emit_w`].
+    /// What its emits send out of each end from this instant, and just before: [`emit_w`]. Not
+    /// the cone they fill, which only those it glances see.
     pub emit: Ends,
     pub was_emit: Ends,
-    /// The half-angle they are sent in from this instant.
-    pub emit_spread_rad: f64,
     /// Unit vector the nose pointed along.
     pub facing: DVec3,
 }
@@ -81,7 +80,6 @@ pub fn transitions(craft: &Craft, balance: &Balance, after_s: f64, until_s: f64)
                 was_w: was[0],
                 emit: emit_w(craft, after_s),
                 was_emit: emit_w(craft, before_s),
-                emit_spread_rad: emit_spread_rad(craft, after_s).unwrap_or(0.0),
                 facing: motion::facing_at(craft.motion_at(at_s), craft.length_m, at_s),
             };
             let changed = was.iter().zip(&now).any(|(was_w, now_w)| stepped(*was_w, *now_w)) || transition.emit_stepped();

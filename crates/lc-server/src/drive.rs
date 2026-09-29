@@ -42,7 +42,6 @@ impl<J: Journal> Server<J> {
                 facing: transition.facing.to_array(),
                 emit_fore_w: transition.emit.fore_w,
                 emit_aft_w: transition.emit.aft_w,
-                emit_spread_rad: transition.emit_spread_rad,
             };
             let payload = serde_json::to_string(&change).unwrap_or_else(|_| "{}".into());
             // A plume going out is as visible as the plume was, so a cut carries what it cut.

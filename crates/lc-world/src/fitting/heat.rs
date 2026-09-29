@@ -7,6 +7,8 @@
 //! `1 − ε` of what the rocket law prices as waste heat, held apart in `Q` so the exhaust cannot
 //! draw it: re-emitted, it would fly the drive as if ε were 1.
 
+use glam::DVec3;
+
 use super::{Balance, Fitting, Hull};
 use crate::cost;
 use crate::field::{Burst, Field, Mode, Segment, Stretch};
@@ -23,6 +25,8 @@ pub struct Lit {
     pub power_w: f64,
     /// Of the cone each end sends it in.
     pub half_angle_rad: f64,
+    /// Unit, world axes: out of the fore end. The aft end sends it the other way.
+    pub axis: DVec3,
 }
 
 /// Since the settlement: the heat reached, the drive's waste within it, and storage's net change.
@@ -906,7 +910,7 @@ mod tests {
     fn an_emit_makes_no_waste() {
         let b = wasteful(quiet());
         let mut fitting = hot(b, 20.0 * me(&b), 0.0, &rest()).0;
-        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18, half_angle_rad: 0.01 });
+        fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e18, half_angle_rad: 0.01, axis: DVec3::X });
         let flow = fitting.flow(Some(&rest()), 200.0);
         assert_eq!((flow.heat_j, flow.waste_j), (0.0, 0.0));
         assert!(close(-flow.income_j, 1.0e20, 1e-12), "{}", flow.income_j);

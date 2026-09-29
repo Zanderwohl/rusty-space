@@ -22,6 +22,7 @@ use glam::{DQuat, DVec3};
 use lc_proto::ShipId;
 use lc_world::courtesy::{cooking_distance_m, cooking_flux_w_m2, courtesy_radius_m};
 use lc_world::emit::Ends;
+use lc_world::signal::Beam;
 use lc_world::fitting::Balance;
 
 use crate::hull::Eye;
@@ -70,36 +71,36 @@ pub struct Lit {
     pub jet: Jet,
     /// What leaves through this jet's end, watts.
     pub power_w: f64,
-    pub half_angle_rad: f64,
+    /// Out of its end, simulation axes.
+    pub cone: Beam,
     pub at_ly: DVec3,
     /// Simulation axes, unit.
     pub facing: DVec3,
     pub length_m: f64,
 }
 
-/// A craft's cones: its main drive's `drive_w` and its emits' `emit` from each end at `spread_rad`.
-fn jets(drive_w: f64, emit: Ends, spread_rad: f64, balance: &Balance) -> [(Jet, f64, f64); 3] {
-    [
-        (Jet::Drive, drive_w, balance.drive_spread_rad),
-        (Jet::EmitAft, emit.aft_w, spread_rad),
-        (Jet::EmitFore, emit.fore_w, spread_rad),
-    ]
+/// A craft's cones: its main drive's `drive_w` out of the stern, and its emits' `emit` out of each
+/// end along `emit_cone`, the fore end's, when it is known.
+fn jets(drive_w: f64, emit: Ends, emit_cone: Option<Beam>, facing: DVec3, balance: &Balance) -> Vec<(Jet, f64, Beam)> {
+    let mut jets = vec![(Jet::Drive, drive_w, Beam::along(-facing, balance.drive_spread_rad))];
+    if let Some(fore) = emit_cone {
+        jets.push((Jet::EmitAft, emit.aft_w, Beam::along(-fore.axis, fore.half_angle_rad)));
+        jets.push((Jet::EmitFore, emit.fore_w, fore));
+    }
+    jets
 }
 
-/// The cone's length, the courtesy radius, if it is drawn for an observer at `here_ly`: inside the
-/// radius, and for an emit inside its cone too, since a narrow one's radius spans a system.
-pub fn cone_m(lit: &Lit, here_ly: DVec3, selected: Option<ShipId>, balance: &Balance) -> Option<f64> {
+/// The cone's length, the courtesy radius, if it is drawn for an observer at `here_ly`: always the
+/// player's own, and another's only inside its radius and glanced by it, as its light shows it.
+pub fn cone_m(lit: &Lit, here_ly: DVec3, balance: &Balance) -> Option<f64> {
     // A spread of zero is a cone of no solid angle, whose courtesy radius is infinite.
-    if lit.power_w <= 0.0 || lit.half_angle_rad <= 0.0 {
+    if lit.power_w <= 0.0 || lit.cone.half_angle_rad <= 0.0 {
         return None;
     }
-    let radius_m = courtesy_radius_m(balance, lit.power_w, lit.half_angle_rad);
+    let radius_m = courtesy_radius_m(balance, lit.power_w, lit.cone.half_angle_rad);
     let offset = here_ly - lit.at_ly;
-    let out = if lit.jet.fore() { lit.facing } else { -lit.facing };
-    let in_cone = lit.jet == Jet::Drive || lc_world::signal::Beam::along(out, lit.half_angle_rad).covers(offset);
-    let inside = offset.length() * M_PER_LY <= radius_m && in_cone;
-    let chosen = lit.craft.is_some() && lit.craft == selected;
-    (lit.craft.is_none() || inside || chosen).then_some(radius_m)
+    let seen = offset.length() * M_PER_LY <= radius_m && lc_world::emit::glanced(&lit.cone, offset);
+    (lit.craft.is_none() || seen).then_some(radius_m)
 }
 
 /// `eye_local` is the caller's to set.
@@ -192,11 +193,6 @@ impl Root {
     fn aft(&self) -> DVec3 {
         (self.rotation * DVec3::NEG_X).normalize()
     }
-
-    /// Out of the end `jet` leaves, render axes.
-    fn out(&self, jet: Jet) -> DVec3 {
-        if jet.fore() { -self.aft() } else { self.aft() }
-    }
 }
 
 /// A proxy with `+y` along `axis` at `origin`, `scale` per local unit, all about the eye; and
@@ -214,37 +210,37 @@ fn about_eye(origin: DVec3, axis: DVec3, scale: f64) -> (Transform, DVec3) {
 fn lits(session: &Session, uplink: &crate::uplink::Uplink, balance: &Balance) -> Vec<Lit> {
     let now = session.coordinate_time_s();
     let ship = &session.ship;
+    let facing = ship.facing_at(now).unwrap_or(DVec3::X).normalize_or_zero();
     let own = jets(
         lc_world::emit::drive_w(ship, balance, now),
         lc_world::emit::emit_w(ship, now),
-        lc_world::emit::emit_spread_rad(ship, now).unwrap_or(0.0),
+        lc_world::emit::emit_cone(ship, now),
+        facing,
         balance,
     )
-    .map(|(jet, power_w, half_angle_rad)| Lit {
+    .into_iter()
+    .map(|(jet, power_w, cone)| Lit {
         craft: None,
         jet,
         power_w,
-        half_angle_rad,
+        cone,
         at_ly: ship.motion.position_ly,
-        facing: ship.facing_at(now).unwrap_or(DVec3::X),
+        facing,
         length_m: ship.length_m,
     });
     let contacts = uplink.contacts.iter().flat_map(|c| {
-        jets(c.drive_w, c.emit, c.emit_spread_rad, balance).map(|(jet, power_w, half_angle_rad)| Lit {
+        let facing = c.facing.normalize_or_zero();
+        jets(c.drive_w, c.emit, c.emit_cone, facing, balance).into_iter().map(move |(jet, power_w, cone)| Lit {
             craft: Some(c.ship_id),
             jet,
             power_w,
-            half_angle_rad,
+            cone,
             at_ly: c.position_ly,
-            facing: c.facing,
+            facing,
             length_m: c.length_m,
         })
     });
-    own.into_iter()
-        .chain(contacts)
-        .map(|lit| Lit { facing: lit.facing.normalize_or_zero(), ..lit })
-        .filter(|lit| lit.power_w > 0.0 && lit.facing != DVec3::ZERO)
-        .collect()
+    own.chain(contacts).filter(|lit| lit.power_w > 0.0 && lit.facing != DVec3::ZERO).collect()
 }
 
 /// After the hulls, whose roots the glows hang from.
@@ -297,37 +293,39 @@ pub fn draw_exhaust(
     let mut want_cones = Vec::new();
     for burn in &lit {
         let root = root_of(burn.craft);
-        let Some(length_m) = cone_m(burn, here, ui.selected_craft, &balance) else { continue };
+        let Some(length_m) = cone_m(burn, here, &balance) else { continue };
         let fore = burn.jet.fore();
         let end_faces: Vec<_> = faces
             .of(burn.craft)
             .map(|lit| lit.faces.iter().map(|f| f.aperture).filter(|a| if fore { a.fore() } else { a.aft() }).collect())
             .unwrap_or_default();
-        // From its end's faces' power-weighted middle, or that end of a craft drawn with none.
+        // From its end's faces' power-weighted middle, or that end of a craft drawn with none. The
+        // drive runs down the hull as drawn; an emit along the axis it was aimed at.
         let (apex, out, apex_from_center_m) = match root {
             Some((_, root)) if !end_faces.is_empty() => {
                 let middle: DVec3 = end_faces.iter().map(|a| a.center * a.share).sum();
-                (root.to_render(middle), root.out(burn.jet), render_to_sim(root.rotation * middle))
+                let out = if burn.jet == Jet::Drive { root.aft() } else { sim_to_render(burn.cone.axis) };
+                (root.to_render(middle), out, render_to_sim(root.rotation * middle))
             }
             _ => {
-                let out = if fore { burn.facing } else { -burn.facing };
-                let end = out * burn.length_m * 0.5;
+                let end = if fore { burn.facing } else { -burn.facing } * burn.length_m * 0.5;
                 let at = eye.offset_m(burn.at_ly, burn.craft, look) + end;
-                (sim_to_render(at / UNIT_M), sim_to_render(out), end)
+                (sim_to_render(at / UNIT_M), sim_to_render(burn.cone.axis), end)
             }
         };
         let (transform, eye_local) = about_eye(apex, out, length_m / UNIT_M);
-        let mut uniforms = cone_uniform(burn.power_w, burn.half_angle_rad, &balance, length_m);
+        let half_angle_rad = burn.cone.half_angle_rad;
+        let mut uniforms = cone_uniform(burn.power_w, half_angle_rad, &balance, length_m);
         uniforms.eye_local = eye_local.as_vec3().extend(0.0);
-        want_cones.push((burn.craft, burn.jet, burn.half_angle_rad, transform, uniforms));
+        want_cones.push((burn.craft, burn.jet, half_angle_rad, transform, uniforms));
         exhausts.cones.push(Drawn {
             craft: burn.craft,
             jet: burn.jet,
             apex_ly: burn.at_ly + apex_from_center_m / M_PER_LY,
             aft: render_to_sim(out),
             length_m,
-            half_angle_rad: burn.half_angle_rad,
-            cooking_m: cooking_distance_m(&balance, burn.power_w, burn.half_angle_rad, 1.0),
+            half_angle_rad,
+            cooking_m: cooking_distance_m(&balance, burn.power_w, half_angle_rad, 1.0),
         });
     }
 
@@ -430,25 +428,27 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn lit(craft: Option<ShipId>, power_w: f64, at_m: DVec3) -> Lit {
-        let (jet, half_angle_rad) = (Jet::Drive, B.drive_spread_rad);
-        Lit { craft, jet, power_w, half_angle_rad, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
+        let cone = Beam::along(DVec3::NEG_X, B.drive_spread_rad);
+        Lit { craft, jet: Jet::Drive, power_w, cone, at_ly: at_m / M_PER_LY, facing: DVec3::X, length_m: 500.0 }
     }
 
     /// What every emit in these scenes is sent in.
     const SPREAD_RAD: f64 = 0.01;
 
-    /// Ship 1 in `form`, a thousand kilometers off `here_ly` along +x, stating `drive_w` and `emit`.
+    /// Ship 1 in `form`, 500 m off `here_ly` along +x with its stern to it, stating `drive_w` and
+    /// `emit`.
     fn presence(here_ly: DVec3, form: &Form, drive_w: f64, emit: Ends) -> lc_proto::Presence {
         lc_proto::Presence {
             ship_id: ShipId(1),
             name: "ship 1".into(),
             length_m: 500.0,
-            at_ly: (here_ly + DVec3::X * 1.0e6 / M_PER_LY).to_array(),
+            at_ly: (here_ly + DVec3::X * 500.0 / M_PER_LY).to_array(),
             beta: [0.0; 3],
             facing: [1.0, 0.0, 0.0],
             drive_w,
             emit_fore_w: emit.fore_w,
             emit_aft_w: emit.aft_w,
+            emit_axis: [1.0, 0.0, 0.0],
             emit_spread_rad: SPREAD_RAD,
             emitted_t: 0,
             arrive_t: 3_600_000_000,
@@ -459,46 +459,47 @@ mod tests {
         }
     }
 
-    /// Own, inside the radius and selected get a cone; nothing else, and nothing coasting.
+    /// Your own is always coned. Another's is only for an observer inside its radius whom it
+    /// glances: in the cone or just past its edge. Nothing coasting is.
     #[test]
     fn which_burns_have_a_cone() {
         let power = 1.1e20;
         let radius = drive_courtesy_radius_m(&B, power);
-        let here = DVec3::ZERO;
-        let (near, far) = (DVec3::Y * radius * 0.9, DVec3::Y * radius * 1.1);
         let other = Some(ShipId(4));
-        let cone = |l: Lit, selected| cone_m(&l, here, selected, &B);
+        let cone = |l: Lit, at: DVec3| cone_m(&l, at / M_PER_LY, &B);
+        let behind = |distance: f64, off_rad: f64| DVec3::new(-off_rad.cos(), off_rad.sin(), 0.0) * distance;
+        let edge = B.drive_spread_rad;
 
-        assert_eq!(cone(lit(None, power, far), None), Some(radius), "your own, wherever it is");
-        assert_eq!(cone(lit(other, power, near), None), Some(radius), "inside its radius");
-        assert_eq!(cone(lit(other, power, far), None), None, "outside and unselected");
-        assert_eq!(cone(lit(other, power, far), other), Some(radius), "selected");
-        assert_eq!(cone(lit(other, power, far), Some(ShipId(5))), None, "another selected");
-        assert_eq!(cone(lit(None, 0.0, here), None), None, "coasting");
-        assert_eq!(cone(lit(other, 0.0, here), other), None, "selected and coasting");
+        assert_eq!(cone(lit(None, power, DVec3::ZERO), DVec3::Y * radius * 2.0), Some(radius), "your own, wherever you are");
+        assert_eq!(cone(lit(other, power, DVec3::ZERO), behind(0.9 * radius, 0.0)), Some(radius), "in it");
+        assert_eq!(cone(lit(other, power, DVec3::ZERO), behind(1.1 * radius, 0.0)), None, "past its radius");
+        let scattered = edge + 0.5 * lc_world::emit::SCATTER_RAD;
+        assert_eq!(cone(lit(other, power, DVec3::ZERO), behind(0.5 * radius, scattered)), Some(radius), "just past its edge");
+        let beside = edge + 2.0 * lc_world::emit::SCATTER_RAD;
+        assert_eq!(cone(lit(other, power, DVec3::ZERO), behind(0.5 * radius, beside)), None, "beside it");
+        assert_eq!(cone(lit(None, 0.0, DVec3::ZERO), DVec3::ZERO), None, "coasting");
+        assert_eq!(cone(lit(other, 0.0, DVec3::ZERO), behind(0.5 * radius, 0.0)), None, "in it and coasting");
     }
 
-    /// Another ship's emit is drawn for an observer inside its radius only if inside its cone as
-    /// well, since a narrow emit's radius spans a system; selected, it is drawn anyway. A spread of
+    /// An emit is coned for an observer as a burn is, along the axis it was aimed at. A spread of
     /// zero, a cone of no solid angle, is never drawn.
     #[test]
-    fn an_emit_is_coned_for_whoever_is_inside_it() {
+    fn an_emit_is_coned_for_whoever_it_glances() {
         let other = Some(ShipId(4));
-        let emit = |jet, half_angle_rad| Lit { jet, half_angle_rad, ..lit(other, 1.0e17, DVec3::ZERO) };
+        let emit = |out: DVec3, half_angle_rad| Lit { jet: Jet::EmitAft, cone: Beam::along(out, half_angle_rad), ..lit(other, 1.0e17, DVec3::ZERO) };
         let behind = -DVec3::X * 1.0e3;
-        let cone = |l: Lit, at: DVec3, selected| cone_m(&l, at / M_PER_LY, selected, &B);
-        assert!(cone(emit(Jet::EmitAft, 0.01), behind, None).is_some(), "behind an aft emit");
-        assert!(cone(emit(Jet::EmitFore, 0.01), behind, None).is_none(), "behind a fore emit");
-        assert!(cone(emit(Jet::EmitAft, 0.01), DVec3::Y * 1.0e3, None).is_none(), "beside it");
-        assert!(cone(emit(Jet::EmitFore, 0.01), behind, other).is_some(), "selected");
-        assert!(cone(emit(Jet::EmitAft, 0.0), behind, other).is_none(), "no spread");
-        assert!(cone(Lit { half_angle_rad: 0.0, ..lit(None, 1.0e17, DVec3::ZERO) }, behind, None).is_none());
+        let cone = |l: Lit, at: DVec3| cone_m(&l, at / M_PER_LY, &B);
+        assert!(cone(emit(DVec3::NEG_X, 0.01), behind).is_some(), "in it");
+        assert!(cone(emit(DVec3::X, 0.01), behind).is_none(), "behind it");
+        assert!(cone(emit(DVec3::Y, 0.01), behind).is_none(), "beside it");
+        assert!(cone(emit(DVec3::NEG_X, 0.0), behind).is_none(), "no spread");
+        assert!(cone(Lit { cone: Beam::along(DVec3::NEG_X, 0.0), ..lit(None, 1.0e17, DVec3::ZERO) }, behind).is_none());
     }
 
     /// The cone runs out at the courtesy radius, which grows as the root of the power.
     #[test]
     fn the_cone_is_as_long_as_the_courtesy_radius() {
-        let at = |power| cone_m(&lit(None, power, DVec3::ZERO), DVec3::ZERO, None, &B).unwrap();
+        let at = |power| cone_m(&lit(None, power, DVec3::ZERO), DVec3::ZERO, &B).unwrap();
         assert_eq!(at(1.1e20), drive_courtesy_radius_m(&B, 1.1e20));
         assert!((at(4.4e20) / at(1.1e20) - 2.0).abs() < 1.0e-9);
     }
@@ -588,7 +589,6 @@ mod tests {
         let faces = apertures(&Builtin::Plate.form(), &B).unwrap();
         for stated in [3.0e17, 1.1e20, 4.4e21] {
             let (mut world, _) = scene(stated);
-            world.resource_mut::<crate::app::Ui>().0.selected_craft = Some(ShipId(1));
             draw(&mut world);
 
             let [cone] = world.resource::<Exhausts>().cones[..] else { panic!("one cone") };
@@ -606,8 +606,8 @@ mod tests {
     }
 
     /// Another craft's emit lights the faces it leaves through at the temperature its `Presence`
-    /// stated of each end, and, selected, is coned out of each end it leaves at its stated spread,
-    /// as a burn is.
+    /// stated of each end, and is coned at its stated spread out of the end whose cone glances this
+    /// ship, behind it, as a burn is.
     #[test]
     fn another_ships_faces_are_as_hot_as_its_stated_emit() {
         let form = turned_fore(Builtin::Plate.form(), 1);
@@ -620,7 +620,6 @@ mod tests {
             (Ends { fore_w: 3.0e19, aft_w: 3.0e19 }, vec![fore, aft]),
         ] {
             let (mut world, _) = scene_of(&form, 0.0, emit);
-            world.resource_mut::<crate::app::Ui>().0.selected_craft = Some(ShipId(1));
             draw(&mut world);
 
             let temperature = |a: &lc_world::form::capacity::Aperture| {
@@ -637,8 +636,7 @@ mod tests {
                 assert_eq!(uniform, face_color(&world, temperature(&faces[face])));
             }
             let cones = &world.resource::<Exhausts>().cones;
-            let want = [(Jet::EmitAft, emit.aft_w, DVec3::NEG_X), (Jet::EmitFore, emit.fore_w, DVec3::X)];
-            let want: Vec<_> = want.into_iter().filter(|(_, w, _)| *w > 0.0).collect();
+            let want: Vec<_> = [(Jet::EmitAft, emit.aft_w, DVec3::NEG_X)].into_iter().filter(|(_, w, _)| *w > 0.0).collect();
             assert_eq!(cones.len(), want.len(), "{emit:?}: {cones:?}");
             for (jet, w, out) in want {
                 let cone = cones.iter().find(|c| c.jet == jet).unwrap_or_else(|| panic!("{emit:?}: no {jet:?}"));
@@ -648,10 +646,10 @@ mod tests {
         }
     }
 
-    /// Glows under the hull, a cone only once selected, and neither once the drive is out.
+    /// Glows under the hull, a cone only while its cone glances this ship, and neither once the
+    /// drive is out.
     #[test]
     fn a_burn_is_glowed_and_coned_under_its_own_hull() {
-        let craft = Some(ShipId(1));
         let (mut world, root) = scene(1.0e17);
         let run = |world: &mut World| {
             draw(world);
@@ -662,11 +660,12 @@ mod tests {
 
         let (glows, cones, drawn) = run(&mut world);
         assert_eq!(glows, [root, root], "one glow per aft face, under the hull");
-        assert_eq!((cones, drawn), (0, 0), "outside its radius and unselected");
+        assert_eq!((cones, drawn), (1, 1), "behind it");
 
-        world.resource_mut::<crate::app::Ui>().0.selected_craft = craft;
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].facing = DVec3::Y;
         let (glows, cones, drawn) = run(&mut world);
-        assert_eq!((glows.len(), cones, drawn), (2, 1, 1), "selected");
+        assert_eq!((glows.len(), cones, drawn), (2, 0, 0), "beside it");
+        world.resource_mut::<crate::uplink::Uplink>().contacts[0].facing = DVec3::X;
 
         world.resource_mut::<crate::uplink::Uplink>().contacts[0].drive_w = 0.0;
         let (glows, cones, drawn) = run(&mut world);

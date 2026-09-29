@@ -49,6 +49,9 @@ pub struct Lit {
     /// Of the cone each end sends it in.
     #[serde(default)]
     pub half_angle_rad: f64,
+    /// Unit, world axes: out of the fore end. The aft end sends it the other way.
+    #[serde(default)]
+    pub axis: [f64; 3],
 }
 
 /// Another craft's field, as its light shows it.

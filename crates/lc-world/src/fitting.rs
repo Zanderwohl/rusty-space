@@ -905,7 +905,14 @@ impl Fitting {
             refit: f.refit.as_ref().map(Into::into),
             posture: field.map_or(Posture::BLACK, Posture::from),
             lit: field.map_or_else(Vec::new, |field| {
-                field.lit.iter().map(|l| Lit { from_s: l.from_s, until_s: l.until_s, power_w: l.power_w, half_angle_rad: l.half_angle_rad }).collect()
+                field.lit.iter().map(|l| Lit {
+                    from_s: l.from_s,
+                    until_s: l.until_s,
+                    power_w: l.power_w,
+                    half_angle_rad: l.half_angle_rad,
+                    axis: glam::DVec3::from_array(l.axis),
+                })
+                .collect()
             }),
         };
         let mut fitting = Fitting::from_account(&account, f.balance.into());
@@ -925,7 +932,14 @@ impl From<&Fitting> for lc_proto::Field {
     fn from(f: &Fitting) -> Self {
         let p = &f.posture;
         let switch = p.switch.map(|s| lc_proto::Switch { to: s.to.into(), done_s: s.done_s });
-        let lit = f.lit.iter().map(|l| lc_proto::Lit { from_s: l.from_s, until_s: l.until_s, power_w: l.power_w, half_angle_rad: l.half_angle_rad }).collect();
+        let lit = f.lit.iter().map(|l| lc_proto::Lit {
+                from_s: l.from_s,
+                until_s: l.until_s,
+                power_w: l.power_w,
+                half_angle_rad: l.half_angle_rad,
+                axis: l.axis.to_array(),
+            })
+            .collect();
         Self { heat_j: f.heat_j, waste_j: f.waste_j, since_s: f.since_s, mode: p.setting.into(), shade: p.shade.into(), switch, lit }
     }
 }

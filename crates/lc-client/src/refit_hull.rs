@@ -581,6 +581,7 @@ mod tests {
             drive_w: 0.0,
             emit_fore_w: 0.0,
             emit_aft_w: 0.0,
+            emit_axis: [0.0; 3],
             emit_spread_rad: 0.0,
             emitted_t: (stated_s * 1.0e6) as i64,
             arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
