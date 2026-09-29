@@ -9,5 +9,6 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 [dependencies]
 em-foundations = { path = "../em-foundations" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
-bevy = "0.19.1"
+# What this crate uses and nothing more; the app decides the rest. See AGENTS.md, "Bevy features".
+bevy = { version = "0.19.1", default-features = false, features = ["std", "bevy_pbr", "bevy_post_process"] }
 bevy_mesh = "0.19"

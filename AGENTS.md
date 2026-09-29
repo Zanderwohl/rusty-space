@@ -133,6 +133,56 @@ straight back in the plane — so pair it with `--rate 0`.
 The store's tests need PostgreSQL (`createdb lc_store`; `LC_STORE_URL` overrides). They
 **skip** when they cannot reach one — keep it that way, so the suite passes without it.
 
+## Bevy features
+
+The browser client downloads every Bevy feature it is compiled with, so **no crate in the
+client's tree takes Bevy's defaults**. `lc-client`, `em-render` and `em-ui` each set
+`default-features = false` and name what they use; `lc-client`'s list is the whole of what
+ships. The libraries name only their own needs, and the app decides the rest. Turning
+the defaults off in 2026-09 took the wasm from 37.8 MB to 31.5 MB (8.29 to 7.11 MB brotli).
+
+**Adding a Bevy capability means adding its feature to `crates/lc-client/Cargo.toml`.** For
+most, the symptom of forgetting is a compile error. For asset loaders it is a runtime one:
+the file compiles, then fails to load, or loads nothing.
+
+Deliberately off, and what turns each back on:
+
+| off | what it is | add |
+|---|---|---|
+| audio | sound, `AudioPlayer`, `.ogg` | `bevy_audio`, and a format: `vorbis`, `mp3`, `wav`, `flac` |
+| gamepads | `Gamepad`, gilrs | `bevy_gilrs` |
+| glTF, animation | `SceneRoot`, `.gltf`/`.glb`, `AnimationPlayer`, morph targets | `bevy_gltf`, `bevy_animation`, `gltf_animation`, `morph`, `morph_animation` |
+| scenes | `DynamicScene`, `.scn.ron` | `bevy_scene`, `bevy_world_serialization` |
+| Bevy picking | `Pointer<Click>`, `Pickable`, `MeshPickingPlugin` | `bevy_picking`, `mesh_picking`, `ui_picking`. The client picks by its own rule (`em_ui::picking`). |
+| gizmos | `Gizmos` | `bevy_gizmos`, `bevy_gizmos_render` |
+| anti-aliasing beyond MSAA | SMAA, FXAA, TAA | `bevy_anti_alias`, and `smaa_luts` for SMAA |
+| sprites | `Sprite`, 2D cameras. The sprite *renderer* comes in with `bevy_ui_render` anyway | `bevy_sprite` |
+| `bevy_ui_widgets` | Bevy's headless slider/checkbox. `em-ui` has its own widgets | `bevy_ui_widgets` |
+| image formats | `.hdr`, `.jpg`, `.exr`… through `AssetServer`. PNG and KTX2 are on | `hdr`, `jpeg`, `exr` |
+| WebGL2 | a second wgpu backend. The client is WebGPU only | nothing — do not |
+| `sysinfo_plugin`, `custom_cursor`, `reflect_auto_register` | | the feature of that name |
+
+`bevy_egui` is the same: `open_url` (egui hyperlinks) and `picking` are off.
+
+The desktop gets `multi_threaded`, `x11` and `wayland` from the non-wasm target section, since
+a browser has one thread and no display server. The Exotic Matters app at the root is desktop
+only and still takes Bevy's defaults.
+
+To see where the bytes go, build with symbols and read them with `twiggy`:
+
+```bash
+cargo build -p lc-client --bin lightcone_web --target wasm32-unknown-unknown \
+    --profile wasm-release --no-default-features --config profile.wasm-release.strip=false
+wasm-bindgen --target web --no-typescript --out-dir /tmp/w \
+    target/wasm32-unknown-unknown/wasm-release/lightcone_web.wasm
+wasm-opt -Oz -g --enable-bulk-memory --enable-nontrapping-float-to-int \
+    --enable-reference-types /tmp/w/lightcone_web_bg.wasm -o /tmp/w/named.wasm
+twiggy top -n 40 /tmp/w/named.wasm
+```
+
+`twiggy` credits a system's monomorphized `FunctionSystem<…>` to `bevy_ecs`, which makes it
+look like 9 MB of ECS. Credit each item to the last non-Bevy crate named in its symbol instead.
+
 ## Traps
 
 Each of these cost real time. None of them are visible from the code that hits them.

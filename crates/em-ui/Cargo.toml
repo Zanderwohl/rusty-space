@@ -7,4 +7,5 @@ license = "MIT"
 authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
-bevy = "0.19.1"
+# What this crate uses and nothing more; the app decides the rest. See AGENTS.md, "Bevy features".
+bevy = { version = "0.19.1", default-features = false, features = ["std", "bevy_ui", "bevy_input_focus"] }
