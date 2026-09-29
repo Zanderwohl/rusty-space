@@ -96,8 +96,8 @@ pub fn parse(args: &[String]) -> Entry {
     if let Some(pages) = value::<i32>(args, "--pages") {
         actions.push(Action::TurnPage(pages));
     }
-    if flag("--beauty") {
-        actions.push(Action::SetBeautyShots(true));
+    if flag("--no-beauty") {
+        actions.push(Action::SetBeautyShots(false));
     }
     if flag("--tune") {
         actions.push(Action::OpenPanel(crate::ui::Panel::Tuning));

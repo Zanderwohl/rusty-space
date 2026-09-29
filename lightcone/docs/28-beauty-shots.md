@@ -5,8 +5,8 @@ of something worth looking at, and shows it in a square beside the map's. Code i
 `lc_client::beauty`. The caption is along the bottom of the square, except on a horizon shot,
 where the planet is.
 
-Status: **experimental**, off by default. `|` (`Shift`+`\`) toggles it, and so do the
-telescope window's *Beauty shots* box and `--beauty`.
+Status: on by default. `|` (`Shift`+`\`) toggles it, and so do the telescope window's
+*Beauty shots* box, the *Slideshow* button, and `--no-beauty`.
 
 ## What is photographed
 

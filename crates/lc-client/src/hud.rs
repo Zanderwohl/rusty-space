@@ -639,7 +639,7 @@ mod tests {
         assert!(before.contains(&("System", Some("y"), false)), "the key's letter, not the first");
         assert!(before.contains(&("Bookshelf", Some("B"), false)));
         assert!(before.contains(&("Comms", Some("C"), false)));
-        assert!(before.contains(&("Slideshow", None, false)));
+        assert!(before.contains(&("Slideshow", None, true)), "on by default");
 
         apply(Action::TogglePanel(Panel::Telescope), &mut ui, &mut fixture().1);
         assert!(underlined(&ui).contains(&("Telescope", Some("T"), true)));

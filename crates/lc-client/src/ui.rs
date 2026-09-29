@@ -590,7 +590,7 @@ impl Default for UiState {
             preset: 0,
             integration_s: 1.0e4,
             god_view: false,
-            beauty_shots: false,
+            beauty_shots: true,
             time_rate: DESIGN_TIME_RATE,
             notifications: Vec::new(),
             reading: Reading::default(),

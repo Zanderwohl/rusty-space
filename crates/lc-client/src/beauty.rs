@@ -1,7 +1,7 @@
 //! Beauty shots: every [`PERIOD_S`] of real time, a photograph through the ship's own telescope
 //! of something worth looking at, shown in a square beside the map's, and at once for anything
-//! queued ahead of the rotation. Experimental, and off unless asked for.
-//! `lightcone/docs/28-beauty-shots.md` is the design.
+//! queued ahead of the rotation. On unless turned off. `lightcone/docs/28-beauty-shots.md` is the
+//! design.
 //!
 //! The camera draws the sky's own scene from the render origin, one frame per shot. The doc
 //! says what the two views cannot share and where each difference is handled.
