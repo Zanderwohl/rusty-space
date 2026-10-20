@@ -247,7 +247,7 @@ start rather than added and later removed.
 
 ## Phase 7 — The event store
 
-**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range, and nothing schedules retention.
+**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`, swept by the shard after every checkpoint so the live partitions stay bounded (`crates/lc-server/tests/retention.rs` runs a month). Deliveries are found as light lands, from fronts kept in `lc_fronts` (`lc_server::front`), so a craft that joins or turns while light is in flight sees it where it actually meets it. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range.
 
 **Before:** 3. Can overlap 6.
 
@@ -428,20 +428,23 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 
 ### 11e — Factions
 
-**Status: not started.** No faction, key generation or certificate exists in code; ship keys (`OfferKey`) do.
+**Status: built.** Protocol 37, schema step `0014_factions`. `lc_server::faction` holds the keys,
+`lc_server::radio` gives and reads them, and the radio window has a chat per key held; its
+done-when is `a_member_left_off_a_new_key_reads_the_old_chat_and_not_the_new`.
 
 **Before:** 11c.
 
-**Deliver:** founding and naming a faction; membership of several at once, with a channel per
-faction held; key generations and rotation, each rotation sent per member sealed to their ship
-key; certificates for `invite`, `grant`, `rotate` and `generation`; invitations in the chat log;
-the faction channel, redacted by generation held at arrival. The minimum generation an asset
-accepts is modeled now, on the craft themselves, so that assets inherit it rather than
-retrofitting it.
+**Deliver:** a faction as a key and its chat. Founding mints and names a key, held at once, with
+nothing on the air. Giving the key is a transmission — sealed to the recipient's ship key or open
+to everyone in range — and whoever can read it when it lands holds it. Saying something under a
+key puts it in that key's chat, readable by whoever held the key when it landed. No members list
+and no certificates: removing somebody is founding a new key that replaces the old — its next
+generation — and sending it to everyone else. A chat under a key the ship holds a later generation
+of says so.
 
-**Done when:** a traitor excluded by rotation can still read everything sealed to the old
-generation, cannot read anything sealed to the new one, and a loyal member far away is seen
-sending in the old generation until the new key reaches them.
+**Done when:** a traitor left off a new key can still read everything said under the old one,
+cannot read anything said under the new one, and a loyal member far away is seen speaking under
+the old key until the new one reaches them.
 
 **Do not:** build relays, or anything about commanding assets.
 

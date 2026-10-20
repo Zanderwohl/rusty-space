@@ -13,7 +13,7 @@ use super::{auto_by, collapse_by};
 use crate::journal::Journal;
 use crate::server::Server;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 /// Set Black and kept there, as tests of anything but the modes want.
 #[cfg(test)]
@@ -31,13 +31,12 @@ impl<J: Journal> Server<J> {
         after_t: i64,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let ids: Vec<CraftId> =
             self.fleet.iter().filter(|c| c.ended_s().is_none() && c.fitting().is_some()).map(|c| c.id).collect();
         for id in ids {
-            while self.keep_field_mode(id, now_s, after_t, events, deliveries) {
+            while self.keep_field_mode(id, now_s, after_t, events) {
                 self.tell_fitted(wire, id);
             }
         }
@@ -50,7 +49,6 @@ impl<J: Journal> Server<J> {
         now_s: f64,
         after_t: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> bool {
         let Some(craft) = self.fleet.get(id) else { return false };
         let Some(fitting) = craft.fitting() else { return false };
@@ -58,7 +56,7 @@ impl<J: Journal> Server<J> {
             if switch.done_s > now_s || collapse_by(craft, switch.done_s).is_some() {
                 return false;
             }
-            return self.flip(id, now_s, after_t, events, deliveries);
+            return self.flip(id, now_s, after_t, events);
         }
         let Some((at_s, to)) = auto_by(craft, now_s) else { return false };
         if collapse_by(craft, at_s).is_some() {
@@ -69,7 +67,7 @@ impl<J: Journal> Server<J> {
 
     /// Take a switch done by `by_s` out of `id`'s account and state it. Stamped up, and never into
     /// the tick before, where cursors already stand.
-    fn flip(&mut self, id: CraftId, by_s: f64, after_t: i64, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) -> bool {
+    fn flip(&mut self, id: CraftId, by_s: f64, after_t: i64, events: &mut Vec<Event>) -> bool {
         let Some(craft) = self.fleet.get_mut(id) else { return false };
         let Some(done_s) = craft.fitting().and_then(|f| f.posture().switch).map(|s| s.done_s).filter(|&t| t <= by_s) else {
             return false;
@@ -86,7 +84,7 @@ impl<J: Journal> Server<J> {
         let payload = serde_json::to_string(&ShadeChange { shade: switch.to.into() }).unwrap_or_else(|_| "{}".into());
         // The clamp moves the stamp only on the order path, for a switch shorter than a tick.
         let at_t = ((done_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
-        self.emit(id, lc_proto::kind::SHADE, power_w, payload, at_t, events, deliveries);
+        self.emit(id, lc_proto::kind::SHADE, power_w, payload, at_t, events);
         true
     }
 
@@ -98,7 +96,6 @@ impl<J: Journal> Server<J> {
         mode: FieldMode,
         at: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<i64, Refusal> {
         let setting = Setting::from(mode);
         if let Setting::Auto(thresholds) = setting
@@ -113,7 +110,7 @@ impl<J: Journal> Server<J> {
         let at_s = at as f64 * 1.0e-6;
         // Only when a switch is shorter than a tick: every other is taken before orders are read.
         // Either way none done by `at_s` is left, which is all `set_field` refuses.
-        self.flip(id, at_s, at - 1, events, deliveries);
+        self.flip(id, at_s, at - 1, events);
         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
         craft.set_field(setting, at_s).map_err(|_| Refusal::Impossible)?;
         Ok(at)
@@ -126,7 +123,6 @@ impl<J: Journal> Server<J> {
         mode: &str,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<String, String> {
         let balance = self.balance();
         let mode = match mode {
@@ -134,7 +130,7 @@ impl<J: Journal> Server<J> {
             "black" => FieldMode::Black,
             _ => Setting::Auto(lc_world::fitting::Thresholds::of(&balance)).into(),
         };
-        self.order_field_mode(id, mode, self.now_t(), events, deliveries).map_err(|why| format!("refused: {why:?}"))?;
+        self.order_field_mode(id, mode, self.now_t(), events).map_err(|why| format!("refused: {why:?}"))?;
         self.tell_fitted(wire, id);
         let craft = self.fleet.get(id).ok_or("no such ship")?;
         let posture = craft.fitting().ok_or("no field")?.posture();

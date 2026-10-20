@@ -337,7 +337,10 @@ impl<J: Journal> Server<J> {
         for event in events.iter().filter(|e| e.kind == lc_proto::kind::REPORT) {
             for scheduled in deliveries.iter().filter(|d| d.event == event.id) {
                 // Redacted as a client is sent it, so a sealed report teaches only its addressee.
-                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer);
+                let observer = CraftId(scheduled.observer.0);
+                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer, |key| {
+                    self.factions.holds(observer, key, scheduled.arrive_t)
+                });
                 let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
                     eprintln!("WARNING: report {} is not a report; it will not land", event.id);
                     continue;
@@ -1187,6 +1190,7 @@ mod tests {
         new.load_world(World::new(sky()));
         assert!(new.adopt(checkpoint).is_empty());
         new.resume_conversations().await.unwrap();
+        new.resume_fronts().await.unwrap();
         let until = new.now_t() + 2 * 3_600 * 1_000_000;
         while new.now_t() < until {
             new.tick(&mut wire).await.unwrap();

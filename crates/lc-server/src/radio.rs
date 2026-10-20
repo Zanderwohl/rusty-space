@@ -11,24 +11,16 @@
 //! interface lets them: it is the mistake a real operator makes, and it is legible afterwards
 //! because everyone in earshot saw it.
 //!
-//! **The keyring and the acknowledgment window are schedules, not sets.** Both live on
-//! [`crate::server::Server`] and both are written the instant a transmission leaves, stamped
-//! with the coordinate time its light *lands*, and refused by every reader until the clock has
-//! reached that. So a key sent four light-years takes four years to become usable, and the rule
-//! that says so is the same shape as the deliveries table's: work it out at write time, gate it
-//! at read time.
-//!
-//! Scheduling them rather than learning them on arrival is also what makes them work for a
-//! craft nobody is flying. Arrivals are only walked for connected clients — there is nobody to
-//! tell otherwise — and a key that only landed when its owner happened to be signed in would be
-//! a mechanic that depended on who was watching.
+//! **The keyring and the acknowledgment window are written as the light lands**, on every craft
+//! and not only connected ones: a key that landed only when its owner was signed in would depend
+//! on who was watching. See [`crate::front`].
 //!
 //! The geometry is `lc_world::signal` and the storage is `lc_store::chat`. See
 //! `lightcone/docs/05-observation.md`.
 
 use lc_proto::{
-    ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said, Secrecy,
-    ShipId, Spoken,
+    ACK_DEPTH, Aim, Body, FactionId, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said,
+    Secrecy, ShipId, Spoken,
 };
 use glam::DVec3;
 use lc_world::craft::CraftId;
@@ -41,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use crate::chase;
 use crate::journal::{Journal, JournalError};
 use crate::server::Server;
-use crate::world::{Event, MICROS_PER_SECOND, Scheduled};
+use crate::world::{Event, MICROS_PER_SECOND};
 
 /// What a transmitter puts out, until a ship has a radio to specify.
 ///
@@ -58,21 +50,38 @@ pub const TRANSMISSION_S: f64 = 1.0;
 /// Held apart from the event because the two are written to different places for different
 /// reasons — see [`crate::journal::Journal::record`] — and because the identifier is minted
 /// after the order is validated.
+#[derive(Clone, Debug)]
 pub(crate) struct Utterance {
     to: Option<ShipId>,
     /// Which message this is, across its resends. Zero for a key offer, which nothing resends.
     idem: MessageKey,
     sealed: bool,
+    under: Option<FactionId>,
     content: Content,
     acks: Vec<i64>,
+}
+
+#[cfg(feature = "storage")]
+impl Utterance {
+    /// What was said, as the store kept it.
+    pub(crate) fn from_message(message: &lc_store::chat::Message) -> Self {
+        Self {
+            to: message.addressee.map(ShipId),
+            idem: message.idem.map_or(0, |idem| idem as MessageKey),
+            sealed: message.sealed,
+            under: message.under.map(FactionId),
+            content: message.content.clone(),
+            acks: message.acks.clone(),
+        }
+    }
 }
 
 /// A message addressed to a craft, due to land on it: what answering it automatically would
 /// take, if auto-ack is on for its sender when it lands.
 ///
-/// Scheduled when the message is sent, as receipts are, and decided when it lands, because
-/// that is when the receiving radio would act. Switching auto-ack on while a message is in
-/// flight answers it; switching it off stops an answer that has not gone yet.
+/// Owed when the message lands, and decided then too, because that is when the receiving radio
+/// would act. Switching auto-ack on while a message is in flight answers it; switching it off
+/// stops an answer that has not gone yet.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Owed {
     /// When the light lands, coordinate microseconds.
@@ -104,7 +113,8 @@ pub(crate) struct Transmission {
 }
 
 impl<J: Journal> Server<J> {
-    /// Validate a [`Order::Say`] or [`Order::OfferKey`] and work out what it puts on the air.
+    /// Validate a [`Order::Say`], [`Order::OfferKey`], [`Order::SendReport`] or [`Order::GiveKey`]
+    /// and work out what it puts on the air.
     ///
     /// Nothing is validated about the addressee, and that is deliberate on both counts. A
     /// client may address a craft that does not exist: the message goes out and nobody it
@@ -123,42 +133,37 @@ impl<J: Journal> Server<J> {
                 if body.is_empty() || body.len() > MESSAGE_LIMIT || *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                let sealed = matches!(secrecy, Secrecy::Sealed);
-                let content = Content::Text(body.clone());
-                // Sealing needs somebody to seal it to. Refused rather than quietly sent in
-                // the open, which is the failure that matters.
-                let Some(addressee) = *to else {
-                    if sealed {
-                        return Err(Refusal::Impossible);
-                    }
-                    return self.transmission(id, aim, at, None, false, content, *idem, Vec::new());
-                };
-                if sealed && !self.holds_key(id, addressee, at) {
-                    return Err(Refusal::NoKey);
+                // A faction's chat is addressed to nobody: acknowledgment is between two craft,
+                // and a chat of forty would acknowledge itself for ever.
+                if matches!(secrecy, Secrecy::Faction(_)) && to.is_some() {
+                    return Err(Refusal::Impossible);
                 }
-                let acks = self.acks_for(id, addressee, at);
-                self.transmission(id, aim, at, Some(addressee), sealed, content, *idem, acks)
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
+                let acks = to.map(|addressee| self.acks_for(id, addressee, at)).unwrap_or_default();
+                self.transmission(id, aim, at, *to, sealed, under, Content::Text(body.clone()), *idem, acks)
             }
             Order::OfferKey { to, aim } => {
                 if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                self.transmission(id, aim, at, *to, false, Content::Key, 0, Vec::new())
+                self.transmission(id, aim, at, *to, false, None, Content::Key, 0, Vec::new())
+            }
+            Order::GiveKey { key, to, aim, secrecy } => {
+                if *to == Some(from) {
+                    return Err(Refusal::Impossible);
+                }
+                if !self.factions.holds(id, *key, at) {
+                    return Err(Refusal::NoKey);
+                }
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
+                self.transmission(id, aim, at, *to, sealed, under, Content::Faction(key.0), 0, Vec::new())
             }
             Order::SendReport { to, aim, secrecy, idem } => {
                 if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                let sealed = matches!(secrecy, Secrecy::Sealed);
                 let beam = self.beam_for(id, aim, at)?;
-                match *to {
-                    // Sealing needs somebody to seal it to, the same rule a message follows.
-                    None if sealed => return Err(Refusal::Impossible),
-                    Some(addressee) if sealed && !self.holds_key(id, addressee, at) => {
-                        return Err(Refusal::NoKey);
-                    }
-                    _ => {}
-                }
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
                 // Written here, from what the shard holds for this craft: see
                 // `crate::instruments::report_for`.
                 let (report, through) = self.report_for(id, *to, at as f64 * 1.0e-6)?;
@@ -167,6 +172,7 @@ impl<J: Journal> Server<J> {
                     beamed: !beam.is_omni(),
                     idem: *idem,
                     sealed,
+                    under,
                     body: Some(report),
                     format: lc_proto::REPORT_FORMAT,
                 };
@@ -186,6 +192,28 @@ impl<J: Journal> Server<J> {
         }
     }
 
+    /// Whether a transmission is sealed to its addressee, and the faction key it is under.
+    fn seal(
+        &self,
+        id: CraftId,
+        to: Option<ShipId>,
+        secrecy: Secrecy,
+        at: i64,
+    ) -> Result<(bool, Option<FactionId>), Refusal> {
+        match secrecy {
+            Secrecy::Open => Ok((false, None)),
+            // Sealing needs somebody to seal it to. Refused rather than quietly sent in the
+            // open, which is the failure that matters.
+            Secrecy::Sealed => match to {
+                None => Err(Refusal::Impossible),
+                Some(addressee) if !self.holds_key(id, addressee, at) => Err(Refusal::NoKey),
+                Some(_) => Ok((true, None)),
+            },
+            Secrecy::Faction(key) if !self.factions.holds(id, key, at) => Err(Refusal::NoKey),
+            Secrecy::Faction(key) => Ok((false, Some(key))),
+        }
+    }
+
     /// The half of [`Server::compose`] that is the same whoever it is for, and all of an
     /// automatic answer.
     #[allow(clippy::too_many_arguments)]
@@ -196,6 +224,7 @@ impl<J: Journal> Server<J> {
         at: i64,
         to: Option<ShipId>,
         sealed: bool,
+        under: Option<FactionId>,
         content: Content,
         idem: MessageKey,
         acks: Vec<i64>,
@@ -209,108 +238,88 @@ impl<J: Journal> Server<J> {
             beamed: !beam.is_omni(),
             idem,
             sealed,
-            body: heard_as(&content, true),
+            under,
+            body: heard_as(&content, true, &self.factions),
             acks: acks.clone(),
         };
         Ok(Transmission {
             kind: match content {
-                Content::Key => lc_proto::kind::KEY,
+                Content::Key | Content::Faction(_) => lc_proto::kind::KEY,
                 _ => lc_proto::kind::MESSAGE,
             },
             payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
             beam,
-            said: Some(Utterance { to, idem, sealed, content, acks }),
+            said: Some(Utterance { to, idem, sealed, under, content, acks }),
             reported: None,
         })
     }
 
-    /// Write a transmission into the conversations it belongs to, and schedule what it teaches.
-    ///
-    /// Everything here is stamped with the time the light **lands**, never the time it left.
-    /// The rows exist from the moment the signal does — there is nothing to compute later, and
-    /// a craft with nobody flying it is served by the same path as one with a pilot watching —
-    /// and every read of them is gated on the clock having reached the arrival. That is the
-    /// same bargain the deliveries table makes, in a second place where it happens to be the
-    /// whole of a game mechanic rather than an optimization.
-    pub(crate) fn remember(
-        &mut self,
-        event_id: i64,
-        sender: CraftId,
-        at: i64,
-        said: &Utterance,
-        landings: &[(CraftId, i64, f32)],
-    ) {
+    /// File a transmission as said. Who hears it is [`Server::landed_on`].
+    pub(crate) fn remember(&mut self, event_id: i64, sender: CraftId, at: i64, said: &Utterance) {
         self.said.push(lc_store::chat::Message {
             event_id,
             sender: sender.0,
             addressee: said.to.map(|t| t.0),
             sealed: said.sealed,
+            under: said.under.map(|key| key.0),
             content: said.content.clone(),
             acks: said.acks.clone(),
             sent_t: at,
-            idem: (said.content != Content::Key).then_some(said.idem as i64),
+            idem: (!matches!(said.content, Content::Key | Content::Faction(_))).then_some(said.idem as i64),
         });
-        for (observer, arrive_t, strength) in landings {
-            if *observer == sender {
-                continue;
+    }
+
+    /// A transmission's light landing on `observer`: its receipt, and the key or acknowledgment
+    /// window place it teaches.
+    pub(crate) fn landed_on(&mut self, event_id: i64, sender: CraftId, said: &Utterance, observer: CraftId, arrive_t: i64, strength: f32) {
+        if observer == sender {
+            return;
+        }
+        self.receipts.push(lc_store::chat::Receipt {
+            event_id,
+            observer: observer.0,
+            arrive_t,
+            // Kept beside the arrival because it is the same kind of fact about the same
+            // reception, and because a transcript read back without it has no reading at
+            // all — which on a reconnection is every message a client has.
+            strength: Some(strength),
+        });
+        if said.content == Content::Key {
+            // Anyone the offer reaches learns the key, addressee or not. That is what
+            // "omnidirectional" costs, and it is the reason to point one at somebody.
+            self.taught.push(lc_store::chat::Held { holder: observer.0, subject: sender.0, learned_t: arrive_t });
+            self.keys
+                .entry(observer)
+                .or_default()
+                .entry(ShipId(sender.0))
+                .and_modify(|learned| *learned = (*learned).min(arrive_t))
+                .or_insert(arrive_t);
+        } else if let Content::Faction(key) = said.content {
+            // The same bargain as a ship key: whoever can read it holds it.
+            if readable(&self.factions, observer, said.to, said.sealed, said.under, arrive_t) {
+                self.factions.learn(observer, FactionId(key), arrive_t);
             }
-            self.receipts.push(lc_store::chat::Receipt {
-                event_id,
-                observer: observer.0,
-                arrive_t: *arrive_t,
-                // Kept beside the arrival because it is the same kind of fact about the same
-                // reception, and because a transcript read back without it has no reading at
-                // all — which on a reconnection is every message a client has.
-                strength: Some(*strength),
-            });
-            if said.content == Content::Key {
-                // Anyone the offer reaches learns the key, addressee or not. That is what
-                // "omnidirectional" costs, and it is the reason to point one at somebody.
-                self.taught.push(lc_store::chat::Held {
-                    holder: observer.0,
-                    subject: sender.0,
-                    learned_t: *arrive_t,
-                });
-                self.keys
-                    .entry(*observer)
-                    .or_default()
-                    .entry(ShipId(sender.0))
-                    .and_modify(|learned| *learned = (*learned).min(*arrive_t))
-                    .or_insert(*arrive_t);
-            } else {
-                let window = self.heard.entry((*observer, ShipId(sender.0))).or_default();
-                let place = window.partition_point(|(landed, _)| *landed <= *arrive_t);
-                window.insert(place, (*arrive_t, event_id));
-            }
+        } else {
+            let window = self.heard.entry((observer, ShipId(sender.0))).or_default();
+            let place = window.partition_point(|(landed, _)| *landed <= arrive_t);
+            window.insert(place, (arrive_t, event_id));
         }
     }
 
-    /// Schedule the possible automatic answer to a message, on the addressee, if it reaches them.
-    ///
-    /// Every craft and not only connected ones, and deciding nothing yet: whether auto-ack is
-    /// on is read when the light lands. See [`Owed`].
-    pub(crate) fn owe(
-        &mut self,
-        sender: CraftId,
-        source_at: DVec3,
-        beamed: bool,
-        said: &Utterance,
-        landings: &[(CraftId, i64, f32)],
-    ) {
+    /// The possible automatic answer to a message that has landed on `observer`, if it is the
+    /// addressee. Whether auto-ack is on is read by [`Server::answer_owed`]. See [`Owed`].
+    pub(crate) fn owe(&mut self, sender: CraftId, source_at: DVec3, beamed: bool, said: &Utterance, observer: CraftId, due_t: i64) {
         // Only text is answered. An acknowledgment answered in turn would have two
         // auto-acking ships trade light for ever.
-        let Some(to) = said.to.filter(|_| matches!(said.content, Content::Text(_))) else {
+        if !said.to.is_some_and(|to| to.0 == observer.0) || !matches!(said.content, Content::Text(_)) {
             return;
-        };
-        let Some((addressee, due_t, _)) = landings.iter().find(|(craft, ..)| craft.0 == to.0) else {
-            return;
-        };
-        let owed = self.owed.entry(*addressee).or_default();
+        }
+        let owed = self.owed.entry(observer).or_default();
         let from = ShipId(sender.0);
         if said.idem != 0 && owed.iter().any(|o| o.from == from && o.idem == said.idem) {
             return;
         }
-        owed.push(Owed { due_t: *due_t, from, idem: said.idem, beamed, source_at: source_at.to_array() });
+        owed.push(Owed { due_t, from, idem: said.idem, beamed, source_at: source_at.to_array() });
     }
 
     /// Send every automatic answer whose message has landed by now.
@@ -321,7 +330,6 @@ impl<J: Journal> Server<J> {
         &mut self,
         after_t: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let now = self.now_t;
         let mut landed = Vec::new();
@@ -357,7 +365,7 @@ impl<J: Journal> Server<J> {
             let idem = lc_world::rng::hash(&[id.0 as u64, owed.from.0 as u64, at as u64]).max(1);
             let acks = self.acks_for(id, owed.from, at);
             let Ok(spoken) =
-                self.transmission(id, &aim, at, Some(owed.from), false, Content::Ack, idem, acks)
+                self.transmission(id, &aim, at, Some(owed.from), false, None, Content::Ack, idem, acks)
             else {
                 continue;
             };
@@ -371,7 +379,6 @@ impl<J: Journal> Server<J> {
                 true,
                 spoken.said,
                 events,
-                deliveries,
             );
             if sent.is_ok() {
                 let answered = self.answered.entry(id).or_default();
@@ -499,10 +506,15 @@ impl<J: Journal> Server<J> {
     /// Hand this tick's transmissions to the journal, beside the events but not with them.
     ///
     /// Drained rather than copied, so a write that fails loses the tick's conversations rather
-    /// than repeating them for ever. Receipts and keys are only ever produced alongside a
-    /// message, so an empty `said` means there is nothing at all to write.
+    /// than repeating them for ever. Receipts and keys are written as light lands, ticks after
+    /// the message, so a tick with nothing said can still have them to write.
     pub(crate) async fn write_conversations(&mut self) -> Result<(), JournalError> {
-        if self.said.is_empty() {
+        if self.factions.is_dirty() {
+            let founded = std::mem::take(&mut self.factions.founded);
+            let taught = std::mem::take(&mut self.factions.taught);
+            self.journal.found(&founded, &taught).await?;
+        }
+        if self.said.is_empty() && self.receipts.is_empty() && self.taught.is_empty() {
             return Ok(());
         }
         let said = std::mem::take(&mut self.said);
@@ -522,6 +534,8 @@ impl<J: Journal> Server<J> {
     /// anyone sends acknowledges nothing — which the far end cannot tell from its own messages
     /// having been lost, and that is the one thing an acknowledgment exists to rule out.
     pub async fn resume_conversations(&mut self) -> Result<(), JournalError> {
+        let (founded, holds) = self.journal.factions().await?;
+        self.factions.resume(founded, holds);
         for held in self.journal.keyring().await? {
             self.keys
                 .entry(CraftId(held.holder))
@@ -542,14 +556,6 @@ impl<J: Journal> Server<J> {
             let excess = window.len().saturating_sub(ACK_DEPTH);
             window.drain(..excess);
         }
-        // Reports whose light had not landed when the last shard stopped. The sender's mark
-        // moved when it sent them, so nothing would ever send them again.
-        let flying = self.journal.in_flight(lc_proto::kind::REPORT, self.now_t).await?;
-        let (mut events, deliveries): (Vec<_>, Vec<_>) = flying.into_iter().map(|(d, e)| (e, d)).unzip();
-        // One row per delivery, so an event heard by several craft comes back several times.
-        events.sort_by_key(|e| e.id);
-        events.dedup_by_key(|e| e.id);
-        self.schedule_landings(&events, &deliveries);
         Ok(())
     }
 
@@ -613,19 +619,22 @@ impl<J: Journal> Server<J> {
                 with_name: m.addressee.map(name_of).unwrap_or_default(),
                 mine: true,
                 sealed: m.sealed,
-                body: heard_as(&m.content, true),
+                body: heard_as(&m.content, true, &self.factions),
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: None,
                 // A sender never hears its own signal, so there is no reading to have.
                 strength: None,
+                under: m.under.map(FactionId),
             });
         }
         for (m, arrive_t, strength) in transcript.heard {
             if arrive_t > now {
                 continue;
             }
-            let readable = !m.sealed || m.addressee == Some(ship.0);
+            let under = m.under.map(FactionId);
+            let readable =
+                readable(&self.factions, CraftId(ship.0), m.addressee.map(ShipId), m.sealed, under, arrive_t);
             messages.push(Said {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
@@ -636,11 +645,12 @@ impl<J: Journal> Server<J> {
                 with_name: name_of(m.sender),
                 mine: false,
                 sealed: m.sealed,
-                body: heard_as(&m.content, readable),
+                body: heard_as(&m.content, readable, &self.factions),
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: Some(arrive_t),
                 strength,
+                under,
             });
         }
         // By when this ship knew of each, which for a conversation across light delay is not
@@ -677,12 +687,17 @@ impl<J: Journal> Server<J> {
 ///
 /// Anything but a message passes through untouched, and a payload that will not parse does too:
 /// this is a filter on what is released, not a validator of what was written.
-pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
+///
+/// `holds` answers whether the observer holds a faction key as of this landing.
+pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(FactionId) -> bool) -> String {
+    let may_read = |to: Option<i64>, sealed: bool, under: Option<FactionId>| {
+        !(sealed && to != Some(observer.0)) && under.is_none_or(&holds)
+    };
     if kind == lc_proto::kind::REPORT {
         let Ok(mut reported) = serde_json::from_str::<Reported>(payload) else {
             return payload.to_string();
         };
-        if reported.sealed && reported.to != Some(observer.0) {
+        if !may_read(reported.to, reported.sealed, reported.under) {
             reported.body = None;
         }
         return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
@@ -693,19 +708,36 @@ pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
     let Ok(mut spoken) = serde_json::from_str::<Spoken>(payload) else {
         return payload.to_string();
     };
-    if spoken.sealed && spoken.to != Some(observer.0) {
+    if !may_read(spoken.to, spoken.sealed, spoken.under) {
         spoken.body = Body::Unreadable;
     }
     serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
 }
 
+/// Whether `observer` may read a transmission landing on it at `arrive_t`: [`redact`]'s rule,
+/// for the paths that have the store's row rather than the payload.
+fn readable(
+    factions: &crate::faction::Factions,
+    observer: CraftId,
+    to: Option<ShipId>,
+    sealed: bool,
+    under: Option<FactionId>,
+    arrive_t: i64,
+) -> bool {
+    !(sealed && to != Some(ShipId(observer.0))) && under.is_none_or(|key| factions.holds(observer, key, arrive_t))
+}
+
 /// What a receiver is handed of `content`, when it may or may not read it.
-fn heard_as(content: &Content, readable: bool) -> Body {
+fn heard_as(content: &Content, readable: bool, factions: &crate::faction::Factions) -> Body {
     match content {
-        Content::Text(_) if !readable => Body::Unreadable,
+        Content::Text(_) | Content::Faction(_) if !readable => Body::Unreadable,
         Content::Text(text) => Body::Text(text.clone()),
         Content::Ack => Body::Ack,
         Content::Key => Body::Key,
+        Content::Faction(key) => match factions.faction(FactionId(*key)) {
+            Some(faction) => Body::Faction(faction),
+            None => Body::Unreadable,
+        },
     }
 }
 
@@ -1422,8 +1454,10 @@ mod tests {
         tell(&mut wire, ClientId(1), 1, say(2, Aim::Omni, Secrecy::Open, "still there?"), 0);
         server.tick(&mut wire).await.unwrap();
 
-        let mut restarted = Server::new(Memory::default(), 0, 1);
+        // The setting is in the checkpoint; the message's light is in the journal.
+        let mut restarted = Server::new(std::mem::take(&mut server.journal), 0, 1);
         assert!(restarted.adopt(server.checkpoint()).is_empty());
+        restarted.resume_fronts().await.unwrap();
         assert!(restarted.auto_ack[&CraftId(2)].contains(&ShipId(1)));
         restarted.admit(ClientId(1), restarted.fleet.get(CraftId(1)).unwrap().clone(), 0.0);
         let mut wire = Loopback::new();

@@ -424,6 +424,8 @@ pub struct Remembered {
     aimed: crate::radio_panel::Aimed,
     seal: bool,
     emit: crate::emit_panel::Draft,
+    /// Whether `--chat found:<name>` has been typed into the radio's field yet.
+    drafted: bool,
 }
 
 pub fn open_panels(
@@ -434,6 +436,7 @@ pub fn open_panels(
     uplink: Res<crate::uplink::Uplink>,
     mut out: MessageWriter<Requested>,
     sky: Option<Res<crate::starfield::Starfield>>,
+    dev: Res<crate::dev::DevEntry>,
     mut held_over: Local<Remembered>,
 ) {
     let Remembered {
@@ -449,7 +452,14 @@ pub fn open_panels(
         aimed,
         seal,
         emit,
+        drafted,
     } = &mut *held_over;
+    if !*drafted {
+        *drafted = true;
+        if let Some(name) = dev.chat.as_deref().and_then(|spec| spec.strip_prefix("found:")) {
+            *draft = name.to_string();
+        }
+    }
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let panels = ui_state.open_panels().to_vec();
     // Once for every panel drawn this frame, and the map already asked for the same second,

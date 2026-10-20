@@ -138,6 +138,13 @@ pub enum Act {
     /// Let this many module-energies of storage go into the field at once, as a round vents what it
     /// has no room for.
     Vent(f64),
+    /// Found a faction key: the next generation of the `replaces`th key this scene founded, or a
+    /// first. Keys are numbered in the order the scene founds them.
+    Found { name: &'static str, replaces: Option<usize> },
+    /// Send the `key`th key this scene founded, open: beamed at `to`, or shouted.
+    GiveKey { key: usize, to: Option<Slot> },
+    /// Say something in the `key`th key's chat.
+    Speak { key: usize, text: &'static str },
 }
 
 /// A scene: who is in it, where they start, and what they do.
@@ -168,7 +175,8 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT];
+    pub const ALL: &'static [Scenario] =
+        &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT, WAKE, SCHISM];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -540,6 +548,70 @@ pub const DISTANT: Scenario = Scenario {
     ],
 };
 
+/// A faction founded, joined and re-keyed, for the radio window. See `lightcone/docs/23-factions.md`.
+///
+/// Osprey founds Wake and shouts the key, so everyone near holds it, and the four talk. Then
+/// Osprey re-keys and beams the new generation to you and to Wren, leaving Shrike on the old key.
+pub const WAKE: Scenario = Scenario {
+    name: "wake",
+    blurb: "A faction founded, then re-keyed to leave one member out.",
+    star: "Sol",
+    rate: 1.0,
+    watch: Slot::Pov,
+    pov: Member { name: "Kestrel", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::AsFound, form: None },
+    cast: &FACTION_CAST,
+    beats: &[
+        Beat { after_s: 1.0 * HOUR_S, actor: OSPREY, act: Act::Found { name: "Wake", replaces: None } },
+        Beat { after_s: 2.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 0, to: None } },
+        Beat { after_s: 3.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 0, text: "Wake is live. Muster at the Jupiter trojans." } },
+        Beat { after_s: 4.0 * HOUR_S, actor: WREN, act: Act::Speak { key: 0, text: "Copy. Burning in forty." } },
+        Beat { after_s: 5.0 * HOUR_S, actor: SHRIKE, act: Act::Speak { key: 0, text: "On my way. Which trojan camp?" } },
+        Beat { after_s: 8.0 * HOUR_S, actor: OSPREY, act: Act::Found { name: "Wake", replaces: Some(0) } },
+        Beat { after_s: 9.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 1, to: Some(Slot::Pov) } },
+        Beat { after_s: 9.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 1, to: Some(WREN) } },
+        Beat { after_s: 10.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 1, text: "New key. Shrike has been talking to the Ceres yard." } },
+        Beat { after_s: 11.0 * HOUR_S, actor: WREN, act: Act::Speak { key: 1, text: "Copy. Going quiet on the old one." } },
+        Beat { after_s: 12.0 * HOUR_S, actor: SHRIKE, act: Act::Speak { key: 0, text: "Osprey? Wren? Anyone?" } },
+    ],
+};
+
+/// [`WAKE`], with a traitor nobody has caught. Shrike re-keys first and beams its own Wake to you
+/// and Wren; Osprey's arrives after, and the old chat is superseded twice over.
+pub const SCHISM: Scenario = Scenario {
+    name: "schism",
+    blurb: "Two members re-key the same faction, and one of them is a traitor.",
+    star: "Sol",
+    rate: 1.0,
+    watch: Slot::Pov,
+    pov: Member { name: "Kestrel", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::AsFound, form: None },
+    cast: &FACTION_CAST,
+    beats: &[
+        Beat { after_s: 1.0 * HOUR_S, actor: OSPREY, act: Act::Found { name: "Wake", replaces: None } },
+        Beat { after_s: 2.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 0, to: None } },
+        Beat { after_s: 3.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 0, text: "Wake is live. Muster at the Jupiter trojans." } },
+        Beat { after_s: 4.0 * HOUR_S, actor: WREN, act: Act::Speak { key: 0, text: "Copy. Burning in forty." } },
+        Beat { after_s: 6.0 * HOUR_S, actor: SHRIKE, act: Act::Found { name: "Wake", replaces: Some(0) } },
+        Beat { after_s: 7.0 * HOUR_S, actor: SHRIKE, act: Act::GiveKey { key: 1, to: Some(Slot::Pov) } },
+        Beat { after_s: 7.0 * HOUR_S, actor: SHRIKE, act: Act::GiveKey { key: 1, to: Some(WREN) } },
+        Beat { after_s: 7.5 * HOUR_S, actor: SHRIKE, act: Act::Speak { key: 1, text: "Osprey is compromised. Use this key." } },
+        Beat { after_s: 8.0 * HOUR_S, actor: OSPREY, act: Act::Found { name: "Wake", replaces: Some(0) } },
+        Beat { after_s: 9.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 2, to: Some(Slot::Pov) } },
+        Beat { after_s: 9.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 2, to: Some(WREN) } },
+        Beat { after_s: 10.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 2, text: "New key. Shrike has been talking to the Ceres yard." } },
+    ],
+};
+
+const OSPREY: Slot = Slot::Cast(0);
+const WREN: Slot = Slot::Cast(1);
+const SHRIKE: Slot = Slot::Cast(2);
+
+const FACTION_CAST: [Member; 3] = [
+    Member { name: "Osprey", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.28, 0.0] }, form: None },
+    Member { name: "Wren", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::Beside { lengths: 16.0, bearing: [1.0, -0.28, 0.0] }, form: None },
+    Member { name: "Shrike", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.0, 0.28] }, form: None },
+];
+
+const HOUR_S: f64 = 3_600.0;
 const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
 /// Of `Q_max`, a field at rest: 400 K against the 4 600 K it fails at, heat going as `T⁴`.
 const IDLE: f64 = 5.7e-5;
@@ -594,7 +666,7 @@ mod tests {
     fn every_beat_is_about_somebody_who_is_there() {
         for scene in Scenario::ALL {
             let slots = scene.beats.iter().flat_map(|beat| match beat.act {
-                Act::Chase(on) | Act::ChaseDirect(on) => vec![beat.actor, on],
+                Act::Chase(on) | Act::ChaseDirect(on) | Act::GiveKey { to: Some(on), .. } => vec![beat.actor, on],
                 _ => vec![beat.actor],
             });
             for slot in slots {

@@ -34,6 +34,39 @@ pub enum Secrecy {
     /// For the addressee alone; others learn only that something was sent. Requires the sender
     /// to hold the addressee's key. See [`Order::OfferKey`](crate::Order::OfferKey).
     Sealed,
+    /// For whoever holds this faction key when it lands, which files it in that faction's chat.
+    /// Addressed to nobody. Appended last.
+    Faction(FactionId),
+}
+
+/// A faction key. Minted by the shard, so nobody can found a faction that is somebody else's.
+/// See `lightcone/docs/23-factions.md`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct FactionId(pub i64);
+
+/// A faction key with the name its founder gave it, which travels with it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Faction {
+    pub key: FactionId,
+    pub name: String,
+    /// Who minted it. Two holders can each replace one key, so a lineage forks, and this is
+    /// how a receiver tells the branches apart. True, because identity is not forgeable yet.
+    pub founder: ShipId,
+    /// The keys this one replaces, the one it directly replaces first. Whole rather than one
+    /// link, so a holder of generation 3 knows it supersedes 1 without ever having held 2.
+    pub lineage: Vec<FactionId>,
+}
+
+impl Faction {
+    /// 1 for a key that replaces nothing.
+    pub fn generation(&self) -> u32 {
+        self.lineage.len() as u32 + 1
+    }
+
+    /// Whether this key is a later generation of `older`.
+    pub fn supersedes(&self, older: FactionId) -> bool {
+        self.lineage.contains(&older)
+    }
 }
 
 /// What makes two transmissions the same message, so a receiver shows a resend as one line.
@@ -60,6 +93,8 @@ pub enum Body {
     Key,
     /// Sealed to somebody else.
     Unreadable,
+    /// A faction's key, given. Appended last.
+    Faction(Faction),
 }
 
 impl Body {
@@ -87,6 +122,10 @@ pub struct Spoken {
     pub idem: MessageKey,
     /// With a [`Body::Text`], you are the addressee.
     pub sealed: bool,
+    /// The faction key it is sealed to. Shown to everyone who hears it, so two messages under
+    /// one key are seen to be.
+    #[serde(default)]
+    pub under: Option<FactionId>,
     pub body: Body,
     /// Event ids of the addressee's messages the sender had received, newest last. Ids rather
     /// than a count because the ends disagree on the count. See [`ACK_DEPTH`].
@@ -105,6 +144,8 @@ pub struct Reported {
     #[serde(default)]
     pub idem: MessageKey,
     pub sealed: bool,
+    #[serde(default)]
+    pub under: Option<FactionId>,
     /// The `lc_world::knowledge::Report`, as [`encode_report`] writes it. Its shape is part of
     /// this protocol: a change to it is a [`REPORT_FORMAT`] bump. `None` when this receiver may
     /// not read it.
@@ -159,4 +200,6 @@ pub struct Said {
     /// In the units the noise floor is compared against. `None` for one this ship sent, and for
     /// one recorded before the store kept the reading. Appended last.
     pub strength: Option<f32>,
+    /// The faction key it was sealed to: a line in that faction's chat. Appended last.
+    pub under: Option<FactionId>,
 }

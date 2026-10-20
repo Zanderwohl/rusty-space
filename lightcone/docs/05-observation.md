@@ -262,7 +262,7 @@ S_min = 2 * k * T_sys / (A_eff * sqrt(B * tau))
 
 The consequence for the game is the fan-out bound in
 [02-event-store.md](02-event-store.md): every emission has a finite detection radius, so the
-set of receivers is finite and can be enumerated at write time.
+light of each is followed only as far as it can be detected, and its set of receivers is finite.
 
 Isotropic broadcast is cheap to send, reaches everyone in range, and announces the sender's
 position to every one of them. It is the default for a player who has not thought about it.

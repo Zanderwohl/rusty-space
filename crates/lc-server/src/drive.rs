@@ -10,7 +10,7 @@ use lc_world::craft::CraftId;
 
 use crate::journal::Journal;
 use crate::server::{KIND_DRIVE, Server};
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 impl<J: Journal> Server<J> {
     /// State every transition in `(after_t, now]`. After every order and re-solve of the tick,
@@ -19,7 +19,6 @@ impl<J: Journal> Server<J> {
         &mut self,
         after_t: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let (after_s, now_s) = (after_t as f64 * 1.0e-6, self.now_t() as f64 * 1.0e-6);
         let balance = &self.balance;
@@ -49,7 +48,7 @@ impl<J: Journal> Server<J> {
             let power_w = total(transition.power_w, transition.emit).max(total(transition.was_w, transition.was_emit));
             // Rounded up, never into the tick before: that is where the cursor already stands.
             let at_t = ((transition.at_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
-            self.emit(id, KIND_DRIVE, power_w, payload, at_t, events, deliveries);
+            self.emit(id, KIND_DRIVE, power_w, payload, at_t, events);
         }
     }
 }

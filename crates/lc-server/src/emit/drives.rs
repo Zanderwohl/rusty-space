@@ -13,7 +13,7 @@ use lc_world::fitting::Balance;
 use super::Lighting;
 use crate::journal::Journal;
 use crate::server::Server;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 /// A lit drive's power is said again once it has moved this fraction from what was last said.
 const POWER_STEP: f64 = 0.01;
@@ -80,7 +80,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// State every lit drive over `(after_t, now]`. A wreck's were put out when it collapsed.
-    pub(crate) fn light_drives(&mut self, after_t: i64, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    pub(crate) fn light_drives(&mut self, after_t: i64, events: &mut Vec<Event>) {
         let now = self.now_t;
         let (after_s, now_s) = (after_t as f64 * 1.0e-6, now as f64 * 1.0e-6);
         let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
@@ -104,14 +104,14 @@ impl<J: Journal> Server<J> {
             for mark in marks {
                 while mark - 1 > from && self.drive_differs(id, mark - 1) {
                     let t = first(from, mark - 1, |t| self.drive_differs(id, t));
-                    self.state_drive(id, t, events, deliveries);
+                    self.state_drive(id, t, events);
                     from = t;
                     if self.drive_differs(id, t) {
                         break;
                     }
                 }
                 if self.drive_differs(id, mark) {
-                    self.state_drive(id, mark, events, deliveries);
+                    self.state_drive(id, mark, events);
                 }
                 from = mark;
             }
@@ -119,7 +119,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// Say what `id`'s drives send at `t`, where it differs from what was last said.
-    fn state_drive(&mut self, id: CraftId, t: i64, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    fn state_drive(&mut self, id: CraftId, t: i64, events: &mut Vec<Event>) {
         let Some(craft) = self.fleet.get(id) else { return };
         let wanted = wanted(craft, &self.balance, t);
         let face_m2 = exhaust_face_m2(craft);
@@ -130,7 +130,7 @@ impl<J: Journal> Server<J> {
             match (at, wanted.jets.iter().find(|j| j.jet == kind)) {
                 (Some(k), None) => {
                     let lighting = lit.remove(k);
-                    self.light_event(id, &lighting, t, 0.0, events, deliveries);
+                    self.light_event(id, &lighting, t, 0.0, events);
                 }
                 (Some(k), Some(jet)) if stepped(lit[k].power_w, jet.power_w) || turned(&lit[k], jet) => {
                     let lighting = &mut lit[k];
@@ -138,7 +138,7 @@ impl<J: Journal> Server<J> {
                     lighting.power_w = jet.power_w;
                     lighting.spectrum = spectrum(jet.power_w);
                     let lighting = *lighting;
-                    self.light_event(id, &lighting, t, jet.power_w, events, deliveries);
+                    self.light_event(id, &lighting, t, jet.power_w, events);
                 }
                 (None, Some(jet)) => {
                     let mut lighting = Lighting {
@@ -151,7 +151,7 @@ impl<J: Journal> Server<J> {
                         beam: None,
                         jet: Some(kind),
                     };
-                    lighting.beam = self.light_event(id, &lighting, t, jet.power_w, events, deliveries);
+                    lighting.beam = self.light_event(id, &lighting, t, jet.power_w, events);
                     if lighting.beam.is_some() {
                         lit.push(lighting);
                     }
@@ -164,7 +164,7 @@ impl<J: Journal> Server<J> {
             if stepped(lighting.power_w, power_w) {
                 lighting.power_w = power_w;
                 let lighting = *lighting;
-                self.light_event(id, &lighting, t, power_w, events, deliveries);
+                self.light_event(id, &lighting, t, power_w, events);
             }
         }
         if !lit.is_empty() {

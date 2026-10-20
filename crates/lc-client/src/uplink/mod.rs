@@ -301,6 +301,11 @@ fn fold(
                 fitting: fitting.into_iter().map(Into::into).collect(),
             };
         }
+        Outbound::Factions { ship_id, factions } => {
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                uplink.chat.holding(factions);
+            }
+        }
         Outbound::Backlog { messages, keys } => {
             // Nothing is announced. A transcript is what was *already* said, and a box of
             // notifications about years-old messages on every sign-in would bury whatever is

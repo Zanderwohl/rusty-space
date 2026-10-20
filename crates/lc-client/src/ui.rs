@@ -346,6 +346,10 @@ pub enum Channel {
     Overheard,
     /// One craft's conversation, both halves.
     With(lc_proto::ShipId),
+    /// A faction's chat: everything heard under its key.
+    Faction(lc_proto::FactionId),
+    /// Naming a new faction.
+    Founding,
 }
 
 #[derive(Clone, Debug, PartialEq)]

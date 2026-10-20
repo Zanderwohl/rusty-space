@@ -440,3 +440,56 @@ async fn an_emit_flown_as_a_burn_is_said_again_as_the_ship_lightens() {
     assert!((said[0] / power_w - 1.0).abs() < 1.0e-6, "{said:?}");
     assert!(said.windows(2).all(|w| w[1] / w[0] < 0.99 && w[1] / w[0] > 0.985), "{said:?}");
 }
+
+/// A zero-power event is seen at a tenth over what it stops, or over the hull's glow.
+#[tokio::test]
+async fn an_event_that_puts_out_nothing_is_seen_by_what_it_stops() {
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
+    server.fleet.insert(anvil(2));
+    let at = 50 * 1_000_000;
+    let at_s = at as f64 * 1.0e-6;
+    let burning_w = lc_world::ignition::putting_out_w(server.ship(ShipId(1)).unwrap(), &Balance::DEFAULT, at_s);
+    assert!(burning_w > 1.0e15, "premise: the drive is lit, at {burning_w} W");
+    assert_eq!(server.seen_w(CraftId(1), at, 0.0), crate::world::CANCEL_MARGIN * burning_w);
+
+    let dark = server.seen_w(CraftId(2), at, 0.0);
+    let glow = lc_world::glow::thermal_w(&lc_world::glow::Glow::unfitted(&Balance::DEFAULT));
+    assert!(dark > 0.0 && (dark - crate::world::CANCEL_MARGIN * glow).abs() <= 1.0e-9 * dark, "{dark} against {glow}");
+    assert_eq!(server.seen_w(CraftId(2), at, 5.0), 5.0, "a power of its own is its own");
+}
+
+/// A watcher that saw the burn hears the cut, which is seen by the drive as it ran before the order
+/// rewrote the course.
+#[tokio::test]
+async fn a_watcher_that_saw_the_burn_hears_the_cut() {
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(60.0));
+    server.admit(ClientId(1), crossing(anvil(1), 1.0, 1.0e13), 0.0);
+    let far = DVec3::Y * LIGHT_HOUR_US;
+    server.admit(ClientId(2), ship(2, far, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    until(&mut server, &mut wire, 120.0e6).await;
+    let burning = server.ship(ShipId(1)).unwrap().clone();
+
+    wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CutDrive, issued_at_client_t: i64::MAX }));
+    server.tick(&mut wire).await.unwrap();
+    let cut = server.journal().events.iter().find(|e| e.kind == crate::server::KIND_CUT).expect("the cut was ordered").clone();
+    let drive_w = lc_world::ignition::putting_out_w(&burning, &Balance::DEFAULT, cut.t as f64 * 1.0e-6);
+    assert!(drive_w > 1.0e15, "premise: the drive ran at {drive_w} W");
+    assert_eq!(cut.power_w, crate::world::CANCEL_MARGIN * drive_w);
+
+    let arrive_t = (cut.t as f64 + (far - cut.at).length()).ceil() as i64;
+    until(&mut server, &mut wire, arrive_t as f64 + 2.0 * 60.0e6).await;
+    let heard: Vec<i64> = wire
+        .take(ClientId(2))
+        .into_iter()
+        .flat_map(|m| match m {
+            Outbound::Sightings(list) => list.into_iter().map(|s| s.get().clone()).collect(),
+            _ => Vec::new(),
+        })
+        .filter(|s| s.kind == crate::server::KIND_CUT && s.source_id == 1)
+        .map(|s| s.arrive_t)
+        .collect();
+    assert_eq!(heard, vec![arrive_t]);
+}

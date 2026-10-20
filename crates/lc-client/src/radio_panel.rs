@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-use lc_proto::Body;
+use lc_proto::{Body, FactionId};
 use lc_world::sky::StarId;
 
 use crate::action::Action;
@@ -152,6 +152,15 @@ pub(crate) fn chat(
                     ask(out, Action::ChatWith(Channel::Overheard));
                 }
                 ui.separator();
+                for (key, faction) in uplink.chat.factions() {
+                    if ui.selectable_label(showing == Channel::Faction(key), faction_label(uplink, key, faction, forked(uplink, key))).clicked() {
+                        ask(out, Action::ChatWith(Channel::Faction(key)));
+                    }
+                }
+                if ui.selectable_label(showing == Channel::Founding, "found faction").clicked() {
+                    ask(out, Action::ChatWith(Channel::Founding));
+                }
+                ui.separator();
                 for (id, name) in &parties {
                     let in_sight = uplink.contacts.iter().any(|c| c.ship_id == *id);
                     let label = ui
@@ -190,6 +199,15 @@ pub(crate) fn chat(
                 public_log(ui, uplink, &own, out);
                 compose(ui, game, uplink, None, star, false, aim_of(*aimed, None, star), draft, aimed, seal, out);
             }
+            Channel::Faction(key) => {
+                let star = state.0.selected;
+                if *aimed == Aimed::AtThem || (*aimed == Aimed::AtTheSelectedStar && star.is_none()) {
+                    *aimed = Aimed::Omni;
+                }
+                faction_log(ui, uplink, key, &own, out);
+                compose_faction(ui, game, uplink, key, star, aim_of(*aimed, None, star), draft, aimed, out);
+            }
+            Channel::Founding => founding(ui, draft, out),
             Channel::With(with) => {
                 let star = state.0.selected;
                 let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
@@ -247,6 +265,153 @@ fn public_log(
     });
 }
 
+/// A faction's chat: everything heard under its key, and this ship's own.
+fn faction_log(
+    ui: &mut egui::Ui,
+    uplink: &crate::uplink::Uplink,
+    key: FactionId,
+    own: &str,
+    out: &mut MessageWriter<Requested>,
+) {
+    let lines = uplink.chat.faction(key).map(|f| f.lines.as_slice()).unwrap_or_default();
+    let newer = uplink.chat.newer(key);
+    // Outside the log, so scrolling cannot hide it, and a row reserved even when empty, so the
+    // log does not jump when a key lands. One row per branch: a fork may be two loyal members
+    // who could not know of each other, or a traitor cutting part of the faction off.
+    let banner = BANNER_ROW * newer.len().max(1) as f32;
+    ui.allocate_ui(egui::vec2(LOG_WIDTH, banner), |ui| {
+        let amber = egui::Color32::from_rgb(210, 165, 60);
+        for (k, chat) in &newer {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Superseded by").color(amber));
+                if clickable_name(ui, &faction_label(uplink, *k, chat, true), amber).clicked() {
+                    ask(out, Action::ChatWith(Channel::Faction(*k)));
+                }
+            });
+        }
+    });
+    log_area(ui, "chat_faction", BODY_HEIGHT - COMPOSER_HEIGHT - banner, |ui| {
+        if lines.is_empty() {
+            ui.weak("Nothing said under this key.");
+            return;
+        }
+        for loose in lines {
+            ui.horizontal_wrapped(|ui| {
+                match loose.from.filter(|_| !loose.line.mine) {
+                    Some(from) => {
+                        if clickable_name(ui, &format!("{}:", loose.from_name), RADIO).clicked() {
+                            ask(out, Action::ChatWith(Channel::With(from)));
+                        }
+                    }
+                    None => speaker(ui, own, true),
+                }
+                body_of(ui, &loose.line, loose.line.mine, None);
+            });
+        }
+    });
+}
+
+/// Whether another key held shares this one's name and generation, which only a fork makes.
+fn forked(uplink: &crate::uplink::Uplink, key: FactionId) -> bool {
+    let Some(this) = uplink.chat.faction(key) else { return false };
+    uplink.chat.factions().iter().any(|(k, other)| {
+        *k != key && other.name == this.name && other.generation() == this.generation()
+    })
+}
+
+/// Room for one line saying a chat's key has been superseded.
+const BANNER_ROW: f32 = 22.0;
+
+/// What a faction is shown as: its name, or a mark that tells keys apart until the name arrives,
+/// and always its generation. With `founder`, who minted it, which tells a fork's branches apart.
+pub(crate) fn faction_label(uplink: &crate::uplink::Uplink, key: FactionId, chat: &crate::chat::FactionChat, founder: bool) -> String {
+    let name = match chat.name.is_empty() {
+        true => crate::chat::key_mark(key),
+        false => chat.name.clone(),
+    };
+    let by = chat.founder.filter(|_| founder).map(|f| match uplink.joined().is_some_and(|j| j.ship_id == f) {
+        true => "you".to_string(),
+        false => uplink.name_of(f),
+    });
+    let g = chat.generation();
+    match by {
+        None => format!("{name} (gen {g})"),
+        Some(by) => format!("{name} (gen {g}, {by})"),
+    }
+}
+
+/// The aim and the field a message to a faction is typed into. Always under the key.
+#[allow(clippy::too_many_arguments)]
+fn compose_faction(
+    ui: &mut egui::Ui,
+    game: &Game,
+    uplink: &crate::uplink::Uplink,
+    key: FactionId,
+    star: Option<StarId>,
+    aim: lc_proto::Aim,
+    draft: &mut String,
+    aimed: &mut Aimed,
+    out: &mut MessageWriter<Requested>,
+) {
+    ui.separator();
+    let secrecy = lc_proto::Secrecy::Faction(key);
+    ui.horizontal(|ui| {
+        ui.selectable_value(aimed, Aimed::Omni, "omni")
+            .on_hover_text("every direction: heard by everyone in range, read by whoever holds the key");
+        ui.add_enabled_ui(star.is_some(), |ui| {
+            let name = star.map(|id| game.name_of(id)).unwrap_or_else(|| "the selected star".into());
+            ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star").on_hover_text(name);
+        });
+        // The rarer actions, behind a menu at the row's end.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let more = hamburger(ui);
+            egui::Popup::menu(&more).show(|ui| {
+                if ui.button("send survey").clicked() {
+                    ask(out, Action::SendReport { to: None, aim, secrecy });
+                }
+                // The next generation, under the same name. Nobody else holds it until it is given.
+                if ui.button("re-key").clicked() {
+                    let name = uplink.chat.faction(key).map(|f| f.name.clone()).unwrap_or_default();
+                    ask(out, Action::Found { name, replaces: Some(key) });
+                }
+            });
+        });
+    });
+    ui.horizontal(|ui| {
+        let field = ui.add(egui::TextEdit::singleline(draft).desired_width(LOG_WIDTH - 52.0));
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.button("send").clicked() || entered) && !draft.trim().is_empty() {
+            ask(out, Action::Say { to: None, aim, secrecy, body: std::mem::take(draft), idem: None });
+            field.request_focus();
+        }
+    });
+}
+
+/// A button of three bars. Painted, because the default font has no U+2630 and draws a box.
+fn hamburger(ui: &mut egui::Ui) -> egui::Response {
+    let response = ui.add(egui::Button::new("").min_size(egui::vec2(24.0, 18.0)));
+    let ink = ui.visuals().widgets.style(&response).fg_stroke.color;
+    let c = response.rect.center();
+    for dy in [-4.0, 0.0, 4.0] {
+        ui.painter().line_segment(
+            [egui::pos2(c.x - 6.0, c.y + dy), egui::pos2(c.x + 6.0, c.y + dy)],
+            egui::Stroke::new(1.5_f32, ink),
+        );
+    }
+    response
+}
+
+/// Naming a new faction. Founding puts nothing on the air; the key is held at once.
+fn founding(ui: &mut egui::Ui, draft: &mut String, out: &mut MessageWriter<Requested>) {
+    ui.horizontal(|ui| {
+        let field = ui.add(egui::TextEdit::singleline(draft).desired_width(LOG_WIDTH - 64.0).hint_text("name"));
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.button("found").clicked() || entered) && !draft.trim().is_empty() {
+            ask(out, Action::Found { name: std::mem::take(draft), replaces: None });
+        }
+    });
+}
+
 /// Other people's traffic, which this ship happened to be in range of.
 ///
 /// **The encrypted ones are here too**, and that is deliberate: the fact of a signal is real
@@ -272,11 +437,12 @@ fn overheard_log(
             let to = loose.to.map(|to| uplink.name_of(to));
             let face = logged(ui);
             ui.label(
-                egui::RichText::new(match &to {
-                    Some(to) => format!("{from} -> {to}"),
+                egui::RichText::new(match (&to, loose.under) {
+                    (Some(to), _) => format!("{from} -> {to}"),
+                    (None, Some(key)) => format!("{from} -> {}", crate::chat::key_mark(key)),
                     // Unreachable while `overheard` means "addressed to somebody else", and
                     // cheaper to render than to prove.
-                    None => from.to_string(),
+                    (None, None) => from.to_string(),
                 })
                 .color(RADIO)
                 .font(face.clone()),
@@ -289,6 +455,10 @@ fn overheard_log(
                     }
                     Body::Key => {
                         ui.label(egui::RichText::new("offered its key").font(face.clone()).weak());
+                    }
+                    Body::Faction(faction) => {
+                        let gave = format!("gave the key to {} (gen {})", faction.name, faction.generation());
+                        ui.label(egui::RichText::new(gave).font(face.clone()).weak());
                     }
                     Body::Ack => {}
                     // Fixed-length noise, and the same noise every frame. There is nothing in
@@ -465,6 +635,16 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
             .weak(),
         ),
         Body::Key => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
+        Body::Faction(faction) if mine => ui.label(
+            said(match to {
+                Some(to) => format!("gave {to} the key to {} (gen {})", faction.name, faction.generation()),
+                None => format!("gave out the key to {} (gen {})", faction.name, faction.generation()),
+            })
+            .weak(),
+        ),
+        Body::Faction(faction) => {
+            ui.label(said(format!("gave the key to {} (gen {})", faction.name, faction.generation())).color(RADIO))
+        }
         Body::Text(body) => ui.label(said(body.clone()).color(color)),
         Body::Ack => ui.label(said("(acknowledgment)".to_string()).weak()),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
@@ -551,6 +731,27 @@ fn compose(
             ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star").on_hover_text(
                 format!("{name}: the whole system, for when you do not know where in it they are"),
             );
+        });
+        let factions = uplink.chat.factions();
+        ui.add_enabled_ui(!factions.is_empty(), |ui| {
+            // Sealed or not as the encrypt box says. Open, it hands the key to everyone it reaches.
+            let secrecy = match *seal {
+                true => lc_proto::Secrecy::Sealed,
+                false => lc_proto::Secrecy::Open,
+            };
+            ui.menu_button("give key", |ui| {
+                for (key, faction) in &factions {
+                    if ui.button(faction_label(uplink, *key, faction, forked(uplink, *key))).clicked() {
+                        ask(out, Action::GiveKey { key: *key, to: with, aim, secrecy });
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text(match *seal {
+                true => "sealed: only they will hold it",
+                false => "open: everyone it reaches will hold it",
+            });
         });
     });
     ui.horizontal(|ui| {

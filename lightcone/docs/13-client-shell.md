@@ -156,8 +156,17 @@ by who it was addressed to, never by who sent it**:
 | addressed to | channel |
 |---|---|
 | nobody | **Public** — broadcasts, sent and heard |
+| nobody, under a faction key this ship holds | that faction's chat |
+| nobody, under a key it does not | **Overheard**, marked with the key so two such messages can be told to share one |
 | this ship | that craft's conversation |
 | another craft | **Overheard** |
+
+Faction chats are listed between the pinned channels and the craft, by name rather than by
+recency, because which key a message goes out under is the decision that leaks. Every key is
+shown with its generation, the first included: the mechanic is meant to be seen. A chat under a
+key this ship holds a later generation of carries a line per newer key above its log, outside the
+scroll, naming the key and its founder and opening its chat. Re-keying and sending a survey are in
+the menu at the end of a faction's action row. See [23-factions.md](23-factions.md).
 
 A message addressed to one craft is not public however openly it was sent. Anyone in range can
 read it, but it was still somebody's mail, and being in earshot of it is what Overheard is.

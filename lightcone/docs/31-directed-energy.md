@@ -322,9 +322,8 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   blackbody for a drive's face. Summed over the source's beams landing on it, in the brightest's
   spectrum.
 - **A restart** brings back what each craft has lit, what it has said of it and the beams landing on
-  each now, with the craft's checkpoint, and every landing still in flight, from the journal's
-  deliveries of events the restored clock has reached, whatever lit them. A lit drive goes on being
-  said as the same beam.
+  each now, with the craft's checkpoint, and every light still in flight, from the journal's
+  fronts, whatever lit them. A lit drive goes on being said as the same beam.
 
 ### Spread, and why it is a choice
 

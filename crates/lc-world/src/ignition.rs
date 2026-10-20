@@ -96,6 +96,14 @@ fn stepped(was_w: f64, now_w: f64) -> bool {
     }
 }
 
+/// Everything a craft's drive, thrusters and emits put out just before `at_s`, watts: what an
+/// order that stops them at `at_s` stops.
+pub fn putting_out_w(craft: &Craft, balance: &Balance, at_s: f64) -> f64 {
+    let before_s = at_s - STRADDLE_S;
+    let emit = emit_w(craft, before_s);
+    lit_w(craft, balance, before_s).iter().sum::<f64>() + emit.fore_w + emit.aft_w
+}
+
 /// `F c` at `s` of the main drive, the thrusters and an emit flown as a burn, in that order.
 fn lit_w(craft: &Craft, balance: &Balance, s: f64) -> [f64; 3] {
     let jets = exhaust(craft, balance, s);

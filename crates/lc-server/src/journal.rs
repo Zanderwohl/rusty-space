@@ -1,4 +1,4 @@
-//! Where events and their scheduled deliveries are kept.
+//! Where events, the light still on its way from them, and its deliveries are kept.
 //!
 //! A trait with two implementations. [`Memory`] is what the filter's own tests run against —
 //! they are about causality and must not need a database. [`Postgres`] is the real one, and
@@ -41,11 +41,13 @@ pub trait Journal {
         to_t: i64,
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
-    /// Append events and the deliveries already worked out for them.
+    /// Append a tick's events, deliveries and fronts, all or none: a front kept for an event that
+    /// was not would be sightings of something the journal never had.
     fn write(
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
     /// What reaches one observer in `(after_t, until_t]`, in arrival order, with the event each
@@ -60,14 +62,12 @@ pub trait Journal {
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
 
-    /// Every delivery of an event of `kind` that lands after `after_t`, with its event: what is
-    /// still in flight. Read once, when a shard comes back, for whatever it acts on when light
-    /// lands rather than merely shows.
-    fn in_flight(
+    /// Every front something could still detect at `now_t`, with what was said for any that are
+    /// speech. Read once, when a shard comes back.
+    fn fronts(
         &self,
-        kind: i16,
-        after_t: i64,
-    ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+        now_t: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<crate::front::Front>, JournalError>> + Send;
 
     /// Append what was said, where it landed, and what keys that taught.
     ///
@@ -113,6 +113,21 @@ pub trait Journal {
     fn ack_window(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<(i64, i64, i64)>, JournalError>> + Send;
+
+    /// Append minted faction keys and who will hold which. Kept for ever, like the keyring.
+    fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
+
+    /// Every faction key and every holding of one. Read once, when a shard comes back, for the
+    /// reason [`Journal::keyring`] is.
+    fn factions(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError>,
+    > + Send;
 }
 
 /// One ship's own copy of every conversation it is party to.
@@ -129,9 +144,12 @@ pub struct Transcript {
 pub struct Memory {
     pub events: Vec<Event>,
     pub deliveries: Vec<Scheduled>,
+    pub fronts: Vec<crate::front::Front>,
     pub messages: Vec<lc_store::chat::Message>,
     pub receipts: Vec<lc_store::chat::Receipt>,
     pub keys: Vec<lc_store::chat::Held>,
+    pub founded: Vec<lc_store::chat::Founded>,
+    pub holds: Vec<lc_store::chat::Holds>,
 }
 
 impl Journal for Memory {
@@ -143,6 +161,7 @@ impl Journal for Memory {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
         // The payload column is `jsonb`, so a payload that is not JSON is a row the real
         // journal refuses. A fake that took it let a burn built with `format!` out of a
@@ -157,6 +176,7 @@ impl Journal for Memory {
         }
         self.events.extend_from_slice(events);
         self.deliveries.extend_from_slice(deliveries);
+        self.fronts.extend_from_slice(fronts);
         Ok(())
     }
 
@@ -178,15 +198,8 @@ impl Journal for Memory {
         Ok(out)
     }
 
-    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
-        let mut out: Vec<(Scheduled, Event)> = self
-            .deliveries
-            .iter()
-            .filter(|d| d.arrive_t > after_t)
-            .filter_map(|d| self.events.iter().find(|e| e.id == d.event && e.kind == kind).map(|e| (*d, e.clone())))
-            .collect();
-        out.sort_by_key(|(d, _)| d.arrive_t);
-        Ok(out)
+    async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
+        Ok(self.fronts.iter().filter(|f| f.until_t >= now_t).cloned().collect())
     }
 
     async fn record(
@@ -232,7 +245,7 @@ impl Journal for Memory {
             else {
                 continue;
             };
-            if message.content == lc_store::chat::Content::Key {
+            if matches!(message.content, lc_store::chat::Content::Key | lc_store::chat::Content::Faction(_)) {
                 continue;
             }
             out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));
@@ -240,13 +253,44 @@ impl Journal for Memory {
         out.sort_by_key(|(observer, sender, _, arrive_t)| (*observer, *sender, *arrive_t));
         Ok(out.into_iter().map(|(observer, sender, event, _)| (observer, sender, event)).collect())
     }
+
+    async fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> Result<(), JournalError> {
+        self.founded.extend_from_slice(founded);
+        for h in holds {
+            if !self.holds.iter().any(|k| k.holder == h.holder && k.faction == h.faction) {
+                self.holds.push(*h);
+            }
+        }
+        Ok(())
+    }
+
+    async fn factions(
+        &self,
+    ) -> Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError> {
+        Ok((self.founded.clone(), self.holds.clone()))
+    }
 }
 
 /// How far ahead of `now` the tick keeps partitions made.
 ///
-/// One span is thirty days of coordinate time, about five real minutes at the design rate. The
-/// tick prepares before it writes, so two spans is slack rather than a deadline.
+/// One span is about a real hour at the design rate. The tick prepares before it writes, so two
+/// spans is slack rather than a deadline.
 pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
+
+/// Coordinate microseconds in a real hour at the design rate: a Julian year.
+pub const DESIGN_HOUR_US: i64 = crate::server::TICK_US * crate::server::TICKS_PER_SECOND as i64 * 3_600;
+
+/// What the shard keeps live behind its clock: a real day at the design rate, so a client back
+/// after a day away is sent every sighting it missed. The light-crossing time of the playable
+/// volume, `02-event-store.md`'s first tier, is for the light-cone cursor, which the shard does not
+/// run.
+#[cfg(feature = "storage")]
+pub const RETENTION: lc_store::retention::Policy =
+    lc_store::retention::Policy { kept_us: 24 * DESIGN_HOUR_US, most: 64 };
 
 
 #[cfg(test)]
@@ -270,6 +314,7 @@ mod tests {
                     Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0 },
                     Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0 },
                 ],
+                &[],
             )
             .await
             .unwrap();
@@ -289,7 +334,7 @@ mod tests {
     async fn a_delivery_with_no_event_is_dropped() {
         let mut journal = Memory::default();
         journal
-            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }])
+            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }], &[])
             .await
             .unwrap();
         assert!(journal.due(ShipId(9), 0, 1_000).await.unwrap().is_empty());
