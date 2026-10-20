@@ -166,9 +166,10 @@ recency, because which key a message goes out under is the decision that leaks. 
 shown with its generation, the first included: the mechanic is meant to be seen. A chat under a
 key this ship holds a later generation of carries a line per newer key above its log, outside the
 scroll, naming the key and its founder and opening its chat. Re-keying and sending a survey are in
-the menu at the end of a faction's action row; in a conversation with one craft, the same menu
-holds sending this ship's personal key, sending a faction key, and sending a survey, each sealed
-or open as the encrypt box says, but for the personal key, which is always open. See [23-factions.md](23-factions.md).
+the menu at the end of a faction's action row; in Public and in a conversation with one craft,
+the same menu holds sending this ship's personal key, sending a faction key, and sending a
+survey, each sealed or open as the encrypt box says, but for the personal key, which is always
+open. See [23-factions.md](23-factions.md).
 
 A message addressed to one craft is not public however openly it was sent. Anyone in range can
 read it, but it was still somebody's mail, and being in earshot of it is what Overheard is.

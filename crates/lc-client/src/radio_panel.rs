@@ -767,24 +767,21 @@ fn compose(
             true => lc_proto::Secrecy::Sealed,
             false => lc_proto::Secrecy::Open,
         };
-        match with {
-            // To one craft, the rarer transmissions are behind a menu at the row's end.
-            Some(_) => {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let more = hamburger(ui);
-                    egui::Popup::menu(&more).show(|ui| {
-                        if ui.button("send personal key").clicked() {
-                            ask(out, Action::OfferKey { to: with, aim });
-                        }
-                        faction_keys(ui, uplink, with, aim, secrecy, *seal, out);
-                        if ui.button("send survey").clicked() {
-                            ask(out, Action::SendReport { to: with, aim, secrecy });
-                        }
-                    });
-                });
-            }
-            None => faction_keys(ui, uplink, None, aim, secrecy, *seal, out),
-        }
+        // The rarer transmissions are behind a menu at the row's end.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let more = hamburger(ui);
+            egui::Popup::menu(&more).show(|ui| {
+                // On the public channel, to whoever hears it, so anyone in range can answer in
+                // private: the only way somebody never spoken to can open a private conversation.
+                if ui.button("send personal key").clicked() {
+                    ask(out, Action::OfferKey { to: with, aim });
+                }
+                faction_keys(ui, uplink, with, aim, secrecy, *seal, out);
+                if ui.button("send survey").clicked() {
+                    ask(out, Action::SendReport { to: with, aim, secrecy });
+                }
+            });
+        });
     });
     ui.horizontal(|ui| {
         ui.add_enabled_ui(holds_key, |ui| {
@@ -800,39 +797,6 @@ fn compose(
         });
         if !holds_key {
             *seal = false;
-        }
-        if with.is_none()
-            && ui
-            .button("send personal key")
-            .on_hover_text(match with {
-                Some(_) => "so they can encrypt messages back; it travels at c like anything else",
-                // The reason to put a key on the public channel at all: it is the only way
-                // somebody you have never spoken to can open a private conversation with you.
-                None => "to whoever hears it, so anyone in range can answer in private",
-            })
-            .clicked()
-        {
-            ask(out, Action::OfferKey { to: with, aim });
-        }
-        // A report is a transmission and not a message: aimed and sealed the same way, and
-        // filed at the far end as knowledge rather than as something somebody said.
-        if with.is_none()
-            && ui
-            .button("send survey")
-            .on_hover_text(
-                "everything learned since the last report to them, oldest first; \
-                 what it teaches is theirs from the moment the light lands",
-            )
-            .clicked()
-        {
-            ask(out, Action::SendReport {
-                to: with,
-                aim,
-                secrecy: match *seal {
-                    true => lc_proto::Secrecy::Sealed,
-                    false => lc_proto::Secrecy::Open,
-                },
-            });
         }
         // One craft, one standing answer. Never on the public channel: a ship that answered
         // every broadcast it heard would announce its position to everything in range.
