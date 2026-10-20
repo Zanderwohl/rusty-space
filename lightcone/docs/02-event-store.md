@@ -172,10 +172,17 @@ player who joined in the meantime never saw it, and a ship that turned away met 
 nobody had scheduled. It also put a delivery row, and a partition, at every distinct arrival year:
 one event seen across the galaxy would have been tens of thousands of partitions.
 
-Finding the crossings is the textbook problem of growing spheres over moving points. Fronts are
-bucketed by where they happened, an hour of light on a side, each bucket in order of when; a craft
-asks each bucket for the narrow band of emission times whose surface can be at its distance now,
-and the exact solve (`schedule`) decides. Faded fronts are dropped every minute. Each front is kept
+Finding the crossings is growing spheres over moving points, and it is the same question as the
+light-cone query above, so it has the same answer: index by source, not by place. Light from a
+source slower than light reaches any point in the order it left, because `t + |x - w(t)|` rises with
+`t` along a subluminal worldline. So a source's fronts in order of emission are in order of arrival
+at every craft, and a craft finds what lands on it in a tick by one binary search per source; the
+exact solve (`schedule`) decides each candidate. A jump would break the order, so a front that
+would is put in a run of its own. A tick costs about `s · σ · log f` for `s` craft, `σ` sources
+with light in flight and `f` fronts, plus the landings themselves, however the sources are spread.
+A tree over where and when would cut through about `f^(3/4)` of its leaves for the same question.
+Pruning the `s · σ` pairs is what a bounding hierarchy over sources (`lc_store::bvh`) is for, once
+there are hundreds of ships. Faded fronts are dropped every minute. Each front is kept
 in `lc_fronts` with a copy of its event, so a shard that comes back follows the same light on
 (`Server::resume_fronts`), and a delivery found centuries on can be read after its event's own
 partition has been archived.

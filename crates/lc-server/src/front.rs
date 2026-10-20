@@ -7,9 +7,13 @@
 //! deliveries. Working them out when the event was written was exact only for a craft that already
 //! existed and never changed course, and light can be thirty-six thousand years on the way.
 //!
-//! The search is the textbook one for growing circles over moving points: fronts bucketed by where
-//! they happened, each bucket in order of when, so a craft asks each bucket for the narrow band of
-//! emission times whose surface can be at its distance now. See `lightcone/docs/02-event-store.md`.
+//! The search rests on one fact: light from a source slower than light reaches any point in the order
+//! it left, because `t + |x - w(t)|` rises with `t` along a subluminal worldline. So each source's
+//! fronts, in order of emission, are in order of arrival at every craft too, and a craft finds what
+//! lands on it this tick by a binary search per source rather than a look at every front. A jump
+//! breaks that order, so a front that would break it starts a new run. A spatial index cannot do
+//! the same: the question is a thin shell about the craft's past light cone, which a tree over
+//! where and when cuts through at `f^(3/4)` of its leaves. See `lightcone/docs/02-event-store.md`.
 
 use std::collections::HashMap;
 
@@ -20,10 +24,6 @@ use crate::journal::{Journal, JournalError};
 use crate::radio::Utterance;
 use crate::server::Server;
 use crate::world::{Event, Scheduled, reach_us, schedule};
-
-/// The side of a bucket, light-microseconds: an hour. Wide enough that a system's traffic falls in
-/// a few, narrow enough that a bucket's band of emission times is a few ticks deep.
-const CELL_US: f64 = 3.6e9;
 
 /// Sweeps between clearing faded fronts out of the buckets. Until then they are skipped.
 const COMPACT_EVERY: u32 = 1_200;
@@ -67,7 +67,11 @@ impl Front {
 #[derive(Default)]
 pub struct Fronts {
     live: Vec<Front>,
-    cells: HashMap<[i64; 3], Vec<usize>>,
+    /// Indices into `live`, each run one source's fronts in order of emission and no two of them
+    /// further apart than light goes between them, so in order of arrival everywhere.
+    runs: Vec<Vec<usize>>,
+    /// Each source's runs, by its id.
+    by_source: HashMap<i64, Vec<usize>>,
     /// Made since the last sweep. See [`Fronts::sweep_fresh`].
     fresh: Vec<Front>,
     /// Made since the journal last kept them.
@@ -134,21 +138,17 @@ impl Fronts {
     /// Every landing in `(after_t, now_t]` on any craft in `fleet`, in arrival order.
     pub fn sweep(&mut self, fleet: &Fleet, after_t: i64, now_t: i64) -> Vec<Crossing> {
         let mut found = Vec::new();
+        // A craft moves at most the window's width in the window, so the light that lands on it in
+        // the window is what would land where it is now within that much either side.
         let width = (now_t - after_t).max(0) as f64;
-        let half_diagonal = CELL_US * 3f64.sqrt() * 0.5;
         for craft in fleet.iter() {
             let here = craft.position_at(now_t as f64);
-            for (cell, members) in &self.cells {
-                let center = (glam::DVec3::new(cell[0] as f64, cell[1] as f64, cell[2] as f64) + 0.5) * CELL_US;
-                let distance = (here - center).length();
-                // The surface is at the craft when `t + |x - at| = arrival`, and the craft moves at
-                // most a window's width in the window, so these bound every emission that can land.
-                let earliest = after_t as f64 - (distance + half_diagonal) - width;
-                let latest = now_t as f64 - (distance - half_diagonal).max(0.0) + width;
-                let from = members.partition_point(|&i| (self.live[i].event.t as f64) < earliest);
-                for &index in &members[from..] {
+            let lands = |front: &Front| front.event.t as f64 + (here - front.event.at).length();
+            for run in &self.runs {
+                let from = run.partition_point(|&i| lands(&self.live[i]) <= after_t as f64 - width);
+                for &index in &run[from..] {
                     let front = &self.live[index];
-                    if front.event.t as f64 > latest {
+                    if lands(front) > now_t as f64 + width {
                         break;
                     }
                     if front.until_t < after_t {
@@ -191,12 +191,29 @@ impl Fronts {
 
     fn insert(&mut self, front: Front) -> usize {
         let index = self.live.len();
-        let cell = (front.event.at / CELL_US).floor();
-        let members = self.cells.entry([cell.x as i64, cell.y as i64, cell.z as i64]).or_default();
-        let t = front.event.t;
-        let place = members.partition_point(|&i| self.live[i].event.t <= t);
-        members.insert(place, index);
         self.live.push(front);
+        let live = &self.live;
+        let front = &live[index];
+        // No faster than light between neighbors, which is what keeps a run in arrival order.
+        let keeps_order = |a: usize, b: usize| {
+            let (a, b) = (&live[a].event, &live[b].event);
+            (b.at - a.at).length() <= (b.t - a.t) as f64
+        };
+        let runs = self.by_source.entry(front.event.source.0).or_default();
+        let fits = runs.iter().copied().find_map(|run| {
+            let members = &self.runs[run];
+            let place = members.partition_point(|&i| live[i].event.t <= front.event.t);
+            let after_previous = place == 0 || keeps_order(members[place - 1], index);
+            let before_next = place == members.len() || keeps_order(index, members[place]);
+            (after_previous && before_next).then_some((run, place))
+        });
+        match fits {
+            Some((run, place)) => self.runs[run].insert(place, index),
+            None => {
+                runs.push(self.runs.len());
+                self.runs.push(vec![index]);
+            }
+        }
         index
     }
 
@@ -204,7 +221,8 @@ impl Fronts {
     fn compact(&mut self, now_t: i64, found: Vec<Crossing>) -> Vec<Crossing> {
         let mut moved = vec![usize::MAX; self.live.len()];
         let live = std::mem::take(&mut self.live);
-        self.cells.clear();
+        self.runs.clear();
+        self.by_source.clear();
         for (old, front) in live.into_iter().enumerate() {
             let needed = found.iter().any(|(i, _)| *i == old);
             if front.until_t >= now_t || needed {
@@ -416,6 +434,74 @@ mod tests {
         assert_eq!(told.len(), 1, "{told:?}");
         assert_eq!(told[0].arrive_t, caught.ceil() as i64);
         assert!(told[0].arrive_t > stayed_t + (0.5 * LIGHT_HOUR_US) as i64, "premise: the turn mattered");
+    }
+
+    /// The runs are an index and nothing more: swept a tick at a time they find exactly the landings
+    /// a check of every front against every craft finds, with sources scattered through deep
+    /// space, moving at up to most of `c`, and one that jumps.
+    #[test]
+    fn the_runs_find_what_checking_every_front_finds() {
+        use lc_world::craft::Fleet;
+        use lc_world::signal::Beam;
+
+        use super::{Front, Fronts};
+        use crate::world::{Event, schedule};
+
+        let mut seed = 0x5eed_u64;
+        let mut unit = move || {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let span = 4.0 * LIGHT_HOUR_US;
+        let mut fleet = Fleet::new();
+        for id in 1..=6 {
+            fleet.insert(still(ShipId(id), DVec3::new(unit(), unit(), unit()) * span));
+        }
+        let (step, tick) = (60_000_000_i64, 300_000_000_i64);
+        let mut fronts = Vec::new();
+        for source in 0..5_i64 {
+            let mut at = DVec3::new(unit(), unit(), unit()) * span;
+            let velocity = DVec3::new(unit(), unit(), unit()).normalize() * 0.9;
+            for k in 0..40_i64 {
+                let t = k * step;
+                // The last source jumps three light-hours and back, five emissions apart.
+                let jump = match k % 10 {
+                    4 => 3.0,
+                    9 => -3.0,
+                    _ => 0.0,
+                };
+                at += if source == 4 && jump != 0.0 { DVec3::X * jump * LIGHT_HOUR_US } else { velocity * step as f64 };
+                let event = Event { id: source * 1_000 + k, source: ShipId(100 + source), t, at, kind: 1, power_w: 1.0e30, payload: "{}".into() };
+                fronts.push(Front::new(event, Beam::OMNI, Vec::new(), None, None));
+            }
+        }
+
+        let mut index = Fronts::default();
+        let mut found = Vec::new();
+        let mut now = -1;
+        let end = 40 * step + 3 * span as i64;
+        let mut launched = 0;
+        while now < end {
+            let after = now;
+            now += tick;
+            for front in fronts.iter().filter(|f| f.event.t > after && f.event.t <= now) {
+                index.launch(front.clone());
+                launched += 1;
+            }
+            found.extend(index.sweep(&fleet, after, now).into_iter().map(|(_, l)| (l.observer.0, l.event, l.arrive_t)));
+        }
+        assert_eq!(launched, fronts.len());
+        assert!(index.runs.len() > 5, "premise: the jumps split a run, {} runs", index.runs.len());
+
+        let mut every: Vec<(i64, i64, i64)> = fronts
+            .iter()
+            .flat_map(|f| fleet.iter().filter_map(|c| schedule(&f.event, &Beam::OMNI, c)).map(|l| (l.observer.0, l.event, l.arrive_t)))
+            .filter(|(.., arrive_t)| *arrive_t <= end)
+            .collect();
+        every.sort_unstable();
+        found.sort_unstable();
+        assert!(every.len() > 500, "premise: plenty lands, {}", every.len());
+        assert_eq!(found, every);
     }
 
     /// Light is followed as far as it is bright enough to detect, and then let go.
