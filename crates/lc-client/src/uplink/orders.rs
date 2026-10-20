@@ -144,6 +144,7 @@ pub(super) fn fold(
                         *idem,
                         Body::Text(body.clone()),
                         matches!(secrecy, lc_proto::Secrecy::Sealed),
+                        under(secrecy),
                         at_s,
                     );
                     None
@@ -152,7 +153,38 @@ pub(super) fn fold(
                     let name = to
                         .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
                         .map(|c| c.name.clone());
-                    uplink.chat.sent(*to, name.as_deref(), event_id, 0, Body::Key, false, at_s);
+                    uplink.chat.sent(*to, name.as_deref(), event_id, 0, Body::Key, false, None, at_s);
+                    None
+                }
+                Order::Found { name, key, replaces } => {
+                    let lineage = replaces
+                        .map(|old| {
+                            let older = uplink.chat.faction(old).map(|f| f.lineage.clone()).unwrap_or_default();
+                            std::iter::once(old).chain(older).collect()
+                        })
+                        .unwrap_or_default();
+                    uplink.chat.hold(lc_proto::Faction { key: *key, name: name.clone(), lineage });
+                    Some(format!("founded {name}"))
+                }
+                Order::GiveKey { key, to, secrecy, .. } => {
+                    let name = to
+                        .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
+                        .map(|c| c.name.clone());
+                    let faction = uplink
+                        .chat
+                        .faction(*key)
+                        .map(|f| f.as_given(*key))
+                        .unwrap_or(lc_proto::Faction { key: *key, ..Default::default() });
+                    uplink.chat.sent(
+                        *to,
+                        name.as_deref(),
+                        event_id,
+                        0,
+                        Body::Faction(faction),
+                        matches!(secrecy, lc_proto::Secrecy::Sealed),
+                        under(secrecy),
+                        at_s,
+                    );
                     None
                 }
                 // Answered by `AutoAcking`, never accepted.
@@ -216,6 +248,14 @@ pub fn refused(reason: Refusal) -> String {
     }
 }
 
+/// The faction key a transmission went out under, if any.
+fn under(secrecy: &lc_proto::Secrecy) -> Option<lc_proto::FactionId> {
+    match secrecy {
+        lc_proto::Secrecy::Faction(key) => Some(*key),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +297,7 @@ mod tests {
             beamed: false,
             idem: 13,
             sealed: false,
+            under: None,
             body: Body::Text("got it".into()),
             acks: vec![4242],
         };

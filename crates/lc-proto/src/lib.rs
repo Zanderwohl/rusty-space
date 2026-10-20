@@ -422,12 +422,10 @@ pub enum Order {
     /// authority corrects it as the craft learns its star. See `lightcone/docs/20-solar-power.md`
     /// §Parking.
     Park,
-    /// Mint a faction key named `name`, held from now, with nothing put on the air. `key` is
-    /// the shard's: whatever a client sends is replaced, and the acceptance carries the one
-    /// minted. See `lightcone/docs/23-factions.md`. Appended last.
-    Found { name: String, key: FactionId },
-    /// Send a faction key this craft holds. Whoever can read it when it lands holds it: the
-    /// addressee if sealed, everyone it reaches if open. Appended last.
+    /// Mint a faction key, the next generation of `replaces` or a first; nothing goes on the
+    /// air. `key` is the shard's to mint, and the acceptance carries it. Appended last.
+    Found { name: String, key: FactionId, replaces: Option<FactionId> },
+    /// Send a faction key: whoever can read it when it lands holds it. Appended last.
     GiveKey { key: FactionId, to: Option<ShipId>, aim: Aim, secrecy: Secrecy },
 }
 
@@ -876,8 +874,7 @@ pub enum Outbound {
     Presets(Vec<Preset>),
     /// A standing [`Order::Park`], stated on sign-in as [`Outbound::Pursuing`] is.
     Parked { ship_id: ShipId },
-    /// Every faction key the ship holds by now, on sign-in when there are any. Keys landing
-    /// later arrive as [`Body::Faction`], and keys founded as an accepted [`Order::Found`].
+    /// The faction keys held by now, on sign-in when there are any; later ones arrive as messages.
     Factions { ship_id: ShipId, factions: Vec<Faction> },
 }
 
@@ -1714,7 +1711,7 @@ mod tests {
                 }],
                 keys: vec![ShipId(7)],
             },
-            Outbound::Factions { ship_id: ShipId(42), factions: vec![Faction { key: FactionId(11), name: "Wake".into() }] },
+            Outbound::Factions { ship_id: ShipId(42), factions: vec![Faction { key: FactionId(11), name: "Wake".into(), lineage: vec![FactionId(9)] }] },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
             Outbound::Learned { report: b"{}".to_vec() },
@@ -1855,7 +1852,7 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
-                order: Order::Found { name: "Wake".into(), key: FactionId(0) },
+                order: Order::Found { name: "Wake".into(), key: FactionId(0), replaces: Some(FactionId(9)) },
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent {

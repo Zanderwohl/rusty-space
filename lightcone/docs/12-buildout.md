@@ -428,16 +428,19 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 
 ### 11e — Factions
 
-**Status: not started.** No faction, key generation or certificate exists in code; ship keys (`OfferKey`) do.
+**Status: built.** Protocol 37, schema step `0014_factions`. `lc_server::faction` holds the keys,
+`lc_server::radio` gives and reads them, and the radio window has a chat per key held; its
+done-when is `a_member_left_off_a_new_key_reads_the_old_chat_and_not_the_new`.
 
 **Before:** 11c.
 
 **Deliver:** a faction as a key and its chat. Founding mints and names a key, held at once, with
 nothing on the air. Giving the key is a transmission — sealed to the recipient's ship key or open
 to everyone in range — and whoever can read it when it lands holds it. Saying something under a
-key puts it in that key's chat, readable by whoever held the key when it landed. No members list,
-no certificates and no generations: removing somebody is founding a new key and sending it to
-everyone else.
+key puts it in that key's chat, readable by whoever held the key when it landed. No members list
+and no certificates: removing somebody is founding a new key that replaces the old — its next
+generation — and sending it to everyone else. A chat under a key the ship holds a later generation
+of says so.
 
 **Done when:** a traitor left off a new key can still read everything said under the old one,
 cannot read anything said under the new one, and a loyal member far away is seen speaking under

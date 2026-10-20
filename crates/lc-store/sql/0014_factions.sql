@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS lc_factions (
     faction   bigint PRIMARY KEY,
     founder   bigint NOT NULL,
     name      text   NOT NULL,
+    -- The keys this one replaces, nearest first: its generation is one more than their count.
+    lineage   bigint[] NOT NULL DEFAULT '{}',
     founded_t bigint NOT NULL
 );
 

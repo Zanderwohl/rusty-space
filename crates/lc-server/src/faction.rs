@@ -6,13 +6,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use lc_proto::{Faction, FactionId, NAME_LIMIT};
+use lc_proto::{Faction, FactionId, NAME_LIMIT, Refusal};
 use lc_store::chat::{Founded, Holds};
 use lc_world::craft::CraftId;
 
 #[derive(Default)]
 pub struct Factions {
-    named: HashMap<FactionId, String>,
+    named: HashMap<FactionId, Faction>,
     held: HashMap<CraftId, BTreeMap<FactionId, i64>>,
     /// Written by the next flush, then cleared.
     pub(crate) founded: Vec<Founded>,
@@ -20,12 +20,21 @@ pub struct Factions {
 }
 
 impl Factions {
-    /// Mint a key for `founder`, held from `at`. `None` for a name that is empty or too long.
-    pub fn found(&mut self, founder: CraftId, name: &str, at: i64) -> Option<Faction> {
+    /// Mint a key for `founder`, held from `at`: the next generation of `replaces`, which only a
+    /// holder of it may mint, or a first.
+    pub fn found(&mut self, founder: CraftId, name: &str, replaces: Option<FactionId>, at: i64) -> Result<Faction, Refusal> {
         let name = name.trim();
         if name.is_empty() || name.len() > NAME_LIMIT {
-            return None;
+            return Err(Refusal::Impossible);
         }
+        let lineage = match replaces {
+            None => Vec::new(),
+            Some(old) if !self.holds(founder, old, at) => return Err(Refusal::NoKey),
+            Some(old) => {
+                let older = self.named.get(&old).map(|f| f.lineage.clone()).unwrap_or_default();
+                std::iter::once(old).chain(older).collect()
+            }
+        };
         // Hashed rather than counted, so an identifier says nothing about how many factions
         // there are or which was founded first.
         let mut salt = 0u64;
@@ -37,10 +46,17 @@ impl Factions {
             }
             salt += 1;
         };
-        self.named.insert(key, name.to_string());
-        self.founded.push(Founded { faction: key.0, founder: founder.0, name: name.to_string(), founded_t: at });
+        let faction = Faction { key, name: name.to_string(), lineage };
+        self.named.insert(key, faction.clone());
+        self.founded.push(Founded {
+            faction: key.0,
+            founder: founder.0,
+            name: faction.name.clone(),
+            lineage: faction.lineage.iter().map(|k| k.0).collect(),
+            founded_t: at,
+        });
         self.learn(founder, key, at);
-        Some(Faction { key, name: name.to_string() })
+        Ok(faction)
     }
 
     /// Schedule `holder` holding `key` from `at`. The earliest landing wins.
@@ -57,12 +73,8 @@ impl Factions {
         self.held.get(&holder).and_then(|keys| keys.get(&key)).is_some_and(|learned| *learned <= at)
     }
 
-    pub fn name(&self, key: FactionId) -> Option<&str> {
-        self.named.get(&key).map(String::as_str)
-    }
-
     pub fn faction(&self, key: FactionId) -> Option<Faction> {
-        self.name(key).map(|name| Faction { key, name: name.to_string() })
+        self.named.get(&key).cloned()
     }
 
     /// Every key `holder` holds by `now`, oldest held first.
@@ -82,7 +94,9 @@ impl Factions {
     /// Take up what a previous run wrote. Nothing here is written again.
     pub fn resume(&mut self, founded: Vec<Founded>, holds: Vec<Holds>) {
         for f in founded {
-            self.named.insert(FactionId(f.faction), f.name);
+            let key = FactionId(f.faction);
+            let lineage = f.lineage.into_iter().map(FactionId).collect();
+            self.named.insert(key, Faction { key, name: f.name, lineage });
         }
         for h in holds {
             let learned = self.held.entry(CraftId(h.holder)).or_default().entry(FactionId(h.faction)).or_insert(h.learned_t);
@@ -102,7 +116,7 @@ mod tests {
     #[test]
     fn a_founder_holds_its_key_from_the_moment_it_is_minted_and_not_before() {
         let mut factions = Factions::default();
-        let wake = factions.found(CraftId(1), " Wake ", 1_000).unwrap();
+        let wake = factions.found(CraftId(1), " Wake ", None, 1_000).unwrap();
         assert_eq!(wake.name, "Wake");
         assert!(factions.holds(CraftId(1), wake.key, 1_000));
         assert!(!factions.holds(CraftId(1), wake.key, 999));
@@ -112,15 +126,15 @@ mod tests {
     #[test]
     fn two_foundings_at_once_are_two_keys() {
         let mut factions = Factions::default();
-        let a = factions.found(CraftId(1), "A", 1_000).unwrap();
-        let b = factions.found(CraftId(1), "A", 1_000).unwrap();
+        let a = factions.found(CraftId(1), "A", None, 1_000).unwrap();
+        let b = factions.found(CraftId(1), "A", None, 1_000).unwrap();
         assert_ne!(a.key, b.key);
     }
 
     #[test]
     fn the_earliest_landing_is_when_a_key_is_held() {
         let mut factions = Factions::default();
-        let wake = factions.found(CraftId(1), "Wake", 0).unwrap();
+        let wake = factions.found(CraftId(1), "Wake", None, 0).unwrap();
         factions.learn(CraftId(2), wake.key, 900);
         factions.learn(CraftId(2), wake.key, 500);
         factions.learn(CraftId(2), wake.key, 700);
@@ -133,8 +147,20 @@ mod tests {
     #[test]
     fn a_name_must_say_something() {
         let mut factions = Factions::default();
-        assert!(factions.found(CraftId(1), "  ", 0).is_none());
-        assert!(factions.found(CraftId(1), &"x".repeat(NAME_LIMIT + 1), 0).is_none());
+        assert!(factions.found(CraftId(1), "  ", None, 0).is_err());
+        assert!(factions.found(CraftId(1), &"x".repeat(NAME_LIMIT + 1), None, 0).is_err());
+    }
+
+    #[test]
+    fn a_key_knows_every_key_it_replaces_and_only_a_holder_may_replace_one() {
+        let mut factions = Factions::default();
+        let first = factions.found(CraftId(1), "Wake", None, 0).unwrap();
+        assert_eq!(factions.found(CraftId(2), "Wake", Some(first.key), 10), Err(Refusal::NoKey));
+        let second = factions.found(CraftId(1), "Wake", Some(first.key), 10).unwrap();
+        let third = factions.found(CraftId(1), "Wake", Some(second.key), 20).unwrap();
+        assert_eq!(third.generation(), 3);
+        assert!(third.supersedes(first.key), "without anyone holding the second");
+        assert_eq!(third.lineage, vec![second.key, first.key]);
     }
 
     mod play {
@@ -174,7 +200,7 @@ mod tests {
         }
 
         async fn found(server: &mut Server<Memory>, wire: &mut Loopback, client: ClientId, name: &str) -> FactionId {
-            tell(server, wire, client, Order::Found { name: name.into(), key: FactionId(0) });
+            tell(server, wire, client, Order::Found { name: name.into(), key: FactionId(0), replaces: None });
             server.tick(wire).await.unwrap();
             wire.take(client)
                 .into_iter()
@@ -219,11 +245,21 @@ mod tests {
             run_for(&mut server, &mut wire, TWO_LIGHT_HOURS).await;
             for client in [BRY, CY] {
                 let gave: Vec<Body> = heard(&wire.take(client)).into_iter().map(|(_, s)| s.body).collect();
-                assert!(gave.contains(&Body::Faction(Faction { key: old, name: "Wake".into() })), "{gave:?}");
+                assert!(gave.iter().any(|b| matches!(b, Body::Faction(f) if f.key == old && f.name == "Wake")), "{gave:?}");
             }
             wire.take(ADA);
 
-            let new = found(&mut server, &mut wire, ADA, "Wake").await;
+            tell(&server, &mut wire, ADA, Order::Found { name: "Wake".into(), key: FactionId(0), replaces: Some(old) });
+            server.tick(&mut wire).await.unwrap();
+            let new = wire
+                .take(ADA)
+                .into_iter()
+                .find_map(|m| match m {
+                    Outbound::Accepted { order: Order::Found { key, .. }, .. } => Some(key),
+                    _ => None,
+                })
+                .expect("re-keying was refused");
+            assert!(server.factions.faction(new).unwrap().supersedes(old));
             tell(&server, &mut wire, ADA, Order::GiveKey { key: new, to: Some(ShipId(2)), aim: Aim::Omni, secrecy: Secrecy::Sealed });
             server.tick(&mut wire).await.unwrap();
             tell(&server, &mut wire, ADA, chat(new, "new key"));
@@ -291,7 +327,7 @@ mod tests {
             server.welcome(ClientId(9), ShipId(1), "Ada".into(), "", &mut told);
             assert!(told.take(ClientId(9)).contains(&Outbound::Factions {
                 ship_id: ShipId(1),
-                factions: vec![Faction { key, name: "Wake".into() }],
+                factions: vec![Faction { key, name: "Wake".into(), lineage: vec![] }],
             }));
         }
     }

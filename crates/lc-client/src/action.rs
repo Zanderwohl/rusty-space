@@ -243,6 +243,11 @@ pub enum Action {
     OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
     /// Answer this craft automatically, or stop.
     AutoAck { with: lc_proto::ShipId, on: bool },
+    /// Mint a faction key with this name: the next generation of `replaces`, or a first. See
+    /// `lightcone/docs/23-factions.md`.
+    Found { name: String, replaces: Option<lc_proto::FactionId> },
+    /// Send a faction key this ship holds.
+    GiveKey { key: lc_proto::FactionId, to: Option<lc_proto::ShipId>, aim: lc_proto::Aim, secrecy: lc_proto::Secrecy },
 
     // --- console ----------------------------------------------------------------------
     RunCommand(String),
@@ -704,6 +709,23 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::OfferKey { to, aim } => {
             if session.remote {
                 effects.push(Effect::Send(lc_proto::Order::OfferKey { to, aim }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to give a key to".into()));
+            }
+        }
+        Action::Found { name, replaces } => {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+            } else if !session.remote {
+                effects.push(Effect::Notify("no server, so nobody to found a faction with".into()));
+            } else {
+                // The shard mints the key and the acceptance carries it.
+                effects.push(Effect::Send(lc_proto::Order::Found { name, key: lc_proto::FactionId(0), replaces }));
+            }
+        }
+        Action::GiveKey { key, to, aim, secrecy } => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::GiveKey { key, to, aim, secrecy }));
             } else {
                 effects.push(Effect::Notify("no server, so nobody to give a key to".into()));
             }

@@ -58,10 +58,24 @@ pub(super) fn fold(
                 // **Overheard traffic is announced and not quoted.** That two other craft are
                 // talking is the news; what they said to each other is theirs, and repeating
                 // it into this ship's own events box reads as if it had been said here.
+                let faction = spoken.under.map(|key| match uplink.chat.faction(key) {
+                    Some(chat) if !chat.name.is_empty() => chat.name.clone(),
+                    _ => crate::chat::key_mark(key),
+                });
                 let notice = match (&spoken.body, uplink.chat.filing(spoken.to)) {
                     // News to the transcript, which marks a line delivered, and to nobody
                     // reading the box.
                     (Body::Ack, _) => None,
+                    (Body::Faction(given), crate::chat::Filing::Conversation) => {
+                        Some(format!("{who}: gave you the key to {}", given.name))
+                    }
+                    (Body::Faction(given), _) => Some(format!("{who} gave out the key to {}", given.name)),
+                    (Body::Unreadable, _) if faction.is_some() && spoken.to.is_none() => {
+                        Some(format!("{who} -> {}", faction.as_deref().unwrap_or_default()))
+                    }
+                    (Body::Text(body), _) if faction.is_some() => {
+                        Some(format!("{who} in {}: {body}", faction.as_deref().unwrap_or_default()))
+                    }
                     (_, crate::chat::Filing::Overheard) => {
                         let to = spoken.to.map(|to| uplink.name_of(ShipId(to)));
                         Some(format!("{who} -> {}", to.unwrap_or_else(|| "somebody".into())))
@@ -275,6 +289,7 @@ mod tests {
             beamed: false,
             idem: 3,
             sealed: false,
+            under: None,
             body: Some(lc_proto::encode_report(&report)),
             format: lc_proto::REPORT_FORMAT,
         };
@@ -313,6 +328,7 @@ mod tests {
             beamed: false,
             idem: 4,
             sealed: true,
+            under: None,
             body: None,
             format: lc_proto::REPORT_FORMAT,
         };
@@ -354,6 +370,7 @@ mod tests {
             beamed: false,
             idem: 11,
             sealed: false,
+            under: None,
             body: Body::Text("are you there".into()),
             acks: Vec::new(),
         };
@@ -392,6 +409,7 @@ mod tests {
             beamed: false,
             idem: 14,
             sealed: false,
+            under: None,
             body: Body::Ack,
             acks: vec![4242],
         };
@@ -415,6 +433,7 @@ mod tests {
                 beamed: false,
                 idem: 12,
                 sealed: true,
+                under: None,
                 body: Body::Unreadable,
                 acks: Vec::new(),
             };
@@ -442,6 +461,7 @@ mod tests {
             beamed: false,
             idem: 21,
             sealed: false,
+            under: None,
             body: Body::Text("rendezvous at the third moon".into()),
             acks: Vec::new(),
         };
@@ -466,6 +486,7 @@ mod tests {
             beamed: false,
             idem: 0,
             sealed: false,
+            under: None,
             body: Body::Key,
             acks: Vec::new(),
         };

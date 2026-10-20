@@ -92,6 +92,8 @@ pub struct Founded {
     pub faction: i64,
     pub founder: i64,
     pub name: String,
+    /// The keys it replaces, nearest first.
+    pub lineage: Vec<i64>,
     pub founded_t: i64,
 }
 
@@ -275,9 +277,9 @@ pub async fn save_factions(client: &Client, founded: &[Founded]) -> Result<u64, 
     for f in founded {
         written += client
             .execute(
-                "INSERT INTO lc_factions (faction, founder, name, founded_t) VALUES ($1, $2, $3, $4)
+                "INSERT INTO lc_factions (faction, founder, name, lineage, founded_t) VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT (faction) DO NOTHING",
-                &[&f.faction, &f.founder, &f.name, &f.founded_t],
+                &[&f.faction, &f.founder, &f.name, &f.lineage, &f.founded_t],
             )
             .await?;
     }
@@ -307,10 +309,16 @@ pub async fn save_faction_keys(client: &Client, holds: &[Holds]) -> Result<u64, 
 #[cfg(feature = "postgres")]
 pub async fn all_factions(client: &Client) -> Result<(Vec<Founded>, Vec<Holds>), Error> {
     let founded = client
-        .query("SELECT faction, founder, name, founded_t FROM lc_factions", &[])
+        .query("SELECT faction, founder, name, lineage, founded_t FROM lc_factions", &[])
         .await?
         .iter()
-        .map(|row| Founded { faction: row.get(0), founder: row.get(1), name: row.get(2), founded_t: row.get(3) })
+        .map(|row| Founded {
+            faction: row.get(0),
+            founder: row.get(1),
+            name: row.get(2),
+            lineage: row.get(3),
+            founded_t: row.get(4),
+        })
         .collect();
     let holds = client
         .query("SELECT holder, faction, learned_t FROM lc_faction_keys", &[])
@@ -493,4 +501,38 @@ mod tests {
 
         clear(&client, (ada, bry)).await;
     }
+
+    #[tokio::test]
+    async fn a_faction_and_what_is_said_under_it_read_back() {
+        let Some(client) = store().await else { return };
+        let (ada, bry) = scratch(5);
+        clear(&client, (ada, bry)).await;
+        let faction = 940_000 + ada;
+        let _ = client.execute("DELETE FROM lc_faction_keys WHERE faction = $1", &[&faction]).await;
+        let _ = client.execute("DELETE FROM lc_factions WHERE faction = $1", &[&faction]).await;
+
+        let founded = Founded { faction, founder: ada, name: "Wake".into(), lineage: vec![1, 2], founded_t: 10 };
+        save_factions(&client, std::slice::from_ref(&founded)).await.unwrap();
+        save_faction_keys(&client, &[
+            Holds { holder: ada, faction, learned_t: 10 },
+            Holds { holder: bry, faction, learned_t: 900 },
+            Holds { holder: bry, faction, learned_t: 950 },
+        ])
+        .await
+        .unwrap();
+        let given = Message { content: Content::Faction(faction), ..message(940_001, ada, bry, "", 100) };
+        let chat = Message { addressee: None, under: Some(faction), ..message(940_002, ada, bry, "all hands", 200) };
+        save_messages(&client, &[given.clone(), chat.clone()]).await.unwrap();
+
+        let (all, holds) = all_factions(&client).await.unwrap();
+        assert!(all.contains(&founded));
+        let bry_holds: Vec<Holds> = holds.into_iter().filter(|h| h.holder == bry && h.faction == faction).collect();
+        assert_eq!(bry_holds, vec![Holds { holder: bry, faction, learned_t: 900 }], "the first landing counts");
+        assert_eq!(sent_by(&client, ada).await.unwrap(), vec![given, chat]);
+
+        clear(&client, (ada, bry)).await;
+        let _ = client.execute("DELETE FROM lc_faction_keys WHERE faction = $1", &[&faction]).await;
+        let _ = client.execute("DELETE FROM lc_factions WHERE faction = $1", &[&faction]).await;
+    }
 }
+

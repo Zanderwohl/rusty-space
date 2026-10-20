@@ -709,10 +709,11 @@ impl<J: Journal> Server<J> {
             return Ok(Applied { event_id, at_t: at, order });
         }
         // Founding is minting a key, and nothing goes on the air.
-        if let Order::Found { name, .. } = &intent.order {
-            let faction = self.factions.found(id, name, at).ok_or(Refusal::Impossible)?;
+        if let Order::Found { name, replaces, .. } = &intent.order {
+            let faction = self.factions.found(id, name, *replaces, at)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
-            return Ok(Applied { event_id, at_t: at, order: Order::Found { name: faction.name, key: faction.key } });
+            let order = Order::Found { name: faction.name, key: faction.key, replaces: *replaces };
+            return Ok(Applied { event_id, at_t: at, order });
         }
         // A switch is not seen: its flip is, when it completes. See `crate::field`.
         if let Order::FieldMode { mode } = intent.order {

@@ -8,10 +8,12 @@ network that is rearranging itself as it flies, and what anyone calls anything.
 **Status: partly built.** What things are called is built: subjects, assigned names as rules,
 planet letters and the descriptor ladder in `lc_world::knowledge::{subject, names, called}`,
 `Order::NameIt`, and a hop added to every record a report carries (`lc_world::knowledge::record::Hop`).
-Not built: factions, key generations and certificates (11e) — the only keys are the ship keyring
-in `lc_server::radio`; relays, bundles and transmission cost, with no `transmit_gain` (11f); and
-notes, the subject card and self-claimed craft names, `Presence` still carrying the account's
-name (11g).
+Factions are built (11e): keys and generations in `lc_server::faction`, `Order::{Found, GiveKey}`
+and `Secrecy::Faction` in `lc_server::radio`, rows in `lc_store::chat` (`0014_factions`), and the
+chats in `lc_client::{chat, radio_panel}`. Not built: assets and their minimum generation, which
+wait for assets; out-of-game invitations; relays, bundles and transmission cost, with no
+`transmit_gain` (11f); and notes, the subject card and self-claimed craft names, `Presence` still
+carrying the account's name (11g).
 
 The rule that shapes all of it:
 
@@ -95,9 +97,20 @@ possible and visible rather than impossible.
 ## Removal is a new key
 
 A member who turns out to be a traitor still holds the key. No message can take it back. The only
-defense is to **found again**: mint a new key and send it to everyone except the traitor. The new
-key is a new chat; the old one goes on existing, readable by everyone who held it, traitor
-included.
+defense is to **found again**: mint a new key that **replaces** the old one, and send it to
+everyone except the traitor. The new key is a new chat; the old one goes on existing, readable by
+everyone who held it, traitor included.
+
+### Generations
+
+A key may name the key it replaces, and so the keys of a faction form a chain, each a
+**generation** one later than the key it replaces. Only a holder of a key can mint its
+replacement. The link and the generation travel with the key, so whoever is sent generation 3
+knows it replaces generation 2 whether or not they ever held 2.
+
+The chain is what the interface reads: a chat under a key this ship holds a later generation of
+shows that there is a newer key, and which. Nothing stops a player speaking under the old one
+anyway — sometimes that is exactly who they mean to reach.
 
 The detail that makes this a mechanic rather than a button: **the new key cannot be sent sealed
 to the old one**, because the traitor holds the old one. It goes out one transmission per member
@@ -124,12 +137,14 @@ section otherwise keeps.
 
 ### Later: assets accept keys
 
-When there are probes, swarms and structures to command, each will hold a set of faction keys and
-obey an order sealed to any of them. Re-keying an asset — adding the new key, dropping the old — is
-itself an order, and it is light-delayed like everything else: a swarm that has not heard it takes
-orders from the traitor for as long as the order takes to reach it, and two contradictory orders
-sent from opposite sides of a sector are obeyed in whichever order the geometry delivers them. The
-loyal side wins a race it may not know it is in by being **closer**. Nothing about this needs
+When there are probes, swarms and structures to command, each will hold a faction key and a
+**minimum generation**, and obey an order sealed to any key in that key's chain at or above the
+minimum. Raising the minimum is itself an order, and it is light-delayed like everything else. A
+swarm that has not heard it takes orders from the traitor for as long as the order takes to reach
+it. An asset cannot be raised past a generation it has never been sent, so re-keying it is two
+transmissions, the key and the order. Two contradictory orders sent from opposite sides of a
+sector are obeyed in whichever order the geometry delivers them, and the loyal side wins a race it
+may not know it is in by being **closer**. Nothing about this needs
 certificates or capabilities; it waits for there to be assets.
 
 ## Relays

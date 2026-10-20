@@ -41,14 +41,29 @@ pub enum Secrecy {
 
 /// A faction key. Minted by the shard, so nobody can found a faction that is somebody else's.
 /// See `lightcone/docs/23-factions.md`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FactionId(pub i64);
 
 /// A faction key with the name its founder gave it, which travels with it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Faction {
     pub key: FactionId,
     pub name: String,
+    /// The keys this one replaces, the one it directly replaces first. Whole rather than one
+    /// link, so a holder of generation 3 knows it supersedes 1 without ever having held 2.
+    pub lineage: Vec<FactionId>,
+}
+
+impl Faction {
+    /// 1 for a key that replaces nothing.
+    pub fn generation(&self) -> u32 {
+        self.lineage.len() as u32 + 1
+    }
+
+    /// Whether this key is a later generation of `older`.
+    pub fn supersedes(&self, older: FactionId) -> bool {
+        self.lineage.contains(&older)
+    }
 }
 
 /// What makes two transmissions the same message, so a receiver shows a resend as one line.
