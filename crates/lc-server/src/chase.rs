@@ -519,8 +519,7 @@ mod tests {
         });
     }
 
-    /// A presence says where its observer was when the light landed, which is what a craft
-    /// flying with it is drawn at an offset from.
+    /// A presence carries where its observer was when the light landed.
     #[tokio::test]
     async fn a_presence_says_where_its_observer_was() {
         let mut server = Server::new(Memory::default(), 0, 1);

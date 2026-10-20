@@ -14,14 +14,11 @@
 //! future, and holding one until its time comes was the same jump as never reckoning at all:
 //! a clock twenty seconds behind in low orbit is a thousand kilometers.
 //!
-//! **A burning craft keeping pace with the observer is drawn at its offset from it instead.**
-//! Reckoned on its own it coasts for up to a tick while the observer, drawn at its own present,
-//! goes on burning, and the two part and snap back once a statement: at five gravities and the
-//! design rate that is thousands of kilometers, twenty times a second, between a pursuer and the
-//! quarry it is matching. Their shared motion is what neither end can reckon, and at an offset it
-//! cancels: what is left to get wrong is the difference between the two burns, which in a chase
-//! or a flotilla is nothing. Gated on the craft burning, since a coasting one is reckoned
-//! exactly, and one beside an observer that burns away from it would otherwise be dragged along.
+//! A burning craft within [`ALONGSIDE_BETA`] of the observer is drawn at its offset from it
+//! instead. Reckoned alone it coasts for up to a tick while the observer keeps burning, which at
+//! five gravities parts a pursuer from its quarry by thousands of kilometers; at an offset their
+//! shared motion cancels. A coasting craft is reckoned exactly, and is not dragged along by an
+//! observer burning away from it.
 
 use glam::DVec3;
 
@@ -36,8 +33,7 @@ use crate::system::{LOCAL_SHELL_LY, LocalSystem};
 /// which [`consort::GALILEAN_BETA`] bounds at a thousandth.
 const CONIC_LIGHT_STEPS: usize = 3;
 
-/// The fastest a craft may go relative to the observer and still be drawn at its offset from it.
-/// The offset drifts by the difference of the two velocities, which is Galilean.
+/// The offset drifts by the plain difference of the two velocities, which holds only this slow.
 pub const ALONGSIDE_BETA: f64 = consort::GALILEAN_BETA;
 
 /// The observer as a statement's light reached it.
@@ -174,9 +170,7 @@ mod tests {
         Reckoning::new(None, *seen, false, receiver)
     }
 
-    /// Two craft a kilometer apart at nine-tenths of `c`, both burning, and the observer drawn a
-    /// tick of its own burn later: the contact is still a kilometer off, where reckoning it on
-    /// its own line would have left it the whole burn behind.
+    /// At 0.9 c, a tick of burning later, the contact is still the kilometer off it was stated.
     #[test]
     fn a_craft_burning_alongside_holds_its_offset() {
         let beta = DVec3::X * 0.9;
@@ -198,8 +192,7 @@ mod tests {
         assert!(alone.position_ly.distance(observer_now_ly) * M_PER_LY > 0.9 * burned_m);
     }
 
-    /// Coasting beside an observer that burns away from it, a craft stays on its own line rather
-    /// than being carried off with the observer; and one passing fast is never alongside.
+    /// A coasting craft, or one passing fast, keeps its own line.
     #[test]
     fn only_a_burning_craft_keeping_pace_is_drawn_alongside() {
         let beta = DVec3::X * 0.5;
