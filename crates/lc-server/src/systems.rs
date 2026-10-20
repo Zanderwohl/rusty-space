@@ -142,21 +142,15 @@ pub fn detail(
 
     let mut names: Vec<Name> = Vec::new();
     for (holder, file) in files {
-        let chosen = file.names().iter().filter(|n| n.kind.chosen());
-        for naming in chosen {
-            let by = naming.witness.0 as i64;
-            // Every copy of one naming carries the chooser's own stamp, so this is identity.
-            let same = |n: &&mut Name| {
-                n.by == by && n.name == naming.name && n.stated_s == naming.stated_s
-            };
+        for (_, held) in file.thread().ordered() {
+            let lc_proto::Writing::Name(chosen) = &held.entry.writing else { continue };
+            let by = held.entry.author.0 as i64;
+            let stated_s = held.entry.written_s;
+            // Every copy of one entry carries its author's own stamp, so this is identity.
+            let same = |n: &&mut Name| n.by == by && n.name == *chosen && n.stated_s == stated_s;
             match names.iter_mut().find(same) {
                 Some(name) => name.held_by.push(*holder),
-                None => names.push(Name {
-                    name: naming.name.clone(),
-                    by,
-                    stated_s: naming.stated_s,
-                    held_by: vec![*holder],
-                }),
+                None => names.push(Name { name: chosen.clone(), by, stated_s, held_by: vec![*holder] }),
             }
         }
     }
@@ -590,11 +584,12 @@ mod tests {
         let stars = catalog();
         let sol = &stars[0];
         let chooser = named(7, sol, "Hearth", 10.0);
-        let chosen = chooser.file(Subject::Star(sol.id)).unwrap().names()[0].clone();
+        let (_, chosen) = chooser.file(Subject::Star(sol.id)).unwrap().thread().ordered()[0];
+        let chosen = chosen.clone();
 
         let mut heard = Knowledge::new(Witness(9));
         let hop = Hop { from: Witness(7), to: Witness(9), sent_s: 11.0, received_s: 12.0 };
-        heard.named(Subject::Star(sol.id), Naming { lineage: vec![hop], ..chosen });
+        heard.heard_entry(Subject::Star(sol.id), lc_world::knowledge::thread::Held { lineage: vec![hop], ..chosen });
         heard.named(Subject::Star(sol.id), Naming {
             witness: Witness(9),
             name: "SOL-1".into(),

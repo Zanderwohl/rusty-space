@@ -495,7 +495,7 @@ mod tests {
                 lineage: Vec::new(),
             },
         );
-        let report = lc_proto::encode(&held.report(lc_world::knowledge::Mark::default(), 1.0));
+        let report = lc_proto::encode(&held.report(lc_world::knowledge::Mark::default(), 1.0, lc_world::knowledge::thread::Seal::Whole));
         fold(&mut uplink, &mut game, &mut ui, Outbound::Learned { report });
         assert_eq!(game.0.knowledge.belief(star).unwrap().hops, 0, "its own, not relayed");
     }

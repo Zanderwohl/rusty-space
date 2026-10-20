@@ -413,7 +413,11 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
 
     sender.send(Inbound::Act(Intent {
         ship_id: mine,
-        order: Order::NameIt { subject: lc_proto::Subject::Star(star.get()), name: "Waystone".into() },
+        order: Order::Write {
+            subject: lc_proto::Subject::Star(star.get()),
+            writing: lc_proto::Writing::Name("Waystone".into()),
+            scope: lc_proto::Scope::Open,
+        },
         issued_at_client_t: i64::MAX,
     }));
     // And wait for the name to take before reporting, or the report is built from a file that
@@ -424,7 +428,7 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
         if let Some(refused) = heard.iter().find(|m| matches!(m, Outbound::Refused { .. })) {
             panic!("the shard refused the naming: {refused:?}");
         }
-        if heard.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })) {
+        if heard.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::Write { .. }, .. })) {
             break;
         }
         assert!(tokio::time::Instant::now() < deadline, "the naming was never accepted");
@@ -461,7 +465,7 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
     let mut told_of_it = false;
     let relayed = |copy: &Knowledge| {
         copy.file(star).is_some_and(|f| {
-            f.names().iter().any(|n| n.witness == sent_by && n.lineage.iter().any(|h| h.from == sent_by))
+            f.thread().ordered().iter().any(|(_, h)| h.entry.author == sent_by && h.lineage.iter().any(|hop| hop.from == sent_by))
         })
     };
     let deadline = tokio::time::Instant::now() + PATIENCE;
@@ -483,7 +487,9 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
     // file carries two namings from the same witness and only the ranking tells them apart.
     assert_eq!(copy.name_of(star).as_deref(), Some("Waystone"), "what the sender calls it");
     assert!(
-        copy.file(star).unwrap().names().iter().any(|n| n.witness == sent_by && n.name == "Waystone"),
+        copy.file(star).unwrap().thread().ordered().iter().any(|(_, h)| {
+            h.entry.author == sent_by && h.entry.writing == lc_proto::Writing::Name("Waystone".into())
+        }),
         "and on the sender's word"
     );
 }

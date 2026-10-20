@@ -6,14 +6,16 @@ is enforced when nothing can be checked faster than light, how a report finds it
 network that is rearranging itself as it flies, and what anyone calls anything.
 
 **Status: partly built.** What things are called is built: subjects, assigned names as rules,
-planet letters and the descriptor ladder in `lc_world::knowledge::{subject, names, called}`,
-`Order::NameIt`, and a hop added to every record a report carries (`lc_world::knowledge::record::Hop`).
-Factions are built (11e): keys and generations in `lc_server::faction`, `Order::{Found, GiveKey}`
-and `Secrecy::Faction` in `lc_server::radio`, rows in `lc_store::chat` (`0014_factions`), and the
-chats in `lc_client::{chat, radio_panel}`. Not built: assets and their minimum generation, which
-wait for assets; out-of-game invitations; relays, bundles and transmission cost, with no
-`transmit_gain` (11f); and notes, the subject card and self-claimed craft names, `Presence` still
-carrying the account's name (11g).
+planet letters and the descriptor ladder in `lc_world::knowledge::{subject, names, called}`, and a
+hop added to every record a report carries (`lc_world::knowledge::record::Hop`). Factions are built
+(11e): keys and generations in `lc_server::faction`, `Order::{Found, GiveKey}` and
+`Secrecy::Faction` in `lc_server::radio`, rows in `lc_store::chat` (`0014_factions`), and the chats
+in `lc_client::{chat, radio_panel}`. Notes and chosen names are built as threads (11g, in part):
+`lc_world::knowledge::thread`, `Order::Write`, and `lc_client::thread_view` in the telescope and
+system panels. Not built: assets and their minimum generation, which wait for assets; out-of-game
+invitations; relays, bundles and transmission cost, with no `transmit_gain` (11f); the subject card
+opened from the map and the sky, report transcript lines, and self-claimed craft names, `Presence`
+still carrying the account's name (11g).
 
 The rule that shapes all of it:
 
@@ -356,8 +358,8 @@ today is measured from the generator — innermost orbit `0.70 sqrt(L)` AU, neig
 apart — and lettering eight thousand generated planets in random discovery order needs a second
 letter for about one in nine.
 
-A craft holds one chosen name and one assigned name for anything, side by side. Naming a planet
-"Spout" is shown in place of its letter and never unassigns it: the letter stays frozen, holds its
+A craft holds a planet's assigned letter beside its thread. Naming a planet "Spout" is shown in
+place of its letter and never unassigns it: the letter stays frozen, holds its
 place among the letters, and a refined orbit cannot bring it back over the name.
 
 A little silly, and real catalogs have been sillier. What matters is that the rule is
@@ -394,18 +396,55 @@ else's. The mechanic where factions cannot read each other's names without a del
 is a filter on which namings a craft may *display*, applied on top of this. Nothing here needs to
 change for it.
 
-## Notes
+## Notes, and the names somebody chose
 
-A note is a comment on a subject: author, text, when written, and a scope.
+Everything a craft writes about a subject goes in that subject's **thread**: notes, and the names
+somebody chose for it. A thread has no owner and no agreed order. Any craft appends to its own copy,
+copies merge by union, and nothing is ever edited or removed — two authors light-years apart
+cannot take turns. A correction is another entry.
 
-- **Append-only.** Nobody edits a note, because two authors light-years apart cannot take turns.
-  A correction is another note that refers to the first.
-- **Private by default.** A note shared with the faction is sealed to the faction key and rides
-  in the next report about that subject, so it arrives with everything else and at the same speed.
-- **Ordered by when it was written, marked with when it arrived.** Two notes written by members
-  on opposite sides of a sector are often spacelike-separated: neither author could have known of
-  the other's. The interface should show that rather than hide it — it is the one place in the
-  game where a player sees two people talking past each other *because of physics*.
+| an entry has | why |
+|---|---|
+| author | the craft that wrote it; identity is not forgeable yet |
+| when written | coordinate time at the author |
+| parents | the thread's newest entries as the author held them when writing |
+| scope | where it may travel: below |
+| body | a note's text, or a name |
+
+An entry is known by a hash of all of that, so it is the same entry however many routes it arrives
+by, and two holders of the same entries hold the same thread.
+
+**The parents are the order.** An entry comes after everything it names, directly or through other
+entries; otherwise threads are shown by when each was written. Two entries neither of which names
+the other were each **written without knowing of the other** — often because the light of one had
+not reached the author of the other. The interface says so. It is the one place in the game where
+a player sees two people talking past each other because of physics, and it needs no clock to tell:
+an entry that had not heard of yours does not name it. An entry whose parent never reached this
+craft — private, or under a key it lacks — is kept, and shown as a reply to something not held here.
+
+**A name is an entry.** The name that stands is the newest no later name supersedes. Two names
+neither of which knew the other both stand, and that is a disagreement nobody has settled: a craft
+goes by its own, otherwise by the more recently written, and the thread shows both. What a *rule*
+assigned — a bearing designation, a planet letter — is not an entry: nobody wrote it, so it stays
+on file beside the thread and a chosen name is shown in its place.
+
+### Scope
+
+Chosen at write time, from a list: **for me**, **public**, or any faction key held. For me is the
+default.
+
+| scope | travels in |
+|---|---|
+| for me | nothing; it never leaves the craft |
+| public | any report |
+| a faction | only reports sealed under that key |
+
+**A thread rides whole with its system.** A report that carries a system carries every entry about
+every subject in it that its seal admits — new or not, and at no cost against the report's size.
+So an entry a report could not carry is never left behind: the next report it may go in takes it.
+A craft's reporting is tracked apart for each faction key, so an open broadcast does not move past
+what only a faction report may carry. A member who receives a faction entry carries it on in its
+own reports under that key, which is how a thread grows across a faction by relay.
 
 ## Transcripts
 

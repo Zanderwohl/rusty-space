@@ -49,7 +49,7 @@ pub(crate) fn system(
     show_all: &mut bool,
     picked: &mut Option<BodyId>,
     revealed: &mut Option<BodyId>,
-    draft: &mut String,
+    draft: &mut crate::thread_view::Draft,
     out: &mut MessageWriter<Requested>,
 ) {
     let Some(system) = game.system.as_ref() else {
@@ -68,7 +68,7 @@ pub(crate) fn system(
             station(ui, game, uplink.parked, out);
             ui.separator();
             let parked = uplink.parked && game.station().is_some();
-            focused(ui, state, game, system, held, *picked, parked, draft, out);
+            focused(ui, state, game, system, held, uplink, *picked, parked, draft, out);
         });
     });
 }
@@ -198,14 +198,15 @@ fn focused(
     game: &Game,
     system: &lc_world::system::LocalSystem,
     held: &crate::beliefs::Held,
+    uplink: &crate::uplink::Uplink,
     picked: Option<BodyId>,
     parked: bool,
-    draft: &mut String,
+    draft: &mut crate::thread_view::Draft,
     out: &mut MessageWriter<Requested>,
 ) {
     // A body's detail is its belief, whether or not anything in the arena answers to it.
     if let Some(belief) = picked.and_then(|body| held.bodies.iter().find(|b| b.body == body)) {
-        details(ui, belief, game, system, draft, out);
+        details(ui, belief, game, system, uplink, draft, out);
     }
     let Some(target) = state.focus.as_ref() else {
         if picked.is_none() {
@@ -236,7 +237,7 @@ fn focused(
                 let Target::Band(index) = entry.target else { return };
                 ui.heading(game.band_label(index));
                 let subject = Subject::Population { star: system.star, index: index as u32 };
-                name_field(ui, game, subject, draft, out);
+                crate::thread_view::thread(ui, game, uplink, subject, draft, out);
                 ui.weak(format!(
                     "{} — {} out, {} away",
                     entry.kind.label(),
@@ -381,14 +382,15 @@ fn details(
     belief: &BodyBelief,
     game: &Game,
     system: &lc_world::system::LocalSystem,
-    draft: &mut String,
+    uplink: &crate::uplink::Uplink,
+    draft: &mut crate::thread_view::Draft,
     out: &mut MessageWriter<Requested>,
 ) {
     ui.heading(game.called(belief));
     if belief.given.is_some() {
         ui.weak(game.called(&BodyBelief { given: None, ..belief.clone() }));
     }
-    name_field(ui, game, belief.subject, draft, out);
+    crate::thread_view::thread(ui, game, uplink, belief.subject, draft, out);
     // The range its own orbit implies, never the one the arena holds. A body the list calls
     // "distance unknown" has no range to give, and printing the true one here said what the
     // craft has not measured.
@@ -425,23 +427,6 @@ fn details(
             ui.weak(note);
         }
     });
-}
-
-fn name_field(
-    ui: &mut egui::Ui,
-    game: &Game,
-    subject: Subject,
-    draft: &mut String,
-    out: &mut MessageWriter<Requested>,
-) {
-    if !game.nameable(subject) {
-        return;
-    }
-    let field = ui.add(egui::TextEdit::singleline(draft).hint_text("Add Name").desired_width(150.0));
-    let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-    if entered && !draft.trim().is_empty() {
-        ask(out, Action::Name(subject, std::mem::take(draft)));
-    }
 }
 
 /// The star as something local to fly to, which is how the inventory lists it.

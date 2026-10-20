@@ -15,6 +15,7 @@ use lc_world::fitting::ONBOARD_DATA_BYTES;
 use lc_world::knowledge::observatory::{Observatory, Sky, Station};
 use lc_world::knowledge::survey::{Duty, Gaze};
 use lc_world::knowledge::prior::Prior;
+use lc_world::knowledge::thread::Seal;
 use lc_world::knowledge::{ENTRIES_PER_REPORT, Knowledge, Mark, Report, Reporting, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::sky::CatalogStar;
@@ -401,7 +402,8 @@ impl<J: Journal> Server<J> {
             let knowledge = &self.aboard(CraftId(ship.0)).knowledge;
             let left = knowledge.analyzing();
             let learned = page(PAGE, |limit| {
-                let (report, through) = knowledge.report_upto(since, now_s, limit);
+                // Its own copy: everything, private entries included.
+                let (report, through) = knowledge.report_upto(since, now_s, limit, Seal::Whole);
                 // Nothing new is the usual answer, and not worth encoding an empty report for.
                 (through.map(|_| lc_proto::encode(&report)), through)
             });
@@ -512,10 +514,18 @@ impl<J: Journal> Server<J> {
                     integration_s: aboard.observatory.integration_s,
                 })
             }
-            Order::NameIt { subject, name } => {
-                let name = name.trim();
-                if name.is_empty() || name.len() > lc_proto::NAME_LIMIT {
+            Order::Write { subject, writing, scope } => {
+                if !writing.is_valid() {
                     return Err(Refusal::Impossible);
+                }
+                let writing = match writing {
+                    lc_proto::Writing::Note(text) => lc_proto::Writing::Note(text.trim().to_string()),
+                    lc_proto::Writing::Name(name) => lc_proto::Writing::Name(name.trim().to_string()),
+                };
+                if let lc_proto::Scope::Faction(key) = scope
+                    && !self.factions.holds(id, *key, (at_s * 1.0e6) as i64)
+                {
+                    return Err(Refusal::NoKey);
                 }
                 let subject = Subject::from(*subject);
                 let here = self.fleet.get(id).and_then(|craft| craft.system.clone());
@@ -523,8 +533,8 @@ impl<J: Journal> Server<J> {
                 if !knowledge.nameable(subject, here.as_deref()) {
                     return Err(Refusal::Impossible);
                 }
-                knowledge.name_it(subject, name, at_s);
-                Ok(Order::NameIt { subject: subject.into(), name: name.to_string() })
+                knowledge.write(subject, writing.clone(), *scope, at_s);
+                Ok(Order::Write { subject: subject.into(), writing, scope: *scope })
             }
             Order::RetainRaw { subject, keep } => {
                 let knowledge = &mut self.aboard(id).knowledge;
@@ -548,9 +558,9 @@ impl<J: Journal> Server<J> {
     /// Shrunk until it fits [`lc_proto::REPORT_LIMIT`]: [`ENTRIES_PER_REPORT`] counts systems,
     /// and a system that does not fit alone — the home system does not — is told a share of its
     /// subjects at a time.
-    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, at_s: f64) -> Result<(String, Mark), Refusal> {
+    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, seal: Seal, at_s: f64) -> Result<(String, Mark), Refusal> {
         let aboard = self.instruments.aboard.get(&id).ok_or(Refusal::NothingNew)?;
-        let since = aboard.reporting.since(to.map_or(0, |t| t.0));
+        let since = aboard.reporting.since(told(to, seal));
         let knowledge = &aboard.knowledge;
         let fits = |(report, through): (Report, Option<Mark>)| {
             let through = through.ok_or(Refusal::NothingNew)?;
@@ -559,14 +569,14 @@ impl<J: Journal> Server<J> {
         };
         let mut limit = ENTRIES_PER_REPORT;
         while limit > 0 {
-            if let Some(sent) = fits(knowledge.report_upto(since, at_s, limit))? {
+            if let Some(sent) = fits(knowledge.report_upto(since, at_s, limit, seal))? {
                 return Ok(sent);
             }
             limit /= 2;
         }
         let mut limit = ENTRIES_PER_REPORT;
         while limit > 0 {
-            if let Some(sent) = fits(knowledge.report_within(since, at_s, limit))? {
+            if let Some(sent) = fits(knowledge.report_within(since, at_s, limit, seal))? {
                 return Ok(sent);
             }
             limit /= 2;
@@ -576,8 +586,19 @@ impl<J: Journal> Server<J> {
     }
 
     /// A report went out: this craft has now told `to` everything through `through`.
-    pub(crate) fn reported(&mut self, id: CraftId, to: Option<ShipId>, through: Mark) {
-        self.aboard(id).reporting.sent(to.map_or(0, |t| t.0), through);
+    pub(crate) fn reported(&mut self, id: CraftId, to: Option<ShipId>, seal: Seal, through: Mark) {
+        self.aboard(id).reporting.sent(told(to, seal), through);
+    }
+}
+
+/// Whom a craft's reporting mark is kept for: the addressee, `0` for a broadcast, and a faction's
+/// broadcasts apart under the negated key, so an open broadcast does not move past what only a
+/// faction report may carry. Ship ids and faction keys are both positive.
+fn told(to: Option<ShipId>, seal: Seal) -> i64 {
+    match (to, seal) {
+        (Some(to), _) => to.0,
+        (None, Seal::Faction(key)) => -key.0,
+        (None, _) => 0,
     }
 }
 
@@ -1009,11 +1030,11 @@ mod tests {
 
         let home = lc_proto::Subject::Star(sky()[0].id.get());
         let far = lc_proto::Subject::Star(sky()[1].id.get());
-        wire.client_says(ClientId(1), act(ship, Order::NameIt { subject: home, name: "Hearth".into() }));
-        wire.client_says(ClientId(1), act(ship, Order::NameIt { subject: far, name: "Yonder".into() }));
+        wire.client_says(ClientId(1), act(ship, Order::Write { subject: home, writing: lc_proto::Writing::Name("Hearth".into()), scope: lc_proto::Scope::Own }));
+        wire.client_says(ClientId(1), act(ship, Order::Write { subject: far, writing: lc_proto::Writing::Name("Yonder".into()), scope: lc_proto::Scope::Own }));
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(ClientId(1));
-        assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })));
+        assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { order: Order::Write { .. }, .. })));
         assert!(said.iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })));
         server.tick(&mut wire).await.unwrap();
         let mut all = said;
@@ -1034,13 +1055,13 @@ mod tests {
         assert!(belts.is_some_and(|n| n > 0), "premise: the craft starts in a system with a belt");
 
         let belt = |star: StarId, index| lc_proto::Subject::Population { star: star.get(), index };
-        let named = |subject| act(ship, Order::NameIt { subject, name: "Shoals".into() });
+        let named = |subject| act(ship, Order::Write { subject, writing: lc_proto::Writing::Name("Shoals".into()), scope: lc_proto::Scope::Own });
         wire.client_says(ClientId(1), named(belt(sky()[0].id, 0)));
         wire.client_says(ClientId(1), named(belt(sky()[1].id, 0)));
         wire.client_says(ClientId(1), named(belt(sky()[0].id, belts.unwrap() as u32)));
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(ClientId(1));
-        let accepted = said.iter().filter(|m| matches!(m, Outbound::Accepted { order: Order::NameIt { .. }, .. })).count();
+        let accepted = said.iter().filter(|m| matches!(m, Outbound::Accepted { order: Order::Write { .. }, .. })).count();
         let refused = said.iter().filter(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })).count();
         assert_eq!((accepted, refused), (1, 2), "{said:?}");
         server.tick(&mut wire).await.unwrap();
@@ -1085,7 +1106,7 @@ mod tests {
             let sample = lc_world::knowledge::Sample { observed_s: now_s + n as f64 * 1e-3, deficit: 1e-4, sigma: 1e-5 };
             knowledge.measured(watched, witness(id), em_spectra::Band::V, sample);
         }
-        let whole = lc_proto::encode(&knowledge.report(Mark::default(), now_s + 2.0)).len();
+        let whole = lc_proto::encode(&knowledge.report(Mark::default(), now_s + 2.0, Seal::Whole)).len();
         assert!(whole > 3 * PAGE_BYTES, "the test needs several pages of files: {whole}");
 
         for _ in 0..200 {
@@ -1235,14 +1256,14 @@ mod tests {
         let mut told = std::collections::BTreeSet::new();
         let mut reports = 0;
         loop {
-            let (body, through) = match server.report_for(CraftId(far.0), Some(near), now_s) {
+            let (body, through) = match server.report_for(CraftId(far.0), Some(near), Seal::Plain, now_s) {
                 Ok(sent) => sent,
                 Err(Refusal::NothingNew) => break,
                 Err(other) => panic!("refused {other:?} after {reports} reports"),
             };
             let report: Report = lc_proto::decode_report(&body).unwrap();
             told.extend(report.entries.iter().flat_map(|e| e.parts.iter().map(|p| p.subject)));
-            server.reported(CraftId(far.0), Some(near), through);
+            server.reported(CraftId(far.0), Some(near), Seal::Plain, through);
             reports += 1;
         }
         assert!(reports > 1, "it did not need splitting, so this tests nothing");
@@ -1509,7 +1530,7 @@ mod tests {
                 lineage: Vec::new(),
             },
         );
-        let (report, _) = knowledge.report_upto(Mark::default(), 20.0, PAGE);
+        let (report, _) = knowledge.report_upto(Mark::default(), 20.0, PAGE, Seal::Whole);
         let Some(Outbound::Learned { report }) =
             lc_proto::decode(&lc_proto::encode(&Outbound::Learned { report: lc_proto::encode(&report) })).ok()
         else {

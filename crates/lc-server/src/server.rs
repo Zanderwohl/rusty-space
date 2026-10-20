@@ -705,7 +705,7 @@ impl<J: Journal> Server<J> {
         let at_s = at as f64 * 1.0e-6;
         // Orders about what a craft knows or is watching put nothing on the air, so they are
         // not events. They still get an identifier, so an acceptance looks like any other.
-        if matches!(intent.order, Order::SetDuty { .. } | Order::NameIt { .. } | Order::RetainRaw { .. } | Order::Analyze) {
+        if matches!(intent.order, Order::SetDuty { .. } | Order::Write { .. } | Order::RetainRaw { .. } | Order::Analyze) {
             let order = self.act_on_knowledge(id, &intent.order, at_s)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order });
@@ -947,7 +947,7 @@ impl<J: Journal> Server<J> {
             }
             // Returned from above, before anything is put on the air.
             Order::SetDuty { .. }
-            | Order::NameIt { .. }
+            | Order::Write { .. }
             | Order::RetainRaw { .. }
             | Order::Analyze
             | Order::FieldMode { .. }
@@ -983,8 +983,8 @@ impl<J: Journal> Server<J> {
         }
 
         let event_id = self.put_on_air(id, at, kind, power_w, payload, &beam, transmitted, utterance, events)?;
-        if let Some((to, through)) = reported {
-            self.reported(id, to, through);
+        if let Some((to, seal, through)) = reported {
+            self.reported(id, to, seal, through);
         }
         Ok(Applied { event_id, at_t: at, order: applied })
     }

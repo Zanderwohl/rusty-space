@@ -696,16 +696,6 @@ impl Session {
         self.knowledge.nameable(subject, self.system.as_deref())
     }
 
-    pub fn name_it(&mut self, subject: lc_world::knowledge::Subject, name: &str) -> bool {
-        let name = name.trim();
-        if name.is_empty() || !self.nameable(subject) {
-            return false;
-        }
-        let now = self.coordinate_time_s();
-        self.knowledge.name_it(subject, name, now);
-        true
-    }
-
     /// What is believed about a star, or nothing if it has never been detected.
     pub fn belief(&self, id: StarId) -> Option<&Belief> {
         self.knowledge.belief(id)

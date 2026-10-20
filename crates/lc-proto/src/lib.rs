@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 38;
+pub const PROTOCOL_VERSION: u32 = 39;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -393,8 +393,9 @@ pub enum Order {
     SendReport { to: Option<ShipId>, aim: Aim, secrecy: Secrecy, idem: MessageKey },
     /// Put the telescope on a duty. Appended last.
     SetDuty { duty: Duty, integration_s: f64 },
-    /// Call something by a name of this craft's own. Appended last.
-    NameIt { subject: Subject, name: String },
+    /// Append to a subject's thread: a note, or what this craft calls it from now on. A
+    /// [`Scope::Faction`] needs the key held now. See `lightcone/docs/23-factions.md` §Notes.
+    Write { subject: Subject, writing: Writing, scope: Scope },
     /// Keep a subject's raw logs whatever the shard concludes from them, or stop keeping them.
     /// Appended last.
     RetainRaw { subject: Subject, keep: bool },
@@ -1484,10 +1485,14 @@ mod tests {
         })
     }
 
-    fn name_it() -> Inbound {
+    fn write() -> Inbound {
         Inbound::Act(Intent {
             ship_id: ShipId(42),
-            order: Order::NameIt { subject: Subject::Body { star: 7, body: 9 }, name: "Kettle".into() },
+            order: Order::Write {
+                subject: Subject::Body { star: 7, body: 9 },
+                writing: Writing::Name("Kettle".into()),
+                scope: Scope::Faction(FactionId(11)),
+            },
             issued_at_client_t: 1_000_000,
         })
     }
@@ -1609,7 +1614,7 @@ mod tests {
         );
         for (what, bytes, pinned) in [
             ("Order::SetDuty", encode(&set_duty()), golden::SET_DUTY),
-            ("Order::NameIt", encode(&name_it()), golden::NAME_IT),
+            ("Order::Write", encode(&write()), golden::WRITE),
             ("Outbound::Observing", encode(&observing()), golden::OBSERVING),
             ("Outbound::Observing (survey)", encode(&surveying()), golden::SURVEYING),
             ("Outbound::Observing (stare at a place)", encode(&staring()), golden::STARING),
@@ -1825,7 +1830,11 @@ mod tests {
             }),
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
-                order: Order::NameIt { subject: Subject::Body { star: 7, body: 9 }, name: "Kettle".into() },
+                order: Order::Write {
+                    subject: Subject::Body { star: 7, body: 9 },
+                    writing: Writing::Note("hot".into()),
+                    scope: Scope::Own,
+                },
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent {

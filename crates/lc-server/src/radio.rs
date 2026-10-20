@@ -24,6 +24,7 @@ use lc_proto::{
 };
 use glam::DVec3;
 use lc_world::craft::CraftId;
+use lc_world::knowledge::thread::Seal;
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_store::chat::Content;
 use lc_world::signal::{Beam, Transmitter};
@@ -108,8 +109,9 @@ pub(crate) struct Transmission {
     /// The transcript line, for the kinds that make one. `None` for a survey report, which is
     /// a transmission and not something anybody said.
     pub said: Option<Utterance>,
-    /// For a report, who it went to and how far through its sender's backlog it reached.
-    pub reported: Option<(Option<ShipId>, lc_world::knowledge::Mark)>,
+    /// For a report, who it went to, under what, and how far through its sender's backlog it
+    /// reached.
+    pub reported: Option<(Option<ShipId>, Seal, lc_world::knowledge::Mark)>,
 }
 
 impl<J: Journal> Server<J> {
@@ -166,7 +168,11 @@ impl<J: Journal> Server<J> {
                 let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
                 // Written here, from what the shard holds for this craft: see
                 // `crate::instruments::report_for`.
-                let (report, through) = self.report_for(id, *to, at as f64 * 1.0e-6)?;
+                let seal = match under {
+                    Some(key) => Seal::Faction(key),
+                    None => Seal::Plain,
+                };
+                let (report, through) = self.report_for(id, *to, seal, at as f64 * 1.0e-6)?;
                 let reported = Reported {
                     to: to.map(|t| t.0),
                     beamed: !beam.is_omni(),
@@ -184,7 +190,7 @@ impl<J: Journal> Server<J> {
                     // transcript, nothing acknowledges it, and what it does at the far end is
                     // fold into what that craft knows. See `lightcone/docs/22-provenance.md`.
                     said: None,
-                    reported: Some((*to, through)),
+                    reported: Some((*to, seal, through)),
                 })
             }
             // Unreachable: `act` sends only the orders above here.

@@ -334,6 +334,53 @@ mod tests {
             assert_eq!(refused, 2, "neither speaking under a key nor giving one is open to a craft without it");
         }
 
+        /// A note under a faction key reaches a member in a report under that key, and a note
+        /// kept for its author goes nowhere. See `lightcone/docs/23-factions.md` §Notes.
+        #[tokio::test]
+        async fn a_faction_note_reaches_who_holds_the_key_and_a_private_one_stays_home() {
+            use lc_proto::{Scope, Writing};
+            use lc_world::knowledge::{Bearing, Sighting, Subject, Witness};
+            let (mut server, mut wire) = three();
+            let star = lc_world::sky::StarId::synthesize("notes", 1);
+            server.aboard(CraftId(1)).knowledge.sighted(star, Sighting {
+                witness: Witness(1),
+                observed_s: 0.0,
+                bearing: Bearing { observer_ly: DVec3::ZERO, toward: DVec3::X, sigma_rad: 1e-9 },
+                size: None,
+                range_m: None,
+                spin_s: None,
+                band: em_spectra::Band::V,
+                flux: 1e-12,
+                flux_sigma: 1e-15,
+                lineage: Vec::new(),
+            });
+            let key = found(&mut server, &mut wire, ADA, "Wake").await;
+            tell(&server, &mut wire, ADA, Order::GiveKey { key, to: Some(ShipId(2)), aim: Aim::Ship(ShipId(2)), secrecy: Secrecy::Open });
+            run_for(&mut server, &mut wire, TWO_LIGHT_HOURS).await;
+            assert!(server.factions.holds(CraftId(2), key, server.now_t()), "premise: Bry holds the key");
+
+            let write = |writing, scope| Order::Write { subject: lc_proto::Subject::Star(star.get()), writing, scope };
+            tell(&server, &mut wire, ADA, write(Writing::Note("mine alone".into()), Scope::Own));
+            tell(&server, &mut wire, ADA, write(Writing::Note("muster here".into()), Scope::Faction(key)));
+            server.tick(&mut wire).await.unwrap();
+            tell(&server, &mut wire, ADA, Order::SendReport { to: None, aim: Aim::Omni, secrecy: Secrecy::Faction(key), idem: 7 });
+            server.tick(&mut wire).await.unwrap();
+            assert!(wire.take(ADA).iter().any(|m| matches!(m, Outbound::Accepted { order: Order::SendReport { .. }, .. })));
+            run_for(&mut server, &mut wire, TWO_LIGHT_HOURS).await;
+
+            let notes = |server: &mut Server<Memory>, craft| -> Vec<String> {
+                let knowledge = &server.aboard(CraftId(craft)).knowledge;
+                knowledge.file(Subject::Star(star)).map(|f| {
+                    f.thread().ordered().into_iter().map(|(_, h)| match &h.entry.writing {
+                        Writing::Note(t) | Writing::Name(t) => t.clone(),
+                    }).collect()
+                }).unwrap_or_default()
+            };
+            assert_eq!(notes(&mut server, 2), vec!["muster here"]);
+            assert!(notes(&mut server, 3).is_empty(), "Cy heard the report and holds no key");
+            assert_eq!(notes(&mut server, 1).len(), 2, "both stay with their author");
+        }
+
         #[tokio::test]
         async fn a_returning_pilot_is_told_the_keys_it_holds() {
             let (mut server, mut wire) = three();

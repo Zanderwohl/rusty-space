@@ -42,7 +42,7 @@ pub(super) fn fold(
                     None
                 }
                 // What it did arrives in the next `Learned`, with everything else it knows.
-                Order::NameIt { .. } => None,
+                Order::Write { .. } => None,
                 Order::RetainRaw { subject, keep } => {
                     game.0.knowledge.retain_raw(lc_world::knowledge::Subject::from(*subject), *keep);
                     None

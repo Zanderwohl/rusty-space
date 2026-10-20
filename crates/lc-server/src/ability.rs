@@ -97,7 +97,7 @@ impl Act {
             | Order::Park
             // What the telescope does and what the crew call things are the ship's business.
             | Order::SetDuty { .. }
-            | Order::NameIt { .. }
+            | Order::Write { .. }
             | Order::RetainRaw { .. }
             | Order::Analyze => Act::Command,
             // Separate from flying so a shard can silence somebody without grounding them.

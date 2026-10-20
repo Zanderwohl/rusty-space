@@ -136,9 +136,9 @@ pub enum Action {
     StareSelected,
     /// Add the selected star to the watch rotation, or drop it from one.
     WatchSelected,
-    /// Call the selected star something. A name is this ship's, not the star's.
-    NameSelected(String),
-    Name(Subject, String),
+    /// Add to a subject's thread: a note, or what this ship calls it. See
+    /// `lightcone/docs/23-factions.md` §Notes.
+    Write { subject: Subject, writing: lc_proto::Writing, scope: lc_proto::Scope },
     /// Keep a star's raw log whatever is concluded from it, or let it go once it has been read.
     RetainRaw(StarId, bool),
     /// Read every log this ship holds into a conclusion and free its room.
@@ -437,11 +437,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 None => effects.push(Effect::Notify("no system here to survey".into())),
             }
         }
-        Action::NameSelected(name) => match ui.selected {
-            Some(id) => name_it(session, id.into(), &name, &mut effects),
-            None => effects.push(Effect::Notify("nothing selected to name".into())),
-        },
-        Action::Name(subject, name) => name_it(session, subject, &name, &mut effects),
+        Action::Write { subject, writing, scope } => write(session, subject, writing, scope, &mut effects),
         // Only a shard reads logs, so with none there is nothing to analyze.
         Action::Analyze => {
             if session.remote {
@@ -897,18 +893,22 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     }
 }
 
-/// With a shard, the name is held only once the shard's report brings it back.
-fn name_it(session: &mut Session, subject: Subject, name: &str, effects: &mut Vec<Effect>) {
-    let name = name.trim();
-    if name.is_empty() {
+/// With a shard, the entry is held only once the shard's report brings it back.
+fn write(session: &mut Session, subject: Subject, writing: lc_proto::Writing, scope: lc_proto::Scope, effects: &mut Vec<Effect>) {
+    let writing = match writing {
+        lc_proto::Writing::Note(text) => lc_proto::Writing::Note(text.trim().to_string()),
+        lc_proto::Writing::Name(name) => lc_proto::Writing::Name(name.trim().to_string()),
+    };
+    if !writing.is_valid() {
         return;
     }
     if !session.nameable(subject) {
-        effects.push(Effect::Notify("nothing detected there to name".into()));
+        effects.push(Effect::Notify("nothing detected there to write about".into()));
     } else if session.remote {
-        effects.push(Effect::Send(lc_proto::Order::NameIt { subject: subject.into(), name: name.to_string() }));
-    } else if session.name_it(subject, name) {
-        effects.push(Effect::Notify(format!("noted: {name}")));
+        effects.push(Effect::Send(lc_proto::Order::Write { subject: subject.into(), writing, scope }));
+    } else {
+        let now = session.coordinate_time_s();
+        session.knowledge.write(subject, writing, scope, now);
     }
 }
 
@@ -1685,25 +1685,24 @@ mod tests {
         assert!(s.observe(1.0e4).is_some());
     }
 
+    fn name(subject: Subject, text: &str) -> Action {
+        Action::Write { subject, writing: lc_proto::Writing::Name(text.into()), scope: lc_proto::Scope::Own }
+    }
+
     /// A name is this ship's, not the star's — and it belongs to something detected. Naming a
     /// light nobody has picked up is naming nothing.
     #[test]
     fn naming_a_star_is_this_ship_saying_so() {
         let (mut ui, mut s) = fixture();
         let id = s.stars[0].id;
-        apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
-        apply(Action::NameSelected("The Kettle".into()), &mut ui, &mut s);
+        apply(name(id.into(), "The Kettle"), &mut ui, &mut s);
         assert_eq!(s.name_of(id), "The Kettle");
-        let naming = s.belief(id).unwrap().name.clone().unwrap();
-        assert_eq!(
-            naming.witness, s.knowledge.owner,
-            "ours, not the catalog's"
-        );
-        assert!(naming.lineage.is_empty(), "nobody told us this one");
+        let (_, held) = s.knowledge.file(id).unwrap().thread().ordered()[0];
+        assert_eq!(held.entry.author, s.knowledge.owner, "ours, not the catalog's");
+        assert!(held.lineage.is_empty(), "nobody told us this one");
 
         let unknown = lc_world::sky::StarId::synthesize("absent", 7);
-        ui.selected = Some(unknown);
-        let effects = apply(Action::NameSelected("Nowhere".into()), &mut ui, &mut s);
+        let effects = apply(name(unknown.into(), "Nowhere"), &mut ui, &mut s);
         assert!(
             matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected"))
         );
@@ -1730,21 +1729,21 @@ mod tests {
             })
             .filter(|(_, body)| s.knowledge.knows(*body))
             .expect("a charted body");
-        apply(Action::Name(body, " Kettle ".into()), &mut ui, &mut s);
+        apply(name(body, " Kettle "), &mut ui, &mut s);
         assert_eq!(s.body_label(&key), "Kettle");
 
         let belt = Subject::Population { star: system.star, index: 0 };
-        apply(Action::Name(belt, "The Shoals".into()), &mut ui, &mut s);
+        apply(name(belt, "The Shoals"), &mut ui, &mut s);
         assert_eq!(s.band_label(0), "The Shoals");
 
         let none = Subject::Population { star: system.star, index: system.populations.len() as u32 };
-        let effects = apply(Action::Name(none, "Nowhere".into()), &mut ui, &mut s);
+        let effects = apply(name(none, "Nowhere"), &mut ui, &mut s);
         assert!(matches!(effects.as_slice(), [Effect::Notify(t)] if t.contains("nothing detected")));
 
         s.remote = true;
-        let effects = apply(Action::Name(belt, "Reef".into()), &mut ui, &mut s);
+        let effects = apply(name(belt, "Reef"), &mut ui, &mut s);
         assert!(
-            matches!(effects.as_slice(), [Effect::Send(lc_proto::Order::NameIt { subject: lc_proto::Subject::Population { index: 0, .. }, .. })]),
+            matches!(effects.as_slice(), [Effect::Send(lc_proto::Order::Write { subject: lc_proto::Subject::Population { index: 0, .. }, .. })]),
             "{effects:?}",
         );
         assert_eq!(s.band_label(0), "The Shoals", "renamed when the shard says so, not before");
@@ -1779,8 +1778,8 @@ mod tests {
         // orders nothing rather than ordering a survey of nowhere.
         assert!(s.system.is_none(), "the fixture is not in a system");
         assert!(orders(&apply(Action::SurveySystem, &mut ui, &mut s)).is_empty());
-        let sent = orders(&apply(Action::NameSelected("Kettle".into()), &mut ui, &mut s));
-        assert!(matches!(sent.as_slice(), [lc_proto::Order::NameIt { .. }]), "{sent:?}");
+        let sent = orders(&apply(name(id.into(), "Kettle"), &mut ui, &mut s));
+        assert!(matches!(sent.as_slice(), [lc_proto::Order::Write { .. }]), "{sent:?}");
         assert_ne!(s.name_of(id), "Kettle", "named when the shard says so, not before");
         let to = Some(lc_proto::ShipId(7));
         let report = Action::SendReport { to, aim: lc_proto::Aim::Omni, secrecy: lc_proto::Secrecy::Open };

@@ -88,6 +88,7 @@ pub mod surfaces;
 pub mod starfield;
 pub mod system_panel;
 pub mod telescope_panel;
+pub mod thread_view;
 pub mod tonemap;
 pub mod truss;
 pub mod ui;

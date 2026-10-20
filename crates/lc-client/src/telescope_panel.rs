@@ -24,7 +24,8 @@ pub fn telescope(
     game: &mut Game,
     held: &crate::beliefs::Held,
     revealed: &mut Option<StarId>,
-    draft: &mut String,
+    uplink: &crate::uplink::Uplink,
+    draft: &mut crate::thread_view::Draft,
     out: &mut MessageWriter<Requested>,
     plot: &mut CurvePlot,
 ) {
@@ -82,7 +83,7 @@ pub fn telescope(
     });
     ui.separator();
 
-    details(ui, state, game, draft, out);
+    details(ui, state, game, uplink, draft, out);
     conclusion(ui, game, out);
     ui.separator();
     curve(ui, game, out, plot);
@@ -343,7 +344,8 @@ fn details(
     ui: &mut egui::Ui,
     state: &Ui,
     game: &Game,
-    draft: &mut String,
+    uplink: &crate::uplink::Uplink,
+    draft: &mut crate::thread_view::Draft,
     out: &mut MessageWriter<Requested>,
 ) {
     let Some(id) = described(game).filter(|id| game.knows(*id)) else {
@@ -353,13 +355,8 @@ fn details(
     for name in names(game, id) {
         ui.strong(name);
     }
-    // A name is a record like any other: timestamped and relayed to whoever this ship reports to.
     if state.selected == Some(id) {
-        let field = ui.add(egui::TextEdit::singleline(draft).hint_text("Add Name").desired_width(150.0));
-        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if entered && !draft.trim().is_empty() {
-            ask(out, Action::NameSelected(std::mem::take(draft)));
-        }
+        crate::thread_view::thread(ui, game, uplink, id.into(), draft, out);
     }
     let Some(belief) = game.belief(id) else { return };
     let here = game.ship.motion.position_ly;
@@ -371,12 +368,10 @@ fn details(
     });
 }
 
-/// Chosen names first, each once. An unnamed star's discovery designation is one of these.
+/// The chosen name first, then every designation, each once.
 fn names(game: &Game, id: StarId) -> Vec<String> {
-    let mut held: Vec<_> = game.knowledge.file(id).map(|f| f.names().to_vec()).unwrap_or_default();
-    held.sort_by_key(|n| !n.kind.chosen());
-    let mut names: Vec<String> = Vec::new();
-    for naming in held {
+    let mut names: Vec<String> = game.knowledge.given_name_of(id).into_iter().collect();
+    for naming in game.knowledge.file(id).map(|f| f.names().to_vec()).unwrap_or_default() {
         if !names.contains(&naming.name) {
             names.push(naming.name);
         }
