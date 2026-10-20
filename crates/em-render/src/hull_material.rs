@@ -110,6 +110,11 @@ pub struct HullUniform {
     /// `(surface_reference, stops, 0, 0)`, evaluated per fragment as `body_surface.wgsl` does:
     /// lights and sunlight mix across the hull and the curve is logarithmic.
     pub exposure: Vec4,
+    /// `(floor, tail_stops, rim, 0)`: how far a hull departs from the exposure to stay legible.
+    /// Below the window it fades to black over `tail_stops` from `floor` instead of clipping, and
+    /// `rim` of the display is added toward its silhouette, so its shape reads unlit. All zero is
+    /// the physical curve. Monotonic in radiance, so a window still outshines the paint beside it.
+    pub hero: Vec4,
     /// `(tile_m, 0, 0, 0)`: meters one tile spans.
     pub detail: Vec4,
     /// Plating's sweep: `(origin, front)`, ship frame, meters. A panel is plated once `front`
@@ -154,6 +159,7 @@ impl Default for HullUniform {
             reflected: Vec4::ONE,
             glow: Vec4::ZERO,
             exposure: Vec4::new(1.0, 5.0, 0.0, 0.0),
+            hero: Vec4::ZERO,
             detail: Vec4::new(64.0, 0.0, 0.0, 0.0),
             reveal: Vec4::new(0.0, 0.0, 0.0, ALL_PLATED),
             reveal_panel: Vec4::new(8.0, 0.0, 0.0, 0.0),

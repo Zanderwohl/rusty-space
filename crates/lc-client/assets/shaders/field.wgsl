@@ -53,17 +53,20 @@ const TAU: f32 = 6.2831853;
 // The fill past which the field goes uneven; 30-the-field.md's 80%.
 const UNEVEN_FILL: f32 = 0.8;
 
-// A dielectric interface at normal incidence reflects about four percent.
-const RIM_F0: f32 = 0.04;
+// The interface's reflectance face-on. A dielectric's is about four percent, which veiled a night
+// side's whole disc once the exposure opened for its windows; at none the rim is the edge alone.
+const RIM_F0: f32 = 0.0;
 
 // The film's thickness range, nanometers, and its index. A soap film's, which is what Clear is
 // drawn as; thinner than this is black and thicker washes to white.
 const FILM_THIN_NM: f32 = 250.0;
 const FILM_THICK_NM: f32 = 700.0;
 const FILM_INDEX: f32 = 1.33;
-// A soap film's reflectance face-on, and how far its bands are allowed from white. Fully
-// saturated, the bands read as paint rather than as a sheen.
-const FILM_FACE_ON: f32 = 0.02;
+// Reflectance face-on, none where a real soap film's is 2%, and how steeply it rises toward the
+// silhouette: a Clear field is drawn as its outline, with the ship plain through the middle. How
+// far the bands are allowed from white: fully saturated, they read as paint rather than a sheen.
+const FILM_FACE_ON: f32 = 0.0;
+const FILM_GLANCE: f32 = 5.0;
 const FILM_SATURATION: f32 = 0.4;
 
 fn hash3(p: vec3<f32>) -> f32 {
@@ -301,7 +304,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) facing: bool) -> @location(
         // all of it at a glance, so the ship shows through the middle. How much it reflects in
         // total is the photometry's business; this is only where on the disc it goes.
         let lit = abs(dot(n, normalize(material.to_star.xyz)));
-        let glance = FILM_FACE_ON + (1.0 - FILM_FACE_ON) * pow(1.0 - mu, 3.0);
+        let glance = FILM_FACE_ON + (1.0 - FILM_FACE_ON) * pow(1.0 - mu, FILM_GLANCE);
         let reflects = (1.0 - absorbs) * glance * lit;
         let banded = mix(vec3<f32>(1.0), film(in.local, mu), FILM_SATURATION);
         linear = linear + material.starlight.rgb * banded * reflects;

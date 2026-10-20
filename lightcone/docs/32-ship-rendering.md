@@ -167,6 +167,23 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 
 ![Every kind by day and by night](../images/hull-kinds.png)
 
+### A ship is the hero
+
+A ship is the subject of every shot it is in, so its hull is the one surface that departs from
+the exposure; planets and stars stay physical. `HullUniform::hero` (`lc_client::hull::HERO` in the
+game) does it two ways, both in the shader's tone curve:
+
+- **A toe.** Below the window the curve fades to black over four stops from 18% of the display,
+  rather than clipping there. A night side at the 0.3% fill sits about eight stops under its day
+  side, and lands in the toe instead of in black. The curve is still monotonic in radiance, so a lit
+  window outshines the paint beside it as before.
+- **A rim.** Up to 12% of the display toward the silhouette, as `(1 − n·v)³`, so a hull's outline
+  reads where nothing lights it.
+
+`mesh_void --physical` draws without either.
+
+![Physical (left) and hero (right): Cluster by day at Venus's L1, and by night at Jupiter's](../images/hero-day-night.jpg)
+
 ![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
 
 ## Building, as a function of time
@@ -415,7 +432,9 @@ example and 150 km in the client, whose unit is an AU, and turned every mote int
 The envelope from [29-ship-form.md](29-ship-form.md), an ellipsoid, drawn as **two layers**
 whatever is decided about air:
 
-- **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. If air is ever
+- **Inner: clear.** A fresnel rim, faint, with the ship plainly visible through it. Nothing face-on:
+  a dielectric's 4% veiled a night side's whole disc once the exposure opened for its windows, so
+  the rim and the film are the silhouette alone, as a soap bubble's are. If air is ever
   held, this is where the haze goes. `haze.rs` already scatters sunlight through a planet's
   atmosphere, and a park's sky is the same problem in a smaller volume.
 - **Outer: the radiator.** Its color is a blackbody at the field's temperature through
@@ -447,6 +466,8 @@ surface across the envelope over `field_switch_s`, from the Mind outward.
 | collapse | below |
 
 ![A field at 400, 2 400 and 4 600 K, Clear left and Black right](../images/field-temperatures.png)
+
+![Clear by day and by night at Venus's L1, with face-on reflection (left) and without (right)](../images/field-rim.jpg)
 
 At 400 K the glow is nothing in the visible: Clear shows the ship and the world behind it through
 the sheen, and Black is a hole in the world. At 2 400 K it is red-orange, Clear's limb the brighter.

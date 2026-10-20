@@ -9,6 +9,7 @@
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings::view,
     view_transformations::position_world_to_clip,
 }
 
@@ -39,6 +40,7 @@ struct VertexOutput {
     @location(2) ship_normal: vec3<f32>,
 #ifdef HULL_GIRDER
     @location(3) @interpolate(flat) girder: vec4<f32>,
+    @location(4) world_position: vec3<f32>,
 #else
     @location(3) regions_0: vec4<f32>,
     @location(4) regions_1: vec4<f32>,
@@ -47,6 +49,7 @@ struct VertexOutput {
     @location(7) seam: vec2<f32>,
     @location(8) face_share: f32,
     @location(9) @interpolate(flat) face: u32,
+    @location(10) world_position: vec3<f32>,
 #endif
 }
 
@@ -61,6 +64,8 @@ struct HullUniform {
     glow: vec4<f32>,
     /// `(surface_reference, stops, 0, 0)`.
     exposure: vec4<f32>,
+    /// `(floor, tail_stops, rim, 0)`; zero is physical.
+    hero: vec4<f32>,
     /// `(tile_m, 0, 0, 0)`.
     detail: vec4<f32>,
     /// `(origin, front)`, ship frame, meters.
@@ -101,6 +106,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
     let world = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(vertex.position, 1.0));
     out.clip_position = position_world_to_clip(world.xyz);
+    out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
     out.ship_position = vertex.position;
     out.ship_normal = vertex.normal;
@@ -128,23 +134,30 @@ fn band(front: f32, width: f32, x: f32) -> f32 {
     return clamp((front - x) / max(width, 1.0e-6), 0.0, 1.0);
 }
 
-/// Lit albedo plus what glows, through the exposure.
-fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>) -> vec4<f32> {
+/// Lit albedo plus what glows, through the exposure, and `material.hero`'s departures from it.
+fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>, world_position: vec3<f32>) -> vec4<f32> {
+    let n = normalize(world_normal);
     let to_star = normalize(material.to_star.xyz);
-    let lambert = max(dot(normalize(world_normal), to_star), 0.0);
+    let lambert = max(dot(n, to_star), 0.0);
     let light = max(lambert, material.to_star.w);
     let linear = material.reflected.rgb * albedo * light + emitted + material.glow.rgb;
 
     let reference = material.exposure.x;
     let stops = material.exposure.y;
+    let toe = material.hero.x;
     let luminance = dot(linear, LUMA);
     let peak = max(linear.r, max(linear.g, linear.b));
     var value = 0.0;
     if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
-        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
+        // Stops above the window's bottom; the tail is continuous with the window there.
+        let above = log2(luminance / reference) + stops;
+        let tail = toe * exp2(min(above, 0.0) / max(material.hero.y, 1.0e-3));
+        value = (1.0 - toe) * clamp(above / stops, 0.0, 1.0) + tail;
     }
+    let to_eye = normalize(view.world_position - world_position);
+    let rim = material.hero.z * pow(1.0 - clamp(dot(n, to_eye), 0.0, 1.0), 3.0);
     let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
-    return vec4<f32>(chroma * value, 1.0);
+    return vec4<f32>(chroma * (value + rim * (1.0 - value)), 1.0);
 }
 
 fn girder_light() -> vec3<f32> {
@@ -163,7 +176,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (material.reveal.w >= ALL_PLATED || standing <= in.girder.y) {
         discard;
     }
-    return shade(material.girder.rgb, girder_light(), in.world_normal);
+    return shade(material.girder.rgb, girder_light(), in.world_normal, in.world_position);
 }
 #else
 
@@ -361,7 +374,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         t,
     );
     if (material.reveal.w >= ALL_PLATED) {
-        return shade(albedo, emitted, in.world_normal);
+        return shade(albedo, emitted, in.world_normal, in.world_position);
     }
 
     let x = swept(in.ship_position);
@@ -374,7 +387,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         if (!plated_here) {
             discard;
         }
-        return shade(albedo, emitted, in.world_normal);
+        return shade(albedo, emitted, in.world_normal, in.world_position);
     }
 
     // No girder mesh: the lattice is drawn here, in place of plating not yet up and over plating
@@ -401,6 +414,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let closed_albedo = mix(albedo, girder, over);
     let open_emitted = girder_light() * open;
     let closed_emitted = mix(emitted, girder_light(), over);
-    return shade(mix(open_albedo, closed_albedo, plating), mix(open_emitted, closed_emitted, plating), in.world_normal);
+    return shade(mix(open_albedo, closed_albedo, plating), mix(open_emitted, closed_emitted, plating), in.world_normal, in.world_position);
 }
 #endif

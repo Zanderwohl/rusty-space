@@ -65,6 +65,11 @@ const NIGHT: f32 = 0.10;
 /// A real hull's, low enough that a lit window outshines its night side even by Venus.
 pub(crate) const HULL_NIGHT: f32 = 0.003;
 
+/// A ship is the hero of every shot it is in, so its hull keeps a shape where the physical curve
+/// would clip it to black: [`em_render::hull_material::HullUniform::hero`]. Planets and stars stay
+/// physical. A night side at [`HULL_NIGHT`] sits some eight stops under the lit one.
+pub const HERO: Vec4 = Vec4::new(0.18, 4.0, 0.12, 0.0);
+
 /// Where the player is looking from, and how far back that is.
 ///
 /// Recomputed at the head of every frame and read by everything that turns a world position

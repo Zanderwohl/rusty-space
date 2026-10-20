@@ -175,6 +175,7 @@ pub(crate) fn finished(
         reflected: base.reflected / PAINT as f32,
         glow: base.emitted,
         exposure: base.exposure,
+        hero: crate::hull::HERO,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
         bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
         emitted,
