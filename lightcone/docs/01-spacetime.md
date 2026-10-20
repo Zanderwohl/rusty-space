@@ -3,9 +3,7 @@
 **Status: partly built.** The types and solvers are `lc_spacetime::{coord, units, interval,
 worldline, frame, doppler, proper_time}`, and a ship's clock is `clock_s` in `lc_world::motion`,
 shown in `lc_client::hud`; no onboard process runs on that clock yet, since refit rounds
-(`lc_world::refit::rounds`) are timed in coordinate seconds. `Coord::t` is the `Micros` newtype,
-`Worldline` works in light-microseconds and `defined_over` returns a pair, and ships fly
-`lc_world::worldline::Flight` rather than the `em_sim::trajectory::Path` arcs named below.
+(`lc_world::refit::rounds`) are timed in coordinate seconds.
 
 ## The server frame
 
@@ -136,7 +134,7 @@ This forbids storing ship motion only as an integrator state. It is already sati
 |---|---|---|
 | star | fixed point, or linear proper motion | HYG catalog in `assets/catalogs/` |
 | planet, moon, comet | Keplerian elements | `em_sim::motive` |
-| ship under thrust | piecewise analytic arcs | `em_sim::trajectory::Path`, `em_sim::patch` |
+| ship under thrust | piecewise analytic arcs | `lc_world::worldline::Flight`, folded by `lc_world::motion` |
 | structure | fixed relative to its parent body | — |
 
 Ship arcs under constant proper acceleration are hyperbolic motion in the server frame:
@@ -210,11 +208,11 @@ frame switching.
 
 ## Types
 
-Sketch, in `lc-spacetime`:
+In `lc-spacetime`, abridged:
 
 ```rust
 /// Server-frame coordinate on the integer light-microsecond grid. c = 1.
-pub struct Coord { pub t: i64, pub x: i64, pub y: i64, pub z: i64 }
+pub struct Coord { pub t: Micros, pub x: i64, pub y: i64, pub z: i64 }
 
 /// Invariant interval squared, in i128. Sign classifies the pair.
 pub fn interval2(a: Coord, b: Coord) -> i128;
@@ -230,13 +228,16 @@ pub enum Separation { Timelike, Lightlike, Spacelike }
 pub fn retarded_times(observer: Coord, w: &dyn Worldline) -> SmallVec<[f64; 2]>;
 
 pub trait Worldline {
-    fn position_at(&self, t: f64) -> DVec3;   // local meters, or global if unparented
-    fn velocity_at(&self, t: f64) -> DVec3;
-    fn defined_over(&self) -> Range<f64>;
+    fn position_at(&self, t: f64) -> DVec3;   // light-microseconds, in the caller's frame
+    fn velocity_at(&self, t: f64) -> DVec3;   // beta
+    fn defined_over(&self) -> (f64, f64);     // inclusive
 
     /// Every worldline in the current design returns true. The single-root invariant is
     /// asserted against this, not assumed globally.
     fn is_subluminal(&self) -> bool { true }
+
+    /// Coordinate times at which it jumps. The solvers split there, so each piece has one root.
+    fn breaks(&self) -> SmallVec<[f64; 2]> { SmallVec::new() }
 }
 ```
 

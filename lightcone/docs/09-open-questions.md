@@ -4,12 +4,8 @@ Decisions not yet made, grouped by what they block. Each topic document carries 
 "Open" section; this is the index and the ordering.
 
 **Status: reference.** The index of open questions, kept current against each topic document's own
-"Open" section. Sixteen are decided (eleven under Resolved, the four prototype blockers, rate
-limiting) and two designed (identity, reconciliation), against thirty-four open; of the decided, von
-Neumann generation TTLs, per-body deposits and the skybox of distant galaxies have no code yet, and
-star proper motion is planned-not-built by its own entry. Two open rows trail the code: metallicity
-synthesis exists in `lc_world::sky::metallicity`, and the wire is `postcard` under
-`PROTOCOL_VERSION` over a WebSocket (`lc_proto::encode`, `lc_server::websocket`).
+"Open" section. Of the decided, von Neumann generation TTLs, per-body deposits and the skybox of
+distant galaxies have no code yet, and star proper motion is planned-not-built by its own entry.
 
 ## Resolved
 
@@ -25,6 +21,11 @@ synthesis exists in `lc_world::sky::metallicity`, and the wire is `postcard` und
 | Event ID allocation | `(shard, coordinate_time, sequence)`, snowflake-style. Locally generated and time-ordered whether or not sharding happens. |
 | Von Neumann termination | Replication orders carry a generation TTL. Drift can corrupt the counter, producing self-perpetuating drifters, which is a mechanic rather than a bug. |
 | Ice giant internal heat | One number for both. Uranus radiates 1.06 times what it absorbs and Neptune 2.61 though it is half again as far out, and nothing derivable from a body's mass, radius or temperature separates them. Taken nearer Uranus; see [04-stellar-photometry.md](04-stellar-photometry.md#a-giant-does-the-same-thing-and-less-of-it). |
+| Metallicity synthesis | Saturating in peculiar speed with seeded scatter, `lc_world::sky::metallicity`, and scaling a disc's solids. The resource yield curve waits on resources. |
+| Wire format | `postcard`, versioned by `PROTOCOL_VERSION` and pinned byte-for-byte by `lc_proto::golden`; new variants are appended, never renumbered. |
+| Partition cadence | Thirty days of coordinate time, about five real minutes, kept two ahead by the tick. See [02-event-store.md](02-event-store.md). |
+| Optical depth | Populations combine as `1 − exp(−τ)` (`lc_world::emission`). |
+| Band set | Seven bands (`em_spectra::BANDS`), the thermal IR among them. |
 | Superluminal travel | Not built, not foreclosed. Three cheap signature decisions keep the option open; see [10-superluminal.md](10-superluminal.md). |
 
 ## Blocking the prototype
@@ -104,14 +105,12 @@ Listed so they do not get planned. Each is a local edit whenever it is faced.
 |---|---|
 | Playable volume | How many stars, out to what distance. Sets the source count, the BVH size, and the maximum light delay. Bounded above by the 36 500 ly coordinate invariant, and expected to be far smaller. |
 | Drift rate, TTL depth, branching factor | The three numbers that tune von Neumann expansion and drifters. All need calibrating against how long a player should take to notice and to respond. |
-| Metallicity synthesis | The correlation between kinematics and `[Fe/H]` is real and strong; the mapping still needs writing and the resource yield curve calibrating. |
 
 ## Blocking the event store
 
 | question | notes |
 |---|---|
 | `cube` versus PostGIS | `cube` is contrib and adequate for bounding-box pruning; PostGIS is heavier and gives real spatial operators. |
-| Partition cadence | One in-game month is 3.6 real hours. Partition maintenance must be automated either way. |
 | Retention and archival | When an event becomes unreachable, and whether archival must stay reversible for replays. |
 
 ## Blocking photometry
@@ -120,11 +119,9 @@ Listed so they do not get planned. Each is a local edit whenever it is faced.
 |---|---|
 | Coherent/statistical threshold | Currently "when `m` approaches 1 the events stop being separable". It is also observational — a better telescope separates more — and the two criteria have not been reconciled. |
 | Caustic edge term | A thin ring's turning latitudes carry an integrable spike that a level-5 shell smears. An analytic correction is cheaper than raising the whole shell's level, and is unwritten. |
-| Optical depth | Deficits are summed linearly, which fails as a swarm approaches full coverage — exactly the end state the game is about. Switch to `1 - exp(-tau)` past a few percent. |
 | Non-Poisson flicker | Real swarms have resonances, gaps and clumps, so the noise is correlated and its spectrum says more than the current model admits. |
 | The `m ~ 1` transition band | Neither the Gaussian nor the Poisson branch of the flicker synthesizer is right there, and a Kuiper analog sits in it. Generating the true event train is affordable at `m ~ 1`; decide whether to. |
 | Limb darkening | Bundle Claret tables, or fit a two-parameter function of `Teff`. |
-| Band set | Four bands assumed, including a thermal IR band so waste heat is visible. More bands cost linearly in baked shell size and nothing on the analytic path. |
 | Reflected light and phase curves | 1e-5 of stellar flux at best. Probably out; it is an information channel if in. |
 
 ## Blocking the client
@@ -143,8 +140,7 @@ advance. Each is local to one component.
 
 | question | notes |
 |---|---|
-| Transport | WebTransport availability decides whether browser and native share one transport or two. |
-| Wire format | `postcard` or `bincode`, plus a versioning scheme, since clients will lag deploys. |
+| Transport | One WebSocket for both today (`lc_server::websocket`). WebTransport availability decides whether that stays one transport or becomes two. |
 | Where the light-cone cursor lives | `lc-store` needs a database; the client wants the traversal logic. Likely splits into `lc-spacetime`. |
 | Rate limiting | A scripted client can emit intents at any rate. **Decided:** an integer token bucket per client, measured rather than guessed. |
 | Identity on a socket | **Designed:** [16-identity.md](16-identity.md). A broker neither product owns, a sixty-second single-use ticket, verified locally against JWKS. |

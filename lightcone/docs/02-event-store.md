@@ -5,8 +5,7 @@ tables are `crates/lc-store/sql/`, applied by `lc_store::migrate`; `lc_store::id
 ids, and the server's journal (`lc_server::journal::postgres`) writes events and delivery rows and
 reads deliveries back. `lc_store::cursor::LightConeCursor` and `lc_store::bvh` are built but run
 only in `lc-store`'s own tests, over an in-memory event source: nothing writes the `sources` or
-`systems` tables, and nothing schedules `lc_store::retention`. Partitions are thirty-day spans
-made on demand by the journal, not months.
+`systems` tables, and nothing schedules `lc_store::retention`.
 
 ## What is an event
 
@@ -96,9 +95,11 @@ CREATE INDEX events_source_t ON events (source_id, t);
 CREATE INDEX events_t_brin ON events USING brin (t) WITH (pages_per_range = 32);
 ```
 
-Partitions are monthly in coordinate time. At 8766x, one in-game month is 3.6 real hours,
-so partition maintenance is frequent and must be automated (`pg_partman` or a cron job that
-pre-creates a window ahead).
+Partitions are thirty-day spans of coordinate time (`lc_partition_span()`), numbered by floor
+division rather than named after months, because coordinate time has no calendar. At 8766x one
+span is about five real minutes, so maintenance cannot be a cron job: the tick keeps two spans
+made ahead of now (`lc_server::journal::PREPARE_AHEAD_US`), and an event stamped further away
+gets its own partition when it is written.
 
 `lx/ly/lz/lt` carry the exact local-frame values. The global `gx/gy/gz/t` are the index.
 Both are stored because recomputing one from the other loses the 150 m of the grid.

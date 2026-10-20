@@ -13,9 +13,7 @@ one is how to draw a surface without it fighting what is already there.
 `map*` on `em-map`, and the flags in `dev` and `entry`. Not built: Settings (the panel and the
 menu's NewWorld, Load, Settings and About pages are placeholders; nothing persists and nothing
 rebinds), the debug window's causality overlay, scale-tier readout and retarded-solver
-statistics, the `Tab` scale-tier control, and an aggregate map source. Departures: the menu
-backdrop is 12 000 stars, Refit is a ledger with refits begun from the editor's Apply per
-[29-ship-form.md](29-ship-form.md), and the editor's `form_*` modules read `KeyCode` too.
+statistics, the `Tab` scale-tier control, and an aggregate map source.
 
 ## States
 
@@ -82,7 +80,7 @@ catalog's. Loading the catalog is what `Loading` exists for — a hundred and tw
 rows, and generation per star — and a menu that waits for it is the frozen window that state
 was added to avoid.
 
-So the menu generates four thousand main-sequence stars from a fixed seed: isotropic, uniform
+So the menu generates twelve thousand main-sequence stars from a fixed seed: isotropic, uniform
 in volume out to four hundred light-years, masses from an inverted Salpeter IMF and effective
 temperature from the same mass so the colors agree with the sizes. Fixed rather than random
 per launch, because a backdrop that differs each time reads as a bug in the sky.
@@ -133,7 +131,7 @@ with.
 | communications | `C` | one conversation at a time, chosen from a list of everyone heard from and everyone in sight |
 | debug | `F3` | below |
 | scenarios | — | scenes to stage. Development only, and every button does nothing without a shard started for it |
-| refit | `R` | module counts and hull slots as sliders, what applying them would cost and take, and the refit under way. See [19-ship-fitting.md](19-ship-fitting.md) |
+| refit | `R` | the ledger: what the ship holds and the refit under way. A refit is begun from the form editor's Apply. See [29-ship-form.md](29-ship-form.md) |
 | dev actions | `F5` | energy for the ship. Development only; a shard refuses it |
 
 The map is not in that table. It is the **other mode of the main view** — see below — and `M`
@@ -311,7 +309,7 @@ into the session.
 Action        an enum: ToggleP anel, SetBandPreset, ExposureUp, SelectTarget, Quit, ...
 apply()       Action + UiState + Session -> Vec<Effect>
 Effect        the few things needing the engine: Quit, WriteSnapshot, Notify
-input.rs      the only place that knows about KeyCode; maps input to Action
+input.rs      maps input to Action; the form editor's handles read the mouse and keys too
 ```
 
 Rebinding is not built yet and this is what makes it a table rather than a rewrite. It also
@@ -319,8 +317,9 @@ buys the things that usually arrive too late to be cheap: driving the UI from a 
 window, replaying a session from a list of actions, macros, and a remote control for
 debugging. The cost is one enum and one match.
 
-`Action` is engine-free. Only `input.rs` mentions `KeyCode`, so the core stays testable and a
-second front end — a touch build, a script — needs no new plumbing.
+`Action` is engine-free, so the core stays testable and a second front end — a touch build, a
+script — needs no new plumbing. Bindings live in `input.rs`; the form editor's `form_*` modules
+read `KeyCode` themselves, and are the exception.
 
 ## Structure
 

@@ -54,7 +54,7 @@ pub struct EmissionModel {
     pub bodies: Vec<Body>,
     /// Statistically steady occluders.
     pub populations: Vec<Population>,
-    /// A bake of `populations`, used in place of evaluating them when present.
+    /// A bake of `populations`. Nothing samples it yet: [`Self::deficit`] integrates them.
     pub shell: Option<Shell>,
     pub seed: u64,
 }
@@ -64,7 +64,7 @@ impl EmissionModel {
         Self { star, bodies: Vec::new(), populations: Vec::new(), shell: None, seed }
     }
 
-    /// Bake the populations at `level`, so later samples interpolate rather than integrate.
+    /// Bake the populations at `level`.
     pub fn bake(&mut self, level: u8) {
         self.shell = Some(Shell::bake(&self.star, &self.populations, level));
     }

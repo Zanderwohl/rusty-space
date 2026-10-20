@@ -7,8 +7,7 @@ in `lc_proto` and folded by `lc-client/src/uplink/orders.rs`; the clock slew is 
 wall-clock ticking `lc_server::timing::Pacer`, CBOR checkpoints `lc_server::persist`, and the
 crossing from a moving start `lc_world::flight`. Not built: `Outbound::Resync`, the
 render-offset slew, the drift meter and the re-acquire mechanic. The client does not apply its
-orders optimistically and keeps no log of unacknowledged intents — it waits for `Accepted` — and
-§Adjust's "currently does not" report clamps is out of date.
+orders optimistically and keeps no log of unacknowledged intents: it waits for `Accepted`.
 
 ## This game is not the usual case
 
@@ -39,10 +38,11 @@ can differ at all"**, and there turn out to be four.
 | 3 | transcendental functions differ between platforms | yes | slew |
 | 4 | the client's state is unreachable from the server's | no | replace |
 
-**1 is not an error.** The client applies its own order optimistically at its own coordinate;
+**1 is not an error.** A client may apply its own order optimistically at its own coordinate;
 the server applies it a fraction of a second later at a coordinate it chose. They converge as
-soon as the acknowledgment arrives. This is the common case and it needs no mechanism beyond
-knowing which coordinate the server used — which today it does not tell you (see below).
+soon as the acknowledgment arrives, which says which coordinate the server used. This is the
+common case and it needs no further mechanism. Today's client skips the optimism and waits for
+the acknowledgment.
 
 **3 is the one that surprised me.** IEEE-754 pins `+ - * /` exactly, so the same arithmetic gives
 the same bits everywhere. It pins **nothing** about `sinh`, `cosh`, `atan2`, `exp` or `sin`,
@@ -77,23 +77,22 @@ whose scales span from a low orbit to the Oort cloud.
 
 ### Adjust — an intent the server did not take as offered
 
-The client re-folds from the last agreed state with what the server actually did. This requires
-the server to say what that was, and **it currently does not**:
+The client re-folds from the last agreed state with what the server actually did. The server
+changes two things without being asked:
 
-- `issued_at_client_t` is clamped into `[cursor_t + 1, now_t]` and the chosen value is never
-  reported. A client that predicted from its own stamp is predicting from a different event.
-- `accel_g` is clamped to the craft's drive, silently. Ask for a thousand g, get five, and be
-  told nothing.
+- `issued_at_client_t` is clamped into `[cursor_t + 1, now_t]`. A client that predicted from its
+  own stamp is predicting from a different event.
+- `accel_g` is clamped to the craft's drive. Ask for a thousand g, get five.
 
-Both need an acknowledgment:
+So every order that stands is answered with
 
 ```
 Accepted { ship_id, event_id, at_t, order }
 ```
 
 carrying the order **as applied**, not as sent. That closes the loop for 1 and 2 at once: the
-client folds `Accepted` exactly as the server folded it, and its optimistic version is discarded
-rather than reconciled. The refusal path already exists and is the same shape.
+client folds `Accepted` exactly as the server folded it, and any optimistic version is discarded
+rather than reconciled. `Refused` is the same shape.
 
 An adjustment is worth *telling the player about*, in words, because they asked for something
 and got something else: "acceleration limited to 5 g". It is not a glitch to hide.

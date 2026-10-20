@@ -1,7 +1,6 @@
 # World model
 
-**Status: partly built.** Built: star providers (`HygProvider`, `AuthoredStars`, `ChunkProvider`,
-not the names below) with synthetic `StarId`s and names as provenance in `lc_world::sky`; seeded
+**Status: partly built.** Built: star providers with synthetic `StarId`s and names as provenance in `lc_world::sky`; seeded
 generation into `em-sim` bodies, binaries as a barycenter with two children and metallicity-scaled
 solids in `lc_world::sky::{generate, metallicity}`; `lc_world::population`; the system join
 `lc_world::system::LocalSystem`; and known-world records in `lc_world::knowledge`. Not built:
@@ -89,8 +88,10 @@ data is how the physics gets validated, not what the game ships.
 
 That has one architectural consequence, and it is cheap now and expensive later:
 
-- **Star data comes through a provider interface from the start.** `HygCatalog` is one
-  implementation; `AuthoredGalaxy` and `ProceduralGalaxy` are others. Nothing in world
+- **Star data comes through a provider interface from the start.** `StarProvider` has three
+  implementations in `lc_world::sky`: `HygProvider` over the catalog, `ChunkProvider` over the
+  packed sky chunk the browser loads, and `AuthoredStars` for a hand-written few. An authored or
+  procedural galaxy is another. Nothing in world
   generation parses a CSV directly.
 - **Star identity is a synthetic stable ID, never a catalog ID.** An HYG number must not
   reach `source_id`, the event store, or the wire format. The importer assigns IDs; the

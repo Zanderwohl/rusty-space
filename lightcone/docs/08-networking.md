@@ -37,9 +37,10 @@ implies the rule above and adds the part that keeps the delivery findable. It to
 ticks of accumulated cursor to show at all, which is why acting on the first tick never
 revealed it.
 
-Clients predict locally by running the same `lc_world::apply` over the events they have, so
-a local order appears to take effect immediately and is reconciled when the server's version
-of the event arrives. Because the client's ship is co-located with the player, the
+Clients predict locally by running the same `lc_world::motion` over the events they have. An
+order is folded when the server's `Accepted` comes back carrying it as applied; folding it on
+sending and reconciling later is the optimistic path [17-reconciliation.md](17-reconciliation.md)
+allows and the client does not take yet. Because the client's ship is co-located with the player, the
 round-trip is real network latency only — tens of milliseconds — and misprediction is rare.
 
 ## Filtering
@@ -511,7 +512,7 @@ A client that disconnects for an hour missed 8766 in-game hours of deliveries. O
 
 1. Client sends the coordinate time of the last reception it has.
 2. Server replays `deliveries` from that point, ordered by `arrive_t`, paginated.
-3. Client folds them through `lc_world::apply` to rebuild its known-world snapshot.
+3. Client folds them through `lc_world::motion` to rebuild its known-world snapshot.
 
 The same path serves a brand-new client, from `t = 0` or from a compacted snapshot. Store a
 periodic fold per observer so replay does not grow without bound.

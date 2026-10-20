@@ -9,7 +9,12 @@ the auth service slots in at two places, both named below. That service is desig
 anticipate: `/play` mints the game ticket, because the player's website session is the only
 place a browser client can get an identity without running an OAuth dance from the CDN origin.
 
-**Status: partly built.** W1–W3 are done, and W4 is done except for a real bucket, whatever its heading below says: `web/lc-web` serves the site, blog, feeds and `/play`, `releases`, `channels` and the `/internal/*` endpoints are `web/lc-web/src/{releases,internal}.rs` driven by hand from `tools/release.sh` rather than by CI on a tag, and builds reach the Caddy dev CDN (`tools/dev-cdn/`) by `docker cp` from `tools/publish-build.sh`. W5 is not started beyond `robots.txt` and a 404 page: no CSP, rate limits, 500 page, canonical URLs or JSON logs. Departures: no htmx (the site has no JavaScript but `/play`), sqlx queries are checked at runtime rather than through `.sqlx/`, there is no `manifest_key`, `subscribers` or `post_views`, and the image listens on 3100 and builds from the `web` context.
+**Status: partly built.** W1–W3 are done, and W4 is done but for a real bucket: `web/lc-web`
+serves the site, blog, feeds and `/play`; `releases`, `channels` and the `/internal/*` endpoints
+are `web/lc-web/src/{releases,internal}.rs`, driven by hand from `tools/release.sh`; and builds
+reach the Caddy dev CDN (`tools/dev-cdn/`) through `tools/publish-build.sh`. W5 is not started
+beyond `robots.txt` and a 404 page: no CSP, rate limits, 500 page, canonical URLs or JSON logs.
+The newsletter's `subscribers` and the `post_views` counter are not built.
 
 ## Three deploy units
 
@@ -56,9 +61,9 @@ version field. Not a path dependency.
 | middleware | tower-http: trace, compression, timeout, set-header | — |
 | templates | **maud** | askama's template files buy nothing when every fragment is also a function; maud makes "return a partial or a whole page" a composition question, and the compiler checks it |
 | styling | SCSS compiled by **grass** at startup, semantic classes | no Node in the build, and no utility-class vocabulary to learn twice |
-| interactivity | htmx, pinned and vendored | listed below; it is a very small list |
+| interactivity | none: no JavaScript but `/play` | see [The site is documents](#the-site-is-documents) |
 | markdown | pulldown-cmark + syntect | — |
-| database | PostgreSQL via sqlx 0.8, `SQLX_OFFLINE=true` with a committed `.sqlx/` | `lc-store` uses tokio-postgres because it hand-writes range scans; the site writes ordinary queries and wants them checked at compile time |
+| database | PostgreSQL via sqlx 0.8, queries checked at run time | compile-time checking needs a committed `.sqlx/` re-prepared against a live database on every query change, and a stale one fails the Docker build; for a handful of queries over two tables, the hermetic build wins. `lc-store` uses tokio-postgres because it hand-writes range scans |
 | feeds | the `rss` crate | hand-rolled XML escaping is a bug farm |
 
 ## Routes
@@ -75,10 +80,10 @@ version field. Not a path dependency.
 | `/sitemap.xml`, `/robots.txt` | — | no |
 | `/healthz` | liveness, touches nothing | no |
 | `/readyz` | readiness, pings the pool | yes |
-| `/v/:build/*` | site CSS, images, fonts, the htmx build | no |
-| `/internal/release` | CI promotes a build (see below) | yes |
+| `/v/:build/*` | site CSS, images, fonts | no |
+| `/internal/release`, `/internal/releases`, `/internal/channel/:channel` | register, list and promote builds (see below) | yes |
 
-Everything but `/play` and `/internal/release` works with JavaScript disabled and with
+Everything but `/play` and `/internal/*` works with JavaScript disabled and with
 PostgreSQL stopped.
 
 ## The site is documents
@@ -88,23 +93,8 @@ renders on arrival; `/play` is the single exception, and what it does is hand ov
 Anything that wants real interactivity belongs in the client, which is a Bevy application with
 a WebGPU context and no reason to be re-implemented badly in a browser DOM.
 
-So htmx earns its place in four spots: blog pagination, tag filtering, the newsletter form,
-and — later — the account pages the auth service will bring. That is the whole list, and each
-one is a page that works without it.
-
-Two rules:
-
-- **Vendor the exact build.** Serve it from `/v/<site-build>/vendor/htmx.js`, not from a
-  third-party CDN by floating tag. The one script permitted to
-  rewrite the DOM should change when you change it and not otherwise.
-- **Every `hx-` endpoint also answers a plain request.** The handler returns a fragment when
-  `HX-Request` is present and the full page when it is not. In maud that is one `if`, and it
-  means no route is reachable only through htmx.
-
-On the version: this plan assumes only the attribute model common to every htmx major. Three
-things have moved between majors and must be read out of the release notes before the first
-fragment is written — attribute inheritance, the default swap style, and event/`hx-on`
-naming. I have not verified htmx 4's specifics from here; check them, then pin.
+An earlier draft let htmx into four places — pagination, tag filtering, the newsletter form and
+the account pages. None was built: each is a plain page and a plain form, and works as one.
 
 ## Styling: semantic classes, and as few of them as possible
 
@@ -142,7 +132,6 @@ web/static/
     _play.scss           # the loader — the one page with a sheet of its own
   images/
   fonts/
-  vendor/htmx.js
 ```
 
 Three rules that keep it from rotting:
@@ -277,11 +266,10 @@ splitting them later a config change.
 releases (
   build_id     text primary key,     -- git short sha, or semver+sha
   cdn_base     text not null,        -- lets a build move CDNs without a code change
-  manifest_key text not null,
   wasm_bytes   bigint,
-  published_at timestamptz not null,
   notes        text,
-  yanked       bool not null default false
+  yanked       bool not null default false,
+  published_at timestamptz not null default now()
 )
 
 channels (
@@ -290,6 +278,11 @@ channels (
   updated_at timestamptz not null
 )
 
+```
+
+That is `migrations/0001_releases.sql`. Two more tables are planned and not built:
+
+```sql
 subscribers (email citext primary key, confirmed_at timestamptz, token uuid)
 post_views  (slug text, day date, count bigint, primary key (slug, day))
 ```
@@ -551,16 +544,17 @@ not fetch an HTTP build — so the day the site gets TLS, the CDN needs it the s
 
 ## Promotion is one row
 
-CI, on a tag:
+By hand, with `tools/release.sh` ([15-runbook.md](15-runbook.md)); CI does not release:
 
-1. build wasm, `wasm-opt`, stage the merged asset tree
-2. pack the sky chunk to `assets/sky/catalog.lcsky`
-3. write `manifest.json`
-4. `aws s3 cp --recursive` into `game/<build-id>/` with the headers above
-5. `POST /internal/release` on the site: `{build_id, cdn_base, manifest_key, bytes}` — inserts
-   into `releases`, does **not** touch `channels`
+1. `tools/build-wasm.sh`: build wasm, `wasm-opt`, stage the merged asset tree, pack the sky chunk
+   to `assets/sky/catalog.lcsky`, write `manifest.json`
+2. `tools/publish-build.sh`: copy into `game/<build-id>/` on the CDN, refusing to overwrite. On a
+   real bucket this becomes `aws s3 cp --recursive` with the headers above
+3. `release.sh register`: `POST /internal/release` with `{build_id, cdn_base, wasm_bytes}` —
+   inserts into `releases`, does **not** touch `channels`
 
-Promoting to players is a separate, deliberate act: update `channels` where `name='stable'`.
+Promoting to players is a separate, deliberate act, `release.sh promote`: update `channels`
+where `name='stable'`. `release.sh ship` does all four, for development.
 Rollback is the same statement with an older id. Neither requires a site deploy, a CDN purge,
 or a game server restart.
 
@@ -593,17 +587,18 @@ Multi-stage, cargo-chef for dependency caching, distroless runtime.
 
 ```dockerfile
 FROM rust:1-bookworm AS chef      # cargo-chef prepare / cook
-FROM chef AS builder              # SQLX_OFFLINE=true SITE_BUILD=$SITE_BUILD cargo build --release
+FROM chef AS builder              # SITE_BUILD=$SITE_BUILD cargo build --release --bin lc-web
 FROM gcr.io/distroless/cc-debian12
-COPY --from=builder /app/target/release/lc-web /lc-web
-COPY web/content /content
-COPY web/static  /static          # SCSS source included; compiled at boot
+COPY --from=builder /build/target/release/lc-web /app/lc-web
+COPY static  /app/static          # SCSS source included; compiled at boot
+COPY content /app/content
+ENV BIND_ADDR=0.0.0.0:3100 SITE_ENV=production
+EXPOSE 3100
 USER nonroot
-EXPOSE 8080
-ENTRYPOINT ["/lc-web"]
+ENTRYPOINT ["/app/lc-web"]
 ```
 
-Under 100 MB. `content/` and `static/` are baked in, which is what makes a content rollback,
+That is `web/Dockerfile`, abridged; its build context is `web/`. Under 100 MB. `content/` and `static/` are baked in, which is what makes a content rollback,
 a style rollback and a code rollback the same operation. The site is one image plus
 environment and does not depend on the CDN to render a single page — the CDN serves the game,
 not the website.
@@ -614,7 +609,7 @@ Images are built on **`rocinante`**, a docker context over SSH to an idle home-l
 that is natively `linux/amd64`.
 
 ```bash
-docker --context rocinante build -t lightcone-web:<tag> -f web/Dockerfile .
+docker --context rocinante build -t lightcone-web:<tag> -f web/Dockerfile web
 docker --context rocinante run -d --name lightcone-web -p 3100:3100 ... lightcone-web:<tag>
 ```
 
@@ -637,9 +632,9 @@ Environment only; no config file, no secrets in the image.
 
 | var | | |
 |---|---|---|
-| `BIND_ADDR` | `0.0.0.0:8080` | |
+| `BIND_ADDR` | `0.0.0.0:3100` | |
 | `DATABASE_URL` | | optional — absent means degraded mode, and that is a supported state |
-| `CDN_BASE` | `https://cdn.<domain>` | default when a release row does not carry its own. **Not yet implemented** — `/play` is what reads it, and that is W4; a field nothing reads is worse than a missing one |
+| `CDN_BASE` | `https://cdn.<domain>` | what `/play` loads `FALLBACK_BUILD_ID` from when the database is unreachable; a release row carries its own |
 | `FALLBACK_BUILD_ID` | | what `/play` serves when the DB is unreachable |
 | `SITE_ENV` | `production` \| `staging` \| `dev` | gates drafts and the file watcher |
 | `RELEASE_TOKEN` | | shared secret for `/internal/release` |
@@ -705,7 +700,7 @@ and nothing about where the primitive itself sits.
 turns a CSS syntax error into a failed deploy, and CI compiling it first turns it back into a
 failed build.
 
-## W2 — The blog
+## W2 — The blog — **done**
 
 **Deliver:** the markdown pipeline, post and tag pages, Atom and JSON feeds, sitemap, OG cards,
 the dev file watcher.
@@ -781,7 +776,7 @@ failure. Anything else from `init` is shown to the reader.
 sidecar beside every asset; on a filesystem that is a wasted stat, and over a CDN it is an
 extra round trip and a negatively-cached 404 per file. Three of them, on every first visit.
 
-## W4 — Delivery — **half done**
+## W4 — Delivery — **done but for the bucket**
 
 **Deliver:** the bucket, the CDN, the publish script, `releases` and `channels`, the
 `/internal/release` endpoint, and `/play` with its loader.
@@ -795,12 +790,11 @@ correctly with Postgres stopped**; the wasm arrives brotli-compressed as
 **Do not:** add accounts, saves, or matchmaking. `/play` launches a client; what it connects
 to is phase 8's problem.
 
-**Done so far.** The CDN, the publish script, and `/play` — which reads `CDN_BASE` and
-`FALLBACK_BUILD_ID` and hands over to the client. That is deliberately the *degraded* path
-built first: it is what the site falls back to when the database is unreachable, so the
-database adds a lookup in front of it rather than replacing it.
-
-**Still to do:** `releases` and `channels`, `/internal/release`, and promotion as a row.
+**As built.** The development CDN stands in for the bucket (see above), and `publish-build.sh`
+is the one command that changes when a bucket exists. `/play` reads `CDN_BASE` and
+`FALLBACK_BUILD_ID` first — the *degraded* path, built first because it is what the site falls
+back to when the database is unreachable — and the database adds a lookup in front of it:
+`releases`, `channels`, `/internal/release`, and promotion as a row, through `release.sh`.
 
 With no build configured `/play` says so, rather than rendering a loader with nothing to load.
 
@@ -832,7 +826,7 @@ on top of a running game. The overlay is now **removed** rather than hidden — 
 argument to lose, and it leaves the accessibility tree at the same time. `[hidden]` is also
 now `!important` in the base sheet, because that trap is general.
 
-## W5 — Hardening
+## W5 — Hardening — **not started**, but for `robots.txt` and the 404 page
 
 **Deliver:** CSP with nonces, rate limits, structured logs, real 404 and 500 pages, robots,
 canonical URLs, and the failure-message table for the loader.
@@ -862,8 +856,7 @@ provoked deliberately and shows its message.
    separately. They will not, under this plan.
 3. **How many builds to retain?** Storage is nearly free and old build ids are the rollback
    path; fifty is a guess, not a measurement.
-4. **htmx 4's inheritance and swap defaults** — read the release notes before the first
-   fragment, per the note above.
+4. ~~**htmx 4's inheritance and swap defaults.**~~ Moot: the site has no htmx.
 5. ~~**Does the sky chunk belong to `lc-world` or a new `lc-pack`?**~~ Settled in W3:
    `lc_world::sky::chunk` for the format and `lc-world`'s `skypack` binary for the packer. A
    separate crate would have split `StarRecord` from the importer that produces it, and that

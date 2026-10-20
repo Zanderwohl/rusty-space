@@ -107,7 +107,7 @@ Run it at the end of any phase of work — the printout is the review artifact.
   display convention that stops at that crate's boundary. Element structs above it store
   degrees; callers convert once, on the way in.
 - **Simulation space is right-handed and Z-up**, ecliptic of J2000, +X toward the vernal
-  equinox. Bevy renders Y-up. `src/presentation/render_space.rs` is the only place that
+  equinox. Bevy renders Y-up. `em_render::render_space` is the only place that
   converts — do not open-code the swizzle.
 - **Time is typed.** `Instant` counts seconds since J2000; `JulianDate` counts days from a
   different origin. They convert only through `From`. This exists because mixing them once

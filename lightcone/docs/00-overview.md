@@ -1,8 +1,8 @@
 # Overview
 
 **Status: reference.** The premise, scope and rate the numbered documents assume, kept current
-against them and against `lc_server::server::TICK_US`. The rate there is a compiled constant
-(`TICK_MS * 8766`), not the server configuration value described below.
+against them. The design rate is compiled into `lc_server::server::TICK_US`; a shard runs at a
+multiple of it (`Server::set_rate`), which it states to clients in `Welcome` and `Clock`.
 
 ## What the game is
 
