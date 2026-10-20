@@ -2,6 +2,14 @@
 
 What happens when the client's ship and the server's ship are not in the same place.
 
+**Status: partly built.** `Outbound::Accepted` (the order as applied) and `Outbound::Flying` are
+in `lc_proto` and folded by `lc-client/src/uplink/orders.rs`; the clock slew is `uplink::Slew`,
+wall-clock ticking `lc_server::timing::Pacer`, CBOR checkpoints `lc_server::persist`, and the
+crossing from a moving start `lc_world::flight`. Not built: `Outbound::Resync`, the
+render-offset slew, the drift meter and the re-acquire mechanic. The client does not apply its
+orders optimistically and keeps no log of unacknowledged intents — it waits for `Accepted` — and
+§Adjust's "currently does not" report clamps is out of date.
+
 ## This game is not the usual case
 
 The standard client-prediction story is: the client guesses, the server knows better, the client

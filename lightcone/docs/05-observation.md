@@ -9,6 +9,15 @@ they reach anyone else, and why a star nobody has looked at is absent rather tha
 unmeasured — is [22-provenance.md](22-provenance.md). This document is the physics of the
 measurement; that one is the bookkeeping the game is made of.
 
+**Status: partly built.** Photometry is `lc_world::{observation, instrument}` (band masks,
+detector families, self-emission, survey regimes) and `lc_world::knowledge` (seeded
+`survey::look`, BLS in `transit`, flicker moments in `moments`); messaging — aim, sealing, keys,
+`ACK_DEPTH` acknowledgments, message keys, auto-ack and the beam flag — is `lc_world::signal`,
+`lc_proto::radio` and `lc_server::radio`. Not built: FFT and Lomb-Scargle, spectroscopy,
+interferometry, and the radiometer and sky-noise model, so every craft inside a beam hears it
+whatever the distance, at a fixed 10 GHz (`Transmitter::SHIP`). The flicker knee is read from
+lagged autocovariance, not a fitted power spectrum.
+
 ## Photometry
 
 A telescope points at a star and records flux over time. The flux is

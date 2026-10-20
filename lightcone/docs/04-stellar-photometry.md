@@ -1,5 +1,15 @@
 # Stellar photometry: the emission shell
 
+**Status: partly built.** Paths 1 to 3 and re-emission are `lc_world::{emission, occluder,
+population, flicker, shell, star}`, with bands, extinction and the color index in `em_spectra`,
+and the moment inversion in `lc_world::emission::invert_moments`. Not built: intrinsic
+variability (`L_star` is a bare blackbody), content-addressed shell reuse, promotion and
+demotion between paths, the caustic edge term, per-type limb darkening (every star carries one
+pair), and body emission. Discrete occluders fly `CircularOrbit`s rather than `em_sim` Kepler,
+transit depth is a numerical limb-darkened integral rather than Mandel–Agol, and
+`EmissionModel::bake` builds a shell that `deficit` never reads, so every sample integrates the
+populations directly.
+
 ## The model
 
 A star is surrounded by a sphere at the system's shell radius. Every direction on that

@@ -7,6 +7,15 @@ trajectory plots.
 
 So: one shared crate, `crates/em-plot`, deliberately small.
 
+**Status: partly built.** `em_plot::{chart, decimate, scale, colormap, primitives}` emit
+primitives through `TextMetrics`, with min/max decimation and a mean track,
+`Linear`/`Log10`/`SymLog` scales, viridis, magma and diverging maps, scatter and grid density;
+the backends are `em_plot::svg` and a `tiny-skia` rasterizer behind the `raster` feature, which
+`lc-client/src/plot.rs` copies into an egui texture. Not built: the `Time` scale, histograms,
+error bars and bands, step and box marks, sphere maps, and the `bevy` and `egui` features. The
+core depends on nothing, not even glam, and `min_max` scans every sample and allocates on each
+call rather than querying a sorted range.
+
 ## Requirements, from the actual use cases
 
 | need | comes from |
