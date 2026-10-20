@@ -9,6 +9,8 @@ the auth service slots in at two places, both named below. That service is desig
 anticipate: `/play` mints the game ticket, because the player's website session is the only
 place a browser client can get an identity without running an OAuth dance from the CDN origin.
 
+**Status: partly built.** W1–W3 are done, and W4 is done except for a real bucket, whatever its heading below says: `web/lc-web` serves the site, blog, feeds and `/play`, `releases`, `channels` and the `/internal/*` endpoints are `web/lc-web/src/{releases,internal}.rs` driven by hand from `tools/release.sh` rather than by CI on a tag, and builds reach the Caddy dev CDN (`tools/dev-cdn/`) by `docker cp` from `tools/publish-build.sh`. W5 is not started beyond `robots.txt` and a 404 page: no CSP, rate limits, 500 page, canonical URLs or JSON logs. Departures: no htmx (the site has no JavaScript but `/play`), sqlx queries are checked at runtime rather than through `.sqlx/`, there is no `manifest_key`, `subscribers` or `post_views`, and the image listens on 3100 and builds from the `web` context.
+
 ## Three deploy units
 
 | unit | artifact | lives | cadence | rollback |

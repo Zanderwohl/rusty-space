@@ -3,6 +3,8 @@
 How to build, publish, deploy and roll back. [14-hosting.md](14-hosting.md) is why any of it
 is shaped this way; this is the sequence of commands.
 
+**Status: reference.** Kept current against `tools/{build-wasm,publish-build,release,publish-books,build-icons,publish-icons}.sh`, `tools/proxy/`, `tools/dev-cdn/`, the three Dockerfiles, and the flags in `lightcone-server --help` and `lc_client::entry`. One command no longer matches its script: `tools/release.sh` defaults `LC_SITE` to `https://dev.lightconefrontier.com`, not `localhost:3100` as [Shipping a game build](#shipping-a-game-build) says.
+
 Everything runs on **`rocinante`**, a docker context over SSH to a home-lab machine that is
 natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to another project.
 

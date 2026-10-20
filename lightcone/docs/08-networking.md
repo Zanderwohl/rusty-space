@@ -1,5 +1,7 @@
 # Networking
 
+**Status: partly built.** The gate and its channels are `lc_proto::{Cleared, Outbound}`; the tick, `Journal` (memory and Postgres), the WebSocket `Transport`, the rate limit and catch-up are `lc_server::{server, journal, websocket, rate}`, with sighting and pursuit in `lc_server::chase` and `lc_world::{sighted, ignition, pursuit, escort, consort}`, and the client half is `lc_client::link`. Not built: QUIC and WebTransport; separate channels (one reliable WebSocket carries everything, with no unreliable local-state or bulk channel); level-3 subscription; a stored per-observer fold for catch-up (`Inbound::ResumeFrom` only rewinds the cursor); the spatial bound on presence solves; and more than one shard.
+
 ## Shape of the problem
 
 The usual MMO problem is sending frequent state updates to many clients with low latency.
