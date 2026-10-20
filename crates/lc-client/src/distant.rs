@@ -882,6 +882,8 @@ mod tests {
             emit_spread_rad: 0.0,
             emitted_t: 0,
             arrive_t: 0,
+            observer_ly: [0.0; 3],
+            observer_beta: [0.0; 3],
             form: lc_proto::Form::default(),
             building: None,
             glow: None,

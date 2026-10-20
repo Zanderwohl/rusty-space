@@ -452,6 +452,8 @@ mod tests {
             emit_spread_rad: SPREAD_RAD,
             emitted_t: 0,
             arrive_t: 3_600_000_000,
+            observer_ly: [0.0; 3],
+            observer_beta: [0.0; 3],
             form: form.into(),
             building: None,
             glow: None,

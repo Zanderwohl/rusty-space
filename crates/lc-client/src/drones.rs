@@ -814,6 +814,8 @@ mod tests {
             emit_spread_rad: 0.0,
             emitted_t: (stated_s * 1.0e6) as i64,
             arrive_t: (stated_s * 1.0e6) as i64 + 3_600_000_000,
+            observer_ly: [0.0; 3],
+            observer_beta: [0.0; 3],
             form: (&plan.at(stated_s).form).into(),
             building: round.then(|| under.into()),
             glow: None,
