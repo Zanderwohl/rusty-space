@@ -1,5 +1,12 @@
 # Spacetime coordinates and the relativity model
 
+**Status: partly built.** The types and solvers are `lc_spacetime::{coord, units, interval,
+worldline, frame, doppler, proper_time}`, and a ship's clock is `clock_s` in `lc_world::motion`,
+shown in `lc_client::hud`; no onboard process runs on that clock yet, since refit rounds
+(`lc_world::refit::rounds`) are timed in coordinate seconds. `Coord::t` is the `Micros` newtype,
+`Worldline` works in light-microseconds and `defined_over` returns a pair, and ships fly
+`lc_world::worldline::Flight` rather than the `em_sim::trajectory::Path` arcs named below.
+
 ## The server frame
 
 One inertial frame is privileged by fiat. Call it the **server frame**. Its origin in space

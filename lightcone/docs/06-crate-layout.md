@@ -1,5 +1,13 @@
 # Crate layout
 
+**Status: partly built.** Every crate in the table exists, `em-render` ships definitions only as
+revised below, and `lc-spacetime` has exactly the files listed. Departures: `lc-store` is on
+`tokio-postgres`, not `sqlx`; `lc-world` depends on `lc-proto`, not the reverse; `em-plot` has no
+bevy or egui features; and `lc-world`'s modules are not the list below, with no `apply.rs` (the
+event fold is `lc_world::motion`). The `libm` rule is unmet: only `lc_world::solar` and
+`lc_world::form` use it, while `lc-spacetime` and `em-foundations` use `std` transcendentals and
+the latter has no `deterministic` feature.
+
 ## Target state
 
 | crate | what it is | may depend on |

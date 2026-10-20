@@ -1,5 +1,15 @@
 # World model
 
+**Status: partly built.** Built: star providers (`HygProvider`, `AuthoredStars`, `ChunkProvider`,
+not the names below) with synthetic `StarId`s and names as provenance in `lc_world::sky`; seeded
+generation into `em-sim` bodies, binaries as a barycenter with two children and metallicity-scaled
+solids in `lc_world::sky::{generate, metallicity}`; `lc_world::population`; the system join
+`lc_world::system::LocalSystem`; and known-world records in `lc_world::knowledge`. Not built:
+structures, deposits and mining, order programs, replication with its TTL and drift, and nested
+sub-populations. The shell is a fixed `LOCAL_SHELL_LY` of 1.6 ly, not sized by mass or clamped
+against neighbours, and system membership is a distance test re-run every tick
+(`lc_server::world::World`, `resync_systems`), not a crossing event.
+
 ## Hierarchy
 
 ```

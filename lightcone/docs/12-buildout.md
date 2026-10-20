@@ -247,7 +247,7 @@ start rather than added and later removed.
 
 ## Phase 7 — The event store
 
-**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`.
+**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range, and nothing schedules retention.
 
 **Before:** 3. Can overlap 6.
 

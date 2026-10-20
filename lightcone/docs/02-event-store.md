@@ -1,5 +1,13 @@
 # The event store
 
+**Status: partly built.** The schema, causality, partition and retention functions and the chat
+tables are `crates/lc-store/sql/`, applied by `lc_store::migrate`; `lc_store::id` mints the event
+ids, and the server's journal (`lc_server::journal::postgres`) writes events and delivery rows and
+reads deliveries back. `lc_store::cursor::LightConeCursor` and `lc_store::bvh` are built but run
+only in `lc-store`'s own tests, over an in-memory event source: nothing writes the `sources` or
+`systems` tables, and nothing schedules `lc_store::retention`. Partitions are thirty-day spans
+made on demand by the journal, not months.
+
 ## What is an event
 
 An event is a discrete, unpredictable change of world state, stamped with a server-frame

@@ -1,5 +1,9 @@
 # Overview
 
+**Status: reference.** The premise, scope and rate the numbered documents assume, kept current
+against them and against `lc_server::server::TICK_US`. The rate there is a compiled constant
+(`TICK_MS * 8766`), not the server configuration value described below.
+
 ## What the game is
 
 A real-time strategy sandbox set across a volume of real stars. Each player controls one
