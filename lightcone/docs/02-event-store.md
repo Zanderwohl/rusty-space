@@ -365,6 +365,12 @@ in one transaction. Seeding `lc_last_event` reads the newest partition holding a
 unpartitioning `lc_samples` moves each partition's rows across and drops it, a transaction each,
 before the step that swaps the tables (`lc_store::migrate`).
 
+Shown on a copy of the dev store's shape under default settings (64 locks a transaction, 7,725
+thirty-day partitions of each table, a clock 634 years in), where master's boot query and `pg_dump`
+both ran out of shared memory: the steps applied, the shard came back and caught up in 233 sweeps
+and 91 seconds, and `pg_dump` ran. It left 298 partitions of each table rather than thirty, because
+the twenty-four kept years are still in thirty-day partitions; they age out over the next real day.
+
 Shipping the archive to object storage is a deployment's job — it needs a bucket — so the crate
 records *where it went* and stops there, because that is the part a restore needs to survive a
 restart.
