@@ -20,23 +20,28 @@ pub enum Content {
     Ack,
     /// A key offer, kept in the same transcript because that is where a player looks for it.
     Key,
+    /// A faction's key, given: whoever can read it on landing holds it.
+    Faction(i64),
 }
 
 #[cfg(feature = "postgres")]
 impl Content {
-    fn column(&self) -> (&'static str, Option<&str>) {
+    /// The `content`, `body` and `faction` columns.
+    fn columns(&self) -> (&'static str, Option<&str>, Option<i64>) {
         match self {
-            Content::Text(text) => ("text", Some(text)),
-            Content::Ack => ("ack", None),
-            Content::Key => ("key", None),
+            Content::Text(text) => ("text", Some(text), None),
+            Content::Ack => ("ack", None, None),
+            Content::Key => ("key", None, None),
+            Content::Faction(faction) => ("faction", None, Some(*faction)),
         }
     }
 
     /// The table's CHECK admits no other combination.
-    fn from_column(content: &str, body: Option<String>) -> Self {
-        match (content, body) {
-            ("text", Some(text)) => Content::Text(text),
-            ("key", _) => Content::Key,
+    fn from_columns(content: &str, body: Option<String>, faction: Option<i64>) -> Self {
+        match (content, body, faction) {
+            ("text", Some(text), _) => Content::Text(text),
+            ("key", ..) => Content::Key,
+            ("faction", _, Some(faction)) => Content::Faction(faction),
             _ => Content::Ack,
         }
     }
@@ -51,6 +56,8 @@ pub struct Message {
     /// said to nobody in particular, which everyone in range hears.
     pub addressee: Option<i64>,
     pub sealed: bool,
+    /// The faction key it is sealed to, which files it in that faction's chat.
+    pub under: Option<i64>,
     pub content: Content,
     /// Event ids of the addressee's messages the sender had received when this went out.
     pub acks: Vec<i64>,
@@ -79,6 +86,23 @@ pub struct Held {
     pub learned_t: i64,
 }
 
+/// A faction key, as minted.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Founded {
+    pub faction: i64,
+    pub founder: i64,
+    pub name: String,
+    pub founded_t: i64,
+}
+
+/// One ship holding a faction key, as of the moment it landed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Holds {
+    pub holder: i64,
+    pub faction: i64,
+    pub learned_t: i64,
+}
+
 /// How much of a transcript a sign-in is handed.
 ///
 /// A cap and not a policy: everything is still in the table, and a conversation that has run to
@@ -93,12 +117,12 @@ pub const BACKLOG_LIMIT: i64 = 500;
 pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64, Error> {
     let mut written = 0;
     for m in messages {
-        let (content, body) = m.content.column();
+        let (content, body, faction) = m.content.columns();
         written += client
             .execute(
                 "INSERT INTO lc_messages
-                     (event_id, sender, addressee, sealed, content, body, acks, sent_t, idem)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                     (event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                  ON CONFLICT (event_id) DO NOTHING",
                 &[
                     &m.event_id,
@@ -110,6 +134,8 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
                     &m.acks,
                     &m.sent_t,
                     &m.idem,
+                    &m.under,
+                    &faction,
                 ],
             )
             .await?;
@@ -164,15 +190,16 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
         sender: row.get(1),
         addressee: row.get(2),
         sealed: row.get(3),
-        content: Content::from_column(row.get(4), row.get(5)),
+        content: Content::from_columns(row.get(4), row.get(5), row.get(10)),
         acks: row.get(6),
         sent_t: row.get(7),
         idem: row.get(8),
+        under: row.get(9),
     }
 }
 
 #[cfg(feature = "postgres")]
-const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem";
+const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction";
 
 /// Everything this ship transmitted, oldest first.
 #[cfg(feature = "postgres")]
@@ -211,7 +238,7 @@ pub async fn heard_by(
         )
         .await?;
     let mut out: Vec<(Message, i64, Option<f32>)> =
-        rows.iter().map(|row| (message_from(row), row.get(9), row.get(10))).collect();
+        rows.iter().map(|row| (message_from(row), row.get(11), row.get(12))).collect();
     out.reverse();
     Ok(out)
 }
@@ -241,6 +268,59 @@ pub async fn all_keys(client: &Client) -> Result<Vec<Held>, Error> {
         .collect())
 }
 
+/// Write minted faction keys.
+#[cfg(feature = "postgres")]
+pub async fn save_factions(client: &Client, founded: &[Founded]) -> Result<u64, Error> {
+    let mut written = 0;
+    for f in founded {
+        written += client
+            .execute(
+                "INSERT INTO lc_factions (faction, founder, name, founded_t) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (faction) DO NOTHING",
+                &[&f.faction, &f.founder, &f.name, &f.founded_t],
+            )
+            .await?;
+    }
+    Ok(written)
+}
+
+/// Write who holds which faction key. The first to land counts, as for [`save_keys`].
+#[cfg(feature = "postgres")]
+pub async fn save_faction_keys(client: &Client, holds: &[Holds]) -> Result<u64, Error> {
+    if holds.is_empty() {
+        return Ok(0);
+    }
+    let holders: Vec<i64> = holds.iter().map(|h| h.holder).collect();
+    let factions: Vec<i64> = holds.iter().map(|h| h.faction).collect();
+    let learned: Vec<i64> = holds.iter().map(|h| h.learned_t).collect();
+    client
+        .execute(
+            "INSERT INTO lc_faction_keys (holder, faction, learned_t)
+             SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[])
+             ON CONFLICT (holder, faction) DO NOTHING",
+            &[&holders, &factions, &learned],
+        )
+        .await
+}
+
+/// Every faction key ever minted, and every holding of one. Read once, when a shard comes back.
+#[cfg(feature = "postgres")]
+pub async fn all_factions(client: &Client) -> Result<(Vec<Founded>, Vec<Holds>), Error> {
+    let founded = client
+        .query("SELECT faction, founder, name, founded_t FROM lc_factions", &[])
+        .await?
+        .iter()
+        .map(|row| Founded { faction: row.get(0), founder: row.get(1), name: row.get(2), founded_t: row.get(3) })
+        .collect();
+    let holds = client
+        .query("SELECT holder, faction, learned_t FROM lc_faction_keys", &[])
+        .await?
+        .iter()
+        .map(|row| Holds { holder: row.get(0), faction: row.get(1), learned_t: row.get(2) })
+        .collect();
+    Ok((founded, holds))
+}
+
 /// The last `depth` messages each observer received from each sender, oldest first.
 ///
 /// What a reply acknowledges, rebuilt after a restart. Without it the first message anybody
@@ -255,7 +335,7 @@ pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, 
                         row_number() OVER (PARTITION BY r.observer, m.sender
                                            ORDER BY r.arrive_t DESC) AS n
                    FROM lc_message_receipts r JOIN lc_messages m USING (event_id)
-                  WHERE m.content <> 'key'
+                  WHERE m.content NOT IN ('key', 'faction')
              ) ranked
               WHERE n <= $1
               ORDER BY observer, sender, arrive_t",
@@ -299,6 +379,7 @@ mod tests {
             sender: from,
             addressee: Some(to),
             sealed: false,
+            under: None,
             content: Content::Text(body.into()),
             acks: Vec::new(),
             sent_t,

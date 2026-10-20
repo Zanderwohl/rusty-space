@@ -113,6 +113,21 @@ pub trait Journal {
     fn ack_window(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<(i64, i64, i64)>, JournalError>> + Send;
+
+    /// Append minted faction keys and who will hold which. Kept for ever, like the keyring.
+    fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
+
+    /// Every faction key and every holding of one. Read once, when a shard comes back, for the
+    /// reason [`Journal::keyring`] is.
+    fn factions(
+        &self,
+    ) -> impl std::future::Future<
+        Output = Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError>,
+    > + Send;
 }
 
 /// One ship's own copy of every conversation it is party to.
@@ -132,6 +147,8 @@ pub struct Memory {
     pub messages: Vec<lc_store::chat::Message>,
     pub receipts: Vec<lc_store::chat::Receipt>,
     pub keys: Vec<lc_store::chat::Held>,
+    pub founded: Vec<lc_store::chat::Founded>,
+    pub holds: Vec<lc_store::chat::Holds>,
 }
 
 impl Journal for Memory {
@@ -232,13 +249,33 @@ impl Journal for Memory {
             else {
                 continue;
             };
-            if message.content == lc_store::chat::Content::Key {
+            if matches!(message.content, lc_store::chat::Content::Key | lc_store::chat::Content::Faction(_)) {
                 continue;
             }
             out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));
         }
         out.sort_by_key(|(observer, sender, _, arrive_t)| (*observer, *sender, *arrive_t));
         Ok(out.into_iter().map(|(observer, sender, event, _)| (observer, sender, event)).collect())
+    }
+
+    async fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> Result<(), JournalError> {
+        self.founded.extend_from_slice(founded);
+        for h in holds {
+            if !self.holds.iter().any(|k| k.holder == h.holder && k.faction == h.faction) {
+                self.holds.push(*h);
+            }
+        }
+        Ok(())
+    }
+
+    async fn factions(
+        &self,
+    ) -> Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError> {
+        Ok((self.founded.clone(), self.holds.clone()))
     }
 }
 

@@ -261,6 +261,23 @@ impl Journal for Postgres {
     async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
         Ok(lc_store::chat::recent_heard(&self.client, lc_proto::ACK_DEPTH as i64).await?)
     }
+
+    async fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> Result<(), JournalError> {
+        // Keys before holdings, for the foreign key.
+        lc_store::chat::save_factions(&self.client, founded).await?;
+        lc_store::chat::save_faction_keys(&self.client, holds).await?;
+        Ok(())
+    }
+
+    async fn factions(
+        &self,
+    ) -> Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError> {
+        Ok(lc_store::chat::all_factions(&self.client).await?)
+    }
 }
 
 /// Whichever of the two a shard was started with.
@@ -331,6 +348,20 @@ impl Journal for Store {
 
     async fn ack_window(&self) -> Result<Vec<(i64, i64, i64)>, JournalError> {
         either!(self, ack_window())
+    }
+
+    async fn found(
+        &mut self,
+        founded: &[lc_store::chat::Founded],
+        holds: &[lc_store::chat::Holds],
+    ) -> Result<(), JournalError> {
+        either!(self, found(founded, holds))
+    }
+
+    async fn factions(
+        &self,
+    ) -> Result<(Vec<lc_store::chat::Founded>, Vec<lc_store::chat::Holds>), JournalError> {
+        either!(self, factions())
     }
 }
 

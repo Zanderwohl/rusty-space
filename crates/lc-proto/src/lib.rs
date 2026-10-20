@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -422,6 +422,13 @@ pub enum Order {
     /// authority corrects it as the craft learns its star. See `lightcone/docs/20-solar-power.md`
     /// §Parking.
     Park,
+    /// Mint a faction key named `name`, held from now, with nothing put on the air. `key` is
+    /// the shard's: whatever a client sends is replaced, and the acceptance carries the one
+    /// minted. See `lightcone/docs/23-factions.md`. Appended last.
+    Found { name: String, key: FactionId },
+    /// Send a faction key this craft holds. Whoever can read it when it lands holds it: the
+    /// addressee if sealed, everyone it reaches if open. Appended last.
+    GiveKey { key: FactionId, to: Option<ShipId>, aim: Aim, secrecy: Secrecy },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -869,6 +876,9 @@ pub enum Outbound {
     Presets(Vec<Preset>),
     /// A standing [`Order::Park`], stated on sign-in as [`Outbound::Pursuing`] is.
     Parked { ship_id: ShipId },
+    /// Every faction key the ship holds by now, on sign-in when there are any. Keys landing
+    /// later arrive as [`Body::Faction`], and keys founded as an accepted [`Order::Found`].
+    Factions { ship_id: ShipId, factions: Vec<Faction> },
 }
 
 /// The longest command line a shard will read, in bytes.
@@ -994,7 +1004,7 @@ pub use form::{Form, FormFault, Hull, Preset};
 pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, Gaze, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
 
 pub use radio::{
-    ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    ACK_DEPTH, Aim, Body, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
     decode_report, encode_report,
 };
 
@@ -1700,9 +1710,11 @@ mod tests {
                     sent_t: 500_000,
                     arrive_t: Some(1_000_000),
                     strength: Some(0.25),
+                    under: Some(FactionId(11)),
                 }],
                 keys: vec![ShipId(7)],
             },
+            Outbound::Factions { ship_id: ShipId(42), factions: vec![Faction { key: FactionId(11), name: "Wake".into() }] },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
             Outbound::Learned { report: b"{}".to_vec() },
@@ -1839,6 +1851,27 @@ mod tests {
             Inbound::Act(Intent {
                 ship_id: ShipId(42),
                 order: Order::AutoAck { with: ShipId(7), on: true },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::Found { name: "Wake".into(), key: FactionId(0) },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::GiveKey { key: FactionId(11), to: Some(ShipId(7)), aim: Aim::Omni, secrecy: Secrecy::Sealed },
+                issued_at_client_t: 0,
+            }),
+            Inbound::Act(Intent {
+                ship_id: ShipId(42),
+                order: Order::Say {
+                    to: None,
+                    aim: Aim::Omni,
+                    secrecy: Secrecy::Faction(FactionId(11)),
+                    body: "all hands".into(),
+                    idem: 3,
+                },
                 issued_at_client_t: 0,
             }),
             Inbound::Act(Intent { ship_id: ShipId(42), order: Order::Analyze, issued_at_client_t: 0 }),

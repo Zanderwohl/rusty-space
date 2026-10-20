@@ -28,6 +28,7 @@ pub mod command;
 pub mod director;
 pub mod drive;
 pub mod emit;
+pub mod faction;
 pub mod field;
 pub(crate) mod fits;
 pub mod fitting;

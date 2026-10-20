@@ -197,6 +197,7 @@ pub struct Server<J: Journal> {
     pub(crate) said: Vec<lc_store::chat::Message>,
     pub(crate) receipts: Vec<lc_store::chat::Receipt>,
     pub(crate) taught: Vec<lc_store::chat::Held>,
+    pub(crate) factions: crate::faction::Factions,
     /// What every craft knows and what its instruments are doing. See [`crate::instruments`].
     pub(crate) instruments: crate::instruments::Instruments,
     /// Who each craft answers automatically. Standing state, like `pursuits`, and for the same
@@ -251,6 +252,7 @@ impl<J: Journal> Server<J> {
             said: Vec::new(),
             receipts: Vec::new(),
             taught: Vec::new(),
+            factions: Default::default(),
             instruments: Default::default(),
             auto_ack: HashMap::new(),
             owed: HashMap::new(),
@@ -655,6 +657,10 @@ impl<J: Journal> Server<J> {
         if self.auto_ack.contains_key(&CraftId(ship_id.0)) {
             self.tell_auto_acking(wire, from, ship_id);
         }
+        let factions = self.factions.held_by(CraftId(ship_id.0), self.now_t);
+        if !factions.is_empty() {
+            wire.send(from, Outbound::Factions { ship_id, factions });
+        }
         // A shard with no shelf says nothing about one, and its clients show an empty bookcase
         // rather than a broken one.
         if !self.library.is_empty() {
@@ -701,6 +707,12 @@ impl<J: Journal> Server<J> {
             let order = self.act_on_knowledge(id, &intent.order, at_s)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order });
+        }
+        // Founding is minting a key, and nothing goes on the air.
+        if let Order::Found { name, .. } = &intent.order {
+            let faction = self.factions.found(id, name, at).ok_or(Refusal::Impossible)?;
+            let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
+            return Ok(Applied { event_id, at_t: at, order: Order::Found { name: faction.name, key: faction.key } });
         }
         // A switch is not seen: its flip is, when it completes. See `crate::field`.
         if let Order::FieldMode { mode } = intent.order {
@@ -936,10 +948,11 @@ impl<J: Journal> Server<J> {
             | Order::RetainRaw { .. }
             | Order::Analyze
             | Order::FieldMode { .. }
-            | Order::Emit { .. } => {
+            | Order::Emit { .. }
+            | Order::Found { .. } => {
                 return Err(Refusal::Impossible);
             }
-            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } => {
+            Order::Say { .. } | Order::OfferKey { .. } | Order::SendReport { .. } | Order::GiveKey { .. } => {
                 // The whole of it in `crate::radio`, because everything a transmission needs
                 // to decide — the keyring, the aim, the acknowledgment window — is that
                 // module's and none of it is this one's.
@@ -1300,6 +1313,7 @@ impl<J: Journal> Server<J> {
         )
         .await?;
 
+        let factions = &self.factions;
         for ((id, ship_id, _), due) in reading.into_iter().zip(dues) {
             let Some(ship) = self.fleet.get(CraftId(ship_id.0)) else { continue };
             let Some(state) = self.clients.get_mut(&id) else { continue };
@@ -1316,7 +1330,9 @@ impl<J: Journal> Server<J> {
                     direction: direction.to_array(),
                     strength: scheduled.strength,
                     kind: event.kind,
-                    payload: crate::radio::redact(event.kind, &event.payload, ship_id),
+                    payload: crate::radio::redact(event.kind, &event.payload, ship_id, |key| {
+                        factions.holds(CraftId(ship_id.0), key, scheduled.arrive_t)
+                    }),
                 };
                 match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {

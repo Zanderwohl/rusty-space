@@ -27,8 +27,8 @@
 //! `lightcone/docs/05-observation.md`.
 
 use lc_proto::{
-    ACK_DEPTH, Aim, Body, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said, Secrecy,
-    ShipId, Spoken,
+    ACK_DEPTH, Aim, Body, FactionId, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said,
+    Secrecy, ShipId, Spoken,
 };
 use glam::DVec3;
 use lc_world::craft::CraftId;
@@ -63,6 +63,7 @@ pub(crate) struct Utterance {
     /// Which message this is, across its resends. Zero for a key offer, which nothing resends.
     idem: MessageKey,
     sealed: bool,
+    under: Option<FactionId>,
     content: Content,
     acks: Vec<i64>,
 }
@@ -104,7 +105,8 @@ pub(crate) struct Transmission {
 }
 
 impl<J: Journal> Server<J> {
-    /// Validate a [`Order::Say`] or [`Order::OfferKey`] and work out what it puts on the air.
+    /// Validate a [`Order::Say`], [`Order::OfferKey`], [`Order::SendReport`] or [`Order::GiveKey`]
+    /// and work out what it puts on the air.
     ///
     /// Nothing is validated about the addressee, and that is deliberate on both counts. A
     /// client may address a craft that does not exist: the message goes out and nobody it
@@ -123,42 +125,37 @@ impl<J: Journal> Server<J> {
                 if body.is_empty() || body.len() > MESSAGE_LIMIT || *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                let sealed = matches!(secrecy, Secrecy::Sealed);
-                let content = Content::Text(body.clone());
-                // Sealing needs somebody to seal it to. Refused rather than quietly sent in
-                // the open, which is the failure that matters.
-                let Some(addressee) = *to else {
-                    if sealed {
-                        return Err(Refusal::Impossible);
-                    }
-                    return self.transmission(id, aim, at, None, false, content, *idem, Vec::new());
-                };
-                if sealed && !self.holds_key(id, addressee, at) {
-                    return Err(Refusal::NoKey);
+                // A faction's chat is addressed to nobody: acknowledgment is between two craft,
+                // and a chat of forty would acknowledge itself for ever.
+                if matches!(secrecy, Secrecy::Faction(_)) && to.is_some() {
+                    return Err(Refusal::Impossible);
                 }
-                let acks = self.acks_for(id, addressee, at);
-                self.transmission(id, aim, at, Some(addressee), sealed, content, *idem, acks)
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
+                let acks = to.map(|addressee| self.acks_for(id, addressee, at)).unwrap_or_default();
+                self.transmission(id, aim, at, *to, sealed, under, Content::Text(body.clone()), *idem, acks)
             }
             Order::OfferKey { to, aim } => {
                 if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                self.transmission(id, aim, at, *to, false, Content::Key, 0, Vec::new())
+                self.transmission(id, aim, at, *to, false, None, Content::Key, 0, Vec::new())
+            }
+            Order::GiveKey { key, to, aim, secrecy } => {
+                if *to == Some(from) {
+                    return Err(Refusal::Impossible);
+                }
+                if !self.factions.holds(id, *key, at) {
+                    return Err(Refusal::NoKey);
+                }
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
+                self.transmission(id, aim, at, *to, sealed, under, Content::Faction(key.0), 0, Vec::new())
             }
             Order::SendReport { to, aim, secrecy, idem } => {
                 if *to == Some(from) {
                     return Err(Refusal::Impossible);
                 }
-                let sealed = matches!(secrecy, Secrecy::Sealed);
                 let beam = self.beam_for(id, aim, at)?;
-                match *to {
-                    // Sealing needs somebody to seal it to, the same rule a message follows.
-                    None if sealed => return Err(Refusal::Impossible),
-                    Some(addressee) if sealed && !self.holds_key(id, addressee, at) => {
-                        return Err(Refusal::NoKey);
-                    }
-                    _ => {}
-                }
+                let (sealed, under) = self.seal(id, *to, *secrecy, at)?;
                 // Written here, from what the shard holds for this craft: see
                 // `crate::instruments::report_for`.
                 let (report, through) = self.report_for(id, *to, at as f64 * 1.0e-6)?;
@@ -167,6 +164,7 @@ impl<J: Journal> Server<J> {
                     beamed: !beam.is_omni(),
                     idem: *idem,
                     sealed,
+                    under,
                     body: Some(report),
                     format: lc_proto::REPORT_FORMAT,
                 };
@@ -186,6 +184,28 @@ impl<J: Journal> Server<J> {
         }
     }
 
+    /// Whether a transmission is sealed to its addressee, and the faction key it is under.
+    fn seal(
+        &self,
+        id: CraftId,
+        to: Option<ShipId>,
+        secrecy: Secrecy,
+        at: i64,
+    ) -> Result<(bool, Option<FactionId>), Refusal> {
+        match secrecy {
+            Secrecy::Open => Ok((false, None)),
+            // Sealing needs somebody to seal it to. Refused rather than quietly sent in the
+            // open, which is the failure that matters.
+            Secrecy::Sealed => match to {
+                None => Err(Refusal::Impossible),
+                Some(addressee) if !self.holds_key(id, addressee, at) => Err(Refusal::NoKey),
+                Some(_) => Ok((true, None)),
+            },
+            Secrecy::Faction(key) if !self.factions.holds(id, key, at) => Err(Refusal::NoKey),
+            Secrecy::Faction(key) => Ok((false, Some(key))),
+        }
+    }
+
     /// The half of [`Server::compose`] that is the same whoever it is for, and all of an
     /// automatic answer.
     #[allow(clippy::too_many_arguments)]
@@ -196,6 +216,7 @@ impl<J: Journal> Server<J> {
         at: i64,
         to: Option<ShipId>,
         sealed: bool,
+        under: Option<FactionId>,
         content: Content,
         idem: MessageKey,
         acks: Vec<i64>,
@@ -209,17 +230,18 @@ impl<J: Journal> Server<J> {
             beamed: !beam.is_omni(),
             idem,
             sealed,
-            body: heard_as(&content, true),
+            under,
+            body: heard_as(&content, true, &self.factions),
             acks: acks.clone(),
         };
         Ok(Transmission {
             kind: match content {
-                Content::Key => lc_proto::kind::KEY,
+                Content::Key | Content::Faction(_) => lc_proto::kind::KEY,
                 _ => lc_proto::kind::MESSAGE,
             },
             payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
             beam,
-            said: Some(Utterance { to, idem, sealed, content, acks }),
+            said: Some(Utterance { to, idem, sealed, under, content, acks }),
             reported: None,
         })
     }
@@ -245,10 +267,11 @@ impl<J: Journal> Server<J> {
             sender: sender.0,
             addressee: said.to.map(|t| t.0),
             sealed: said.sealed,
+            under: said.under.map(|key| key.0),
             content: said.content.clone(),
             acks: said.acks.clone(),
             sent_t: at,
-            idem: (said.content != Content::Key).then_some(said.idem as i64),
+            idem: (!matches!(said.content, Content::Key | Content::Faction(_))).then_some(said.idem as i64),
         });
         for (observer, arrive_t, strength) in landings {
             if *observer == sender {
@@ -277,6 +300,11 @@ impl<J: Journal> Server<J> {
                     .entry(ShipId(sender.0))
                     .and_modify(|learned| *learned = (*learned).min(*arrive_t))
                     .or_insert(*arrive_t);
+            } else if let Content::Faction(key) = said.content {
+                // The same bargain as a ship key: whoever can read it holds it.
+                if readable(&self.factions, *observer, said.to, said.sealed, said.under, *arrive_t) {
+                    self.factions.learn(*observer, FactionId(key), *arrive_t);
+                }
             } else {
                 let window = self.heard.entry((*observer, ShipId(sender.0))).or_default();
                 let place = window.partition_point(|(landed, _)| *landed <= *arrive_t);
@@ -357,7 +385,7 @@ impl<J: Journal> Server<J> {
             let idem = lc_world::rng::hash(&[id.0 as u64, owed.from.0 as u64, at as u64]).max(1);
             let acks = self.acks_for(id, owed.from, at);
             let Ok(spoken) =
-                self.transmission(id, &aim, at, Some(owed.from), false, Content::Ack, idem, acks)
+                self.transmission(id, &aim, at, Some(owed.from), false, None, Content::Ack, idem, acks)
             else {
                 continue;
             };
@@ -502,6 +530,11 @@ impl<J: Journal> Server<J> {
     /// than repeating them for ever. Receipts and keys are only ever produced alongside a
     /// message, so an empty `said` means there is nothing at all to write.
     pub(crate) async fn write_conversations(&mut self) -> Result<(), JournalError> {
+        if self.factions.is_dirty() {
+            let founded = std::mem::take(&mut self.factions.founded);
+            let taught = std::mem::take(&mut self.factions.taught);
+            self.journal.found(&founded, &taught).await?;
+        }
         if self.said.is_empty() {
             return Ok(());
         }
@@ -522,6 +555,8 @@ impl<J: Journal> Server<J> {
     /// anyone sends acknowledges nothing — which the far end cannot tell from its own messages
     /// having been lost, and that is the one thing an acknowledgment exists to rule out.
     pub async fn resume_conversations(&mut self) -> Result<(), JournalError> {
+        let (founded, holds) = self.journal.factions().await?;
+        self.factions.resume(founded, holds);
         for held in self.journal.keyring().await? {
             self.keys
                 .entry(CraftId(held.holder))
@@ -613,19 +648,22 @@ impl<J: Journal> Server<J> {
                 with_name: m.addressee.map(name_of).unwrap_or_default(),
                 mine: true,
                 sealed: m.sealed,
-                body: heard_as(&m.content, true),
+                body: heard_as(&m.content, true, &self.factions),
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: None,
                 // A sender never hears its own signal, so there is no reading to have.
                 strength: None,
+                under: m.under.map(FactionId),
             });
         }
         for (m, arrive_t, strength) in transcript.heard {
             if arrive_t > now {
                 continue;
             }
-            let readable = !m.sealed || m.addressee == Some(ship.0);
+            let under = m.under.map(FactionId);
+            let readable =
+                readable(&self.factions, CraftId(ship.0), m.addressee.map(ShipId), m.sealed, under, arrive_t);
             messages.push(Said {
                 event_id: m.event_id,
                 idem: m.idem.unwrap_or_default() as MessageKey,
@@ -636,11 +674,12 @@ impl<J: Journal> Server<J> {
                 with_name: name_of(m.sender),
                 mine: false,
                 sealed: m.sealed,
-                body: heard_as(&m.content, readable),
+                body: heard_as(&m.content, readable, &self.factions),
                 acks: m.acks,
                 sent_t: m.sent_t,
                 arrive_t: Some(arrive_t),
                 strength,
+                under,
             });
         }
         // By when this ship knew of each, which for a conversation across light delay is not
@@ -677,12 +716,17 @@ impl<J: Journal> Server<J> {
 ///
 /// Anything but a message passes through untouched, and a payload that will not parse does too:
 /// this is a filter on what is released, not a validator of what was written.
-pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
+///
+/// `holds` answers whether the observer holds a faction key as of this landing.
+pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(FactionId) -> bool) -> String {
+    let may_read = |to: Option<i64>, sealed: bool, under: Option<FactionId>| {
+        !(sealed && to != Some(observer.0)) && under.is_none_or(&holds)
+    };
     if kind == lc_proto::kind::REPORT {
         let Ok(mut reported) = serde_json::from_str::<Reported>(payload) else {
             return payload.to_string();
         };
-        if reported.sealed && reported.to != Some(observer.0) {
+        if !may_read(reported.to, reported.sealed, reported.under) {
             reported.body = None;
         }
         return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
@@ -693,19 +737,36 @@ pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId) -> String {
     let Ok(mut spoken) = serde_json::from_str::<Spoken>(payload) else {
         return payload.to_string();
     };
-    if spoken.sealed && spoken.to != Some(observer.0) {
+    if !may_read(spoken.to, spoken.sealed, spoken.under) {
         spoken.body = Body::Unreadable;
     }
     serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
 }
 
+/// Whether `observer` may read a transmission landing on it at `arrive_t`: [`redact`]'s rule,
+/// for the paths that have the store's row rather than the payload.
+fn readable(
+    factions: &crate::faction::Factions,
+    observer: CraftId,
+    to: Option<ShipId>,
+    sealed: bool,
+    under: Option<FactionId>,
+    arrive_t: i64,
+) -> bool {
+    !(sealed && to != Some(ShipId(observer.0))) && under.is_none_or(|key| factions.holds(observer, key, arrive_t))
+}
+
 /// What a receiver is handed of `content`, when it may or may not read it.
-fn heard_as(content: &Content, readable: bool) -> Body {
+fn heard_as(content: &Content, readable: bool, factions: &crate::faction::Factions) -> Body {
     match content {
-        Content::Text(_) if !readable => Body::Unreadable,
+        Content::Text(_) | Content::Faction(_) if !readable => Body::Unreadable,
         Content::Text(text) => Body::Text(text.clone()),
         Content::Ack => Body::Ack,
         Content::Key => Body::Key,
+        Content::Faction(key) => match factions.faction(FactionId(*key)) {
+            Some(faction) => Body::Faction(faction),
+            None => Body::Unreadable,
+        },
     }
 }
 

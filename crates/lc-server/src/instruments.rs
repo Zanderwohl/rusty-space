@@ -337,7 +337,10 @@ impl<J: Journal> Server<J> {
         for event in events.iter().filter(|e| e.kind == lc_proto::kind::REPORT) {
             for scheduled in deliveries.iter().filter(|d| d.event == event.id) {
                 // Redacted as a client is sent it, so a sealed report teaches only its addressee.
-                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer);
+                let observer = CraftId(scheduled.observer.0);
+                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer, |key| {
+                    self.factions.holds(observer, key, scheduled.arrive_t)
+                });
                 let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
                     eprintln!("WARNING: report {} is not a report; it will not land", event.id);
                     continue;
