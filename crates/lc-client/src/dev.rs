@@ -149,6 +149,9 @@ pub struct DevEntry {
     /// shard, so an action run on entering the sky has nobody to talk to yet — this is polled,
     /// like `--at` and the framing, until there is somebody in the contact list.
     pub say: Option<String>,
+    /// `--chat`: the radio window's channel to show once it exists. `found[:<name typed>]`, or
+    /// `faction:<name>:<generation>[:<founder>]`. The only way to photograph a faction's chat.
+    pub chat: Option<String>,
     /// Sent once the shard has welcomed this client, in order, one a `--console`. The only way to
     /// photograph an answer.
     pub console: Vec<String>,
@@ -460,6 +463,37 @@ pub(crate) fn open_the_radio(
         body: words.clone(),
         idem: None,
     }));
+}
+
+/// `--chat`: polled until the channel asked for exists, since every faction arrives from a shard.
+pub(crate) fn open_the_channel(
+    dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    let Some(spec) = dev.chat.as_deref() else { return };
+    if *done || uplink.joined().is_none() {
+        return;
+    }
+    let channel = match spec.split(':').collect::<Vec<_>>().as_slice() {
+        ["found", ..] => Some(crate::ui::Channel::Founding),
+        ["faction", name, generation, by @ ..] => uplink
+            .chat
+            .factions()
+            .into_iter()
+            .find(|(_, f)| {
+                f.name == *name
+                    && generation.parse() == Ok(f.generation())
+                    && by.first().is_none_or(|by| f.founder.is_some_and(|founder| uplink.name_of(founder) == *by))
+            })
+            .map(|(key, _)| crate::ui::Channel::Faction(key)),
+        _ => None,
+    };
+    let Some(channel) = channel else { return };
+    *done = true;
+    out.write(Requested(Action::OpenPanel(crate::ui::Panel::Chat)));
+    out.write(Requested(Action::ChatWith(channel)));
 }
 
 pub(crate) fn type_at_the_console(

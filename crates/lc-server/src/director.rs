@@ -42,11 +42,13 @@ pub struct Director {
     next: usize,
     /// Which craft the player turned out to be.
     pov: Option<CraftId>,
+    /// The faction keys the scene has founded, in order: what [`Act::GiveKey`] and the rest count.
+    keys: Vec<lc_proto::FactionId>,
 }
 
 impl Director {
     pub fn new(scenario: &'static Scenario) -> Self {
-        Self { scenario, started_t: None, next: 0, pov: None }
+        Self { scenario, started_t: None, next: 0, pov: None, keys: Vec::new() }
     }
 
     pub fn scenario(&self) -> &'static Scenario {
@@ -141,7 +143,9 @@ impl<J: Journal> Server<J> {
                 .take_while(|beat| started_t + (beat.after_s * 1.0e6) as i64 <= self.now_t())
                 .count();
             for (id, act) in due {
-                self.perform(&director, id, act, wire, events, deliveries);
+                if !self.speak(&mut director, id, act, events, deliveries) {
+                    self.perform(&director, id, act, wire, events, deliveries);
+                }
             }
         }
         self.director = Some(director);
@@ -194,6 +198,49 @@ impl<J: Journal> Server<J> {
         // The player's craft has been put somewhere it did not ask to be, which is a state it
         // cannot reach by folding anything it sent. Handed one, and it takes it.
         self.tell_flying(wire, pov);
+    }
+
+    /// The faction beats, through the orders a player's would be. False for any other beat.
+    fn speak(
+        &mut self,
+        director: &mut Director,
+        id: CraftId,
+        act: &Act,
+        events: &mut Vec<Event>,
+        deliveries: &mut Vec<Scheduled>,
+    ) -> bool {
+        use lc_proto::{Aim, Order, Secrecy};
+        let at = self.now_t();
+        let key = |k: &usize| director.keys.get(*k).copied();
+        let order = match act {
+            Act::Found { name, replaces } => {
+                let replaces = replaces.and_then(|k| director.keys.get(k).copied());
+                if let Ok(faction) = self.factions.found(id, name, replaces, at) {
+                    director.keys.push(faction.key);
+                }
+                return true;
+            }
+            Act::GiveKey { key: k, to } => {
+                let Some(key) = key(k) else { return true };
+                let to = to.and_then(|slot| director.craft_in(slot)).map(|c| ShipId(c.0));
+                // Beamed at whoever it is for, so the craft beside them is not handed it too.
+                let aim = to.map_or(Aim::Omni, Aim::Ship);
+                Order::GiveKey { key, to, aim, secrecy: Secrecy::Open }
+            }
+            Act::Speak { key: k, text } => {
+                let Some(key) = key(k) else { return true };
+                let idem = lc_world::rng::hash(&[id.0 as u64, at as u64]).max(1);
+                Order::Say { to: None, aim: Aim::Omni, secrecy: Secrecy::Faction(key), body: text.to_string(), idem }
+            }
+            _ => return false,
+        };
+        if let Ok(spoken) = self.compose(id, ShipId(id.0), &order, at) {
+            let _ = self.put_on_air(
+                id, at, spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, &spoken.beam, true, spoken.said, events,
+                deliveries,
+            );
+        }
+        true
     }
 
     fn perform(
@@ -266,7 +313,7 @@ impl<J: Journal> Server<J> {
                 self.pursuits.remove(&id);
                 None
             }
-            Act::Vent(_) => None,
+            Act::Vent(_) | Act::Found { .. } | Act::GiveKey { .. } | Act::Speak { .. } => None,
         };
         if let Some(change) = change {
             let event = motion::Event { ship: motion::ShipId(id.0), at_t: now_s, change };
@@ -974,4 +1021,24 @@ mod tests {
         assert!(peaks[0] > courtesy, "premise: braking at the player is discourteous, {} of {courtesy}", peaks[0]);
         assert!(peaks[1] <= courtesy, "the courteous approach put {} W/m² on the player, over {courtesy}", peaks[1]);
     }
+
+    /// The faction scenes found, give and speak through the orders a player's would be: the
+    /// player ends up holding what the story says, and the one left out does not.
+    #[tokio::test]
+    async fn the_faction_scenes_leave_the_player_holding_what_the_story_says() {
+        for (scene, held) in [(&lc_world::scenario::WAKE, 2), (&lc_world::scenario::SCHISM, 3)] {
+            let (mut server, mut wire, _, pov) = staged(scene).expect("the sample sky has Sol");
+            let until = server.now_t() + 14 * 3_600 * 1_000_000;
+            while server.now_t() < until {
+                server.tick(&mut wire).await.unwrap();
+            }
+            let now = server.now_t();
+            let mine = server.factions.held_by(pov, now);
+            assert_eq!(mine.len(), held, "{}: {mine:?}", scene.name);
+            let shrike = CraftId(lc_world::scenario::BASE_ID + 2);
+            let loyal = mine.iter().find(|f| f.generation() == 2 && f.founder == ShipId(lc_world::scenario::BASE_ID)).unwrap();
+            assert!(!server.factions.holds(shrike, loyal.key, now), "{}: Shrike was handed Osprey's new key", scene.name);
+        }
+    }
 }
+
