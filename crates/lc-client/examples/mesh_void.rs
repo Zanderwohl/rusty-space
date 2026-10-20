@@ -8,11 +8,13 @@
 //! cargo run -p lc-client --example mesh_void -- /tmp/forms.png
 //! cargo run -p lc-client --example mesh_void -- /tmp/strap.png --form strap --cells 32 --finish blocky
 //! cargo run -p lc-client --example mesh_void -- /tmp/remesh.png --form cluster --remesh 256 --burst 40
+//! cargo run -p lc-client --example mesh_void -- /tmp/engines.png --parts engine
 //! ```
 //!
 //! | flag | for |
 //! |---|---|
 //! | `--form <name>` | `starting`, `plate`, `spindle`, `cluster`, `saddle`, `strap`, or `all` side by side (the default) |
+//! | `--parts <kind>` | instead, one part of this kind in each primitive, around the Mind: `storage`, `drone`, `engine`, `living`, `data`, `bay`, `mind`, or `saddle` and `strap`, which are hung off a storage sphere |
 //! | `--finish <smooth\|faceted\|blocky>` | the finish; smooth by default |
 //! | `--cells <n>` | a fixed resolution instead of one from pixels on screen |
 //! | `--scale <x>` | every length times this, so `--scale 100` makes a 50 km starting ship |
@@ -44,9 +46,32 @@ use lc_client::tonemap::ToneMap;
 use lc_world::fitting::Balance;
 use lc_world::form::presets::Builtin;
 use lc_world::form::sdf::Sdf;
-use lc_world::form::{Form, Kind, SparMode};
+use lc_world::form::presets::SLOT_M3;
+use lc_world::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
 const FORMS: [&str; 6] = ["starting", "plate", "spindle", "cluster", "saddle", "strap"];
+
+const PART_KINDS: [(&str, Kind); 9] = [
+    ("storage", Kind::Storage),
+    ("drone", Kind::Drone),
+    ("engine", Kind::Engine),
+    ("living", Kind::Living),
+    ("data", Kind::Data),
+    ("bay", Kind::Bay),
+    ("mind", Kind::Mind),
+    ("saddle", Kind::Spar(SparMode::Saddle)),
+    ("strap", Kind::Spar(SparMode::Strap)),
+];
+
+/// The proportions the presets use.
+const PRIMITIVES: [(&str, Primitive); 6] = [
+    ("ellipsoid", Primitive::Ellipsoid { axes: glam::DVec3::new(2.0, 1.0, 1.0) }),
+    ("capsule", Primitive::Capsule { length: 2.0 }),
+    ("slab", Primitive::Slab { edges: glam::DVec3::new(1.2, 6.0, 4.0), corner: 0.25 }),
+    ("cylinder", Primitive::Cylinder { length: 3.0 }),
+    ("torus", Primitive::Torus { major: 3.0 }),
+    ("frustum", Primitive::Frustum { length: 2.0, taper: 1.5 }),
+];
 
 /// As `hull_void`: the graphs' unit square, and its texels.
 const TILE_M: f32 = 64.0;
@@ -58,7 +83,7 @@ const FOV_Y: f32 = 0.5;
 
 struct Args {
     path: String,
-    forms: Vec<&'static str>,
+    forms: Vec<String>,
     finish: Finish,
     cells: Option<u32>,
     scale: f64,
@@ -83,9 +108,14 @@ impl Args {
             std::process::exit(2);
         };
         let path = args.first().filter(|a| !a.starts_with("--")).cloned().unwrap_or_else(|| fail("give a PNG path to write"));
-        let forms = match text("--form").as_deref() {
-            None | Some("all") => FORMS.to_vec(),
-            Some(name) => vec![*FORMS.iter().find(|f| **f == name).unwrap_or_else(|| fail(&format!("--form is one of {FORMS:?} or all")))],
+        let kinds = PART_KINDS.map(|(name, _)| name);
+        let forms = match (text("--parts"), text("--form").as_deref()) {
+            (Some(_), Some(_)) => fail("give --form or --parts, not both"),
+            (Some(kind), None) if kind == "mind" => vec!["mind:cube".to_string()],
+            (Some(kind), None) if kinds.contains(&kind.as_str()) => PRIMITIVES.iter().map(|(shape, _)| format!("{kind}:{shape}")).collect(),
+            (Some(_), None) => fail(&format!("--parts is one of {kinds:?}")),
+            (None, None | Some("all")) => FORMS.map(String::from).to_vec(),
+            (None, Some(name)) => vec![FORMS.iter().find(|f| **f == name).unwrap_or_else(|| fail(&format!("--form is one of {FORMS:?} or all"))).to_string()],
         };
         let finish = match text("--finish").as_deref() {
             None | Some("smooth") => Finish::Smooth,
@@ -113,6 +143,9 @@ impl Args {
 }
 
 fn fixture(name: &str) -> Form {
+    if let Some((kind, shape)) = name.split_once(':') {
+        return lone_part(kind, shape);
+    }
     match name {
         "starting" => Form::starting(),
         "plate" => Builtin::Plate.form(),
@@ -121,6 +154,36 @@ fn fixture(name: &str) -> Form {
         "saddle" => spar_fixture(SparMode::Saddle),
         "strap" => spar_fixture(SparMode::Strap),
         _ => unreachable!("checked when parsed"),
+    }
+}
+
+/// The Mind and one part of a slot's volume: enclosing it, or for a spar, on a storage sphere
+/// enclosing it, as [`spar_fixture`] hangs one.
+fn lone_part(kind: &str, shape: &str) -> Form {
+    let min_part_m3 = Balance::DEFAULT.min_part_m3;
+    let kind = PART_KINDS.iter().find(|(k, _)| *k == kind).expect("checked when parsed").1;
+    let mind = Part::mind(PartId(0), min_part_m3);
+    if kind == Kind::Mind {
+        return Form { parts: vec![mind] };
+    }
+    let primitive = PRIMITIVES.iter().find(|(s, _)| *s == shape).expect("checked when parsed").1;
+    let hang = |id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: u16, mount: Mount| {
+        let placement = Placement { parent: PartId(parent), mount, twist: 0.0, tilt: glam::DVec2::ZERO, blend: 0.0, mirror: false };
+        Part { id: PartId(id), kind, primitive, volume_m3, placement: Some(placement) }
+    };
+    match kind {
+        Kind::Spar(_) => {
+            let sphere = Primitive::Capsule { length: 0.0 };
+            let anchor = Mount::Attached { anchor: glam::DVec3::new(0.3, 1.0, 0.2), standoff: -0.3 };
+            Form {
+                parts: vec![
+                    mind,
+                    hang(1, Kind::Storage, sphere, SLOT_M3, 0, Mount::Enclosing),
+                    hang(2, kind, primitive, 0.15 * SLOT_M3, 1, anchor),
+                ],
+            }
+        }
+        _ => Form { parts: vec![mind, hang(1, kind, primitive, SLOT_M3, 0, Mount::Enclosing)] },
     }
 }
 
@@ -141,7 +204,7 @@ fn scaled(form: Form, balance: &mut Balance, k: f64) -> Form {
 }
 
 #[derive(Component)]
-struct Hull(&'static str);
+struct Hull(String);
 
 #[derive(Resource)]
 struct Scene {
@@ -295,14 +358,14 @@ fn spawn(
     });
 
     // Side by side in slots as wide as the largest, three to a row.
-    let placed: Vec<(&'static str, Form, Balance, DVec3Pair)> = args
+    let placed: Vec<(String, Form, Balance, DVec3Pair)> = args
         .forms
         .iter()
-        .map(|&name| {
+        .map(|name| {
             let mut balance = Balance::DEFAULT;
             let form = scaled(fixture(name), &mut balance, args.scale);
             let bounds = Sdf::new(&form, &balance).expect("fixtures are valid").bounds();
-            (name, form, balance, bounds)
+            (name.clone(), form, balance, bounds)
         })
         .collect();
     let aim = match (args.aim, placed.as_slice()) {
