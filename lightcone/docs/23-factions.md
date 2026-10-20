@@ -15,172 +15,122 @@ name (11g).
 
 The rule that shapes all of it:
 
-**A faction is not a list. It is a key.** There is no table the server consults to decide who
-is in. There is who has been told a faction's key, as of when that light landed, and what they
-were given permission to do by somebody who had permission to give it. Everything else — the
-roster a player sees, who a relay forwards to, who can read the channel — is a belief built from
-those facts, and it can be wrong.
+**A faction is not a list. It is a key, and its chat.** There is no table the server consults to
+decide who is in, and no roster anywhere. There is who has been sent a faction's key, as of when
+that light landed. Everything else — who a player thinks is in, who a relay forwards to — is a
+belief built from what has been said under the key, and it can be wrong.
 
-## Founding, and what a faction is called
+## Founding
 
-Any craft can found a faction. Founding mints generation 1 of the faction's key, gives the
-founder every capability, and names it.
+Any craft can found a faction, and founding is all it takes: the craft mints a new key, names it,
+and holds it from that instant. Nothing goes on the air. The key comes with its own chat, the way
+a new group chat does — but there is nobody to add. A faction of one is a key nobody else has
+been sent.
 
-The name is a [`Naming`](22-provenance.md#nothing-has-a-name) like any other, stated by the
-founder. A faction's name is information about the faction: members learn it from their
-invitation, and outsiders learn it only by overhearing open traffic that mentions it. Two
-factions may call a third by different names, and a faction may not know what anybody else
-calls it.
+The name travels with the key. Whoever is sent the key is sent what its founder called it, and an
+outsider learns the name only by overhearing it said in the open.
+
+## Joining is being sent the key
+
+To bring another craft in, **beam it the key**. That is a transmission like any other: aimed,
+sealed or open, at `c`. Whoever can read it when it lands holds the key from then on, and nothing
+else is involved — no acceptance, no certificate, no invitation the server keeps.
+
+| sent | who holds the key afterwards |
+|---|---|
+| sealed to the recipient's ship key | the recipient alone |
+| open | **everybody it reaches**, which across a crowded system is the whole system |
+
+Sealing needs the recipient's ship key, the same as any private message
+([05-observation.md](05-observation.md#keys-and-why-first-contact-is-loud)). The interface lets a
+player send a faction key in the open and says plainly what that does. Anybody who holds the key
+can pass it on; holding it is the only permission there is.
+
+**A new craft belongs to nothing.** It starts holding no faction keys, and the only way in is
+being sent one.
+
+The one exception is an invitation from outside the game: a player invites a friend by email or
+the like, and when the friend creates an account, their first craft is created **already holding
+the key**, as if it had landed the instant the craft existed. It is the single place the game lets
+anything skip light delay, and it is honest about why: the invitation was not sent through space.
+It is not built yet; it needs the identity broker to carry an invite from one account to the next.
+
+## Faction chatter
+
+A faction's chat is every message sealed to its key, shouted or beamed like any other.
+
+- **Readable** by every craft that held the key when the message landed. A craft sent the key
+  later does not get to read the history it overheard before — the same as joining a group chat.
+- **Heard** by everybody in range, as always. That a faction is talking — how much, how often,
+  from where — is visible to anybody listening, and it is intelligence. A listener without the key
+  can tell two messages were sealed to the same key, and nothing else.
+- **Addressed to nobody**, so nobody acknowledges it automatically. Acknowledgment is between two
+  craft; a chat of forty would acknowledge itself forever.
+
+There is no members list to show, because there is no membership. What a player sees is who has
+spoken under the key, and when their words landed.
 
 ## Membership is not exclusive
 
 Nothing about holding one key stops a craft holding another. A craft can belong to as many
-factions as will have it, and the model does not distinguish the reasons:
+factions as will send it a key, and the model does not distinguish the reasons:
 
 | arrangement | what it looks like in keys |
 |---|---|
-| overlapping goals | two factions with members in common, each channel read by the overlap |
-| a loose coalition — an EU, a UN | a faction whose members are the leading craft of other factions; the coalition's key says nothing about the members' own |
+| overlapping goals | two keys with holders in common, each chat read by the overlap |
+| a loose coalition — an EU, a UN | a key held by the leading craft of other factions; it says nothing about their own keys |
 | a double agent | a craft that holds both keys and tells each side what suits it |
 
 The consequence worth designing for is **what moves between factions**. Automatic relaying
-stays inside the faction a bundle is sealed to: a craft in two factions forwards A's traffic to A
-and B's to B, and never one to the other on its own. Carrying anything across is a manual relay —
-a choice somebody makes, recorded on every record it carries as a hop through their ship. A leak
-is therefore always somebody's act, and lineage says whose, to anybody who later holds the
-record. That is not protection against a double agent. It is evidence against one.
+stays inside the key a bundle is sealed to: a craft holding two forwards A's traffic to A and B's
+to B, and never one to the other on its own. Carrying anything across is a manual relay — a
+choice somebody makes, recorded on every record it carries as a hop through their ship. A leak is
+therefore always somebody's act, and lineage says whose, to anybody who later holds the record.
+That is not protection against a double agent. It is evidence against one.
 
-The interface needs a channel per faction held, and a report or a note has to say which faction's
-key it goes out under. Getting that wrong is a real way to leak, and the interface should make it
+The interface needs a chat per key held, and a message, a report or a note has to say which key
+it goes out under. Getting that wrong is a real way to leak, and the interface should make it
 possible and visible rather than impossible.
 
-## Keys and generations
+## Removal is a new key
 
-A faction key has a **generation**. Holding generation `g` of faction `F` means exactly one
-thing: a message sealed to `(F, g)` is readable when it lands. It is the same mechanic as the
-ship keyring in [05-observation.md](05-observation.md#keys-and-why-first-contact-is-loud) —
-there are no keys, only the fact of having been told one — with a generation number on it.
-
-| fact the server keeps | written when | readable when |
-|---|---|---|
-| `holds(ship, F, g)` | the key is transmitted | its light lands: `learned_t <= now` |
-| `granted(issuer, subject, F, g, capabilities)` | the grant is transmitted | the same |
-
-Both are rows written at transmission and gated on arrival, like `lc_keyring` and
-`lc_message_receipts`. That is what lets a faction work for a craft nobody is flying.
-
-### Rotation, and why removal is hard
-
-A member who turns out to be a traitor still holds every generation they were ever sent. No
-message can take it back. The only defense is to **rotate**: mint generation `g + 1` and give it
-to everyone except the traitor.
+A member who turns out to be a traitor still holds the key. No message can take it back. The only
+defense is to **found again**: mint a new key and send it to everyone except the traitor. The new
+key is a new chat; the old one goes on existing, readable by everyone who held it, traitor
+included.
 
 The detail that makes this a mechanic rather than a button: **the new key cannot be sent sealed
-to the old one**, because the traitor holds the old one. Rotation is one transmission per member
+to the old one**, because the traitor holds the old one. It goes out one transmission per member
 kept, each sealed to that member's own ship key. So:
 
-- rotating requires holding the ship key of everybody you mean to keep, which is a reason for
-  members to trade ship keys early and a cost for anyone who did not;
+- moving to a new key requires holding the ship key of everybody you mean to keep, which is a
+  reason for members to trade ship keys early and a cost for anyone who did not;
 - it takes as long to complete as light takes to reach the furthest member kept;
-- until each member hears it, they are still speaking in the old generation — and the traitor
-  can still read every word.
+- until each member hears it, they are still speaking under the old key — and the traitor can
+  still read every word.
 
 ### "It's an older key, sir, but it checks out"
 
-A message sealed to an old generation is still readable by anyone who holds that generation.
-It may be a loyal member four light-years out who has not heard of the rotation yet. It may be
-the traitor. **Nothing about the message says which**, and the interface does not pretend to:
-
-| shown | meaning |
-|---|---|
-| `sealed: gen 5` | current as far as this ship knows |
-| `sealed: gen 3, current is 5` | readable, and old; this ship knows who was sent 3 and who has been sent 5 |
-| `sealed: gen 6` | newer than anything held — heard, not readable, and news in itself: somebody rotated |
-
-Deciding whether to trust an old-generation message is a player's decision made under
-uncertainty. That is the game working, the same way as acting on a two-sigma bump in a light
-curve.
+A message under the old key is still readable by everyone who holds it. It may be a loyal member
+four light-years out who has not been sent the new one yet. It may be the traitor. **Nothing about
+the message says which**, and the interface does not pretend to. Deciding whether to trust it is
+a player's decision made under uncertainty — the game working, the same way as acting on a
+two-sigma bump in a light curve.
 
 Identity is not forgeable yet: the server knows which ship transmitted, and a receiver sees the
 true sender. A traitor lies with their own name. Stealing a ship key, which would make forgery
 possible, is a later mechanic and should be designed as one — it breaks the one guarantee this
 section otherwise keeps.
 
-## Permissions are certificates
+### Later: assets accept keys
 
-The user-facing shape is an invitation in a chat log. Underneath, a permission is a
-**certificate**: issuer, subject, faction, generation, and a set of capabilities, transmitted
-like a message and valid from the moment it lands.
-
-| capability | lets the holder |
-|---|---|
-| `invite` | send the current key and a membership certificate to somebody new |
-| `grant` | issue certificates carrying capabilities the holder has, including `grant` |
-| `rotate` | mint a new generation and decide who is sent it |
-| `generation` | tell an asset which generations it accepts |
-| *later*: `command` | order the faction's probes, swarms and structures |
-
-A certificate is honored if its issuer held the capability it hands on, all the way back to
-the founder, and if it is **bound to a generation the checker holds**. For an asset that means at
-or above its minimum: an order sealed to a new generation does not launder a certificate issued
-under an old one, so rotation re-issues authority and not only confidentiality. Rotation re-issues the
-certificates of the members kept, bound to the new generation; a certificate bound to an older
-one is the permission equivalent of an old key, and is shown the same way.
-
-### Assets accept a generation
-
-A faction's telescopes, relays, swarms and structures each carry a **minimum generation**: the
-oldest key they will take an order under. An order is obeyed if it carries a valid certificate
-and is sealed to a generation at or above that minimum.
-
-Moving the minimum is itself an order, and needs the `generation` capability:
-
-| move | effect |
-|---|---|
-| **raise** it | security upgraded: everybody still on an old key, traitor included, is locked out of that asset — and so is every loyal member who has not heard of the rotation yet |
-| **lower** it | an older key lets somebody back in. That is what a rat does: one order, and a craft excluded two rotations ago commands a swarm again |
-
-Raising the minimum past a generation the asset has never been sent is refused: an asset cannot
-require a key it does not hold. So a rotation is complete for an asset only when the new key has
-reached it *and* an order raising its minimum has — two transmissions, both at `c`.
-
-Every piece of this is light-delayed, and that is the Excession mechanic without a line of code
-of its own. A swarm that has not heard of the latest rotation takes orders from the traitor for
-as long as the new key takes to reach it. An order lowering the minimum and an order raising it,
-sent from opposite sides of a sector, arrive in whichever order the geometry decides, and the
-asset obeys whichever landed last. The loyal side wins a race it may not know it is in by being
-**closer**.
-
-### Invitations
-
-An invite is a message in the conversation with the invitee, carrying the faction's name, the
-current key and a certificate. It should be **sealed to the invitee's ship key**. It does not
-have to be, and the interface allows the mistake while naming it: an open invitation hands the
-faction key to every craft in earshot.
-
-**A new craft belongs to nothing.** It starts unaffiliated, and the only way in is an invitation
-somebody sends.
-
-The one exception is an invitation from outside the game: a player invites a friend by email or
-the like, and when the friend creates an account, their first craft is created **already holding
-what that invitation would have delivered** — the key, the certificate, the faction's name — as if
-it had landed the instant the craft existed. It is the single place the game lets anything skip
-light delay, and it is honest about why: the invitation was not sent through space. It is not
-built yet; it needs the identity broker to carry an invite from one account to the next.
-
-There is no acceptance step the server enforces. Holding the key makes a craft able to read the
-channel; whether it considers itself a member, and whether anybody else does, is a social fact
-recorded in what it says next.
-
-## Faction chatter
-
-A channel is a conversation sealed to `(F, g)`, shouted or beamed like any message.
-
-- **Readable** by every craft that holds that generation when the light lands.
-- **Heard** by everybody in range, as always. That a faction is talking — how much, how often,
-  from where — is visible to anybody listening, and it is intelligence.
-- **Not addressed to anyone**, so nobody acknowledges it automatically. Acknowledgment is
-  between two craft; a channel of forty would acknowledge itself forever.
+When there are probes, swarms and structures to command, each will hold a set of faction keys and
+obey an order sealed to any of them. Re-keying an asset — adding the new key, dropping the old — is
+itself an order, and it is light-delayed like everything else: a swarm that has not heard it takes
+orders from the traitor for as long as the order takes to reach it, and two contradictory orders
+sent from opposite sides of a sector are obeyed in whichever order the geometry delivers them. The
+loyal side wins a race it may not know it is in by being **closer**. Nothing about this needs
+certificates or capabilities; it waits for there to be assets.
 
 ## Relays
 
@@ -204,7 +154,7 @@ A relayable unit is a **bundle**:
 | hop limit (TTL) | a bound on how far it spreads, set by the origin |
 | path so far | split horizon, and the lineage every record in it already carries |
 | seal | who can read it; a relay forwards what it cannot read exactly as it forwards what it can |
-| payload | a report, a message, a key, a certificate |
+| payload | a report, a message, a key |
 
 ### Two kinds of forwarding
 
@@ -293,10 +243,10 @@ To the rest of the network a relay swarm is **one node with a size**: a bundle r
 of its footprint is inside it, and crosses it in the time light takes to cross the footprint —
 minutes for a swarm at an AU, not zero. No element is ever addressed.
 
-Its keys follow the same granularity. A swarm's accepted generation belongs to the population
-record, or — since sub-populations exist and nest — to each sub-population. A rotation reaching a
-swarm built in waves arrives at one wave before the next, and for the minutes between, the swarm
-is two things with two minimums. That is the smallest version of the race above, and it is free.
+Its keys follow the same granularity. A swarm's accepted keys belong to the population record,
+or — since sub-populations exist and nest — to each sub-population. A re-keying reaching a swarm
+built in waves arrives at one wave before the next, and for the minutes between, the swarm is two
+things obeying two sets of keys. That is the smallest version of the race above, and it is free.
 
 A swarm is also one witness, not a million: what a telescope swarm sees is recorded as the
 population's observation through `Optics::joined`, with the collecting area and baseline its
@@ -446,4 +396,7 @@ reading back, and is 11g's to build.
 - **The anchor** for `transmit_gain`: one sentence, chosen when 11f builds it, and written down
   beside the solar anchor. `data_per_module`'s is in [19-ship-fitting.md](19-ship-fitting.md).
 - **Key theft**, dictionaries, and commanding assets: deferred by decision, and each sits on top
-  of the certificates above without changing them.
+  of faction keys without changing them.
+- **Reading history on joining.** A key opens only what landed after it did. Real ciphertext
+  recorded earlier would open too; whether the game should let a newcomer read what they overheard
+  is worth trying once there are factions to try it in.

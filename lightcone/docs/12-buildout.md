@@ -432,16 +432,16 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 
 **Before:** 11c.
 
-**Deliver:** founding and naming a faction; membership of several at once, with a channel per
-faction held; key generations and rotation, each rotation sent per member sealed to their ship
-key; certificates for `invite`, `grant`, `rotate` and `generation`; invitations in the chat log;
-the faction channel, redacted by generation held at arrival. The minimum generation an asset
-accepts is modeled now, on the craft themselves, so that assets inherit it rather than
-retrofitting it.
+**Deliver:** a faction as a key and its chat. Founding mints and names a key, held at once, with
+nothing on the air. Giving the key is a transmission — sealed to the recipient's ship key or open
+to everyone in range — and whoever can read it when it lands holds it. Saying something under a
+key puts it in that key's chat, readable by whoever held the key when it landed. No members list,
+no certificates and no generations: removing somebody is founding a new key and sending it to
+everyone else.
 
-**Done when:** a traitor excluded by rotation can still read everything sealed to the old
-generation, cannot read anything sealed to the new one, and a loyal member far away is seen
-sending in the old generation until the new key reaches them.
+**Done when:** a traitor left off a new key can still read everything said under the old one,
+cannot read anything said under the new one, and a loyal member far away is seen speaking under
+the old key until the new one reaches them.
 
 **Do not:** build relays, or anything about commanding assets.
 
