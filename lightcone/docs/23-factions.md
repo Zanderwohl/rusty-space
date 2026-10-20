@@ -5,6 +5,14 @@ what happens when craft start passing records on for each other: who counts as "
 is enforced when nothing can be checked faster than light, how a report finds its way across a
 network that is rearranging itself as it flies, and what anyone calls anything.
 
+**Status: partly built.** What things are called is built: subjects, assigned names as rules,
+planet letters and the descriptor ladder in `lc_world::knowledge::{subject, names, called}`,
+`Order::NameIt`, and a hop added to every record a report carries (`lc_world::knowledge::record::Hop`).
+Not built: factions, key generations and certificates (11e) — the only keys are the ship keyring
+in `lc_server::radio`; relays, bundles and transmission cost, with no `transmit_gain` (11f); and
+notes, the subject card and self-claimed craft names, `Presence` still carrying the account's
+name (11g).
+
 The rule that shapes all of it:
 
 **A faction is not a list. It is a key.** There is no table the server consults to decide who

@@ -8,6 +8,13 @@ So instruments run on the server, knowledge lives on the server, and the client 
 This document is that move, what gets stored, and how a star's raw log is turned into
 conclusions and then thrown away.
 
+**Status: built.** Phases 11b–11d: `lc_server::instruments`,
+`lc_world::knowledge::{observatory, transit, conclusion, room}`, and `lc_knowledge` and
+`lc_samples` from `lc-store/sql/0010_knowledge.sql`. Notes, relaying a report by order, routes
+and custody wait on [23-factions.md](23-factions.md), and a transmission costs nothing yet. Since
+[29-ship-form.md](29-ship-form.md) room is the form's data volume (`lc_world::form::capacity`)
+rather than `data_per_module`, and the save format has moved past 9.
+
 ## Where things run
 
 | | before 11b | now |

@@ -4,6 +4,10 @@ A hundred thousand stars, each with a system nobody has stored. The generator is
 star's eight-byte seed into planets, moons and belts, and this document is what it does and why
 each rule is the rule it is.
 
+**Status: built.** `lc_world::sky::generate::{disc, architecture, planet, moon, belt}`, with every
+default in `tuning::Tuning`; the plots come from `lc-world`'s `systems` binary. The gaps are the
+ones under Open.
+
 **Nothing here is hard-coded and nothing is drawn independently.** The textures came out of
 composing noise rather than authoring terrain, and systems come out the same way: one
 temperature curve, one mass budget, one retention test, composed until the solar system falls
