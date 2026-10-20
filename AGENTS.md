@@ -8,6 +8,20 @@ Design documents are the readable form of the argument and are kept current:
 `lightcone/docs/` for the game, `docs/` for Exotic Matters. Read the one for the area you are
 touching before changing it, and update it when the answer changes.
 
+**Every design document opens with a status line**, after its introduction and before its first
+heading, and each phase of [12-buildout.md](lightcone/docs/12-buildout.md) has one of its own:
+
+```markdown
+**Status: partly built.** Where it lives in code, and what is missing.
+```
+
+The word is one of `built`, `partly built`, `not started` / `design only`, or `reference` for a
+document that is not a plan of work. A change that builds, drops or departs from part of a
+document updates its line in the same PR; a line saying "built" about something that is not is a
+bug, and is how a second agent loses a day. Work cut finer than that lives in
+`lightcone/docs/plans/`, one `- status:` line per task, read by `tools/dag.py`. Find what is open
+with `grep -rn '^\*\*Status' lightcone/docs`.
+
 ## Housekeeping
 
 - **`cargo clean` when you finish.** `target/` reaches **70 GB** in this workspace. Nothing

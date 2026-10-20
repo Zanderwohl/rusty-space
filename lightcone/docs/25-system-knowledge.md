@@ -6,7 +6,7 @@ a system reads the generator. This extends the transit search in
 [24-standing-instruments.md](24-standing-instruments.md) from "there is probably a planet" to a
 body with a name, an orbit and a place in a plane that was itself worked out.
 
-Status: **design**, with phases 1 to 5 built, bar a deferred item in each of 3 and 5. Nothing
+**Status: partly built**: a design, with phases 1 to 5 built, bar a deferred item in each of 3 and 5. Nothing
 below is built except where it says so, and what is carries a mark. Every claim about what
 exists was checked against the code on 2026-09-22, and the symbols named are real; where a draft
 of this document guessed wrong, the correction is in the text rather than quietly removed,
