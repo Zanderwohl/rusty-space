@@ -423,6 +423,7 @@ pub struct Remembered {
     body_draft: String,
     aimed: crate::radio_panel::Aimed,
     seal: bool,
+    listing: crate::radio_panel::Listing,
     emit: crate::emit_panel::Draft,
     /// Whether `--chat found:<name>` has been typed into the radio's field yet.
     drafted: bool,
@@ -451,6 +452,7 @@ pub fn open_panels(
         body_draft,
         aimed,
         seal,
+        listing,
         emit,
         drafted,
     } = &mut *held_over;
@@ -517,6 +519,7 @@ pub fn open_panels(
                 draft,
                 aimed,
                 seal,
+                listing,
                 &mut out,
             ),
         });

@@ -67,11 +67,25 @@ pub enum Aimed {
     AtTheSelectedStar,
 }
 
+/// Which kinds of chat the list shows. Public goes with Group; Overheard is always shown.
+pub struct Listing {
+    pub group: bool,
+    pub direct: bool,
+}
+
+impl Default for Listing {
+    fn default() -> Self {
+        Self { group: true, direct: true }
+    }
+}
+
 /// How wide the list of craft is, and how tall the window's body stays.
 ///
 /// Fixed, both of them. A window that resizes itself as messages arrive is a window whose
 /// buttons move under the cursor, and everything in here arrives without being asked for.
 const LIST_WIDTH: f32 = 130.0;
+/// The Group, Direct and found row above the list.
+const LIST_HEADER: f32 = 26.0;
 /// The whole body: both columns, the composer included.
 const BODY_HEIGHT: f32 = 260.0;
 /// What the composer under a log needs — the aim row, the key row, the field.
@@ -95,17 +109,29 @@ pub(crate) fn chat(
     draft: &mut String,
     aimed: &mut Aimed,
     seal: &mut bool,
+    listing: &mut Listing,
     out: &mut MessageWriter<Requested>,
 ) {
-    // Everyone this ship has talked to, most recent first, then everyone in sight it has not.
-    // The second half is how a conversation starts at all.
-    let mut parties: Vec<(lc_proto::ShipId, String)> =
-        uplink.chat.conversations().into_iter().map(|(id, c)| (id, c.name.clone())).collect();
-    for contact in &uplink.contacts {
-        if !parties.iter().any(|(id, _)| *id == contact.ship_id) {
-            parties.push((contact.ship_id, contact.name.clone()));
+    // Faction chats and craft together, most recently heard first; then everyone in sight never
+    // spoken to, which is how a conversation starts at all.
+    let mut entries: Vec<(f64, Channel, String)> = Vec::new();
+    if listing.group {
+        for (key, faction) in uplink.chat.factions() {
+            let label = faction_label(uplink, key, faction, forked(uplink, key));
+            entries.push((faction.last_at(), Channel::Faction(key), label));
         }
     }
+    if listing.direct {
+        for (id, c) in uplink.chat.conversations() {
+            entries.push((c.last_at(), Channel::With(id), c.name.clone()));
+        }
+        for contact in &uplink.contacts {
+            if !entries.iter().any(|(_, ch, _)| *ch == Channel::With(contact.ship_id)) {
+                entries.push((f64::NEG_INFINITY, Channel::With(contact.ship_id), contact.name.clone()));
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
 
     // What this ship is called, for its own lines. The account's name as the broker knows it,
     // which is what every other craft sees on its contact list.
@@ -124,9 +150,18 @@ pub(crate) fn chat(
             egui::vec2(LIST_WIDTH, BODY_HEIGHT),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+            ui.horizontal(|ui| {
+                ui.toggle_value(&mut listing.group, "Group");
+                ui.toggle_value(&mut listing.direct, "Direct");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.selectable_label(showing == Channel::Founding, "+").clicked() {
+                        ask(out, Action::ChatWith(Channel::Founding));
+                    }
+                });
+            });
             egui::ScrollArea::vertical()
                 .id_salt("chat_parties")
-                .max_height(BODY_HEIGHT)
+                .max_height(BODY_HEIGHT - LIST_HEADER)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                 ui.set_min_width(LIST_WIDTH - 8.0);
@@ -134,10 +169,11 @@ pub(crate) fn chat(
                 // of its own name. A list whose click targets are each a different size reads
                 // as a pile of labels; one where they line up reads as a list.
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                if ui
-                    .selectable_label(showing == Channel::Public, "Public")
-                    .on_hover_text("broadcasts: everything said to nobody in particular")
-                    .clicked()
+                if listing.group
+                    && ui
+                        .selectable_label(showing == Channel::Public, "Public")
+                        .on_hover_text("broadcasts: everything said to nobody in particular")
+                        .clicked()
                 {
                     ask(out, Action::ChatWith(Channel::Public));
                 }
@@ -152,34 +188,23 @@ pub(crate) fn chat(
                     ask(out, Action::ChatWith(Channel::Overheard));
                 }
                 ui.separator();
-                for (key, faction) in uplink.chat.factions() {
-                    if ui.selectable_label(showing == Channel::Faction(key), faction_label(uplink, key, faction, forked(uplink, key))).clicked() {
-                        ask(out, Action::ChatWith(Channel::Faction(key)));
-                    }
-                }
-                if ui.selectable_label(showing == Channel::Founding, "found faction").clicked() {
-                    ask(out, Action::ChatWith(Channel::Founding));
-                }
-                ui.separator();
-                for (id, name) in &parties {
-                    let in_sight = uplink.contacts.iter().any(|c| c.ship_id == *id);
-                    let label = ui
-                        .selectable_label(showing == Channel::With(*id), name.as_str())
-                        .on_hover_text(match in_sight {
+                for (_, channel, label) in &entries {
+                    let mut item = ui.selectable_label(showing == *channel, label.as_str());
+                    if let Channel::With(id) = channel {
+                        let in_sight = uplink.contacts.iter().any(|c| c.ship_id == *id);
+                        item = item.on_hover_text(match in_sight {
                             true => "in sight",
                             // Said, because it decides whether a beam can be aimed and whether
                             // a reply is years or minutes away.
                             false => "out of sight; still worth writing to",
                         });
-                    if label.clicked() {
-                        ask(out, Action::ChatWith(Channel::With(*id)));
+                    }
+                    if item.clicked() {
+                        ask(out, Action::ChatWith(*channel));
                     }
                 }
-                if parties.is_empty() {
-                    ui.weak(match game.remote {
-                        true => "nobody yet",
-                        false => "no server",
-                    });
+                if entries.is_empty() && !game.remote {
+                    ui.weak("no server");
                 }
                 });
             });

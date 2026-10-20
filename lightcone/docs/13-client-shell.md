@@ -142,12 +142,15 @@ able to watch a curve and fly at the same time.
 
 ### The communications window
 
-**A list of craft on the left, one log on the right.** Everything in it is minutes to years old
+**A list of chats on the left, one log on the right.** Everything in it is minutes to years old
 and there is no typing indicator to be had, so the interface that suits it is a log with a
 selector rather than a messaging app pretending the far end is present.
 
-The list is ordered **most recently heard from first**, which is how a player finds the
-conversation they are in the middle of. The cost is worth naming: a list that reorders itself can
+Faction chats and conversations with craft are one list, ordered **most recently heard from
+first**, which is how a player finds the conversation they are in the middle of. Above it, two
+toggles, **Group** and **Direct**, both on to begin with: Group shows faction chats and Public,
+Direct shows conversations with craft. Overheard is always shown, and `+` beside the toggles
+founds a faction. The cost is worth naming: a list that reorders itself can
 be misclicked, and it reorders exactly when a message lands.
 
 Two channels are pinned above the craft, and **which of the three a message lands in is decided
@@ -161,9 +164,8 @@ by who it was addressed to, never by who sent it**:
 | this ship | that craft's conversation |
 | another craft | **Overheard** |
 
-Faction chats are listed between the pinned channels and the craft, by name rather than by
-recency, because which key a message goes out under is the decision that leaks. Every key is
-shown with its generation, the first included: the mechanic is meant to be seen. A chat under a
+Every faction key is shown with its generation, the first included: the mechanic is meant to be
+seen. A chat under a
 key this ship holds a later generation of carries a line per newer key above its log, outside the
 scroll, naming the key and its founder and opening its chat. Re-keying and sending a survey are in
 the menu at the end of a faction's action row; in Public and in a conversation with one craft,

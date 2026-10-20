@@ -129,6 +129,11 @@ pub struct FactionChat {
 }
 
 impl FactionChat {
+    /// When this ship last learned anything here, coordinate seconds, as [`Conversation::last_at`].
+    pub fn last_at(&self) -> f64 {
+        self.lines.last().map_or(f64::NEG_INFINITY, |loose| when(&loose.line))
+    }
+
     pub fn generation(&self) -> u32 {
         self.lineage.len() as u32 + 1
     }
