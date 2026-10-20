@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 
 use lc_world::craft::{Craft, CraftId, Fleet};
+use lc_spacetime::Worldline;
 use lc_world::signal::Beam;
 
 use crate::journal::{Journal, JournalError};
@@ -129,12 +130,6 @@ impl Fronts {
         std::mem::take(&mut self.unkept)
     }
 
-    /// Hand back what the journal could not keep, to be tried with the next.
-    pub fn unkeep(&mut self, mut fronts: Vec<Front>) {
-        fronts.append(&mut self.unkept);
-        self.unkept = fronts;
-    }
-
     /// Every landing in `(after_t, now_t]` on any craft in `fleet`, in arrival order.
     pub fn sweep(&mut self, fleet: &Fleet, after_t: i64, now_t: i64) -> Vec<Crossing> {
         let mut found = Vec::new();
@@ -144,11 +139,17 @@ impl Fronts {
         for craft in fleet.iter() {
             let here = craft.position_at(now_t as f64);
             let lands = |front: &Front| front.event.t as f64 + (here - front.event.at).length();
+            // A jump in the window puts the craft further from where it is now than the width, so
+            // for that tick it is asked of every front. Jumps are rare and a tick is short.
+            let jumped = craft.worldline().breaks().iter().any(|&t| t > after_t as f64 && t <= now_t as f64);
             for run in &self.runs {
-                let from = run.partition_point(|&i| lands(&self.live[i]) <= after_t as f64 - width);
+                let from = match jumped {
+                    true => 0,
+                    false => run.partition_point(|&i| lands(&self.live[i]) <= after_t as f64 - width),
+                };
                 for &index in &run[from..] {
                     let front = &self.live[index];
-                    if lands(front) > now_t as f64 + width {
+                    if !jumped && lands(front) > now_t as f64 + width {
                         break;
                     }
                     if front.until_t < after_t {
@@ -248,6 +249,8 @@ struct Spread {
 
 #[cfg(feature = "storage")]
 impl Front {
+    /// `None`, said, when it cannot be kept: an id no store can hold, or a spread that will not
+    /// serialize.
     pub(crate) fn to_row(&self) -> Option<lc_store::fronts::Front> {
         let spread = Spread {
             at: self.event.at.to_array(),
@@ -257,7 +260,7 @@ impl Front {
             also: self.also.iter().map(|c| c.0).collect(),
             deaf: self.deaf.map(|c| c.0),
         };
-        Some(lc_store::fronts::Front {
+        let kept = || -> Option<lc_store::fronts::Front> { Some(lc_store::fronts::Front {
             event: lc_store::store::Event {
                 id: lc_store::id::EventId::from_raw(self.event.id)?,
                 source_id: self.event.source.0,
@@ -270,7 +273,12 @@ impl Front {
             },
             until_t: self.until_t,
             spread: serde_json::to_string(&spread).ok()?,
-        })
+        }) };
+        let row = kept();
+        if row.is_none() {
+            eprintln!("WARNING: the light of event {} cannot be kept; a restart will not follow it", self.event.id);
+        }
+        row
     }
 
     /// The front a kept row was, with what it said if it was speech.
@@ -329,12 +337,13 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Hand the journal the fronts made this tick, keeping them to try again if it will not take
-    /// them.
-    pub(crate) async fn keep_fronts(&mut self) -> Result<(), JournalError> {
+    /// Journal this tick: its events, the light that landed in it and the light it put out. A
+    /// tick the journal would not take keeps none of its light, because its events are lost.
+    pub(crate) async fn journal_tick(&mut self, events: &[Event]) -> Result<(), JournalError> {
+        let deliveries = self.fronts.take_crossed();
         let made = self.fronts.take_unkept();
-        if let Err(why) = self.journal.keep_fronts(&made).await {
-            self.fronts.unkeep(made);
+        if let Err(why) = self.journal.write(events, &deliveries, &made).await {
+            self.fronts.withdraw(&events.iter().map(|e| e.id).collect::<Vec<_>>());
             return Err(why);
         }
         Ok(())
@@ -437,8 +446,9 @@ mod tests {
     }
 
     /// The runs are an index and nothing more: swept a tick at a time they find exactly the landings
-    /// a check of every front against every craft finds, with sources scattered through deep
-    /// space, moving at up to most of `c`, and one that jumps.
+    /// a check of every front against every craft finds. Sources scattered over light-hours and
+    /// moving at 0.9c, one of them jumping; half the craft closing on a source at 0.9c, which is
+    /// what the window's margin is for; and a craft that jumps in the middle of a tick.
     #[test]
     fn the_runs_find_what_checking_every_front_finds() {
         use lc_world::craft::Fleet;
@@ -453,14 +463,20 @@ mod tests {
             (seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
         };
         let span = 4.0 * LIGHT_HOUR_US;
+        let starts: Vec<DVec3> = (0..5).map(|_| DVec3::new(unit(), unit(), unit()) * span).collect();
         let mut fleet = Fleet::new();
         for id in 1..=6 {
-            fleet.insert(still(ShipId(id), DVec3::new(unit(), unit(), unit()) * span));
+            let at = DVec3::new(unit(), unit(), unit()) * span;
+            match id % 2 {
+                0 => fleet.insert(crate::world::coasting(ShipId(id), at, (starts[0] - at).normalize() * 0.9, 0)),
+                _ => fleet.insert(still(ShipId(id), at)),
+            }
         }
         let (step, tick) = (60_000_000_i64, 300_000_000_i64);
+        let jumper = CraftId(1);
         let mut fronts = Vec::new();
         for source in 0..5_i64 {
-            let mut at = DVec3::new(unit(), unit(), unit()) * span;
+            let mut at = starts[source as usize];
             let velocity = DVec3::new(unit(), unit(), unit()).normalize() * 0.9;
             for k in 0..40_i64 {
                 let t = k * step;
@@ -476,6 +492,15 @@ mod tests {
             }
         }
 
+        // A microsecond after light lands on it, in the same tick, so what landed before the jump
+        // is somewhere the craft no longer is.
+        let jump_t = fronts
+            .iter()
+            .filter_map(|f| schedule(&f.event, &Beam::OMNI, fleet.get(jumper).unwrap()))
+            .map(|l| l.arrive_t + 1)
+            .filter(|t| (t + 1).rem_euclid(tick) > 1)
+            .min()
+            .expect("premise: light lands on the jumper");
         let mut index = Fronts::default();
         let mut found = Vec::new();
         let mut now = -1;
@@ -484,6 +509,11 @@ mod tests {
         while now < end {
             let after = now;
             now += tick;
+            if jump_t > after && jump_t <= now {
+                let craft = fleet.get_mut(jumper).unwrap();
+                let landing_ly = (craft.position_at(jump_t as f64) + DVec3::Y * 2.0 * LIGHT_HOUR_US) / LIGHT_US_PER_LY;
+                craft.teleport_drifting(None, landing_ly, DVec3::ZERO, jump_t as f64 * 1.0e-6);
+            }
             for front in fronts.iter().filter(|f| f.event.t > after && f.event.t <= now) {
                 index.launch(front.clone());
                 launched += 1;

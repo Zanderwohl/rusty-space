@@ -111,7 +111,7 @@ async fn a_month_of_real_time_holds_a_bounded_number_of_partitions() {
         if hour == FAR_HOUR {
             deliveries.push(heard(4, beacon.as_ref().unwrap(), now));
         }
-        journal.write(&[event], &deliveries).await.unwrap();
+        journal.write(&[event], &deliveries, &[]).await.unwrap();
         lc_store::fronts::save(journal.client(), &[kept]).await.unwrap();
 
         let swept = sweep(journal.client(), now, RETENTION).await.unwrap();
@@ -223,7 +223,7 @@ async fn a_store_from_before_the_wider_span_keeps_taking_writes() {
     for t in [now, PARTITION_SPAN_US * 2 - OLD_SPAN_US / 2, late] {
         let event = said(&mut minter, t);
         let arrival = heard(2, &event, t + 1);
-        journal.write(&[event], &[arrival]).await.unwrap();
+        journal.write(&[event], &[arrival], &[]).await.unwrap();
     }
     let names: Vec<String> = journal
         .client()

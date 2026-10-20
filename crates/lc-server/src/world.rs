@@ -314,7 +314,12 @@ pub const CANCEL_MARGIN: f64 = 1.1;
 /// How far an event's light carries along its beam's axis before it is fainter than [`FAINTEST`],
 /// light-microseconds. Never past the edge of the world.
 pub fn reach_us(power_w: f64, beam: &Beam) -> f64 {
-    (power_w.max(0.0) * beam.gain() / FAINTEST as f64).sqrt().min(lc_spacetime::COORD_BOUND as f64)
+    // Not `max(0.0)`: zero watts through a zero-width beam is 0 * inf, NaN, which `min` would
+    // turn into the edge of the world.
+    if power_w <= 0.0 {
+        return 0.0;
+    }
+    (power_w * beam.gain() / FAINTEST as f64).sqrt().min(lc_spacetime::COORD_BOUND as f64)
 }
 
 /// When an event's light reaches a ship, and how strong it is when it does.

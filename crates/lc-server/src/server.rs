@@ -533,9 +533,7 @@ impl<J: Journal> Server<J> {
         self.stages.mark("scene");
         self.land_reports();
         self.stages.mark("landings");
-        let deliveries = self.fronts.take_crossed();
-        self.journal.write(&events, &deliveries).await?;
-        self.keep_fronts().await?;
+        self.journal_tick(&events).await?;
         self.write_conversations().await?;
         self.stages.mark("journal");
         self.pending = events;

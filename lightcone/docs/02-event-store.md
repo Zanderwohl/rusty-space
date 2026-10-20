@@ -103,8 +103,9 @@ CREATE INDEX events_t_brin ON events USING brin (t) WITH (pages_per_range = 32);
 Partitions are 360-day spans of coordinate time (`lc_partition_span()`), numbered by floor
 division rather than named after months, because coordinate time has no calendar. At 8766x one
 span is about a real hour, so maintenance cannot be a cron job: the tick keeps two spans made
-ahead of now (`lc_server::journal::PREPARE_AHEAD_US`), and a delivery landing further away gets
-its own partition when it is written.
+ahead of now (`lc_server::journal::PREPARE_AHEAD_US`). Deliveries are written as light lands, so
+none is ever ahead of that; a row behind it, an order stamped as far back as its client's cursor,
+gets its own partition when it is written.
 
 They were thirty days until a dev shard had run for a month and held 7 725 partitions of each
 table, which `pg_dump` and the shard's own boot query could no longer lock. A tick's window is
@@ -177,12 +178,22 @@ light-cone query above, so it has the same answer: index by source, not by place
 source slower than light reaches any point in the order it left, because `t + |x - w(t)|` rises with
 `t` along a subluminal worldline. So a source's fronts in order of emission are in order of arrival
 at every craft, and a craft finds what lands on it in a tick by one binary search per source; the
-exact solve (`schedule`) decides each candidate. A jump would break the order, so a front that
-would is put in a run of its own. A tick costs about `s · σ · log f` for `s` craft, `σ` sources
+exact solve (`schedule`) decides each candidate. A source's jump would break the order, so a front
+that would is put in a run of its own; a craft that jumps during a tick is further from where it
+ends the tick than the search allows for, so for that tick it is asked of every front. A tick costs
+about `s · σ · log f` for `s` craft, `σ` sources
 with light in flight and `f` fronts, plus the landings themselves, however the sources are spread.
 A tree over where and when would cut through about `f^(3/4)` of its leaves for the same question.
 Pruning the `s · σ` pairs is what a bounding hierarchy over sources (`lc_store::bvh`) is for, once
-there are hundreds of ships. Faded fronts are dropped every minute. Each front is kept
+there are hundreds of ships. Faded fronts are dropped every minute.
+
+How many fronts there are is the event rate times how long each lives, and the brightest common
+events set it. A burn (`BURN_POWER_W`, 1e12 W) is followed for three hundred years, about two
+real weeks at the design rate; a drive at 1e15 W or more for nearly ten thousand, about a real
+year; a narrow beam to the edge of the world. So `f` is every drive and emit restatement over up to
+a real year, not a day's traffic, and it is held in memory and in `lc_fronts` for that long.
+
+Each front is kept
 in `lc_fronts` with a copy of its event, so a shard that comes back follows the same light on
 (`Server::resume_fronts`), and a delivery found centuries on can be read after its event's own
 partition has been archived.
@@ -344,8 +355,15 @@ on the cursor running on the shard; until then only deliveries read events.
   partition and records its bounds; `lc_attach_partition` makes it again and moves them back.
   One archive table rather than the detached partition left standing, because `pg_dump` locks
   every table, and a partition an hour detached is a table an hour.
-- One sweep retires at most `most` partitions, each a brief lock on its parent, so a store
-  thousands behind is caught up over an hour or two of checkpoints rather than in one stall.
+- One sweep retires at most `most` partitions, each its own transaction and a brief lock on its
+  parent. A shard coming back to a store thousands behind sweeps until there is nothing left,
+  before it serves anyone: until then every tick's read is planned against every partition and
+  asks for a lock on each.
+
+A store with thousands of partitions also has to be migrated without asking for that many locks
+in one transaction. Seeding `lc_last_event` reads the newest partition holding any events and stops;
+unpartitioning `lc_samples` moves each partition's rows across and drops it, a transaction each,
+before the step that swaps the tables (`lc_store::migrate`).
 
 Shipping the archive to object storage is a deployment's job — it needs a bucket — so the crate
 records *where it went* and stops there, because that is the part a restore needs to survive a

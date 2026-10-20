@@ -41,11 +41,14 @@ pub trait Journal {
         to_t: i64,
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
-    /// Append events, and the deliveries of light that landed this tick.
+    /// Append events, the deliveries of light that landed this tick, and the light this tick put
+    /// out, so a shard that comes back follows it on (see [`crate::front`]). All or none: light
+    /// kept for an event that was not would be sightings of something the journal never had.
     fn write(
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
     /// What reaches one observer in `(after_t, until_t]`, in arrival order, with the event each
@@ -59,13 +62,6 @@ pub trait Journal {
         after_t: i64,
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
-
-    /// Keep light the shard is following, so a shard that comes back follows it on. See
-    /// [`crate::front`].
-    fn keep_fronts(
-        &mut self,
-        fronts: &[crate::front::Front],
-    ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
     /// Every front something could still detect at `now_t`, with what was said for any that are
     /// speech. Read once, when a shard comes back.
@@ -149,6 +145,7 @@ impl Journal for Memory {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
         // The payload column is `jsonb`, so a payload that is not JSON is a row the real
         // journal refuses. A fake that took it let a burn built with `format!` out of a
@@ -163,6 +160,7 @@ impl Journal for Memory {
         }
         self.events.extend_from_slice(events);
         self.deliveries.extend_from_slice(deliveries);
+        self.fronts.extend_from_slice(fronts);
         Ok(())
     }
 
@@ -182,11 +180,6 @@ impl Journal for Memory {
             .collect();
         out.sort_by_key(|(d, _)| d.arrive_t);
         Ok(out)
-    }
-
-    async fn keep_fronts(&mut self, fronts: &[crate::front::Front]) -> Result<(), JournalError> {
-        self.fronts.extend_from_slice(fronts);
-        Ok(())
     }
 
     async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
@@ -287,6 +280,7 @@ mod tests {
                     Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0 },
                     Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0 },
                 ],
+                &[],
             )
             .await
             .unwrap();
@@ -306,7 +300,7 @@ mod tests {
     async fn a_delivery_with_no_event_is_dropped() {
         let mut journal = Memory::default();
         journal
-            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }])
+            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }], &[])
             .await
             .unwrap();
         assert!(journal.due(ShipId(9), 0, 1_000).await.unwrap().is_empty());

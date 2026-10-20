@@ -86,7 +86,7 @@ meaning, and a file at any other version is refused rather than read: there are 
 | what | where |
 |---|---|
 | files | `lc_knowledge`, one row per craft per subject, CBOR with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql`. CBOR because it is exact for f64, which JSON is not, and names its fields, which postcard does not, so a field added to a file needs no format bump. The subject, a key matched byte for byte across files, samples and discards, stays postcard |
-| samples | `lc_samples`, one table. It was partitioned by learned time until 0017: what it holds leaves by key, never by age, so a partition per span gave retention nothing to take. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
+| samples | `lc_samples`, one table. It was partitioned by learned time until 0018: what it holds leaves by key, never by age, so a partition per span gave retention nothing to take. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
 | duty and report marks | the ship checkpoint, `persist::Saved::instruments`, `persist::SAVE_FORMAT` |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, the samples taken, and the samples consumed to delete. All of it, the ships and the bookmarks go in one transaction, and a failed one hands everything back to be written next time |
 | what a client is sent | its craft's knowledge in byte-bounded pages, as `Learned` reports and `Logged` pages of its own samples, each under `lc_proto::FRAME_LIMIT`, which both ends of the websocket state |

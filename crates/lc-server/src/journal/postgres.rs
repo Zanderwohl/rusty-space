@@ -107,6 +107,7 @@ impl Journal for Postgres {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
         // Every id here was minted, so `from_raw` cannot refuse one; if it somehow did, the event
         // is not written rather than the shard stopping.
@@ -135,7 +136,6 @@ impl Journal for Postgres {
                 .chain(deliveries.iter().map(|d| ("deliveries", d.arrive_t))),
         )
         .await?;
-        lc_store::store::insert_events(&self.client, &rows).await?;
 
         let scheduled: Vec<lc_store::store::Delivery> = deliveries
             .iter()
@@ -148,8 +148,21 @@ impl Journal for Postgres {
                 })
             })
             .collect();
-        lc_store::store::insert_deliveries(&self.client, &scheduled).await?;
-        Ok(())
+        let kept: Vec<lc_store::fronts::Front> = fronts.iter().filter_map(crate::front::Front::to_row).collect();
+        self.client.batch_execute("BEGIN").await?;
+        let written = async {
+            lc_store::store::insert_events(&self.client, &rows).await?;
+            lc_store::store::insert_deliveries(&self.client, &scheduled).await?;
+            lc_store::fronts::save(&self.client, &kept).await
+        }
+        .await;
+        match written {
+            Ok(_) => Ok(self.client.batch_execute("COMMIT").await?),
+            Err(why) => {
+                let _ = self.client.batch_execute("ROLLBACK").await;
+                Err(why.into())
+            }
+        }
     }
 
     async fn due(
@@ -218,12 +231,6 @@ impl Journal for Postgres {
             ));
         }
         Ok(out)
-    }
-
-    async fn keep_fronts(&mut self, fronts: &[crate::front::Front]) -> Result<(), JournalError> {
-        let rows: Vec<lc_store::fronts::Front> = fronts.iter().filter_map(crate::front::Front::to_row).collect();
-        lc_store::fronts::save(&self.client, &rows).await?;
-        Ok(())
     }
 
     async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
@@ -299,8 +306,9 @@ impl Journal for Store {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
-        either!(self, write(events, deliveries))
+        either!(self, write(events, deliveries, fronts))
     }
 
     async fn due(
@@ -310,10 +318,6 @@ impl Journal for Store {
         until_t: i64,
     ) -> Result<Vec<(Scheduled, Event)>, JournalError> {
         either!(self, due(observer, after_t, until_t))
-    }
-
-    async fn keep_fronts(&mut self, fronts: &[crate::front::Front]) -> Result<(), JournalError> {
-        either!(self, keep_fronts(fronts))
     }
 
     async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {

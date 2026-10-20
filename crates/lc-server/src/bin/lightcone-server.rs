@@ -260,6 +260,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+    if let Some(client) = &store {
+        catch_up(client, server.now_t()).await;
+    }
 
     let mut wire = WebSocketServer::bind(&bind).await?;
     eprintln!("listening on {}", wire.local_addr);
@@ -452,6 +455,35 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
             swept.fronts,
         ),
         Err(why) => eprintln!("ERROR: retention failed: {}", lc_server::journal::JournalError::from(why)),
+    }
+}
+
+/// Work off whatever retention is behind before serving anyone, a sweep at a time.
+///
+/// A store that went without retention can hold thousands of partitions, and until they are gone
+/// every read planned against all of them, which is every tick's, asks for a lock on each.
+async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
+    let started = std::time::Instant::now();
+    let (mut sweeps, mut dropped, mut archived) = (0, 0, 0);
+    loop {
+        match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+            Ok(swept) if swept.is_empty() => break,
+            Ok(swept) => {
+                sweeps += 1;
+                dropped += swept.dropped.len();
+                archived += swept.archived.len();
+            }
+            Err(why) => {
+                eprintln!("ERROR: retention could not catch up: {}", lc_server::journal::JournalError::from(why));
+                return;
+            }
+        }
+    }
+    if sweeps > 0 {
+        eprintln!(
+            "retention caught up in {sweeps} sweeps and {:.0} s: dropped {dropped} delivery and archived {archived} event partitions",
+            started.elapsed().as_secs_f64(),
+        );
     }
 }
 

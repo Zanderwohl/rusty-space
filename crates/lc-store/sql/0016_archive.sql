@@ -70,3 +70,16 @@ BEGIN
     EXECUTE format('DROP TABLE %I', child_name);
     RETURN true;
 END $$;
+
+-- Whether any delivery still kept refers to an event in this range.
+--
+-- Restated for what retention now passes as `now_t`: its cutoff, not the clock. A delivery kept
+-- for a client catching up is about its event as much as one in flight, so both hold its
+-- partition. Scoped to `arrive_t >= now_t`, so pruning leaves only the kept partitions.
+CREATE OR REPLACE FUNCTION lc_has_pending_deliveries(from_t bigint, to_t bigint, now_t bigint)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM deliveries d, lc_id_range(from_t, to_t) r
+         WHERE d.arrive_t >= now_t AND d.event_id BETWEEN r.lo AND r.hi
+    );
+$$;

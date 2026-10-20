@@ -23,9 +23,10 @@ pub const STEPS: &[(&str, &str)] =
         ("0013_presets", include_str!("../sql/0013_presets.sql")),
         ("0015_partition_span", include_str!("../sql/0015_partition_span.sql")),
         ("0016_archive", include_str!("../sql/0016_archive.sql")),
-        ("0017_samples_unpartitioned", include_str!("../sql/0017_samples_unpartitioned.sql")),
-        ("0018_last_event", include_str!("../sql/0018_last_event.sql")),
-        ("0019_fronts", include_str!("../sql/0019_fronts.sql")),
+        ("0017_samples_whole", include_str!("../sql/0017_samples_whole.sql")),
+        ("0018_samples_unpartitioned", include_str!("../sql/0018_samples_unpartitioned.sql")),
+        ("0019_last_event", include_str!("../sql/0019_last_event.sql")),
+        ("0020_fronts", include_str!("../sql/0020_fronts.sql")),
     ];
 
 /// The advisory lock every migrator takes before touching the schema.
@@ -65,6 +66,7 @@ async fn apply_locked(client: &Client) -> Result<Vec<&'static str>, tokio_postgr
         if done {
             continue;
         }
+        before(client, name).await?;
         // One transaction per step: a step that fails half way leaves nothing behind, and the
         // record of it only exists if the whole of it ran.
         client.batch_execute("BEGIN").await?;
@@ -80,6 +82,32 @@ async fn apply_locked(client: &Client) -> Result<Vec<&'static str>, tokio_postgr
         ran.push(*name);
     }
     Ok(ran)
+}
+
+/// What a step needs done in many transactions before its own one.
+///
+/// A step that touched every partition of a table in its one transaction would hold a lock on each
+/// until it committed, and a store with thousands of them has not got that many: which is how the
+/// stores that most need these steps came to need them.
+async fn before(client: &Client, step: &str) -> Result<(), tokio_postgres::Error> {
+    if step != "0018_samples_unpartitioned" {
+        return Ok(());
+    }
+    for partition in crate::retention::partitions(client, "lc_samples").await? {
+        client
+            .batch_execute(&format!(
+                "BEGIN;
+                 INSERT INTO lc_samples_whole
+                 SELECT ship_id, subject, witness, band, observed_s, learned_t, deficit, sigma
+                   FROM \"{child}\"
+                 ON CONFLICT DO NOTHING;
+                 DROP TABLE \"{child}\";
+                 COMMIT;",
+                child = partition.child,
+            ))
+            .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -459,3 +459,39 @@ async fn an_event_that_puts_out_nothing_is_seen_by_what_it_stops() {
     assert!(dark > 0.0 && (dark - crate::world::CANCEL_MARGIN * glow).abs() <= 1.0e-9 * dark, "{dark} against {glow}");
     assert_eq!(server.seen_w(CraftId(2), at, 5.0), 5.0, "a power of its own is its own");
 }
+
+/// A drive cut by order puts out nothing, and is seen as far as the drive it cut and a tenth again,
+/// so a watcher that saw the burn hears the cut. The order rewrites the course first; what the cut
+/// is seen by is the drive as it ran just before.
+#[tokio::test]
+async fn a_watcher_that_saw_the_burn_hears_the_cut() {
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.set_rate(ticking(60.0));
+    server.admit(ClientId(1), crossing(anvil(1), 1.0, 1.0e13), 0.0);
+    let far = DVec3::Y * LIGHT_HOUR_US;
+    server.admit(ClientId(2), ship(2, far, Form::starting()), 0.0);
+    let mut wire = Loopback::new();
+    until(&mut server, &mut wire, 120.0e6).await;
+    let burning = server.ship(ShipId(1)).unwrap().clone();
+
+    wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CutDrive, issued_at_client_t: i64::MAX }));
+    server.tick(&mut wire).await.unwrap();
+    let cut = server.journal().events.iter().find(|e| e.kind == crate::server::KIND_CUT).expect("the cut was ordered").clone();
+    let drive_w = lc_world::ignition::putting_out_w(&burning, &Balance::DEFAULT, cut.t as f64 * 1.0e-6);
+    assert!(drive_w > 1.0e15, "premise: the drive ran at {drive_w} W");
+    assert_eq!(cut.power_w, crate::world::CANCEL_MARGIN * drive_w);
+
+    let arrive_t = (cut.t as f64 + (far - cut.at).length()).ceil() as i64;
+    until(&mut server, &mut wire, arrive_t as f64 + 2.0 * 60.0e6).await;
+    let heard: Vec<i64> = wire
+        .take(ClientId(2))
+        .into_iter()
+        .flat_map(|m| match m {
+            Outbound::Sightings(list) => list.into_iter().map(|s| s.get().clone()).collect(),
+            _ => Vec::new(),
+        })
+        .filter(|s| s.kind == crate::server::KIND_CUT && s.source_id == 1)
+        .map(|s| s.arrive_t)
+        .collect();
+    assert_eq!(heard, vec![arrive_t]);
+}
