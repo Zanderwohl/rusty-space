@@ -1,7 +1,7 @@
-//! Events whose light a shard is still following, kept so a shard that comes back follows it on.
+//! Events whose light a shard is still following, so a restarted shard follows it on.
 //!
-//! The event is copied whole: a delivery found decades after the event still has to be read after
-//! the event's own partition has been archived. See `lightcone/docs/02-event-store.md`.
+//! The event is copied whole: a delivery found decades later is read after the event's own
+//! partition has been archived. See `lightcone/docs/02-event-store.md`.
 
 use tokio_postgres::{Client, Error, GenericClient};
 
@@ -14,12 +14,11 @@ pub struct Front {
     pub event: Event,
     /// Coordinate microseconds after which nothing can detect it.
     pub until_t: i64,
-    /// How it spreads and who hears it, as JSON the shard writes and reads. This crate has no
-    /// opinion about it.
+    /// JSON the shard writes and reads; opaque here.
     pub spread: String,
 }
 
-/// Keep fronts. One already kept is left as it was.
+/// One already kept is left as it was.
 pub async fn save(client: &impl GenericClient, fronts: &[Front]) -> Result<u64, Error> {
     if fronts.is_empty() {
         return Ok(0);
@@ -74,7 +73,7 @@ pub async fn live(client: &Client, now_t: i64) -> Result<Vec<Front>, Error> {
     Ok(rows.iter().filter_map(front_from).collect())
 }
 
-/// The fronts of these events, for the ones the events table no longer holds.
+/// For events the events table no longer holds.
 pub async fn of(client: &Client, event_ids: &[i64]) -> Result<Vec<Front>, Error> {
     let rows = client
         .query(&format!("SELECT {COLUMNS} FROM lc_fronts WHERE event_id = ANY($1)"), &[&event_ids])
@@ -82,7 +81,6 @@ pub async fn of(client: &Client, event_ids: &[i64]) -> Result<Vec<Front>, Error>
     Ok(rows.iter().filter_map(front_from).collect())
 }
 
-/// Forget fronts that faded before `before_t`.
 pub async fn forget(client: &Client, before_t: i64) -> Result<u64, Error> {
     client.execute("DELETE FROM lc_fronts WHERE until_t < $1", &[&before_t]).await
 }
@@ -98,7 +96,7 @@ mod tests {
         Some(client)
     }
 
-    /// Kept whole, found by its id, and forgotten once it has faded and not before.
+    /// Kept whole, found by id, and forgotten once faded and not before.
     #[tokio::test]
     async fn a_front_is_kept_until_it_fades() {
         let Some(client) = store().await else { return };

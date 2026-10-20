@@ -1,9 +1,5 @@
--- Detaching a partition folds its rows into one archive table per parent and drops it.
---
--- A detached partition used to stay behind as a table of its own. Retention on a schedule
--- detaches one an hour, and `pg_dump` locks every table it dumps, so that was the same unbounded
--- growth moved out of the partition list. The rows are kept, which is what replays and the god
--- view need; the tables are not.
+-- Detaching a partition folds its rows into one archive table per parent and drops it: replays
+-- need the rows, and a table left standing per detach is a table an hour for `pg_dump` to lock.
 CREATE OR REPLACE FUNCTION lc_detach_partition(table_name text, child_name text)
 RETURNS boolean LANGUAGE plpgsql AS $$
 DECLARE
@@ -24,9 +20,8 @@ BEGIN
     RETURN true;
 END $$;
 
--- Put one back: make the partition again and move its rows out of the archive.
---
--- A table still standing under the name was detached before this step, and is attached as it is.
+-- Put one back from the archive. A table still standing under the name was detached by 0003 and is
+-- attached as it is.
 CREATE OR REPLACE FUNCTION lc_attach_partition(child_name text)
 RETURNS boolean LANGUAGE plpgsql AS $$
 DECLARE
@@ -57,8 +52,7 @@ BEGIN
     RETURN true;
 END $$;
 
--- Drop one partition outright. For deliveries: one that has landed and been read is kept only
--- for a client catching up, and the event it was about still says everything it said.
+-- Drop one partition outright. For deliveries, which the events they are about make redundant.
 CREATE OR REPLACE FUNCTION lc_drop_partition(table_name text, child_name text)
 RETURNS boolean LANGUAGE plpgsql AS $$
 BEGIN
@@ -71,11 +65,8 @@ BEGIN
     RETURN true;
 END $$;
 
--- Whether any delivery still kept refers to an event in this range.
---
--- Restated for what retention now passes as `now_t`: its cutoff, not the clock. A delivery kept
--- for a client catching up is about its event as much as one in flight, so both hold its
--- partition. Scoped to `arrive_t >= now_t`, so pruning leaves only the kept partitions.
+-- Whether any delivery still kept refers to an event in this range. Retention passes its cutoff as
+-- `now_t`: a delivery kept for a client catching up needs its event as much as one in flight.
 CREATE OR REPLACE FUNCTION lc_has_pending_deliveries(from_t bigint, to_t bigint, now_t bigint)
 RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT EXISTS (

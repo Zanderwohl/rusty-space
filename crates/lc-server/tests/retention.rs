@@ -1,9 +1,6 @@
-//! Retention as the shard runs it: the journal keeping partitions ahead of the clock, and a sweep
-//! taking them away behind it.
-//!
-//! In a database of its own, emptied first: a sweep retires everything behind its clock, and the
-//! shared one holds every other test's partitions. Skipped with no database, or no right to make
-//! one.
+//! Retention as the shard runs it, in a database of its own: a sweep retires everything behind its
+//! clock, and the shared one holds every other test's partitions. Skipped with no database, or no
+//! right to make one.
 
 use glam::DVec3;
 use lc_proto::ShipId;
@@ -74,14 +71,8 @@ fn front(event: &Event, reach_us: i64) -> lc_store::fronts::Front {
     }
 }
 
-/// The acceptance test. A month at the design rate is 720 coordinate years, which without
-/// retention left a partition of each table per span: 730 of them. With it the count stays where
-/// the policy puts it, whatever distance light is followed over, while everything a delivery
-/// still needs can be read.
-///
-/// Deliveries are written as light lands, so none waits ahead of the clock however far it comes.
-/// The far case is the first hour's event, bright enough to cross the galaxy: heard seven hundred
-/// light-years off at the end of the month, long after its own partition was archived.
+/// A month at the design rate, 720 coordinate years, holds a bounded number of partitions, and an
+/// event heard seven hundred years on is still read after its partition was archived.
 #[tokio::test]
 async fn a_month_of_real_time_holds_a_bounded_number_of_partitions() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -192,9 +183,8 @@ async fn a_backlog_is_worked_off_a_sweep_at_a_time() {
     assert_eq!(live(&client, "events").await, kept);
 }
 
-/// A store from before the span widened has thirty-day partitions, named `_p`, ahead of its
-/// clock as well as behind it. A wide one would overlap them, so the slot is filled out at their
-/// width, and the old ones are retired like any other.
+/// A slot holding old thirty-day partitions is filled out at their width rather than overlapping
+/// them, and the old ones retire like any other.
 #[tokio::test]
 async fn a_store_from_before_the_wider_span_keeps_taking_writes() {
     let _one = ONE_AT_A_TIME.lock().await;

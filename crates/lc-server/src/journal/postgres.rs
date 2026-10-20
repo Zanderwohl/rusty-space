@@ -23,9 +23,8 @@ pub struct Postgres {
     client: tokio_postgres::Client,
     /// The range already made ready, so the tick is one comparison rather than a round trip.
     prepared: Option<(i64, i64)>,
-    /// Slots made beyond that range, by table, for arrivals beyond it. Kept so a system talking
-    /// to itself asks once rather than every tick. Only ahead of the clock: retention takes what
-    /// is behind it, and a slot remembered there would be one the store no longer has.
+    /// Slots made beyond that range, by table. Only ahead of the clock: retention takes what is
+    /// behind it.
     distant: std::collections::HashSet<(&'static str, i64)>,
 }
 
@@ -46,11 +45,8 @@ impl Postgres {
         &self.client
     }
 
-    /// Make room for rows outside the window [`Journal::prepare`] keeps: an order stamped as far
-    /// back as its client's cursor, or a store written by an older shard. A row with no partition
-    /// is an error.
-    ///
-    /// One partition per slot rather than the range up to it, and only in the table the row goes in.
+    /// Make room for rows outside the window [`Journal::prepare`] keeps, such as an order stamped as
+    /// far back as its client's cursor. One partition per slot, in the table the row goes in.
     async fn make_room(
         &mut self,
         times: impl Iterator<Item = (&'static str, i64)>,
@@ -201,8 +197,7 @@ impl Journal for Postgres {
                 payload: row.get(7),
             })
             .collect();
-        // Light found landing long after it left is about an event whose partition may be archived
-        // by now, and the front kept a copy for exactly this.
+        // Light landing long after it left may be about an archived event; its front kept a copy.
         let missing: Vec<i64> = ids.iter().copied().filter(|id| !found.iter().any(|e| e.id == *id)).collect();
         if !missing.is_empty() {
             found.extend(lc_store::fronts::of(&self.client, &missing).await?.iter().map(|row| Event {

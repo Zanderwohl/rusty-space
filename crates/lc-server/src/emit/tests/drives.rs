@@ -441,8 +441,7 @@ async fn an_emit_flown_as_a_burn_is_said_again_as_the_ship_lightens() {
     assert!(said.windows(2).all(|w| w[1] / w[0] < 0.99 && w[1] / w[0] > 0.985), "{said:?}");
 }
 
-/// An event that puts out nothing is seen by what it stops, a tenth over: a cut by the drive it
-/// cuts, and with nothing running, by the hull's own glow.
+/// A zero-power event is seen at a tenth over what it stops, or over the hull's glow.
 #[tokio::test]
 async fn an_event_that_puts_out_nothing_is_seen_by_what_it_stops() {
     let mut server = Server::new(Memory::default(), 0, 1);
@@ -460,9 +459,8 @@ async fn an_event_that_puts_out_nothing_is_seen_by_what_it_stops() {
     assert_eq!(server.seen_w(CraftId(2), at, 5.0), 5.0, "a power of its own is its own");
 }
 
-/// A drive cut by order puts out nothing, and is seen as far as the drive it cut and a tenth again,
-/// so a watcher that saw the burn hears the cut. The order rewrites the course first; what the cut
-/// is seen by is the drive as it ran just before.
+/// A watcher that saw the burn hears the cut, which is seen by the drive as it ran before the order
+/// rewrote the course.
 #[tokio::test]
 async fn a_watcher_that_saw_the_burn_hears_the_cut() {
     let mut server = Server::new(Memory::default(), 0, 1);

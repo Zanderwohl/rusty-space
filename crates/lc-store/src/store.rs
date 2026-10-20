@@ -55,7 +55,6 @@ pub fn partition_of(t: i64) -> i64 {
     t.div_euclid(PARTITION_SPAN_US)
 }
 
-/// The tables partitioned by time.
 pub const PARTITIONED: [&str; 2] = ["events", "deliveries"];
 
 /// Create whatever partitions the range needs, on every partitioned table.
@@ -71,7 +70,6 @@ pub async fn ensure_partitions(client: &Client, from_t: i64, to_t: i64) -> Resul
     Ok(made)
 }
 
-/// The same for one table.
 #[cfg(feature = "postgres")]
 pub async fn ensure_partition(client: &Client, table: &str, from_t: i64, to_t: i64) -> Result<i32, Error> {
     let row = client
@@ -80,8 +78,8 @@ pub async fn ensure_partition(client: &Client, table: &str, from_t: i64, to_t: i
     Ok(row.get(0))
 }
 
-/// Append events, and raise each writing shard's [`last_event_id`] past them. One statement,
-/// whatever the count, so the two cannot disagree.
+/// Append events and raise each writing shard's [`last_event_id`], in one statement so the two
+/// cannot disagree.
 ///
 /// `unnest` rather than a row at a time: the write path is the one place the store is asked to
 /// keep up with a tick, and a round trip per event would make that the bottleneck instead of
@@ -141,15 +139,14 @@ pub async fn insert_events(client: &Client, events: &[Event]) -> Result<u64, Err
 /// The highest identifier any shard has written, or `None` for an empty store.
 ///
 /// Read once at boot, so a shard resuming a world does not mint identifiers it has already
-/// used. See [`crate::id::Minter::resume_from`]. From the counter [`insert_events`] keeps, not
-/// the events: it holds however many partitions the store has, archived ones included.
+/// used. See [`crate::id::Minter::resume_from`]. A counter, because `max(event_id)` is planned
+/// against every partition.
 #[cfg(feature = "postgres")]
 pub async fn last_event_id(client: &Client) -> Result<Option<EventId>, Error> {
     let row = client.query_one("SELECT max(event_id) FROM lc_last_event", &[]).await?;
     Ok(row.get::<_, Option<i64>>(0).and_then(EventId::from_raw))
 }
 
-/// Record deliveries: an event's light reaching an observer, written as it lands.
 #[cfg(feature = "postgres")]
 pub async fn insert_deliveries(client: &Client, rows: &[Delivery]) -> Result<u64, Error> {
     if rows.is_empty() {
@@ -364,8 +361,7 @@ mod tests {
         let Some(client) = store().await else { return };
         let band = 12_000i64;
         clear(&client, band).await;
-        // A slot of its own. One that still holds thirty-day partitions from before the span
-        // widened is filled out at that width, and the window would then span several.
+        // A slot of its own: one holding old thirty-day partitions would split the window.
         let base = SPAN_US * 30;
         ensure_partitions(&client, base, base + SPAN_US - 1).await.unwrap();
 
@@ -437,8 +433,7 @@ mod tests {
         clear(&client, band).await;
     }
 
-    /// The boot read is a counter rather than a scan of the events, and the statement that writes
-    /// the events is what keeps it, so the two cannot drift.
+    /// The counter moves with the events and never backwards.
     #[tokio::test]
     async fn the_last_identifier_is_kept_beside_the_events() {
         let Some(client) = store().await else { return };

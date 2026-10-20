@@ -84,11 +84,8 @@ async fn apply_locked(client: &Client) -> Result<Vec<&'static str>, tokio_postgr
     Ok(ran)
 }
 
-/// What a step needs done in many transactions before its own one.
-///
-/// A step that touched every partition of a table in its one transaction would hold a lock on each
-/// until it committed, and a store with thousands of them has not got that many: which is how the
-/// stores that most need these steps came to need them.
+/// Work a step needs done in many transactions before its own one. A step touching every partition
+/// in one transaction locks them all, and a store with thousands runs out of locks.
 async fn before(client: &Client, step: &str) -> Result<(), tokio_postgres::Error> {
     if step != "0018_samples_unpartitioned" {
         return Ok(());

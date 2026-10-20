@@ -41,9 +41,8 @@ pub trait Journal {
         to_t: i64,
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
-    /// Append events, the deliveries of light that landed this tick, and the light this tick put
-    /// out, so a shard that comes back follows it on (see [`crate::front`]). All or none: light
-    /// kept for an event that was not would be sightings of something the journal never had.
+    /// Append a tick's events, deliveries and fronts, all or none: a front kept for an event that
+    /// was not would be sightings of something the journal never had.
     fn write(
         &mut self,
         events: &[Event],
@@ -248,12 +247,10 @@ pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
 /// Coordinate microseconds in a real hour at the design rate: a Julian year.
 pub const DESIGN_HOUR_US: i64 = crate::server::TICK_US * crate::server::TICKS_PER_SECOND as i64 * 3_600;
 
-/// What the shard keeps live behind its clock. Swept after every checkpoint, so a backlog of
-/// thousands is worked off in an hour or two.
-///
-/// A real day at the design rate: a client back after a day away is still sent every sighting it
-/// missed. The first tier of `lightcone/docs/02-event-store.md`, the light-crossing time of the
-/// playable volume, is for the light-cone cursor, which the shard does not run.
+/// What the shard keeps live behind its clock: a real day at the design rate, so a client back
+/// after a day away is sent every sighting it missed. The light-crossing time of the playable
+/// volume, `02-event-store.md`'s first tier, is for the light-cone cursor, which the shard does not
+/// run.
 #[cfg(feature = "storage")]
 pub const RETENTION: lc_store::retention::Policy =
     lc_store::retention::Policy { kept_us: 24 * DESIGN_HOUR_US, most: 64 };

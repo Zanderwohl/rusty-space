@@ -1,19 +1,13 @@
 //! Light on its way, followed until it is too faint to matter.
 //!
-//! Every event's light is a sphere growing at `c` from where it happened, for as long as it is
-//! brighter than [`crate::world::FAINTEST`] somewhere it could land: its reach, which its power and
-//! beam fix the moment it happens. Each tick finds the craft the sphere's surface passed during it —
-//! whichever craft there are by then, on the courses they actually flew — and those are its
-//! deliveries. Working them out when the event was written was exact only for a craft that already
-//! existed and never changed course, and light can be thirty-six thousand years on the way.
+//! Every event's light is a sphere growing at `c`, followed until it is fainter than
+//! [`crate::world::FAINTEST`] everywhere it could land. Each tick finds the craft the sphere passed
+//! during the tick, whichever craft exist then and on the courses they actually flew.
 //!
-//! The search rests on one fact: light from a source slower than light reaches any point in the order
-//! it left, because `t + |x - w(t)|` rises with `t` along a subluminal worldline. So each source's
-//! fronts, in order of emission, are in order of arrival at every craft too, and a craft finds what
-//! lands on it this tick by a binary search per source rather than a look at every front. A jump
-//! breaks that order, so a front that would break it starts a new run. A spatial index cannot do
-//! the same: the question is a thin shell about the craft's past light cone, which a tree over
-//! where and when cuts through at `f^(3/4)` of its leaves. See `lightcone/docs/02-event-store.md`.
+//! Light from a subluminal source reaches any point in the order it left, since `t + |x - w(t)|`
+//! rises with `t`. So a source's fronts in emission order are in arrival order at every craft, and
+//! one binary search per source finds a tick's landings. A jump breaks the order, so a front that
+//! would break it starts a new run. See `lightcone/docs/02-event-store.md`.
 
 use std::collections::HashMap;
 
@@ -29,7 +23,7 @@ use crate::world::{Event, Scheduled, reach_us, schedule};
 /// Sweeps between clearing faded fronts out of the buckets. Until then they are skipped.
 const COMPACT_EVERY: u32 = 1_200;
 
-/// One event's light, and everything that hearing it does.
+/// One event's light.
 #[derive(Clone, Debug)]
 pub struct Front {
     pub event: Event,
@@ -41,8 +35,8 @@ pub struct Front {
     pub(crate) said: Option<Utterance>,
     /// Coordinate microseconds after which it is fainter than [`crate::world::FAINTEST`] everywhere.
     pub until_t: i64,
-    /// Through when its landings have been found, when that is later than the last sweep: one
-    /// crossed as it was made is not found again by the next.
+    /// Through when its landings have been found, if later than the last sweep, so a front crossed
+    /// at launch is not found again.
     found_t: i64,
 }
 
@@ -54,7 +48,6 @@ impl Front {
         Self { event, beam, also, deaf, said, until_t, found_t: i64::MIN }
     }
 
-    /// Where and when its light lands on `craft`, if it is bright enough there to be detected.
     fn landing(&self, craft: &Craft) -> Option<Scheduled> {
         if self.deaf == Some(craft.id) {
             return None;
@@ -71,13 +64,10 @@ pub struct Fronts {
     /// Indices into `live`, each run one source's fronts in order of emission and no two of them
     /// further apart than light goes between them, so in order of arrival everywhere.
     runs: Vec<Vec<usize>>,
-    /// Each source's runs, by its id.
     by_source: HashMap<i64, Vec<usize>>,
     /// Made since the last sweep. See [`Fronts::sweep_fresh`].
     fresh: Vec<Front>,
-    /// Made since the journal last kept them.
     unkept: Vec<Front>,
-    /// Landings found since the journal last wrote them.
     crossed: Vec<Scheduled>,
     sweeps: u32,
 }
@@ -91,7 +81,6 @@ impl Fronts {
         self.fresh.push(front);
     }
 
-    /// Put back fronts a journal kept, as a shard comes back.
     pub fn restore(&mut self, fronts: Vec<Front>) {
         for front in fronts {
             self.insert(front);
@@ -110,8 +99,7 @@ impl Fronts {
         self.len() == 0
     }
 
-    /// Take back fronts made this tick whose events were never sent after all, and what they
-    /// were found to have delivered.
+    /// Take back fronts made this tick whose events were never sent, and their landings.
     pub fn withdraw(&mut self, event_ids: &[i64]) {
         self.fresh.retain(|f| !event_ids.contains(&f.event.id));
         self.unkept.retain(|f| !event_ids.contains(&f.event.id));
@@ -121,7 +109,6 @@ impl Fronts {
         }
     }
 
-    /// The landings found since this was last called, for the journal.
     pub fn take_crossed(&mut self) -> Vec<Scheduled> {
         std::mem::take(&mut self.crossed)
     }
@@ -171,9 +158,9 @@ impl Fronts {
         found
     }
 
-    /// Every landing by `now_t` of the fronts made since the last sweep, which then join the rest.
-    /// Their first window opens at their own emission: an order is stamped as far back as its
-    /// client's cursor, and a collapse's light can land on a neighbor in the tick it happens.
+    /// Every landing by `now_t` of fronts made since the last sweep. Their window opens at their own
+    /// emission, which may be before the last sweep: an order is stamped as far back as its
+    /// client's cursor.
     pub fn sweep_fresh(&mut self, fleet: &Fleet, now_t: i64) -> Vec<Crossing> {
         let mut found = Vec::new();
         for mut front in std::mem::take(&mut self.fresh) {
@@ -249,8 +236,7 @@ struct Spread {
 
 #[cfg(feature = "storage")]
 impl Front {
-    /// `None`, said, when it cannot be kept: an id no store can hold, or a spread that will not
-    /// serialize.
+    /// `None`, with a warning, when it cannot be kept.
     pub(crate) fn to_row(&self) -> Option<lc_store::fronts::Front> {
         let spread = Spread {
             at: self.event.at.to_array(),
@@ -281,7 +267,6 @@ impl Front {
         row
     }
 
-    /// The front a kept row was, with what it said if it was speech.
     pub(crate) fn from_row(row: &lc_store::fronts::Front, said: &HashMap<i64, Utterance>) -> Option<Self> {
         let spread: Spread = serde_json::from_str(&row.spread).ok()?;
         Some(Self {
@@ -305,23 +290,21 @@ impl Front {
 }
 
 impl<J: Journal> Server<J> {
-    /// Every landing in `(after_t, now]` of light put out before this tick, on whatever craft it
-    /// landed on.
+    /// Every landing in `(after_t, now]` of light put out before this tick.
     pub(crate) fn cross_fronts(&mut self, after_t: i64) {
         let found = self.fronts.sweep(&self.fleet, after_t, self.now_t);
         self.landed(found);
     }
 
-    /// Send light on its way, and land at once what of it lands by now: a neighbor's spike has to
-    /// land in time order among the collapses still to come in the tick that made it.
+    /// Send light on its way and land at once what lands by now: a collapse's spike must land in
+    /// time order among the collapses still to come in its tick.
     pub(crate) fn launch(&mut self, front: Front) {
         self.fronts.launch(front);
         let found = self.fronts.sweep_fresh(&self.fleet, self.now_t);
         self.landed(found);
     }
 
-    /// Everything light did as it landed: a delivery, and for speech its receipt and any answer
-    /// owed, for an emission its energy, for a report what it teaches.
+    /// Everything a landing does, on any craft, connected or not.
     fn landed(&mut self, found: Vec<Crossing>) {
         for (index, landing) in found {
             let front = self.fronts.get(index).clone();
@@ -337,8 +320,7 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// Journal this tick: its events, the light that landed in it and the light it put out. A
-    /// tick the journal would not take keeps none of its light, because its events are lost.
+    /// A tick the journal refuses keeps none of its light, because its events are lost.
     pub(crate) async fn journal_tick(&mut self, events: &[Event]) -> Result<(), JournalError> {
         let deliveries = self.fronts.take_crossed();
         let made = self.fronts.take_unkept();
@@ -349,7 +331,7 @@ impl<J: Journal> Server<J> {
         Ok(())
     }
 
-    /// Follow on the light the last shard was following. Read once, when a shard comes back.
+    /// Read once, when a shard comes back.
     pub async fn resume_fronts(&mut self) -> Result<(), JournalError> {
         let fronts = self.journal.fronts(self.now_t).await?;
         self.fronts.restore(fronts);
@@ -445,10 +427,8 @@ mod tests {
         assert!(told[0].arrive_t > stayed_t + (0.5 * LIGHT_HOUR_US) as i64, "premise: the turn mattered");
     }
 
-    /// The runs are an index and nothing more: swept a tick at a time they find exactly the landings
-    /// a check of every front against every craft finds. Sources scattered over light-hours and
-    /// moving at 0.9c, one of them jumping; half the craft closing on a source at 0.9c, which is
-    /// what the window's margin is for; and a craft that jumps in the middle of a tick.
+    /// The runs find exactly what checking every front against every craft finds, with sources and
+    /// craft moving at 0.9c, a source that jumps, and a craft that jumps mid-tick.
     #[test]
     fn the_runs_find_what_checking_every_front_finds() {
         use lc_world::craft::Fleet;

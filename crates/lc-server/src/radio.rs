@@ -11,13 +11,9 @@
 //! interface lets them: it is the mistake a real operator makes, and it is legible afterwards
 //! because everyone in earshot saw it.
 //!
-//! **The keyring and the acknowledgment window are written as the light lands**, on whatever
-//! craft it lands on, stamped with the coordinate time it landed. So a key sent four light-years
-//! takes four years to become usable, and a craft that did not exist when it was sent learns it
-//! too if the light finds it. See [`crate::front`].
-//!
-//! Every craft and not only connected ones: a key that only landed when its owner happened to be
-//! signed in would be a mechanic that depended on who was watching.
+//! **The keyring and the acknowledgment window are written as the light lands**, on every craft
+//! and not only connected ones: a key that landed only when its owner was signed in would depend
+//! on who was watching. See [`crate::front`].
 //!
 //! The geometry is `lc_world::signal` and the storage is `lc_store::chat`. See
 //! `lightcone/docs/05-observation.md`.
@@ -235,7 +231,7 @@ impl<J: Journal> Server<J> {
         })
     }
 
-    /// File a transmission as said. Who hears it is [`Server::heard`], as its light lands on each.
+    /// File a transmission as said. Who hears it is [`Server::landed_on`].
     pub(crate) fn remember(&mut self, event_id: i64, sender: CraftId, at: i64, said: &Utterance) {
         self.said.push(lc_store::chat::Message {
             event_id,
@@ -249,9 +245,8 @@ impl<J: Journal> Server<J> {
         });
     }
 
-    /// A transmission's light landing on `observer` at `arrive_t`: its receipt, and the key or the
-    /// place in the acknowledgment window it teaches. Found as the light lands on whatever craft
-    /// is there, connected or not, so one that did not exist when it was sent hears it too.
+    /// A transmission's light landing on `observer`: its receipt, and the key or acknowledgment
+    /// window place it teaches.
     pub(crate) fn landed_on(&mut self, event_id: i64, sender: CraftId, said: &Utterance, observer: CraftId, arrive_t: i64, strength: f32) {
         if observer == sender {
             return;

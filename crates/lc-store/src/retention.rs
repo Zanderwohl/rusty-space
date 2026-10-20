@@ -51,18 +51,16 @@ pub async fn archived(client: &Client) -> Result<Vec<Partition>, Error> {
         .collect())
 }
 
-/// What a [`sweep`] keeps, and how much of a backlog one sweep may work off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Policy {
     /// Coordinate microseconds behind now that stay live: every delivery landing in it, and every
     /// event any delivery still kept is about.
     pub kept_us: i64,
-    /// Partitions one sweep may retire. Each takes a lock on its parent, however briefly, so a
-    /// store thousands behind catches up a sweep at a time rather than stalling the tick.
+    /// Partitions one sweep may retire. Each briefly locks its parent, so a long backlog is worked
+    /// off a sweep at a time.
     pub most: usize,
 }
 
-/// What one [`sweep`] took away.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Swept {
     pub dropped: Vec<Partition>,
@@ -84,9 +82,8 @@ impl Swept {
 
 /// Retire what `policy` no longer keeps at coordinate time `now_t`, oldest first.
 ///
-/// Deliveries before events: an event partition stays while any kept delivery refers to it, so
-/// dropping the old deliveries is what lets their events go in the same sweep. A front is kept as
-/// long past fading as a delivery is past landing, because a delivery it made is read through it.
+/// Deliveries first, so their events can go in the same sweep. A front is kept as long past fading
+/// as a delivery past landing, because a delivery it made is read through it.
 pub async fn sweep(client: &Client, now_t: i64, policy: Policy) -> Result<Swept, Error> {
     let cutoff = now_t.saturating_sub(policy.kept_us.max(0));
     let mut swept = Swept { fronts: crate::fronts::forget(client, cutoff).await?, ..Swept::default() };
@@ -106,11 +103,8 @@ pub async fn sweep(client: &Client, now_t: i64, policy: Policy) -> Result<Swept,
     Ok(swept)
 }
 
-/// Which event partitions may be taken out at coordinate time `now_t`, keeping `kept_us`.
-///
-/// Both tests, in the order that makes the cheap one first: entirely older than the cutoff, and
-/// not referred to by any delivery landing after it — one still in flight, or one landed and
-/// kept for a client catching up, which needs its event just as much.
+/// Event partitions wholly older than the cutoff that no delivery landing after it refers to. A
+/// landed delivery kept for a client catching up needs its event as much as one in flight.
 pub async fn archivable(client: &Client, now_t: i64, kept_us: i64) -> Result<Vec<Partition>, Error> {
     older_and_unreferenced(client, now_t.saturating_sub(kept_us.max(0)), usize::MAX).await
 }
@@ -137,7 +131,7 @@ async fn older_and_unreferenced(client: &Client, cutoff: i64, most: usize) -> Re
     Ok(out)
 }
 
-/// Detach one partition, moving its rows into `<table>_archive` and dropping it.
+/// Move one partition's rows into `<table>_archive` and drop it.
 ///
 /// `false` when there is no such partition of that table, which is what a second call gets.
 pub async fn detach(client: &Client, table: &str, child: &str) -> Result<bool, Error> {
@@ -147,7 +141,7 @@ pub async fn detach(client: &Client, table: &str, child: &str) -> Result<bool, E
     Ok(row.get(0))
 }
 
-/// Drop one partition and its rows. `false` when there is no such partition of that table.
+/// `false` when there is no such partition of that table.
 pub async fn drop_partition(client: &Client, table: &str, child: &str) -> Result<bool, Error> {
     let row = client
         .query_one("SELECT lc_drop_partition($1, $2)", &[&table, &child])
@@ -155,7 +149,7 @@ pub async fn drop_partition(client: &Client, table: &str, child: &str) -> Result
     Ok(row.get(0))
 }
 
-/// Put one back, from the record made when it was detached and the rows in the archive.
+/// Put one back from the archive.
 pub async fn attach(client: &Client, child: &str) -> Result<bool, Error> {
     let row = client.query_one("SELECT lc_attach_partition($1)", &[&child]).await?;
     Ok(row.get(0))
@@ -189,8 +183,7 @@ mod tests {
         Some(client)
     }
 
-    /// Start from nothing: an archived partition's record and rows outlive the run, so a second
-    /// run would otherwise find them.
+    /// An archived partition's record and rows outlive the run.
     ///
     /// Each test owns a band of slots. They share one database and run in parallel, and a
     /// shared band means one test's cleanup drops the partition another just made.

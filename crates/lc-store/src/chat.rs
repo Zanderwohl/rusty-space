@@ -174,8 +174,7 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
 #[cfg(feature = "postgres")]
 const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem";
 
-/// The messages these events carried, in no order. Asked for the light a shard is still following
-/// as it comes back.
+/// The messages these events carried, in no order.
 #[cfg(feature = "postgres")]
 pub async fn messages(client: &Client, event_ids: &[i64]) -> Result<Vec<Message>, Error> {
     let rows = client

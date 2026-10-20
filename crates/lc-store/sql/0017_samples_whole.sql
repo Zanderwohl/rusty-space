@@ -1,4 +1,4 @@
--- The table `lc_samples` becomes, made beside it. See 0018.
+-- What `lc_samples` becomes in 0018.
 CREATE TABLE IF NOT EXISTS lc_samples_whole (
     ship_id    bigint           NOT NULL,
     subject    bytea            NOT NULL,

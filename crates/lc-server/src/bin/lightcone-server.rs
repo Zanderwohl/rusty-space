@@ -442,9 +442,8 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
     (client, taken, written)
 }
 
-/// Retention, on the checkpoint's connection and off the tick, by the clock just written.
-///
-/// By this shard's clock alone: one shard writes a world's tables.
+/// Retention, off the tick, by the clock just written. This shard's clock alone, because one shard
+/// writes a world's tables.
 async fn retire(client: &tokio_postgres::Client, now_t: i64) {
     match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
         Ok(swept) if swept.is_empty() => {}
@@ -458,10 +457,8 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
     }
 }
 
-/// Work off whatever retention is behind before serving anyone, a sweep at a time.
-///
-/// A store that went without retention can hold thousands of partitions, and until they are gone
-/// every read planned against all of them, which is every tick's, asks for a lock on each.
+/// Work off a retention backlog before serving anyone: until it is gone, every tick's read is
+/// planned against thousands of partitions and asks for a lock on each.
 async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
     let started = std::time::Instant::now();
     let (mut sweeps, mut dropped, mut archived) = (0, 0, 0);

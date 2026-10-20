@@ -280,10 +280,7 @@ pub struct Event {
     pub payload: String,
 }
 
-/// An event's light reaching an observer, with the time it got there.
-///
-/// Found as the light lands, on whatever craft is there then (see [`crate::front`]), and written
-/// so a client's catch-up is a range scan rather than a pass over everything that ever happened.
+/// An event's light reaching an observer, found as it lands. See [`crate::front`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scheduled {
     pub observer: ShipId,
@@ -301,14 +298,12 @@ pub fn strength(power_w: f64, distance: f64) -> f32 {
 /// The faintest signal anything can detect, in [`strength`]'s unit: watts over light-microseconds
 /// squared.
 ///
-/// About 1e-26 W/m², a large radio telescope's narrowband limit: a megawatt shout is heard a third
-/// of a light-year off and a burn three hundred, and a beam's gain carries either further along its
-/// axis. Below it nothing is told anything, so it is what gives an event's light an end.
+/// About 1e-26 W/m², a large radio telescope's narrowband limit: a megawatt shout carries a third of
+/// a light-year and a 1e12 W burn three hundred.
 pub const FAINTEST: f32 = 1.13e-20;
 
-/// What a zero-power event is seen at, over the power of what it cancels: a drive cut is seen by
-/// the light of the drive, a lamp going out by the lamp's. More than that light by a margin, so it
-/// reaches every craft that saw what it stopped, one that has drifted outward since included.
+/// A zero-power event is seen at this times the power of what it stops, so it reaches every craft
+/// that saw that, including one that has drifted outward since.
 pub const CANCEL_MARGIN: f64 = 1.1;
 
 /// How far an event's light carries along its beam's axis before it is fainter than [`FAINTEST`],

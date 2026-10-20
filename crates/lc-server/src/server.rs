@@ -140,7 +140,7 @@ pub struct Server<J: Journal> {
     pub(crate) owners: HashMap<CraftId, ClientId>,
     pub(crate) clients: HashMap<ClientId, Connected>,
     pub(crate) journal: J,
-    /// Light on its way, until it is too faint to matter. See [`crate::front`].
+    /// See [`crate::front`].
     pub(crate) fronts: crate::front::Fronts,
     pub(crate) minter: Minter,
     /// Written by this tick, and handed to the journal at the end of it.
@@ -1021,10 +1021,8 @@ impl<J: Journal> Server<J> {
         Ok(event_id)
     }
 
-    /// What an event of `id`'s at `at` is seen at: `power_w`, or for one that puts out nothing,
-    /// [`crate::world::CANCEL_MARGIN`] over what it stops: the drive and emits running just
-    /// before, or failing those the hull itself as an observer sees it, by the field's heat and
-    /// the starlight it sends back.
+    /// `power_w`, or for an event that puts out nothing, [`crate::world::CANCEL_MARGIN`] over what
+    /// it stops: the drive and emits, or failing those the hull's glow and reflected starlight.
     pub(crate) fn seen_w(&self, id: CraftId, at: i64, power_w: f64) -> f64 {
         if power_w > 0.0 {
             return power_w;
