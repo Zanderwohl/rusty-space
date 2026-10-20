@@ -99,7 +99,7 @@ Bands, blackbody, extinction curves, color index, CIE conversion, `BandMapping` 
 
 ## Phase 2 — Photometry
 
-**Status: built.** `lc_world::{population, emission, occluder, flicker, shell}`.
+**Status: built.** `lc_world::{population, emission, occluder, flicker, shell}`. The shell bakes and round-trips, but nothing samples it yet: `EmissionModel::deficit` integrates the populations directly.
 
 **Before:** 1a, 1b.
 
