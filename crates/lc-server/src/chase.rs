@@ -204,6 +204,8 @@ pub fn contacts(
     for (id, state) in clients {
         let Some(observer) = fleet.get(CraftId(state.ship.0)) else { continue };
         let mut seen = Vec::new();
+        let here_ly = observer.position_at(now_t as f64) / LIGHT_US_PER_LY;
+        let here_beta = observer.worldline().velocity_at(now_t as f64);
         for craft in fleet.iter() {
             let Some(sighted) = sighting(fleet, observer.id, ShipId(craft.id.0), now_t) else {
                 continue;
@@ -211,7 +213,6 @@ pub fn contacts(
             let then = craft.seen_at(sighted.emitted_s);
             let emit = lc_world::emit::emit_w(craft, sighted.emitted_s);
             // Its cone only to an observer it glances, out of either end it leaves; the rest see its faces.
-            let here_ly = observer.position_at(now_t as f64) / LIGHT_US_PER_LY;
             let offset = here_ly - sighted.position_ly;
             let cone = lc_world::emit::emit_cone(craft, sighted.emitted_s).filter(|fore| {
                 let aft = lc_world::signal::Beam::along(-fore.axis, fore.half_angle_rad);
@@ -242,7 +243,7 @@ pub fn contacts(
                 // construction, so this is the light landing at this instant.
                 arrive_t: now_t,
                 observer_ly: here_ly.to_array(),
-                observer_beta: observer.worldline().velocity_at(now_t as f64).to_array(),
+                observer_beta: here_beta.to_array(),
                 // As its light left it, as everything else here is: a ship seen mid-refit is seen
                 // in the shape it had then, and a new one only once that light arrives.
                 form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
@@ -526,7 +527,7 @@ mod tests {
         let mut wire = Loopback::new();
         let (watched, watcher) = (ClientId(1), ClientId(2));
         let beta = DVec3::new(0.0, 0.6, 0.0);
-        server.admit(watched, crate::world::coasting(ShipId(1), DVec3::new(3.0e3, 0.0, 0.0), beta, 0), 0.0);
+        server.admit(watched, crate::world::coasting(ShipId(1), DVec3::new(3.0e3, 0.0, 0.0), DVec3::Y * 0.5, 0), 0.0);
         server.admit(watcher, crate::world::coasting(ShipId(2), DVec3::ZERO, beta, 0), 0.0);
         server.tick(&mut wire).await.unwrap();
         let now_t = server.now_t();

@@ -529,9 +529,10 @@ pub struct Presence {
     pub emitted_t: i64,
     /// Coordinate microseconds it arrives. Never later than the server's `t` when it is sent.
     pub arrive_t: i64,
-    /// The observer's own position at [`Presence::arrive_t`], light-years, and velocity, as the
-    /// shard had them. See `lc_world::sighted`.
+    /// The observer's own position at [`Presence::arrive_t`], light-years, as the shard had it.
+    /// See `lc_world::sighted`.
     pub observer_ly: [f64; 3],
+    /// The observer's own velocity then, as a fraction of `c`.
     pub observer_beta: [f64; 3],
     /// Its silhouette, as its light left it: a ship seen mid-refit is seen in the shape it had
     /// then. Empty for a craft with no form, and for one whose form then is past what its

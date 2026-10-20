@@ -63,8 +63,9 @@ impl DriveAt {
         }
     }
 
-    fn is_lit(&self) -> bool {
-        self.drive_w > 0.0 || self.emit.fore_w > 0.0 || self.emit.aft_w > 0.0
+    /// A balanced emit sends equal power out of both ends and pushes nothing.
+    fn is_thrusting(&self) -> bool {
+        self.drive_w > 0.0 || self.emit.fore_w != self.emit.aft_w
     }
 }
 
@@ -105,7 +106,7 @@ impl Contact {
             building: presence.building.map(|b| (emitted_s, b)),
             glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
             glare: presence.glare,
-            reckoning: Reckoning::new(system, sighting, stated.is_lit(), receiver),
+            reckoning: Reckoning::new(system, sighting, stated.is_thrusting(), receiver),
             stated,
         }
     }
@@ -138,3 +139,67 @@ impl Contact {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lc_world::flight::JULIAN_YEAR_S;
+    use lc_world::system::M_PER_LY;
+
+    const ARRIVE_T: i64 = 1_000_000_000;
+    const APART_M: f64 = 1.0e9;
+
+    /// A contact a million kilometers off an observer doing half of `c`, and drifting from it.
+    fn presence(drive_w: f64, emit_w: (f64, f64)) -> Presence {
+        let observer_ly = DVec3::X * 1.0e-9;
+        let observer_beta = DVec3::X * 0.5;
+        Presence {
+            ship_id: ShipId(2),
+            name: "Vela".into(),
+            length_m: 500.0,
+            at_ly: (observer_ly + DVec3::Y * APART_M / M_PER_LY).to_array(),
+            beta: (observer_beta + DVec3::Y * 1.0e-4).to_array(),
+            facing: [1.0, 0.0, 0.0],
+            drive_w,
+            emit_fore_w: emit_w.0,
+            emit_aft_w: emit_w.1,
+            emit_axis: [0.0; 3],
+            emit_spread_rad: 0.0,
+            emitted_t: ARRIVE_T - 3_335_641,
+            arrive_t: ARRIVE_T,
+            observer_ly: observer_ly.to_array(),
+            observer_beta: observer_beta.to_array(),
+            form: lc_proto::Form::default(),
+            building: None,
+            glow: None,
+            glare: None,
+        }
+    }
+
+    fn drawn_from(own_ly: DVec3, presence: Presence, since_s: f64) -> DVec3 {
+        let mut contact = Contact::seen(presence, None);
+        contact.reckon(None, own_ly, ARRIVE_T as f64 * 1.0e-6 + since_s, &[]);
+        (contact.position_ly - own_ly) * M_PER_LY
+    }
+
+    /// Drawn at the stated offset from wherever this ship has itself at, drifting from the arrival.
+    #[test]
+    fn a_contact_under_thrust_is_drawn_from_this_ship() {
+        let own_ly = DVec3::new(3.0e-9, 2.0e-9, 0.0);
+        let since_s = 100.0;
+        let drift_m = 1.0e-4 * since_s / JULIAN_YEAR_S * M_PER_LY;
+        let expected = DVec3::new(0.0, APART_M + drift_m, 0.0);
+        for (drive_w, emit_w) in [(1.0e18, (0.0, 0.0)), (0.0, (0.0, 1.0e18))] {
+            let off = drawn_from(own_ly, presence(drive_w, emit_w), since_s);
+            assert!((off - expected).length() < 1.0, "{off:?}");
+        }
+    }
+
+    /// A balanced emit pushes nothing, so the contact keeps its own line.
+    #[test]
+    fn a_balanced_emit_is_coasting() {
+        let own_ly = DVec3::new(3.0e-9, 2.0e-9, 0.0);
+        let off = drawn_from(own_ly, presence(0.0, (1.0e18, 1.0e18)), 100.0);
+        assert!((off.y - APART_M).abs() > 1.0e3, "{off:?}");
+    }
+}

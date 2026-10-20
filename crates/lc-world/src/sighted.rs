@@ -14,11 +14,13 @@
 //! future, and holding one until its time comes was the same jump as never reckoning at all:
 //! a clock twenty seconds behind in low orbit is a thousand kilometers.
 //!
-//! A burning craft within [`ALONGSIDE_BETA`] of the observer is drawn at its offset from it
-//! instead. Reckoned alone it coasts for up to a tick while the observer keeps burning, which at
-//! five gravities parts a pursuer from its quarry by thousands of kilometers; at an offset their
-//! shared motion cancels. A coasting craft is reckoned exactly, and is not dragged along by an
-//! observer burning away from it.
+//! A craft under thrust within [`consort::GALILEAN_BETA`] of the observer is drawn at its offset
+//! from it instead. Reckoned alone it coasts for up to a tick while the observer keeps burning,
+//! which at five gravities parts a pursuer from its quarry by thousands of kilometers; at an
+//! offset their shared motion cancels. What it gets wrong instead is the difference between the
+//! two accelerations, gravity's across the offset included, for at most a tick: worse than
+//! reckoning alone when the two burn different ways. A coasting craft is reckoned exactly, and
+//! is not dragged along by an observer burning away from it.
 
 use glam::DVec3;
 
@@ -34,7 +36,7 @@ use crate::system::{LOCAL_SHELL_LY, LocalSystem};
 const CONIC_LIGHT_STEPS: usize = 3;
 
 /// The offset drifts by the plain difference of the two velocities, which holds only this slow.
-pub const ALONGSIDE_BETA: f64 = consort::GALILEAN_BETA;
+const ALONGSIDE_BETA: f64 = consort::GALILEAN_BETA;
 
 /// The observer as a statement's light reached it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,12 +77,12 @@ pub struct Appearance {
 impl Reckoning {
 
     /// `system` is the one the observer is in; a sighting outside its shell is not put on a
-    /// conic about that system's bodies. `burning` is whether anything was lit as its light left.
-    pub fn new(system: Option<&LocalSystem>, seen: Sighting, burning: bool, receiver: Receiver) -> Self {
+    /// conic about that system's bodies. `thrusting` is whether it was as its light left.
+    pub fn new(system: Option<&LocalSystem>, seen: Sighting, thrusting: bool, receiver: Receiver) -> Self {
         let frame = system
             .filter(|s| seen.position_ly.distance(s.origin_ly) < LOCAL_SHELL_LY)
             .and_then(|s| consort::frame_for(s, &seen));
-        let alongside = (burning
+        let alongside = (thrusting
             && boost::velocity_to_frame(seen.beta, receiver.beta).length() < ALONGSIDE_BETA)
             .then(|| Alongside {
                 offset_ly: seen.position_ly - receiver.position_ly,
