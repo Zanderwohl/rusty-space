@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use lc_proto::{Faction, FactionId, NAME_LIMIT, Refusal};
+use lc_proto::{Faction, FactionId, NAME_LIMIT, Refusal, ShipId};
 use lc_store::chat::{Founded, Holds};
 use lc_world::craft::CraftId;
 
@@ -46,7 +46,7 @@ impl Factions {
             }
             salt += 1;
         };
-        let faction = Faction { key, name: name.to_string(), lineage };
+        let faction = Faction { key, name: name.to_string(), founder: ShipId(founder.0), lineage };
         self.named.insert(key, faction.clone());
         self.founded.push(Founded {
             faction: key.0,
@@ -96,7 +96,7 @@ impl Factions {
         for f in founded {
             let key = FactionId(f.faction);
             let lineage = f.lineage.into_iter().map(FactionId).collect();
-            self.named.insert(key, Faction { key, name: f.name, lineage });
+            self.named.insert(key, Faction { key, name: f.name, founder: ShipId(f.founder), lineage });
         }
         for h in holds {
             let learned = self.held.entry(CraftId(h.holder)).or_default().entry(FactionId(h.faction)).or_insert(h.learned_t);
@@ -161,6 +161,21 @@ mod tests {
         assert_eq!(third.generation(), 3);
         assert!(third.supersedes(first.key), "without anyone holding the second");
         assert_eq!(third.lineage, vec![second.key, first.key]);
+    }
+
+    /// Nothing reconciles a fork: two holders replacing one key make two keys, and each says who
+    /// made it. No shard could pick a winner without information nobody in the game has yet.
+    #[test]
+    fn two_holders_replacing_one_key_fork_it_and_each_branch_names_its_founder() {
+        let mut factions = Factions::default();
+        let wake = factions.found(CraftId(1), "Wake", None, 0).unwrap();
+        factions.learn(CraftId(2), wake.key, 5);
+        let loyal = factions.found(CraftId(1), "Wake", Some(wake.key), 10).unwrap();
+        let rival = factions.found(CraftId(2), "Wake", Some(wake.key), 10).unwrap();
+        assert_ne!(loyal.key, rival.key);
+        assert_eq!((loyal.generation(), rival.generation()), (2, 2));
+        assert!(loyal.supersedes(wake.key) && rival.supersedes(wake.key));
+        assert_eq!((loyal.founder, rival.founder), (ShipId(1), ShipId(2)));
     }
 
     mod play {
@@ -327,7 +342,7 @@ mod tests {
             server.welcome(ClientId(9), ShipId(1), "Ada".into(), "", &mut told);
             assert!(told.take(ClientId(9)).contains(&Outbound::Factions {
                 ship_id: ShipId(1),
-                factions: vec![Faction { key, name: "Wake".into(), lineage: vec![] }],
+                factions: vec![Faction { key, name: "Wake".into(), founder: ShipId(1), lineage: vec![] }],
             }));
         }
     }

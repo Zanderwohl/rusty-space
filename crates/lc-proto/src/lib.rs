@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 37;
+pub const PROTOCOL_VERSION: u32 = 38;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1711,7 +1711,7 @@ mod tests {
                 }],
                 keys: vec![ShipId(7)],
             },
-            Outbound::Factions { ship_id: ShipId(42), factions: vec![Faction { key: FactionId(11), name: "Wake".into(), lineage: vec![FactionId(9)] }] },
+            Outbound::Factions { ship_id: ShipId(42), factions: vec![Faction { key: FactionId(11), name: "Wake".into(), founder: ShipId(7), lineage: vec![FactionId(9)] }] },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NoKey },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::NothingNew },
             Outbound::Learned { report: b"{}".to_vec() },

@@ -123,6 +123,8 @@ pub struct FactionChat {
     pub name: String,
     /// The keys it replaces, nearest first. See [`Faction::lineage`].
     pub lineage: Vec<FactionId>,
+    /// `None` until the key itself has arrived; a line heard under it says nothing of who made it.
+    pub founder: Option<ShipId>,
     pub lines: Vec<Loose>,
 }
 
@@ -131,9 +133,9 @@ impl FactionChat {
         self.lineage.len() as u32 + 1
     }
 
-    /// The key as it would be given: name and lineage.
-    pub fn as_given(&self, key: FactionId) -> Faction {
-        Faction { key, name: self.name.clone(), lineage: self.lineage.clone() }
+    /// The key as it would be given. `None` for one whose founding has not reached this ship.
+    pub fn as_given(&self, key: FactionId) -> Option<Faction> {
+        Some(Faction { key, name: self.name.clone(), founder: self.founder?, lineage: self.lineage.clone() })
     }
 }
 
@@ -283,15 +285,25 @@ impl Chat {
         if !faction.lineage.is_empty() {
             chat.lineage = faction.lineage;
         }
+        chat.founder = Some(faction.founder);
     }
 
-    /// The latest generation this ship holds of `key`, when it holds one later than `key`.
-    pub fn newer(&self, key: FactionId) -> Option<(FactionId, &FactionChat)> {
-        self.factions
+    /// The latest keys this ship holds that replace `key`: every branch of a fork, newest
+    /// generation first, and no key that another of them replaces in turn.
+    ///
+    /// All of them rather than a winner. Two members re-keying a week apart across light-years
+    /// cannot know of each other, and a traitor can re-key too; which branch to follow is the
+    /// player's call, made on who founded each.
+    pub fn newer(&self, key: FactionId) -> Vec<(FactionId, &FactionChat)> {
+        let later: Vec<(FactionId, &FactionChat)> =
+            self.factions.iter().filter(|(_, chat)| chat.lineage.contains(&key)).map(|(k, c)| (*k, c)).collect();
+        let mut tips: Vec<(FactionId, &FactionChat)> = later
             .iter()
-            .filter(|(_, chat)| chat.lineage.contains(&key))
-            .max_by_key(|(k, chat)| (chat.generation(), **k))
-            .map(|(k, chat)| (*k, chat))
+            .filter(|(k, _)| !later.iter().any(|(_, other)| other.lineage.contains(k)))
+            .copied()
+            .collect();
+        tips.sort_by(|a, b| b.1.generation().cmp(&a.1.generation()).then(a.0.cmp(&b.0)));
+        tips
     }
 
     /// Every key the ship holds, as the server states it on signing in.
@@ -1152,7 +1164,7 @@ mod tests {
     fn a_key_landing_opens_a_chat_and_what_is_said_under_it_goes_there() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
-        let wake = Faction { key: FactionId(5), name: "Wake".into(), lineage: vec![] };
+        let wake = Faction { key: FactionId(5), name: "Wake".into(), founder: ShipId(2), lineage: vec![] };
         chat.received(ShipId(2), Some("Bry"), 10, keyed(1, "", 0, vec![]), 0.0, 1.0, 1.0);
         let given = Spoken { body: Body::Faction(wake.clone()), ..spoken(1, text(""), true, vec![]) };
         chat.received(ShipId(2), Some("Bry"), 11, given, 0.0, 1.0, 1.0);
@@ -1182,7 +1194,7 @@ mod tests {
     fn this_ships_own_words_under_a_key_are_in_its_chat() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
-        chat.hold(Faction { key: FactionId(5), name: "Wake".into(), lineage: vec![] });
+        chat.hold(Faction { key: FactionId(5), name: "Wake".into(), founder: ShipId(2), lineage: vec![] });
         chat.sent(None, None, 20, 3, text("mine"), false, Some(FactionId(5)), 1.0);
         assert_eq!(chat.faction(FactionId(5)).unwrap().lines.len(), 1);
         assert!(chat.public().is_empty());
@@ -1192,7 +1204,7 @@ mod tests {
     fn a_restored_transcript_keeps_the_keys_held_and_refiles_their_chats() {
         let mut chat = Chat::default();
         chat.i_am(ShipId(1));
-        chat.holding(vec![Faction { key: FactionId(5), name: "Wake".into(), lineage: vec![] }]);
+        chat.holding(vec![Faction { key: FactionId(5), name: "Wake".into(), founder: ShipId(2), lineage: vec![] }]);
         chat.sent(None, None, 20, 3, text("stale"), false, Some(FactionId(5)), 1.0);
         let heard = Said {
             event_id: 30,
@@ -1219,11 +1231,24 @@ mod tests {
     #[test]
     fn an_old_key_knows_the_newest_generation_held() {
         let mut chat = Chat::default();
-        chat.hold(Faction { key: FactionId(1), name: "Wake".into(), lineage: vec![] });
-        assert!(chat.newer(FactionId(1)).is_none());
+        chat.hold(Faction { key: FactionId(1), name: "Wake".into(), founder: ShipId(2), lineage: vec![] });
+        assert!(chat.newer(FactionId(1)).is_empty());
         // Generation 3 arrives without 2 ever having been held.
-        chat.hold(Faction { key: FactionId(3), name: "Wake".into(), lineage: vec![FactionId(2), FactionId(1)] });
-        assert_eq!(chat.newer(FactionId(1)).map(|(k, c)| (k, c.generation())), Some((FactionId(3), 3)));
-        assert!(chat.newer(FactionId(3)).is_none());
+        chat.hold(Faction { key: FactionId(3), name: "Wake".into(), founder: ShipId(2), lineage: vec![FactionId(2), FactionId(1)] });
+        let newer: Vec<(FactionId, u32)> = chat.newer(FactionId(1)).into_iter().map(|(k, c)| (k, c.generation())).collect();
+        assert_eq!(newer, vec![(FactionId(3), 3)]);
+        assert!(chat.newer(FactionId(3)).is_empty());
+    }
+
+    #[test]
+    fn every_branch_of_a_fork_is_shown_and_none_that_a_later_key_replaces() {
+        let mut chat = Chat::default();
+        let wake = |key, founder, lineage| Faction { key: FactionId(key), name: "Wake".into(), founder: ShipId(founder), lineage };
+        chat.hold(wake(1, 1, vec![]));
+        chat.hold(wake(2, 1, vec![FactionId(1)]));
+        chat.hold(wake(3, 9, vec![FactionId(1)]));
+        chat.hold(wake(4, 1, vec![FactionId(2), FactionId(1)]));
+        let newer: Vec<(i64, Option<ShipId>)> = chat.newer(FactionId(1)).into_iter().map(|(k, c)| (k.0, c.founder)).collect();
+        assert_eq!(newer, vec![(4, Some(ShipId(1))), (3, Some(ShipId(9)))], "2 is replaced by 4, so it is no tip");
     }
 }

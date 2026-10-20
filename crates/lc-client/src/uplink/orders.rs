@@ -163,18 +163,21 @@ pub(super) fn fold(
                             std::iter::once(old).chain(older).collect()
                         })
                         .unwrap_or_default();
-                    uplink.chat.hold(lc_proto::Faction { key: *key, name: name.clone(), lineage });
+                    let founder = uplink.joined().map(|joined| joined.ship_id).unwrap_or(lc_proto::ShipId(0));
+                    uplink.chat.hold(lc_proto::Faction { key: *key, name: name.clone(), founder, lineage });
                     Some(format!("founded {name}"))
                 }
                 Order::GiveKey { key, to, secrecy, .. } => {
                     let name = to
                         .and_then(|t| uplink.contacts.iter().find(|c| c.ship_id == t))
                         .map(|c| c.name.clone());
-                    let faction = uplink
-                        .chat
-                        .faction(*key)
-                        .map(|f| f.as_given(*key))
-                        .unwrap_or(lc_proto::Faction { key: *key, ..Default::default() });
+                    // Only for the line; what went on the air is the shard's copy of the key.
+                    let faction = uplink.chat.faction(*key).and_then(|f| f.as_given(*key)).unwrap_or(lc_proto::Faction {
+                        key: *key,
+                        name: String::new(),
+                        founder: lc_proto::ShipId(0),
+                        lineage: Vec::new(),
+                    });
                     uplink.chat.sent(
                         *to,
                         name.as_deref(),

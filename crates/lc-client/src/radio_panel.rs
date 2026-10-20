@@ -153,7 +153,7 @@ pub(crate) fn chat(
                 }
                 ui.separator();
                 for (key, faction) in uplink.chat.factions() {
-                    if ui.selectable_label(showing == Channel::Faction(key), faction_label(key, faction)).clicked() {
+                    if ui.selectable_label(showing == Channel::Faction(key), faction_label(uplink, key, faction, forked(uplink, key))).clicked() {
                         ask(out, Action::ChatWith(Channel::Faction(key)));
                     }
                 }
@@ -276,12 +276,24 @@ fn faction_log(
     let lines = uplink.chat.faction(key).map(|f| f.lines.as_slice()).unwrap_or_default();
     // Fixed height whether or not it is there, so the log does not jump when a key lands.
     ui.allocate_ui(egui::vec2(LOG_WIDTH, BANNER_HEIGHT), |ui| {
-        if let Some((newer, chat)) = uplink.chat.newer(key) {
-            let text = format!("Superseded by {}", faction_label(newer, chat));
-            if clickable_name(ui, &text, egui::Color32::from_rgb(210, 165, 60)).clicked() {
-                ask(out, Action::ChatWith(Channel::Faction(newer)));
-            }
+        let newer = uplink.chat.newer(key);
+        if newer.is_empty() {
+            return;
         }
+        // Every branch, with who made it: a fork may be two loyal members who could not know
+        // of each other, or a traitor cutting part of the faction off.
+        let amber = egui::Color32::from_rgb(210, 165, 60);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(match newer.len() {
+                1 => "Superseded by",
+                _ => "Superseded twice over:",
+            }).color(amber));
+            for (k, chat) in &newer {
+                if clickable_name(ui, &faction_label(uplink, *k, chat, true), amber).clicked() {
+                    ask(out, Action::ChatWith(Channel::Faction(*k)));
+                }
+            }
+        });
     });
     log_area(ui, "chat_faction", BODY_HEIGHT - COMPOSER_HEIGHT - BANNER_HEIGHT, |ui| {
         if lines.is_empty() {
@@ -304,19 +316,34 @@ fn faction_log(
     });
 }
 
+/// Whether another key held shares this one's name and generation, which only a fork makes.
+fn forked(uplink: &crate::uplink::Uplink, key: FactionId) -> bool {
+    let Some(this) = uplink.chat.faction(key) else { return false };
+    uplink.chat.factions().iter().any(|(k, other)| {
+        *k != key && other.name == this.name && other.generation() == this.generation()
+    })
+}
+
 /// Room for the line saying a chat's key has been superseded.
 const BANNER_HEIGHT: f32 = 22.0;
 
 /// What a faction is shown as: its name, or a mark that tells keys apart until the name arrives,
-/// and its generation once there is more than one.
-fn faction_label(key: FactionId, chat: &crate::chat::FactionChat) -> String {
+/// and its generation once there is more than one. With `founder`, who minted it, which is what
+/// tells the branches of a fork apart.
+fn faction_label(uplink: &crate::uplink::Uplink, key: FactionId, chat: &crate::chat::FactionChat, founder: bool) -> String {
     let name = match chat.name.is_empty() {
         true => crate::chat::key_mark(key),
         false => chat.name.clone(),
     };
-    match chat.generation() {
-        1 => name,
-        g => format!("{name} (gen {g})"),
+    let by = chat.founder.filter(|_| founder).map(|f| match uplink.joined().is_some_and(|j| j.ship_id == f) {
+        true => "you".to_string(),
+        false => uplink.name_of(f),
+    });
+    match (chat.generation(), by) {
+        (1, None) => name,
+        (1, Some(by)) => format!("{name} ({by})"),
+        (g, None) => format!("{name} (gen {g})"),
+        (g, Some(by)) => format!("{name} (gen {g}, {by})"),
     }
 }
 
@@ -699,7 +726,7 @@ fn compose(
             };
             ui.menu_button("give key", |ui| {
                 for (key, faction) in &factions {
-                    if ui.button(faction_label(*key, faction)).clicked() {
+                    if ui.button(faction_label(uplink, *key, faction, forked(uplink, *key))).clicked() {
                         ask(out, Action::GiveKey { key: *key, to: with, aim, secrecy });
                         ui.close();
                     }

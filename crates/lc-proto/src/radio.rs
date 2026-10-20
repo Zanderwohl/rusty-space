@@ -45,10 +45,13 @@ pub enum Secrecy {
 pub struct FactionId(pub i64);
 
 /// A faction key with the name its founder gave it, which travels with it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Faction {
     pub key: FactionId,
     pub name: String,
+    /// Who minted it. Two holders can each replace one key, so a lineage forks, and this is
+    /// how a receiver tells the branches apart. True, because identity is not forgeable yet.
+    pub founder: ShipId,
     /// The keys this one replaces, the one it directly replaces first. Whole rather than one
     /// link, so a holder of generation 3 knows it supersedes 1 without ever having held 2.
     pub lineage: Vec<FactionId>,

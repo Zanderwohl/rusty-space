@@ -105,12 +105,30 @@ everyone who held it, traitor included.
 
 A key may name the key it replaces, and so the keys of a faction form a chain, each a
 **generation** one later than the key it replaces. Only a holder of a key can mint its
-replacement. The link and the generation travel with the key, so whoever is sent generation 3
-knows it replaces generation 2 whether or not they ever held 2.
+replacement. The chain and the founder travel with the key, so whoever is sent generation 3
+knows it replaces generation 2 whether or not they ever held 2, and knows who made it.
 
 The chain is what the interface reads: a chat under a key this ship holds a later generation of
-shows that there is a newer key, and which. Nothing stops a player speaking under the old one
-anyway — sometimes that is exactly who they mean to reach.
+shows that there is a newer key, which, and whose. Nothing stops a player speaking under the old
+one anyway — sometimes that is exactly who they mean to reach.
+
+### Forks
+
+**Any holder can replace a key, so two can.** Each makes a key of the same generation, and
+the chain splits. Nothing reconciles it: a shard that picked a winner would be acting on what
+nobody in the game knows yet.
+
+Sometimes a fork is innocent. Two loyal members light-years apart notice the same traitor and
+re-key within the same week, neither able to know of the other, and the faction is split in two
+until somebody holding both keys says so. Sometimes it is the attack. A traitor whose defection
+nobody has noticed re-keys first and sends the new key to part of the faction, which follows it
+in good faith; that part is cut off from the rest, speaking under a key the traitor holds and
+the others do not, until someone who saw both explains what happened. It is the same mechanic as
+a loyal re-key, and nothing but who founded each branch tells them apart.
+
+So the interface shows **every branch, with its founder**: a chat superseded twice says so and
+names both, and two held keys sharing a name and a generation are labeled by who made them.
+Which to follow is the player's decision, made on what they know about the founders.
 
 The detail that makes this a mechanic rather than a button: **the new key cannot be sent sealed
 to the old one**, because the traitor holds the old one. It goes out one transmission per member
@@ -137,9 +155,11 @@ section otherwise keeps.
 
 ### Later: assets accept keys
 
-When there are probes, swarms and structures to command, each will hold a faction key and a
-**minimum generation**, and obey an order sealed to any key in that key's chain at or above the
-minimum. Raising the minimum is itself an order, and it is light-delayed like everything else. A
+When there are probes, swarms and structures to command, each will hold the faction keys it has
+been **sent**, and a **minimum generation**, and obey an order sealed to a key it holds at or
+above the minimum. Descending from a key it holds grants nothing: any holder can replace a key, the
+traitor included, so a rule that honored the chain would hand every asset to whoever forked it.
+Raising the minimum is itself an order, and it is light-delayed like everything else. A
 swarm that has not heard it takes orders from the traitor for as long as the order takes to reach
 it. An asset cannot be raised past a generation it has never been sent, so re-keying it is two
 transmissions, the key and the order. Two contradictory orders sent from opposite sides of a
