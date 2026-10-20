@@ -247,7 +247,7 @@ start rather than added and later removed.
 
 ## Phase 7 — The event store
 
-**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range, and nothing schedules retention.
+**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`, swept by the shard after every checkpoint so the live partitions stay bounded (`crates/lc-server/tests/retention.rs` runs a month). Deliveries are found as light lands, from fronts kept in `lc_fronts` (`lc_server::front`), so a craft that joins or turns while light is in flight sees it where it actually meets it. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range.
 
 **Before:** 3. Can overlap 6.
 

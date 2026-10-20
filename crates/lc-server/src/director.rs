@@ -29,7 +29,7 @@ use lc_world::system::{LocalSystem, M_PER_LY};
 use crate::journal::Journal;
 use crate::server::{BURN_POWER_W, KIND_BURN, Server};
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 /// A staged scene, and how far through it we are.
 pub struct Director {
@@ -121,7 +121,6 @@ impl<J: Journal> Server<J> {
         &mut self,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let Some(mut director) = self.director.take() else { return };
         if director.started_t.is_none() {
@@ -143,8 +142,8 @@ impl<J: Journal> Server<J> {
                 .take_while(|beat| started_t + (beat.after_s * 1.0e6) as i64 <= self.now_t())
                 .count();
             for (id, act) in due {
-                if !self.speak(&mut director, id, act, events, deliveries) {
-                    self.perform(&director, id, act, wire, events, deliveries);
+                if !self.speak(&mut director, id, act, events) {
+                    self.perform(&director, id, act, wire, events);
                 }
             }
         }
@@ -207,7 +206,6 @@ impl<J: Journal> Server<J> {
         id: CraftId,
         act: &Act,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> bool {
         use lc_proto::{Aim, Order, Secrecy};
         let at = self.now_t();
@@ -237,7 +235,6 @@ impl<J: Journal> Server<J> {
         if let Ok(spoken) = self.compose(id, ShipId(id.0), &order, at) {
             let _ = self.put_on_air(
                 id, at, spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, &spoken.beam, true, spoken.said, events,
-                deliveries,
             );
         }
         true
@@ -250,7 +247,6 @@ impl<J: Journal> Server<J> {
         act: &Act,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let at_t = self.now_t();
         let now_s = at_t as f64 * 1.0e-6;
@@ -324,7 +320,7 @@ impl<J: Journal> Server<J> {
         }
         // A burn, and burns are the loudest thing a ship does. Everyone in range learns that
         // this craft maneuvered, at light delay, exactly as they would for any other.
-        self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), at_t, events, deliveries);
+        self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), at_t, events);
         self.tell_flying(wire, id);
     }
 

@@ -23,9 +23,9 @@ pub struct Postgres {
     client: tokio_postgres::Client,
     /// The range already made ready, so the tick is one comparison rather than a round trip.
     prepared: Option<(i64, i64)>,
-    /// Partitions made outside that range, for arrivals beyond it. Kept so a system talking to
-    /// itself asks once rather than every tick.
-    distant: std::collections::HashSet<i64>,
+    /// Slots made beyond that range, by table. Only ahead of the clock: retention takes what is
+    /// behind it.
+    distant: std::collections::HashSet<(&'static str, i64)>,
 }
 
 impl Postgres {
@@ -45,27 +45,26 @@ impl Postgres {
         &self.client
     }
 
-    /// Make room for rows landing outside the window [`Journal::prepare`] keeps.
-    ///
-    /// **A delivery's `arrive_t` is years out, not a time near now**, because that is how long
-    /// the light takes — so the first thing said within earshot of another system lands past
-    /// any rolling window, and a row with no partition is an error.
-    ///
-    /// One partition per arrival rather than the range up to it: every thirty-day slot between
-    /// here and a star would be thousands of empty tables.
-    async fn make_room(&mut self, times: impl Iterator<Item = i64>) -> Result<(), JournalError> {
+    /// Make room for rows outside the window [`Journal::prepare`] keeps, such as an order stamped as
+    /// far back as its client's cursor. One partition per slot, in the table the row goes in.
+    async fn make_room(
+        &mut self,
+        times: impl Iterator<Item = (&'static str, i64)>,
+    ) -> Result<(), JournalError> {
         // Nothing prepared yet is an empty range, which every time falls outside.
         let (lo, hi) = self.prepared.unwrap_or((i64::MAX, i64::MIN));
-        let wanted: std::collections::BTreeSet<i64> = times
-            .filter(|t| *t < lo || *t > hi)
-            .map(lc_store::store::partition_of)
-            .filter(|slot| !self.distant.contains(slot))
+        let wanted: std::collections::BTreeSet<(&'static str, i64)> = times
+            .filter(|(_, t)| *t < lo || *t > hi)
+            .map(|(table, t)| (table, lc_store::store::partition_of(t)))
+            .filter(|key| !self.distant.contains(key))
             .collect();
-        for slot in wanted {
+        for (table, slot) in wanted {
             // The slot's own start, so the call makes exactly the one partition.
             let at = slot.saturating_mul(lc_store::store::PARTITION_SPAN_US);
-            lc_store::store::ensure_partitions(&self.client, at, at).await?;
-            self.distant.insert(slot);
+            lc_store::store::ensure_partition(&self.client, table, at, at).await?;
+            if at > hi {
+                self.distant.insert((table, slot));
+            }
         }
         Ok(())
     }
@@ -96,6 +95,7 @@ impl Journal for Postgres {
         let last = lc_store::store::partition_of(to_t);
         let hi = last.saturating_add(1).saturating_mul(lc_store::store::PARTITION_SPAN_US) - 1;
         self.prepared = Some((from_t, hi));
+        self.distant.retain(|(_, slot)| *slot > last);
         Ok(())
     }
 
@@ -103,6 +103,7 @@ impl Journal for Postgres {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
         // Every id here was minted, so `from_raw` cannot refuse one; if it somehow did, the event
         // is not written rather than the shard stopping.
@@ -123,13 +124,14 @@ impl Journal for Postgres {
                 payload: e.payload.clone(),
             })
             .collect();
-        // Both tables at once, and before either insert: an event is always inside the tick's
-        // window, but the deliveries it schedules reach as far as the light does.
+        // Both tables at once, and before either insert.
         self.make_room(
-            events.iter().map(|e| e.t).chain(deliveries.iter().map(|d| d.arrive_t)),
+            events
+                .iter()
+                .map(|e| ("events", e.t))
+                .chain(deliveries.iter().map(|d| ("deliveries", d.arrive_t))),
         )
         .await?;
-        lc_store::store::insert_events(&self.client, &rows).await?;
 
         let scheduled: Vec<lc_store::store::Delivery> = deliveries
             .iter()
@@ -142,8 +144,21 @@ impl Journal for Postgres {
                 })
             })
             .collect();
-        lc_store::store::insert_deliveries(&self.client, &scheduled).await?;
-        Ok(())
+        let kept: Vec<lc_store::fronts::Front> = fronts.iter().filter_map(crate::front::Front::to_row).collect();
+        self.client.batch_execute("BEGIN").await?;
+        let written = async {
+            lc_store::store::insert_events(&self.client, &rows).await?;
+            lc_store::store::insert_deliveries(&self.client, &scheduled).await?;
+            lc_store::fronts::save(&self.client, &kept).await
+        }
+        .await;
+        match written {
+            Ok(_) => Ok(self.client.batch_execute("COMMIT").await?),
+            Err(why) => {
+                let _ = self.client.batch_execute("ROLLBACK").await;
+                Err(why.into())
+            }
+        }
     }
 
     async fn due(
@@ -168,10 +183,36 @@ impl Journal for Postgres {
                 &[&ids],
             )
             .await?;
+        let mut found: Vec<Event> = events
+            .iter()
+            .map(|row| Event {
+                id: row.get(0),
+                source: ShipId(row.get(1)),
+                t: row.get(2),
+                at: from_grid([row.get(3), row.get(4), row.get(5)]),
+                kind: row.get(6),
+                // Not stored: what a source radiated is in the delivery's own strength,
+                // which is the only thing anything downstream reads it for.
+                power_w: 0.0,
+                payload: row.get(7),
+            })
+            .collect();
+        // Light landing long after it left may be about an archived event; its front kept a copy.
+        let missing: Vec<i64> = ids.iter().copied().filter(|id| !found.iter().any(|e| e.id == *id)).collect();
+        if !missing.is_empty() {
+            found.extend(lc_store::fronts::of(&self.client, &missing).await?.iter().map(|row| Event {
+                id: row.event.id.get(),
+                source: ShipId(row.event.source_id),
+                t: row.event.t,
+                at: from_grid(row.event.g),
+                kind: row.event.kind,
+                power_w: 0.0,
+                payload: row.event.payload.clone(),
+            }));
+        }
         let mut out = Vec::with_capacity(rows.len());
         for delivery in rows {
-            let Some(row) = events.iter().find(|r| r.get::<_, i64>(0) == delivery.event_id.get())
-            else {
+            let Some(event) = found.iter().find(|e| e.id == delivery.event_id.get()) else {
                 continue;
             };
             out.push((
@@ -181,56 +222,21 @@ impl Journal for Postgres {
                     arrive_t: delivery.arrive_t,
                     strength: delivery.strength,
                 },
-                Event {
-                    id: row.get(0),
-                    source: ShipId(row.get(1)),
-                    t: row.get(2),
-                    at: from_grid([row.get(3), row.get(4), row.get(5)]),
-                    kind: row.get(6),
-                    // Not stored: what a source radiated is in the delivery's own strength,
-                    // which is the only thing anything downstream reads it for.
-                    power_w: 0.0,
-                    payload: row.get(7),
-                },
+                event.clone(),
             ));
         }
         Ok(out)
     }
 
-    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
-        let rows = self
-            .client
-            .query(
-                "SELECT d.observer_id, d.arrive_t, d.event_id, d.strength,
-                        e.source_id, e.t, e.gx, e.gy, e.gz, e.kind, e.payload::text
-                   FROM deliveries d JOIN events e ON e.event_id = d.event_id
-                  WHERE e.kind = $1 AND d.arrive_t > $2
-               ORDER BY d.arrive_t",
-                &[&kind, &after_t],
-            )
-            .await?;
-        Ok(rows
+    async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
+        let rows = lc_store::fronts::live(&self.client, now_t).await?;
+        let spoken: Vec<i64> = rows.iter().map(|row| row.event.id.get()).collect();
+        let said: std::collections::HashMap<i64, crate::radio::Utterance> = lc_store::chat::messages(&self.client, &spoken)
+            .await?
             .iter()
-            .map(|row| {
-                (
-                    Scheduled {
-                        observer: ShipId(row.get(0)),
-                        arrive_t: row.get(1),
-                        event: row.get(2),
-                        strength: row.get(3),
-                    },
-                    Event {
-                        id: row.get(2),
-                        source: ShipId(row.get(4)),
-                        t: row.get(5),
-                        at: from_grid([row.get(6), row.get(7), row.get(8)]),
-                        kind: row.get(9),
-                        power_w: 0.0,
-                        payload: row.get(10),
-                    },
-                )
-            })
-            .collect())
+            .map(|message| (message.event_id, crate::radio::Utterance::from_message(message)))
+            .collect();
+        Ok(rows.iter().filter_map(|row| crate::front::Front::from_row(row, &said)).collect())
     }
 
     async fn record(
@@ -312,8 +318,9 @@ impl Journal for Store {
         &mut self,
         events: &[Event],
         deliveries: &[Scheduled],
+        fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
-        either!(self, write(events, deliveries))
+        either!(self, write(events, deliveries, fronts))
     }
 
     async fn due(
@@ -325,8 +332,8 @@ impl Journal for Store {
         either!(self, due(observer, after_t, until_t))
     }
 
-    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
-        either!(self, in_flight(kind, after_t))
+    async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
+        either!(self, fronts(now_t))
     }
 
     async fn record(
@@ -380,7 +387,8 @@ mod tests {
     /// gate reads back through the index-only range scan, and none of it is in memory.
     ///
     /// "Survives a restart" is what this is for. A second server, over a second connection,
-    /// knowing nothing about the first, still delivers what the first scheduled.
+    /// knowing nothing about the first but what the store kept, still delivers the first one's
+    /// light when it lands.
     #[tokio::test]
     async fn a_second_server_delivers_what_the_first_one_scheduled() {
         use crate::server::{Server, TICK_US};
@@ -406,6 +414,11 @@ mod tests {
             .execute("DELETE FROM events WHERE source_id IN ($1, $2)", &[&ACTOR, &WATCHER])
             .await
             .unwrap();
+        journal
+            .client()
+            .execute("DELETE FROM lc_fronts WHERE source_id IN ($1, $2)", &[&ACTOR, &WATCHER])
+            .await
+            .unwrap();
 
         let mut wire = Loopback::new();
         let mut server = Server::new(journal, 0, SHARD);
@@ -426,6 +439,7 @@ mod tests {
         // A new server, a new connection, and nothing carried over but the database.
         let Ok(journal) = Postgres::open().await else { return };
         let mut restarted = Server::new(journal, arrives - TICK_US, SHARD + 1);
+        restarted.resume_fronts().await.unwrap();
         let watcher = lc_proto::ClientId(1);
         restarted.admit(watcher, still(ShipId(WATCHER), far), 0.0);
         let mut wire = Loopback::new();
@@ -441,6 +455,8 @@ mod tests {
                 Outbound::Sightings(list) => list,
                 _ => Vec::new(),
             })
+            // A restored shard follows all the light in the store, and other tests share it.
+            .filter(|s| s.get().source_id == ACTOR)
             .collect();
         assert_eq!(told.len(), 1, "the restart lost the scheduled delivery");
         let sighting = told[0].get();
@@ -453,12 +469,17 @@ mod tests {
         // reached the arrival is told the same thing by the same query, and releases nothing.
         let Ok(journal) = Postgres::open().await else { return };
         let mut early = Server::new(journal, arrives - TICK_US * 3, SHARD + 2);
+        early.resume_fronts().await.unwrap();
         let watcher = lc_proto::ClientId(1);
         early.admit(watcher, still(ShipId(WATCHER), far), 0.0);
         let mut wire = Loopback::new();
         wire.client_says(watcher, Inbound::ResumeFrom { arrive_t: 0 });
         early.tick(&mut wire).await.unwrap();
         assert!(early.now_t() < arrives, "the test never stayed before the arrival");
-        assert!(wire.take(watcher).is_empty(), "a sighting was released before its light landed");
+        let early_told = wire.take(watcher).into_iter().any(|m| match m {
+            Outbound::Sightings(list) => list.iter().any(|s| s.get().source_id == ACTOR),
+            _ => false,
+        });
+        assert!(!early_told, "a sighting was released before its light landed");
     }
 }

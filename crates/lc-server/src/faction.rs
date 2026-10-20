@@ -1,8 +1,8 @@
 //! Faction keys: who minted which, and who holds which from when.
 //!
 //! A faction is a key and its chat, with no roster; see `lightcone/docs/23-factions.md`. Holding
-//! is a schedule like the ship keyring in [`crate::radio`]: written when a key is sent, stamped
-//! with when its light lands, and refused by every reader until the clock gets there.
+//! is learned like the ship keyring in [`crate::radio`]: as the light of a readable gift lands, on
+//! every craft it lands on, signed in or not.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -59,7 +59,7 @@ impl Factions {
         Ok(faction)
     }
 
-    /// Schedule `holder` holding `key` from `at`. The earliest landing wins.
+    /// `holder` holds `key` from `at`. The earliest landing wins.
     pub fn learn(&mut self, holder: CraftId, key: FactionId, at: i64) {
         let learned = self.held.entry(holder).or_default().entry(key).or_insert(at);
         if at <= *learned {

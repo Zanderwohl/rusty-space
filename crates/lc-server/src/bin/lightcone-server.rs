@@ -250,8 +250,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
             server.resume_conversations().await?;
-            // After the craft, which the landings are for.
-            server.resume_landings().await?;
+            // After the craft, which the light lands on.
+            server.resume_fronts().await?;
             Some(client)
         }
         None => {
@@ -260,6 +260,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+    if let Some(client) = &store {
+        catch_up(client, server.now_t()).await;
+    }
 
     let mut wire = WebSocketServer::bind(&bind).await?;
     eprintln!("listening on {}", wire.local_addr);
@@ -328,7 +331,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // The snapshot is taken here, on the tick, so it is the shard at one tick; only the
             // writing is moved off it. It used to hold the tick for the whole transaction.
             let taken = take(&mut server);
-            saving = Some(tokio::spawn(write(client, shard_id, taken)));
+            saving = Some(tokio::spawn(async move {
+                let written = write(client, shard_id, taken).await;
+                if written.2.is_ok() {
+                    retire(&written.0, written.1.checkpoint.now_t).await;
+                }
+                written
+            }));
         }
     }
 
@@ -411,8 +420,6 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         let transaction = client.transaction().await?;
         lc_store::ships::forget(&transaction, &taken.destroyed).await?;
         lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
-        // The partitions the samples land in exist, because the journal keeps them ready ahead of
-        // the clock every tick and nothing is learned in the future.
         lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
         lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
         lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;
@@ -433,6 +440,48 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         eprintln!("checkpoint written in {:.0} ms", started.elapsed().as_secs_f64() * 1.0e3);
     }
     (client, taken, written)
+}
+
+/// Retention, off the tick, by the clock just written. This shard's clock alone, because one shard
+/// writes a world's tables.
+async fn retire(client: &tokio_postgres::Client, now_t: i64) {
+    match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+        Ok(swept) if swept.is_empty() => {}
+        Ok(swept) => eprintln!(
+            "retention: dropped {} delivery and archived {} event partitions, forgot {} faded fronts",
+            swept.dropped.len(),
+            swept.archived.len(),
+            swept.fronts,
+        ),
+        Err(why) => eprintln!("ERROR: retention failed: {}", lc_server::journal::JournalError::from(why)),
+    }
+}
+
+/// Work off a retention backlog before serving anyone: until it is gone, every tick's read is
+/// planned against thousands of partitions and asks for a lock on each.
+async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
+    let started = std::time::Instant::now();
+    let (mut sweeps, mut dropped, mut archived) = (0, 0, 0);
+    loop {
+        match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+            Ok(swept) if swept.is_empty() => break,
+            Ok(swept) => {
+                sweeps += 1;
+                dropped += swept.dropped.len();
+                archived += swept.archived.len();
+            }
+            Err(why) => {
+                eprintln!("ERROR: retention could not catch up: {}", lc_server::journal::JournalError::from(why));
+                return;
+            }
+        }
+    }
+    if sweeps > 0 {
+        eprintln!(
+            "retention caught up in {sweeps} sweeps and {:.0} s: dropped {dropped} delivery and archived {archived} event partitions",
+            started.elapsed().as_secs_f64(),
+        );
+    }
 }
 
 /// A failed checkpoint is not a reason to stop the world. It is a reason to say so every time,

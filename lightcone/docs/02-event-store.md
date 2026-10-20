@@ -3,9 +3,14 @@
 **Status: partly built.** The schema, causality, partition and retention functions and the chat
 tables are `crates/lc-store/sql/`, applied by `lc_store::migrate`; `lc_store::id` mints the event
 ids, and the server's journal (`lc_server::journal::postgres`) writes events and delivery rows and
-reads deliveries back. `lc_store::cursor::LightConeCursor` and `lc_store::bvh` are built but run
-only in `lc-store`'s own tests, over an in-memory event source: nothing writes the `sources` or
-`systems` tables, and nothing schedules `lc_store::retention`.
+reads deliveries back. Light is followed as fronts (`lc_server::front`, kept in `lc_fronts`) and
+delivered to whatever craft it lands on, late joiners and ships that turned included. The shard
+sweeps retention after every checkpoint
+(`lc_store::retention::sweep`, under `lc_server::journal::RETENTION`), so the live partitions stay
+near thirty per table however long it runs. `lc_store::cursor::LightConeCursor` and
+`lc_store::bvh` are built but run only in `lc-store`'s own tests, over an in-memory event source:
+nothing writes the `sources` or `systems` tables. Shipping the archive to object storage is not
+built.
 
 ## What is an event
 
@@ -95,11 +100,19 @@ CREATE INDEX events_source_t ON events (source_id, t);
 CREATE INDEX events_t_brin ON events USING brin (t) WITH (pages_per_range = 32);
 ```
 
-Partitions are thirty-day spans of coordinate time (`lc_partition_span()`), numbered by floor
+Partitions are 360-day spans of coordinate time (`lc_partition_span()`), numbered by floor
 division rather than named after months, because coordinate time has no calendar. At 8766x one
-span is about five real minutes, so maintenance cannot be a cron job: the tick keeps two spans
-made ahead of now (`lc_server::journal::PREPARE_AHEAD_US`), and an event stamped further away
+span is about a real hour, so maintenance cannot be a cron job: the tick keeps two spans made
+ahead of now (`lc_server::journal::PREPARE_AHEAD_US`). Deliveries are written as light lands, so
+none is ever ahead of that; a row behind it, an order stamped as far back as its client's cursor,
 gets its own partition when it is written.
+
+They were thirty days until a dev shard had run for a month and held 7 725 partitions of each
+table, which `pg_dump` and the shard's own boot query could no longer lock. A tick's window is
+minutes inside one span and retention takes them away whole, so neither wants them narrow; 360
+days is twelve of the old spans, so a slot that still holds old ones (named `_p`, where the new
+are `_s`) is filled out at their width rather than overlapping them, until retention has taken
+them.
 
 `lx/ly/lz/lt` carry the exact local-frame values. The global `gx/gy/gz/t` are the index.
 Both are stored because recomputing one from the other loses the 150 m of the grid.
@@ -135,9 +148,55 @@ is not defined. See [01-spacetime.md](01-spacetime.md).
 `numeric` exponentiation is slow (roughly 100x a float8 multiply). It is only for the exact
 test after an index prune, never inside a scan.
 
-## Delivery scheduling
+## Light fronts and deliveries
 
-For discrete signals with known receivers, do the work at write time instead of read time.
+Every event's light is a sphere growing at `c` from where it happened, and it is followed for as
+long as it is bright enough for anything to detect. That is fixed the moment it happens: strength
+falls as `1/r^2` from the event's power times its beam's gain, and below `FAINTEST`
+(`lc_server::world`, about 1e-26 W/m², a large radio telescope's narrowband limit) nothing is told
+anything. So every event has a **reach**, and its light a **time to live**: a megawatt shout a
+third of a light-year, a burn three hundred, a beam far more along its axis, and nothing past the
+edge of the world. An event that puts out nothing — a drive cut, a lamp going out, an order — is
+seen by what it stops, at `CANCEL_MARGIN` (110%) of its power, so it reaches everyone who saw the
+thing stop; with nothing running, by the hull's own glow (`lc_world::glow`).
+
+`lc_server::front` holds the light still in flight. Each tick, first of all, it finds every craft
+a front's surface passed during the tick — whichever craft there are by then, on the courses they
+actually flew — and each of those is a delivery, written as it lands. Light put out during the
+tick is crossed as it is put out, so a collapse's spike lands in time order among the collapses
+still to come in that tick. Speech is received, owed an answer, and teaches its keys at the same
+moment; an emission feeds energy; a report teaches what it carries.
+
+This replaced working deliveries out when the event was written, which was exact only for a craft
+that already existed and never changed course. Light is decades to millennia on the way, so a
+player who joined in the meantime never saw it, and a ship that turned away met it at a time
+nobody had scheduled. It also put a delivery row, and a partition, at every distinct arrival year:
+one event seen across the galaxy would have been tens of thousands of partitions.
+
+Finding the crossings is growing spheres over moving points, and it is the same question as the
+light-cone query above, so it has the same answer: index by source, not by place. Light from a
+source slower than light reaches any point in the order it left, because `t + |x - w(t)|` rises with
+`t` along a subluminal worldline. So a source's fronts in order of emission are in order of arrival
+at every craft, and a craft finds what lands on it in a tick by one binary search per source; the
+exact solve (`schedule`) decides each candidate. A source's jump would break the order, so a front
+that would is put in a run of its own; a craft that jumps during a tick is further from where it
+ends the tick than the search allows for, so for that tick it is asked of every front. A tick costs
+about `s · σ · log f` for `s` craft, `σ` sources
+with light in flight and `f` fronts, plus the landings themselves, however the sources are spread.
+A tree over where and when would cut through about `f^(3/4)` of its leaves for the same question.
+Pruning the `s · σ` pairs is what a bounding hierarchy over sources (`lc_store::bvh`) is for, once
+there are hundreds of ships. Faded fronts are dropped every minute.
+
+How many fronts there are is the event rate times how long each lives, and the brightest common
+events set it. A burn (`BURN_POWER_W`, 1e12 W) is followed for three hundred years, about two
+real weeks at the design rate; a drive at 1e15 W or more for nearly ten thousand, about a real
+year; a narrow beam to the edge of the world. So `f` is every drive and emit restatement over up to
+a real year, not a day's traffic, and it is held in memory and in `lc_fronts` for that long.
+
+Each front is kept
+in `lc_fronts` with a copy of its event, so a shard that comes back follows the same light on
+(`Server::resume_fronts`), and a delivery found centuries on can be read after its event's own
+partition has been archived.
 
 ```sql
 CREATE TABLE deliveries (
@@ -157,18 +216,17 @@ SELECT * FROM deliveries
  ORDER BY arrive_t;
 ```
 
-A single B-tree range scan. This is the mechanism that makes the game's core loop O(log n)
-instead of O(events).
+A single B-tree range scan, and what a client catching up reads. Every row is at or behind the
+clock, so the partitions it needs are only ever the ones the tick keeps ready.
 
-Fan-out is finite because signal strength falls as `1/r^2` and every receiver has a noise
-floor, so each emission has a maximum detection radius. That radius, not the world size,
-bounds the number of `deliveries` rows per emission. A transmitter that raises its power
-raises its fan-out cost, which is a fair place for a game-balance knob to live.
+Fan-out is finite because every event has a reach, so it is the reach, not the world size, that
+bounds the deliveries per emission. A transmitter that raises its power raises its fan-out cost,
+which is a fair place for a game-balance knob to live.
 
 | phenomenon | strategy | why |
 |---|---|---|
-| radio pulse, tight beam | write-time delivery rows | receivers known, fan-out bounded |
-| ship arrival, burn | write-time delivery rows | few observers care |
+| radio pulse, tight beam | front, delivered as it lands | receivers can appear or move while it flies |
+| ship arrival, burn | front, delivered as it lands | the same |
 | starlight | read-time, analytic | continuous; a function, not an event stream |
 | transit dimming | read-time, analytic | derived from the star's occluder list |
 | swarm reconfiguration | event, then read-time | the event changes the function's parameters |
@@ -247,19 +305,17 @@ geometry. "Everything this ship has said and been told" is a question about who 
 the second has to be answerable without walking the first.
 
 Everything in those tables is stamped with the time the light **lands**, never the time it left,
-and every read is gated on the clock having reached it. That is the same bargain the deliveries
-table makes — work it out at write time, gate it at read time — in a place where it happens to
-be the whole of a game mechanic rather than an optimization:
+and written as it lands:
 
 | row | written | readable |
 |---|---|---|
-| `lc_message_receipts` | when the message is transmitted | `arrive_t <= now` |
-| `lc_keyring` | when the key offer is transmitted | `learned_t <= now`, which is what makes a key take four years to cross four light-years |
+| `lc_messages` | when the message is transmitted | by its sender at once |
+| `lc_message_receipts` | when its light lands on a craft | `arrive_t <= now` |
+| `lc_keyring` | when the key offer's light lands on a craft | from then, which is what makes a key take four years to cross four light-years |
 
-Writing them at transmission rather than at arrival is also what makes them work for a craft
-nobody is flying. Arrivals are only walked for connected clients, because there is nobody to tell
-otherwise — and a key that only landed when its owner happened to be signed in would be a
-mechanic that depended on who was watching.
+Fronts are crossed against every craft, not only connected ones, so a craft nobody is flying hears
+the same: a key that only landed when its owner happened to be signed in would be a mechanic that
+depended on who was watching.
 
 ## Retention
 
@@ -275,15 +331,57 @@ Three tiers:
 | older, still referenced by a delivery row | live partitions |
 | older than both | detach partition, compress, archive to object storage |
 
+Light still in flight does not hold its event's partition: its front keeps a copy, until it has
+faded and the kept span past that.
+
 Replays and the god view (see [07-rendering.md](07-rendering.md)) read archived partitions,
 so archival must be reversible, not destructive.
 
 ### How it is done
 
-`lc_detach_partition` takes a partition out of its table and records everything needed to put
-it back; `lc_attach_partition` puts it back. Nothing is ever dropped. Shipping the detached
-bytes to object storage is a deployment's job — it needs a bucket — so the crate records *where
-they went* and stops there, because that is the part a restore needs to survive a restart.
+The shard runs `lc_store::retention::sweep` after every checkpoint, on the checkpoint's
+connection and off the tick, by the clock it has just written. It keeps a real day at the design
+rate, `lc_server::journal::RETENTION`: twenty-four years of coordinate time, which is what a client
+back after a day away is sent on `ResumeFrom`. The first tier's lag, the light-crossing time of
+the playable volume, waits on the playable volume being decided ([09](09-open-questions.md)) and
+on the cursor running on the shard; until then only deliveries read events.
+
+- **Fronts** that faded before the cutoff are forgotten. Until then a delivery they made reads its
+  event through them.
+- **Deliveries** landing before the cutoff are dropped. Nothing reads a landed delivery except a
+  client catching up, and the event it was about still says everything it did.
+- **Events** whose partition is wholly before the cutoff, and that no remaining delivery refers
+  to, are archived: `lc_detach_partition` moves the rows into `events_archive`, drops the
+  partition and records its bounds; `lc_attach_partition` makes it again and moves them back.
+  One archive table rather than the detached partition left standing, because `pg_dump` locks
+  every table, and a partition an hour detached is a table an hour.
+- One sweep retires at most `most` partitions, each its own transaction and a brief lock on its
+  parent. A shard coming back to a store thousands behind sweeps until there is nothing left,
+  before it serves anyone: until then every tick's read is planned against every partition and
+  asks for a lock on each.
+
+A store with thousands of partitions also has to be migrated without asking for that many locks
+in one transaction. Seeding `lc_last_event` reads the newest partition holding any events and stops;
+unpartitioning `lc_samples` moves each partition's rows across and drops it, a transaction each,
+before the step that swaps the tables (`lc_store::migrate`).
+
+Shown on a copy of the dev store's shape under default settings (64 locks a transaction, 7,725
+thirty-day partitions of each table, a clock 634 years in), where master's boot query and `pg_dump`
+both ran out of shared memory: the steps applied, the shard came back and caught up in 233 sweeps
+and 91 seconds, and `pg_dump` ran. It left 298 partitions of each table rather than thirty, because
+the twenty-four kept years are still in thirty-day partitions; they age out over the next real day.
+
+Shipping the archive to object storage is a deployment's job — it needs a bucket — so the crate
+records *where it went* and stops there, because that is the part a restore needs to survive a
+restart.
+
+`lc_samples` is not partitioned. Its rows are bounded by the room aboard each craft and leave by
+key when a log is consumed, never by age ([24](24-standing-instruments.md)), so a partition per
+span gave retention nothing to take.
+
+The boot read that keeps a restarted shard from minting identifiers it already used is
+`lc_last_event`, one row per shard, raised by the same statement that inserts the events. It
+was `max(event_id)` over every partition, which is what ran out of lock space first.
 
 The middle tier is the one a date comparison would get wrong. Light is in flight for years, so
 an event far past the horizon can still be the thing a scheduled delivery is *about*, and taking
@@ -348,8 +446,8 @@ than a bitmap scan. Cost on twenty thousand rows: 362 before, 39 after. *The hot
 index-only only while autovacuum keeps up* — a deployment requirement, not a schema one.
 
 With both, the plan is one `Index Only Scan` over one partition, no sort and no heap access.
-Partition pruning does the rest: a tick's window falls inside one thirty-day span, so the other
-partitions are never opened.
+Partition pruning does the rest: a tick's window falls inside one span, so the other partitions
+are never opened.
 
 A developer needs `createdb lc_store` and nothing else; `LC_STORE_URL` points elsewhere. Every
 test that needs the database **skips** when it cannot reach one, because the suite has to pass on

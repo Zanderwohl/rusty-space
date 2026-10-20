@@ -30,6 +30,7 @@ pub mod drive;
 pub mod emit;
 pub mod faction;
 pub mod field;
+pub mod front;
 pub(crate) mod fits;
 pub mod fitting;
 pub(crate) mod instruments;

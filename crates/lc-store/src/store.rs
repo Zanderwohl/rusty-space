@@ -44,10 +44,10 @@ pub struct Delivery {
     pub strength: f32,
 }
 
-/// The width of one partition, microseconds. `lc_partition_span()` in SQL, and the two have to
-/// agree: a caller that works out which partition a row needs from a different span asks for
-/// the wrong one.
-pub const PARTITION_SPAN_US: i64 = 2_592_000_000_000;
+/// The width of one partition, microseconds: 360 days, about an hour at the design rate.
+/// `lc_partition_span()` in SQL, and the two have to agree: a caller that works out which
+/// partition a row needs from a different span asks for the wrong one.
+pub const PARTITION_SPAN_US: i64 = 31_104_000_000_000;
 
 /// Which partition a coordinate time falls in. `lc_partition_of()` in SQL, floor division so
 /// it is right below zero too.
@@ -55,24 +55,31 @@ pub fn partition_of(t: i64) -> i64 {
     t.div_euclid(PARTITION_SPAN_US)
 }
 
+pub const PARTITIONED: [&str; 2] = ["events", "deliveries"];
+
 /// Create whatever partitions the range needs, on every partitioned table.
 ///
 /// Has to run ahead of any write into the range: a row with no partition is an error, not a
-/// table that grows one. At the design rate a partition is four and a half real days, so this
-/// belongs on a schedule rather than at install.
+/// table that grows one.
 #[cfg(feature = "postgres")]
 pub async fn ensure_partitions(client: &Client, from_t: i64, to_t: i64) -> Result<i32, Error> {
     let mut made = 0;
-    for table in ["events", "deliveries", "lc_samples"] {
-        let row = client
-            .query_one("SELECT lc_ensure_partitions($1, $2, $3)", &[&table, &from_t, &to_t])
-            .await?;
-        made += row.get::<_, i32>(0);
+    for table in PARTITIONED {
+        made += ensure_partition(client, table, from_t, to_t).await?;
     }
     Ok(made)
 }
 
-/// Append events. One statement, whatever the count.
+#[cfg(feature = "postgres")]
+pub async fn ensure_partition(client: &Client, table: &str, from_t: i64, to_t: i64) -> Result<i32, Error> {
+    let row = client
+        .query_one("SELECT lc_ensure_partitions($1, $2, $3)", &[&table, &from_t, &to_t])
+        .await?;
+    Ok(row.get(0))
+}
+
+/// Append events and raise each writing shard's [`last_event_id`], in one statement so the two
+/// cannot disagree.
 ///
 /// `unnest` rather than a row at a time: the write path is the one place the store is asked to
 /// keep up with a tick, and a round trip per event would make that the bottleneck instead of
@@ -96,40 +103,50 @@ pub async fn insert_events(client: &Client, events: &[Event]) -> Result<u64, Err
     let kinds: Vec<i16> = events.iter().map(|e| e.kind).collect();
     let payloads: Vec<&str> = events.iter().map(|e| e.payload.as_str()).collect();
 
+    let sequence_bits = crate::id::SEQUENCE_BITS as i32;
+    let max_shard = crate::id::MAX_SHARD as i64;
     client
         .execute(
             // The payload goes over as `text[]` and is cast in the statement: there is no
             // conversion from a Rust string to `jsonb` in the wire protocol, and building one
             // would mean this crate parsing payloads it has no opinion about.
-            "INSERT INTO events
-                 (event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind, payload)
-             SELECT event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind,
-                    payload::jsonb
-               FROM unnest(
-                 $1::bigint[], $2::bigint[], $3::bigint[], $4::bigint[], $5::bigint[],
-                 $6::bigint[], $7::bigint[], $8::float8[], $9::float8[], $10::float8[],
-                 $11::float8[], $12::smallint[], $13::text[])
-                 AS u(event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind,
-                      payload)",
+            "WITH written AS (
+                 INSERT INTO events
+                     (event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind, payload)
+                 SELECT event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind,
+                        payload::jsonb
+                   FROM unnest(
+                     $1::bigint[], $2::bigint[], $3::bigint[], $4::bigint[], $5::bigint[],
+                     $6::bigint[], $7::bigint[], $8::float8[], $9::float8[], $10::float8[],
+                     $11::float8[], $12::smallint[], $13::text[])
+                     AS u(event_id, source_id, t, gx, gy, gz, system_id, lx, ly, lz, lt, kind,
+                          payload)
+                 RETURNING event_id)
+             INSERT INTO lc_last_event (shard, event_id)
+             SELECT (event_id >> $14) & $15, max(event_id) FROM written GROUP BY 1
+             ON CONFLICT (shard) DO UPDATE
+                 SET event_id = greatest(lc_last_event.event_id, excluded.event_id)",
             &[
                 &ids, &sources, &times, &gx, &gy, &gz, &systems, &lx, &ly, &lz, &lt, &kinds,
-                &payloads,
+                &payloads, &sequence_bits, &max_shard,
             ],
         )
-        .await
+        .await?;
+    // Every row or an error: there is no `ON CONFLICT` on the events.
+    Ok(events.len() as u64)
 }
 
-/// The highest identifier the store holds, or `None` for an empty one.
+/// The highest identifier any shard has written, or `None` for an empty store.
 ///
 /// Read once at boot, so a shard resuming a world does not mint identifiers it has already
-/// used. See [`crate::id::Minter::resume_from`].
+/// used. See [`crate::id::Minter::resume_from`]. A counter, because `max(event_id)` is planned
+/// against every partition.
 #[cfg(feature = "postgres")]
 pub async fn last_event_id(client: &Client) -> Result<Option<EventId>, Error> {
-    let row = client.query_one("SELECT max(event_id) FROM events", &[]).await?;
+    let row = client.query_one("SELECT max(event_id) FROM lc_last_event", &[]).await?;
     Ok(row.get::<_, Option<i64>>(0).and_then(EventId::from_raw))
 }
 
-/// Schedule deliveries. Written when the event is written, not worked out when it is read.
 #[cfg(feature = "postgres")]
 pub async fn insert_deliveries(client: &Client, rows: &[Delivery]) -> Result<u64, Error> {
     if rows.is_empty() {
@@ -207,7 +224,6 @@ mod tests {
     use crate::id::Minter;
     use crate::migrate;
 
-    /// One span is thirty days of coordinate time. Tests that cross a boundary use it.
     const SPAN_US: i64 = PARTITION_SPAN_US;
 
     async fn store() -> Option<Client> {
@@ -292,7 +308,7 @@ mod tests {
         // Far enough out that no other test will have made it, and dropped first so that a
         // second run of the suite starts from the same place a first one did.
         let far = SPAN_US * 900;
-        client.batch_execute("DROP TABLE IF EXISTS events_p900, deliveries_p900").await.unwrap();
+        client.batch_execute("DROP TABLE IF EXISTS events_s900, deliveries_s900").await.unwrap();
         let refused = insert_events(&client, &[event(&mut minter, 10_900, far)]).await;
         assert!(refused.is_err(), "a row with no partition was accepted");
 
@@ -345,7 +361,9 @@ mod tests {
         let Some(client) = store().await else { return };
         let band = 12_000i64;
         clear(&client, band).await;
-        ensure_partitions(&client, 0, SPAN_US).await.unwrap();
+        // A slot of its own: one holding old thirty-day partitions would split the window.
+        let base = SPAN_US * 30;
+        ensure_partitions(&client, base, base + SPAN_US - 1).await.unwrap();
 
         // Enough rows, and enough observers, that a sequential scan would be the wrong choice
         // and the planner would take it if the index were not usable.
@@ -354,7 +372,7 @@ mod tests {
         for step in 0..20_000i64 {
             rows.push(Delivery {
                 observer_id: band + step % 40,
-                arrive_t: (step * 7_919) % SPAN_US,
+                arrive_t: base + (step * 7_919) % SPAN_US,
                 event_id: minter.mint(step * 1_000).unwrap(),
                 strength: 1.0,
             });
@@ -367,18 +385,18 @@ mod tests {
         // is a deployment requirement, and this is where it is written down.
         client.batch_execute("VACUUM ANALYZE deliveries").await.unwrap();
 
-        let plan = explain_delivery_query(&client, band + 7, 0, SPAN_US / 4).await.unwrap();
+        let plan = explain_delivery_query(&client, band + 7, base, base + SPAN_US / 4).await.unwrap();
         assert!(plan.contains("Index Only Scan"), "the index did not cover it:\n{plan}");
         assert!(!plan.contains("Seq Scan"), "it scanned the table:\n{plan}");
         assert!(!plan.contains("Sort"), "the order was imposed, not read:\n{plan}");
         // One partition, not all of them: the range prunes before the scan starts.
-        // ` on deliveries_p`, not `deliveries_p`: the plan names the index as well as the
+        // ` on deliveries_`, not `deliveries_`: the plan names the index as well as the
         // table, so the bare prefix counts every partition twice.
-        let scanned = plan.matches(" on deliveries_p").count();
+        let scanned = plan.matches(" on deliveries_").count();
         assert_eq!(scanned, 1, "the query touched {scanned} partitions:\n{plan}");
 
         // And the rows themselves come back in arrival order, which is what the scan is for.
-        let got = deliveries_for(&client, band + 7, 0, SPAN_US / 4).await.unwrap();
+        let got = deliveries_for(&client, band + 7, base, base + SPAN_US / 4).await.unwrap();
         assert!(!got.is_empty(), "the query found nothing to plan for");
         assert!(got.windows(2).all(|w| w[0].arrive_t <= w[1].arrive_t), "out of order");
         assert!(got.iter().all(|d| d.observer_id == band + 7));
@@ -412,6 +430,37 @@ mod tests {
         let overlap: Vec<_> =
             first.iter().filter(|a| second.iter().any(|b| b.event_id == a.event_id)).collect();
         assert!(overlap.is_empty(), "a tick delivered {} events twice", overlap.len());
+        clear(&client, band).await;
+    }
+
+    /// The counter moves with the events and never backwards.
+    #[tokio::test]
+    async fn the_last_identifier_is_kept_beside_the_events() {
+        let Some(client) = store().await else { return };
+        let band = 15_000i64;
+        clear(&client, band).await;
+        ensure_partitions(&client, 0, SPAN_US).await.unwrap();
+        // A shard number no other test mints with, so its row is this test's.
+        const SHARD: i64 = 1001;
+        let kept = || async {
+            client
+                .query_one("SELECT event_id FROM lc_last_event WHERE shard = $1", &[&SHARD])
+                .await
+                .unwrap()
+                .get::<_, i64>(0)
+        };
+
+        let mut minter = Minter::new(SHARD as u64).unwrap();
+        let written: Vec<Event> = (1..=3).map(|s| event(&mut minter, band, s * 1_000_000)).collect();
+        insert_events(&client, &written).await.unwrap();
+        let highest = written.iter().map(|e| e.id.get()).max().unwrap();
+        assert_eq!(kept().await, highest);
+        assert!(last_event_id(&client).await.unwrap().unwrap().get() >= highest);
+
+        // An earlier event written later does not lower it.
+        let mut behind = Minter::new(SHARD as u64).unwrap();
+        insert_events(&client, &[event(&mut behind, band, 0)]).await.unwrap();
+        assert_eq!(kept().await, highest, "the counter went backwards");
         clear(&client, band).await;
     }
 

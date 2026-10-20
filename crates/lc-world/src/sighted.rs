@@ -13,9 +13,18 @@
 //! Backwards too. A client whose clock is behind the shard's is sent samples from its own
 //! future, and holding one until its time comes was the same jump as never reckoning at all:
 //! a clock twenty seconds behind in low orbit is a thousand kilometers.
+//!
+//! A craft under thrust within [`consort::GALILEAN_BETA`] of the observer is drawn at its offset
+//! from it instead. Reckoned alone it coasts for up to a tick while the observer keeps burning,
+//! which at five gravities parts a pursuer from its quarry by thousands of kilometers; at an
+//! offset their shared motion cancels. What it gets wrong instead is the difference between the
+//! two accelerations, gravity's across the offset included, for at most a tick: worse than
+//! reckoning alone when the two burn different ways. A coasting craft is reckoned exactly, and
+//! is not dragged along by an observer burning away from it.
 
 use glam::DVec3;
 
+use crate::boost;
 use crate::coast::{self, Coast};
 use crate::consort;
 use crate::flight::JULIAN_YEAR_S;
@@ -26,6 +35,25 @@ use crate::system::{LOCAL_SHELL_LY, LocalSystem};
 /// which [`consort::GALILEAN_BETA`] bounds at a thousandth.
 const CONIC_LIGHT_STEPS: usize = 3;
 
+/// The offset drifts by the plain difference of the two velocities, which holds only this slow.
+const ALONGSIDE_BETA: f64 = consort::GALILEAN_BETA;
+
+/// The observer as a statement's light reached it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Receiver {
+    pub position_ly: DVec3,
+    pub beta: DVec3,
+    /// Coordinate seconds the light arrived.
+    pub at_s: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Alongside {
+    offset_ly: DVec3,
+    drift: DVec3,
+    arrived_s: f64,
+}
+
 /// A sighting, ready to be drawn at any later time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reckoning {
@@ -33,6 +61,7 @@ pub struct Reckoning {
     /// The conic it was on, solved once per statement rather than once per frame. `None` for a
     /// craft outside `system`, or too fast for one.
     frame: Option<Coast>,
+    alongside: Option<Alongside>,
 }
 
 /// What an observer sees of a craft at one instant.
@@ -48,12 +77,19 @@ pub struct Appearance {
 impl Reckoning {
 
     /// `system` is the one the observer is in; a sighting outside its shell is not put on a
-    /// conic about that system's bodies.
-    pub fn new(system: Option<&LocalSystem>, seen: Sighting) -> Self {
+    /// conic about that system's bodies. `thrusting` is whether it was as its light left.
+    pub fn new(system: Option<&LocalSystem>, seen: Sighting, thrusting: bool, receiver: Receiver) -> Self {
         let frame = system
             .filter(|s| seen.position_ly.distance(s.origin_ly) < LOCAL_SHELL_LY)
             .and_then(|s| consort::frame_for(s, &seen));
-        Self { seen, frame }
+        let alongside = (thrusting
+            && boost::velocity_to_frame(seen.beta, receiver.beta).length() < ALONGSIDE_BETA)
+            .then(|| Alongside {
+                offset_ly: seen.position_ly - receiver.position_ly,
+                drift: seen.beta - receiver.beta,
+                arrived_s: receiver.at_s,
+            });
+        Self { seen, frame, alongside }
     }
 
     /// What `observer_ly` sees at `now_s`.
@@ -63,6 +99,14 @@ impl Reckoning {
         observer_ly: DVec3,
         now_s: f64,
     ) -> Appearance {
+        if let Some(alongside) = &self.alongside {
+            let since_s = now_s - alongside.arrived_s;
+            return Appearance {
+                position_ly: observer_ly + alongside.offset_ly + alongside.drift * since_s / JULIAN_YEAR_S,
+                beta: self.seen.beta,
+                emitted_s: self.seen.emitted_s + since_s,
+            };
+        }
         if let Some((frame, system)) = self.frame.as_ref().zip(system)
             && let Some(seen) = along_conic(frame, system, observer_ly, now_s)
         {
@@ -123,13 +167,57 @@ mod tests {
         Sighting { target: ShipId(2), position_ly, beta, length_m: 500.0, emitted_s: 100.0 }
     }
 
+    fn coasting(seen: &Sighting) -> Reckoning {
+        let receiver = Receiver { position_ly: DVec3::ZERO, beta: DVec3::ZERO, at_s: seen.emitted_s };
+        Reckoning::new(None, *seen, false, receiver)
+    }
+
+    /// At 0.9 c, a tick of burning later, the contact is still the kilometer off it was stated.
+    #[test]
+    fn a_craft_burning_alongside_holds_its_offset() {
+        let beta = DVec3::X * 0.9;
+        let observer_ly = DVec3::ZERO;
+        let seen = drifting(observer_ly + DVec3::Y * 1.0e3 / M_PER_LY, beta);
+        let receiver = Receiver { position_ly: observer_ly, beta, at_s: seen.emitted_s };
+        let reckoning = Reckoning::new(None, seen, true, receiver);
+
+        let tick_s = 438.0;
+        let burned_m = 0.5 * 50.0 * tick_s * tick_s;
+        let now_s = seen.emitted_s + tick_s;
+        let observer_now_ly = observer_ly + beta * tick_s / JULIAN_YEAR_S + DVec3::X * burned_m / M_PER_LY;
+        let drawn = reckoning.appearance_at(None, observer_now_ly, now_s);
+        let range_m = (drawn.position_ly - observer_now_ly) * M_PER_LY;
+        assert!((range_m - DVec3::Y * 1.0e3).length() < 1.0, "{range_m:?}");
+        assert_eq!(drawn.emitted_s, now_s);
+
+        let alone = coasting(&seen).appearance_at(None, observer_now_ly, now_s);
+        assert!(alone.position_ly.distance(observer_now_ly) * M_PER_LY > 0.9 * burned_m);
+    }
+
+    /// A coasting craft, or one passing fast, keeps its own line.
+    #[test]
+    fn only_a_burning_craft_keeping_pace_is_drawn_alongside() {
+        let beta = DVec3::X * 0.5;
+        let seen = drifting(DVec3::Y * 1.0e3 / M_PER_LY, beta);
+        let at = |receiver_beta: DVec3, burning: bool| {
+            let receiver = Receiver { position_ly: DVec3::ZERO, beta: receiver_beta, at_s: seen.emitted_s };
+            Reckoning::new(None, seen, burning, receiver)
+                .appearance_at(None, DVec3::X * 5.0e6 / M_PER_LY, seen.emitted_s + 100.0)
+        };
+        let alone = coasting(&seen).appearance_at(None, DVec3::X * 5.0e6 / M_PER_LY, seen.emitted_s + 100.0);
+        assert_eq!(at(beta, false), alone);
+        let passing = beta + DVec3::X * ALONGSIDE_BETA;
+        assert_eq!(at(passing, true), alone);
+        assert_ne!(at(beta, true), alone);
+    }
+
     /// Between the stars, a light-hour off and doing a fifth of `c`: what is drawn is on the
     /// light cone, and later than what was stated.
     #[test]
     fn a_distant_contact_is_drawn_where_its_light_left() {
         let light_hour_ly = 3_600.0 / JULIAN_YEAR_S;
         let seen = drifting(DVec3::X * light_hour_ly, DVec3::Y * 0.2);
-        let reckoning = Reckoning::new(None, seen.clone());
+        let reckoning = coasting(&seen);
         let now_s = 100.0 + 3_600.0 + 600.0;
         let seen_now = reckoning.appearance_at(None, DVec3::ZERO, now_s);
 
@@ -144,7 +232,7 @@ mod tests {
     #[test]
     fn a_sample_from_the_future_is_reckoned_back_to_now() {
         let seen = drifting(DVec3::ZERO, DVec3::Y * 1e-4);
-        let reckoning = Reckoning::new(None, seen.clone());
+        let reckoning = coasting(&seen);
         let now_s = seen.emitted_s - 20.0;
         let observer_ly = seen.reckoned_at(now_s) + DVec3::X * 1.5e3 / M_PER_LY;
         let early = reckoning.appearance_at(None, observer_ly, now_s);
@@ -157,7 +245,7 @@ mod tests {
     #[test]
     fn a_contact_alongside_is_drawn_at_the_present() {
         let seen = drifting(DVec3::ZERO, DVec3::Y * 1e-4);
-        let reckoning = Reckoning::new(None, seen.clone());
+        let reckoning = coasting(&seen);
         let now_s = 538.0;
         let observer_ly = seen.reckoned_at(now_s) + DVec3::X * 1.5e3 / M_PER_LY;
         let seen_now = reckoning.appearance_at(None, observer_ly, now_s);

@@ -21,7 +21,7 @@ use lc_world::field::{CONTACT_FRACTION, received_fraction};
 use crate::journal::Journal;
 use crate::server::{KIND_COLLAPSE, Server};
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 mod afterglow;
 mod mode;
@@ -136,7 +136,6 @@ impl<J: Journal> Server<J> {
         after_t: i64,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let now_s = self.now_t as f64 * 1.0e-6;
         let mut due: Vec<(CraftId, i64)> =
@@ -156,14 +155,14 @@ impl<J: Journal> Server<J> {
                     let landing = self.emissions.landings.swap_remove(k);
                     let id = landing.observer;
                     due.retain(|(craft, _)| *craft != id);
-                    if !self.land(landing, wire, events, deliveries) {
+                    if !self.land(landing, wire, events) {
                         let next = self.fleet.get(id).and_then(|craft| collapse_by(craft, now_s));
                         due.extend(next.map(|at_s| (id, self.stamp(at_s, after_t))));
                     }
                 }
                 (Some((k, id, at_t)), _) => {
                     due.swap_remove(k);
-                    self.collapse(id, at_t, wire, events, deliveries);
+                    self.collapse(id, at_t, wire, events);
                 }
                 (None, _) => break,
             }
@@ -182,10 +181,9 @@ impl<J: Journal> Server<J> {
         at_t: i64,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let at_s = at_t as f64 * 1.0e-6;
-        self.put_out(id, at_t, true, events, deliveries);
+        self.put_out(id, at_t, true, events);
         let Some(craft) = self.fleet.get_mut(id) else { return };
         craft.settle(at_s);
         let Some(fitting) = craft.fitting() else { return };
@@ -199,11 +197,7 @@ impl<J: Journal> Server<J> {
         self.emissions.lit_by.remove(&id);
         let released = serde_json::to_value(lc_proto::Released { released_j }).unwrap_or_default();
         let payload = crate::emit::carrying(released, &crate::emit::burst(from, spike_j, balance.collapse_spike_k));
-        if self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events, deliveries).is_some() {
-            if let Some(event) = events.last().cloned() {
-                self.queue_landings(&event, deliveries);
-            }
-        }
+        self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events);
 
         self.pursuits.remove(&id);
         self.parks.remove(&id);

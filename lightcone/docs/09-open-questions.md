@@ -23,7 +23,7 @@ distant galaxies have no code yet, and star proper motion is planned-not-built b
 | Ice giant internal heat | One number for both. Uranus radiates 1.06 times what it absorbs and Neptune 2.61 though it is half again as far out, and nothing derivable from a body's mass, radius or temperature separates them. Taken nearer Uranus; see [04-stellar-photometry.md](04-stellar-photometry.md#a-giant-does-the-same-thing-and-less-of-it). |
 | Metallicity synthesis | Saturating in peculiar speed with seeded scatter, `lc_world::sky::metallicity`, and scaling a disc's solids. The resource yield curve waits on resources. |
 | Wire format | `postcard`, versioned by `PROTOCOL_VERSION` and pinned byte-for-byte by `lc_proto::golden`; new variants are appended, never renumbered. |
-| Partition cadence | Thirty days of coordinate time, about five real minutes, kept two ahead by the tick. See [02-event-store.md](02-event-store.md). |
+| Partition cadence | 360 days of coordinate time, about a real hour, kept two ahead by the tick and a real day behind it by retention. See [02-event-store.md](02-event-store.md). |
 | Optical depth | Populations combine as `1 − exp(−τ)` (`lc_world::emission`). |
 | Band set | Seven bands (`em_spectra::BANDS`), the thermal IR among them. |
 | Superluminal travel | Not built, not foreclosed. Three cheap signature decisions keep the option open; see [10-superluminal.md](10-superluminal.md). |

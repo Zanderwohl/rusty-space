@@ -203,6 +203,15 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
 #[cfg(feature = "postgres")]
 const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction";
 
+/// The messages these events carried, in no order.
+#[cfg(feature = "postgres")]
+pub async fn messages(client: &Client, event_ids: &[i64]) -> Result<Vec<Message>, Error> {
+    let rows = client
+        .query(&format!("SELECT {COLUMNS} FROM lc_messages WHERE event_id = ANY($1)"), &[&event_ids])
+        .await?;
+    Ok(rows.iter().map(message_from).collect())
+}
+
 /// Everything this ship transmitted, oldest first.
 #[cfg(feature = "postgres")]
 pub async fn sent_by(client: &Client, ship: i64) -> Result<Vec<Message>, Error> {

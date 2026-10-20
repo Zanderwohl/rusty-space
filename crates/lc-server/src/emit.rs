@@ -10,8 +10,8 @@
 //! payload as [`Emitted`], so the journal holds everything a restart needs.
 //!
 //! Three things come back after a restart: what each craft has lit, has said of it and what lands
-//! on each craft now, with the craft's checkpoint, and landings still in flight, from the journal's
-//! deliveries.
+//! on each craft now, with the craft's checkpoint, and light still in flight, from the journal's
+//! fronts.
 //!
 //! **Restated as it goes.** An emission is said again, as an event of the same beam, whenever what
 //! it sends has changed by a step: a lit drive's power as the ship lightens, or its axis as it
@@ -35,10 +35,10 @@ use lc_world::signal::{Beam, Transmitter};
 use serde::{Deserialize, Serialize};
 
 use crate::field::shadow_toward_m2;
-use crate::journal::{Journal, JournalError};
-use crate::server::{KIND_COLLAPSE, Server};
+use crate::journal::Journal;
+use crate::server::Server;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled, schedule};
+use crate::world::{Event, Scheduled};
 
 mod drives;
 mod restate;
@@ -345,7 +345,7 @@ impl<J: Journal> Server<J> {
     /// Put out what `id` has lit, at `at`, its drives too when `drives`: its draw stops, and the
     /// light of stopping follows what is already on its way. A drive cut by an order is not put out
     /// here but by the change of motion, which [`drives`] states.
-    pub(crate) fn put_out(&mut self, id: CraftId, at: i64, drives: bool, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    pub(crate) fn put_out(&mut self, id: CraftId, at: i64, drives: bool, events: &mut Vec<Event>) {
         let Some(lit) = self.emissions.emitting.get_mut(&id) else { return };
         let mut withdrawn = Vec::new();
         lit.retain_mut(|lighting| {
@@ -375,28 +375,28 @@ impl<J: Journal> Server<J> {
             }
             !drop
         });
-        deliveries.retain(|d| !dropped.contains(&d.event));
+        self.fronts.withdraw(&dropped);
         if let Some(craft) = self.fleet.get_mut(id) {
             craft.adjust(at as f64 * 1.0e-6, |fitting| fitting.darken());
         }
-        self.keep_emissions(events, deliveries);
+        self.keep_emissions(events);
     }
 
     /// Write every lighting and going out due by now.
-    pub(crate) fn keep_emissions(&mut self, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    pub(crate) fn keep_emissions(&mut self, events: &mut Vec<Event>) {
         let now = self.now_t;
         let ids: Vec<CraftId> = self.emissions.emitting.keys().copied().collect();
         for id in ids {
             let Some(mut lit) = self.emissions.emitting.remove(&id) else { continue };
             for lighting in &mut lit {
                 if lighting.beam.is_none() && lighting.lights_t <= now {
-                    lighting.beam = self.light_event(id, lighting, lighting.lights_t, lighting.power_w, events, deliveries);
+                    lighting.beam = self.light_event(id, lighting, lighting.lights_t, lighting.power_w, events);
                 }
             }
             lit.retain(|lighting| {
                 let done = lighting.beam.is_some() && lighting.out_t <= now;
                 if done {
-                    self.light_event(id, lighting, lighting.out_t, 0.0, events, deliveries);
+                    self.light_event(id, lighting, lighting.out_t, 0.0, events);
                 }
                 !done && lighting.beam.is_some() || lighting.lights_t > now
             });
@@ -433,7 +433,6 @@ impl<J: Journal> Server<J> {
         at: i64,
         power_w: f64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Option<i64> {
         let from = self.fleet.get(id)?.position_at(at as f64);
         let emission = |beam: i64| Emitted {
@@ -452,16 +451,17 @@ impl<J: Journal> Server<J> {
             None => Vec::new(),
         };
         let payload = |event_id: i64| carrying(serde_json::json!({}), &emission(event_id));
-        let event_id = self.fan_out(id, from, KIND_EMIT, power_w, payload, at, &cone, &holding, events, deliveries)?;
-        self.queue_landings(events.last()?, deliveries);
+        // Going out, it is seen by the light it puts out.
+        let seen_w = if power_w > 0.0 { power_w } else { crate::world::CANCEL_MARGIN * lighting.power_w };
+        let event_id = self.fan_out(id, from, KIND_EMIT, seen_w, payload, at, &cone, &holding, events)?;
         let said = self.emissions.said.entry(id).or_default();
         said.push(Said { t: at, emitted: emission(event_id) });
         said.sort_by_key(|s| s.t);
         Some(event_id)
     }
 
-    /// Write an event and schedule it to every worldline its light reaches inside `cone`, and to
-    /// `also` wherever they are. Its id, unless none could be minted.
+    /// Write an event and send its light on its way, to every worldline it reaches inside `cone`
+    /// and to `also` wherever they are. Its id, unless none could be minted.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn fan_out(
         &mut self,
@@ -474,22 +474,17 @@ impl<J: Journal> Server<J> {
         cone: &Beam,
         also: &[CraftId],
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Option<i64> {
         let event_id = self.minter.mint(at)?.get();
+        let power_w = self.seen_w(id, at, power_w);
         let event = Event { id: event_id, source: ShipId(id.0), t: at, at: from, kind, power_w, payload: payload(event_id) };
-        for observer in self.fleet.iter() {
-            let reach = if also.contains(&observer.id) { &Beam::OMNI } else { cone };
-            if let Some(scheduled) = schedule(&event, reach, observer) {
-                deliveries.push(scheduled);
-            }
-        }
+        self.launch(crate::front::Front::new(event.clone(), *cone, also.to_vec(), None, None));
         events.push(event);
         Some(event_id)
     }
 
     /// Queue a landing for every delivery of `event` to a craft other than its source, if it
-    /// carries an emission.
+    /// carries an emission. Called as its light lands.
     pub(crate) fn queue_landings(&mut self, event: &Event, deliveries: &[Scheduled]) {
         let Some(emitted) = emitted(&event.payload) else { return };
         let landings = deliveries
@@ -506,7 +501,6 @@ impl<J: Journal> Server<J> {
         landing: Landing,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> bool {
         let Landing { observer, arrive_t, source, emitted, said_t } = landing;
         let at_s = arrive_t as f64 * 1.0e-6;
@@ -524,7 +518,7 @@ impl<J: Journal> Server<J> {
             let arriving_j = emitted.burst_j * fraction;
             let Some(craft) = self.fleet.get_mut(observer) else { return false };
             craft.adjust(at_s, |fitting| fitting.take_burst(Burst::Arriving(arriving_j)));
-            return self.after_landing(observer, arrive_t, wire, events, deliveries);
+            return self.after_landing(observer, arrive_t, wire, events);
         }
 
         let lit = emitted.cone().reaches(offset, crate::field::radius_us(shadow_m2)) && emitted.power_w > 0.0;
@@ -567,7 +561,7 @@ impl<J: Journal> Server<J> {
         }
         let Some(craft) = self.fleet.get_mut(observer) else { return false };
         craft.adjust(at_s, |fitting| fitting.set_lit_w(fitting.lit_w() + arriving_w - was_w));
-        self.after_landing(observer, arrive_t, wire, events, deliveries)
+        self.after_landing(observer, arrive_t, wire, events)
     }
 
     /// Collapse a craft a landing took to `Q_max`, or tell its owner what its field now holds.
@@ -577,7 +571,6 @@ impl<J: Journal> Server<J> {
         at_t: i64,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> bool {
         let at_s = at_t as f64 * 1.0e-6;
         let Some(craft) = self.fleet.get(id) else { return false };
@@ -586,24 +579,8 @@ impl<J: Journal> Server<J> {
             self.tell_fitted(wire, id);
             return false;
         }
-        self.collapse(id, at_t, wire, events, deliveries);
+        self.collapse(id, at_t, wire, events);
         true
-    }
-
-    /// Landings whose light had not arrived when the last shard stopped, whatever lit them, from
-    /// the journal's deliveries of events this shard's clock has reached.
-    pub async fn resume_landings(&mut self) -> Result<(), JournalError> {
-        for kind in [KIND_EMIT, KIND_COLLAPSE] {
-            let flying = self.journal.in_flight(kind, self.now_t).await?;
-            let (mut events, deliveries): (Vec<Event>, Vec<Scheduled>) = flying.into_iter().map(|(d, e)| (e, d)).unzip();
-            events.sort_by_key(|e| e.id);
-            events.dedup_by_key(|e| e.id);
-            let now = self.now_t;
-            for event in events.iter().filter(|e| e.t <= now) {
-                self.queue_landings(event, &deliveries);
-            }
-        }
-        Ok(())
     }
 }
 

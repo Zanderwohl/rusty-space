@@ -21,7 +21,7 @@ use crate::journal::{Journal, JournalError, PREPARE_AHEAD_US};
 use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::ticket::{Spent, Trusted};
-use crate::world::{Event, Scheduled, World, schedule};
+use crate::world::{Event, World};
 use lc_world::craft::{Craft, CraftId, Fleet, Kind};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
@@ -140,6 +140,8 @@ pub struct Server<J: Journal> {
     pub(crate) owners: HashMap<CraftId, ClientId>,
     pub(crate) clients: HashMap<ClientId, Connected>,
     pub(crate) journal: J,
+    /// See [`crate::front`].
+    pub(crate) fronts: crate::front::Fronts,
     pub(crate) minter: Minter,
     /// Written by this tick, and handed to the journal at the end of it.
     pending: Vec<Event>,
@@ -238,6 +240,7 @@ impl<J: Journal> Server<J> {
             owners: HashMap::new(),
             clients: HashMap::new(),
             journal,
+            fronts: Default::default(),
             // Startup, which may panic: a shard number outside the field is a misconfiguration.
             #[allow(clippy::expect_used)]
             minter: Minter::new(shard).expect("a shard inside the identifier's field"),
@@ -466,12 +469,14 @@ impl<J: Journal> Server<J> {
         self.now_t += span_us;
         let now_s = self.now_t as f64 * 1.0e-6;
         let mut events = Vec::new();
-        let mut deliveries = Vec::new();
+        // First, so what earlier light does as it lands this tick is known before anything acts
+        // on a landing. Light put out this tick is crossed as it is put out.
+        self.cross_fronts(after_t);
         self.shine(after_t);
         // Before anything settles an account past the instant: advancing crosses starlight's day
         // boundaries, and a field over its limit at one cannot say when it got there.
-        self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
-        self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
+        self.keep_field_modes(after_t, wire, &mut events);
+        self.collapse_fields(after_t, wire, &mut events);
         // Membership before motion, as the client orders it: a station and a conic are both
         // positions *in* a system, and one resolved against the wrong system is a craft in the
         // wrong place.
@@ -486,7 +491,7 @@ impl<J: Journal> Server<J> {
         // the range it has already made and this is a comparison until the window moves.
         self.journal.prepare(self.now_t, self.now_t + PREPARE_AHEAD_US).await?;
         self.stages.mark("prepare");
-        // 2. Drain intents, validate, write events, schedule deliveries.
+        // 2. Drain intents, validate, write events, send their light on its way.
         for (from, message) in wire.poll() {
             // Charged before the message is read, so a malformed one costs its sender as much
             // as a valid one and there is nothing to gain by sending rubbish quickly.
@@ -496,14 +501,14 @@ impl<J: Journal> Server<J> {
                 wire.send(from, Outbound::Throttled { retry_after_ticks });
                 continue;
             }
-            self.handle(from, message, wire, &mut events, &mut deliveries);
+            self.handle(from, message, wire, &mut events);
         }
         for budget in self.budgets.values_mut() {
             budget.advance(TICKS_PER_SECOND);
         }
         self.stages.mark("intents");
         // After the intents, so a command sees every order that arrived with it already flown.
-        self.run_commands(wire, &mut events, &mut deliveries);
+        self.run_commands(wire, &mut events);
         self.stages.mark("commands");
         // After motion, so every instrument looks from where its craft now is, and after the
         // intents, so a report composed this tick carries nothing its craft learns in it.
@@ -511,27 +516,26 @@ impl<J: Journal> Server<J> {
         // 3. A staged scene, if one is running. Before the pursuits and after the intents for
         // the same reason they are after the intents: a chase a beat ordered is not re-solved
         // against the plan it has only just made.
-        self.direct(wire, &mut events, &mut deliveries);
+        self.direct(wire, &mut events);
         // After the intents, so an intercept ordered this tick is not immediately re-solved
         // against the plan it just made.
-        self.steer_pursuits(wire, &mut events, &mut deliveries);
-        self.steer_parks(wire, &mut events, &mut deliveries);
+        self.steer_pursuits(wire, &mut events);
+        self.steer_parks(wire, &mut events);
         // After the intents, so an auto-ack switched off this tick answers nothing more.
-        self.answer_owed(after_t, &mut events, &mut deliveries);
-        self.announce_drives(after_t, &mut events, &mut deliveries);
-        self.light_drives(after_t, &mut events, &mut deliveries);
-        self.keep_emissions(&mut events, &mut deliveries);
+        self.answer_owed(after_t, &mut events);
+        self.announce_drives(after_t, &mut events);
+        self.light_drives(after_t, &mut events);
+        self.keep_emissions(&mut events);
         self.restate(after_t);
         self.keep_accounts(wire);
         // After every change of input this tick, each of which settled first.
-        self.keep_field_modes(after_t, wire, &mut events, &mut deliveries);
-        self.collapse_fields(after_t, wire, &mut events, &mut deliveries);
+        self.keep_field_modes(after_t, wire, &mut events);
+        self.collapse_fields(after_t, wire, &mut events);
         self.sweep_wrecks();
         self.stages.mark("scene");
-        self.schedule_landings(&events, &deliveries);
         self.land_reports();
         self.stages.mark("landings");
-        self.journal.write(&events, &deliveries).await?;
+        self.journal_tick(&events).await?;
         self.write_conversations().await?;
         self.stages.mark("journal");
         self.pending = events;
@@ -558,7 +562,6 @@ impl<J: Journal> Server<J> {
         message: Inbound,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         match message {
             Inbound::Hello { protocol, ticket } => {
@@ -591,7 +594,7 @@ impl<J: Journal> Server<J> {
             }
             Inbound::Act(intent) => {
                 let ship_id = intent.ship_id;
-                match self.act(from, intent, events, deliveries) {
+                match self.act(from, intent, events) {
                     Ok(applied) => {
                         // An intercept is a policy, so what it *did* — the first approach —
                         // is not something the client can work out from the order coming back.
@@ -679,7 +682,6 @@ impl<J: Journal> Server<J> {
         from: ClientId,
         intent: Intent,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<Applied, Refusal> {
         // **The gate.** `NotYours` whichever half failed: a client that could tell them apart could
         // probe for both.
@@ -717,7 +719,7 @@ impl<J: Journal> Server<J> {
         }
         // A switch is not seen: its flip is, when it completes. See `crate::field`.
         if let Order::FieldMode { mode } = intent.order {
-            let at = self.order_field_mode(id, mode, at, events, deliveries)?;
+            let at = self.order_field_mode(id, mode, at, events)?;
             let event_id = self.minter.mint(at).ok_or(Refusal::Impossible)?.get();
             return Ok(Applied { event_id, at_t: at, order: intent.order });
         }
@@ -865,7 +867,7 @@ impl<J: Journal> Server<J> {
                 // The order puts nothing out. The plume going dark is still seen, by anyone
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 // Whatever it had lit goes out with it.
-                self.put_out(id, at, false, events, deliveries);
+                self.put_out(id, at, false, events);
                 (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness, approach } => {
@@ -980,17 +982,15 @@ impl<J: Journal> Server<J> {
             self.parks.remove(&id);
         }
 
-        let event_id = self.put_on_air(
-            id, at, kind, power_w, payload, &beam, transmitted, utterance, events, deliveries,
-        )?;
+        let event_id = self.put_on_air(id, at, kind, power_w, payload, &beam, transmitted, utterance, events)?;
         if let Some((to, through)) = reported {
             self.reported(id, to, through);
         }
         Ok(Applied { event_id, at_t: at, order: applied })
     }
 
-    /// Write an event and schedule it to everyone it reaches, and file it as a conversation
-    /// when it is one. `transmitted` is a radio transmission, which its sender does not hear.
+    /// Write an event and send its light on its way, and file it as a conversation when it is
+    /// one. `transmitted` is a radio transmission, which its sender does not hear.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn put_on_air(
         &mut self,
@@ -1003,7 +1003,6 @@ impl<J: Journal> Server<J> {
         transmitted: bool,
         utterance: Option<crate::radio::Utterance>,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<i64, Refusal> {
         let at_position = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64);
         let event = Event {
@@ -1012,7 +1011,7 @@ impl<J: Journal> Server<J> {
             t: at,
             at: at_position,
             kind,
-            power_w,
+            power_w: self.seen_w(id, at, power_w),
             payload,
         };
         // Charged from storage, not heat: a dish is not an engine (31 §Radio).
@@ -1021,28 +1020,33 @@ impl<J: Journal> Server<J> {
                 craft.drain(power_w * crate::radio::TRANSMISSION_S, at as f64 * 1.0e-6);
             }
         }
-        let mut landings = Vec::new();
-        for observer in self.fleet.iter() {
-            // A transmitter does not receive its own transmission. True of a real radio, which
-            // is not listening on the frequency it is shouting into — and load-bearing here,
-            // because a sender that heard itself would have every message twice in its own
-            // transcript: once as its own, and once as an arrival from a stranger with its
-            // own identifier. Everything else a ship does, it does go on seeing.
-            if transmitted && observer.id == id {
-                continue;
-            }
-            if let Some(scheduled) = schedule(&event, beam, observer) {
-                landings.push((observer.id, scheduled.arrive_t, scheduled.strength));
-                deliveries.push(scheduled);
-            }
-        }
         let event_id = event.id;
-        if let Some(said) = utterance {
-            self.remember(event_id, id, at, &said, &landings);
-            self.owe(id, event.at, !beam.is_omni(), &said, &landings);
+        if let Some(said) = &utterance {
+            self.remember(event_id, id, at, said);
         }
+        // A transmitter does not receive its own transmission. True of a real radio, which is not
+        // listening on the frequency it is shouting into — and load-bearing here, because a sender
+        // that heard itself would have every message twice in its own transcript: once as its
+        // own, and once as an arrival from a stranger with its own identifier. Everything else a
+        // ship does, it does go on seeing.
+        let deaf = transmitted.then_some(id);
+        self.launch(crate::front::Front::new(event.clone(), *beam, Vec::new(), deaf, utterance));
         events.push(event);
         Ok(event_id)
+    }
+
+    /// `power_w`, or for an event that puts out nothing, [`crate::world::CANCEL_MARGIN`] over what
+    /// it stops: the drive and emits, or failing those the hull's glow and reflected starlight.
+    pub(crate) fn seen_w(&self, id: CraftId, at: i64, power_w: f64) -> f64 {
+        if power_w > 0.0 {
+            return power_w;
+        }
+        let Some(craft) = self.fleet.get(id) else { return power_w };
+        let at_s = at as f64 * 1.0e-6;
+        let stopped_w = lc_world::ignition::putting_out_w(craft, &self.balance, at_s);
+        let glow = craft.glow_at(at_s).unwrap_or_else(|| lc_world::glow::Glow::unfitted(&self.balance));
+        let hull_w = lc_world::glow::thermal_w(&glow) + craft.starlight_w_at(at_s) * lc_world::glow::reflectance(glow.shade, &self.balance);
+        crate::world::CANCEL_MARGIN * stopped_w.max(hull_w)
     }
 
     /// Verify a ticket and bind the connection to the account's craft.
@@ -1202,7 +1206,6 @@ impl<J: Journal> Server<J> {
         &mut self,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
@@ -1227,14 +1230,14 @@ impl<J: Journal> Server<J> {
             }
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
             // that this craft maneuvered, at light delay, exactly as they would for any other.
-            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
+            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events);
             // Its owner learns *what* it is flying, at once and directly. Nobody else does:
             // this is a ship being told about itself.
             self.tell_flying(wire, id);
         }
     }
 
-    /// Write an event for something a craft did, and schedule it to everyone who will see it.
+    /// Write an event for something a craft did, and send its light on its way.
     /// Its id, unless none could be minted.
     pub(crate) fn emit(
         &mut self,
@@ -1244,10 +1247,9 @@ impl<J: Journal> Server<J> {
         payload: String,
         at: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Option<i64> {
         let from = self.fleet.get(id)?.position_at(at as f64);
-        self.emit_from(id, from, kind, power_w, payload, at, events, deliveries)
+        self.emit_from(id, from, kind, power_w, payload, at, events)
     }
 
     /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
@@ -1262,11 +1264,10 @@ impl<J: Journal> Server<J> {
         payload: String,
         at: i64,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Option<i64> {
         // Omnidirectional: everything that reaches here is a plume, a hull or an engine going
         // out, and none of those are pointed at anybody.
-        self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events, deliveries)
+        self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events)
     }
 
     /// Release what has arrived. **The only place anything reaches a client.**
@@ -2267,7 +2268,7 @@ use crate::transport::Loopback;
             last_seen: None,
         });
         let intent = Intent { ship_id: ShipId(1), order: Order::Park, issued_at_client_t: 0 };
-        let refused = server.act(ClientId(1), intent, &mut Vec::new(), &mut Vec::new());
+        let refused = server.act(ClientId(1), intent, &mut Vec::new());
         assert_eq!(refused.err(), Some(Refusal::Uncharacterized));
         assert!(server.pursuits.contains_key(&CraftId(1)), "a refused order ended the pursuit");
     }

@@ -15,6 +15,8 @@
 pub mod bvh;
 pub mod chat;
 pub mod cursor;
+#[cfg(feature = "postgres")]
+pub mod fronts;
 pub mod id;
 #[cfg(feature = "postgres")]
 pub mod knowledge;

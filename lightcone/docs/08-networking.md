@@ -53,11 +53,11 @@ send(client, event) requires:
     the event's light cone has reached W at or before the server's current t
 ```
 
-Implemented as the `deliveries` table from [02-event-store.md](02-event-store.md): arrival
-times are computed when the event is written, so the tick-time check is a B-tree range scan
-on `(observer_id, arrive_t)`. The server reads it through exactly that scan, and a second
-server started against the same database delivers what the first one scheduled — the tick loop
-holds no events of its own.
+Implemented as light fronts and the `deliveries` table from
+[02-event-store.md](02-event-store.md): each tick finds the craft a front's light passed, whichever
+craft exist by then, and writes the delivery as it lands, so the per-client check is a B-tree range
+scan on `(observer_id, arrive_t)`. A second server started against the same database follows the
+first one's light on from the fronts it kept.
 
 Storage sits behind a `Journal` trait with two implementations. The filter's own tests run
 against the in-memory one, because they are about causality and must not need a database to
@@ -96,6 +96,19 @@ a ship flying formation with it and snapped back twenty times a second. Reckonin
 an event whose light has not arrived. What it can get wrong is a maneuvere since the sample,
 for at most a tick, which is the same thing a pursuer's dead reckoning gets wrong and for the
 same reason: it was not told.
+
+**A craft under thrust keeping pace with the observer is drawn at its offset from it** rather
+than reckoned on its own. A presence also says where the observer itself was when the light
+landed, and how fast; a contact under thrust moving within `GALILEAN_BETA` of that is drawn at the stated
+offset from the observer's own present, drifting by the difference of the two velocities. On
+its own, a quarry being escorted coasted for up to a tick while its pursuer, drawn at its own
+present, went on matching the burn: thousands of kilometers apart and back again once a
+statement, at any speed. At an offset the shared motion cancels, and so does a client clock
+running a little off the shard's. What it gets wrong instead is the difference between the two
+accelerations, gravity's across the offset included, for at most a tick, which is worse than
+reckoning alone when the two burn different ways. A coasting contact is reckoned exactly and
+keeps its own line, so a ship that burns away from a companion does not drag it along. A
+balanced emit pushes nothing and counts as coasting.
 
 `beta` and `facing` are in it because both are measurable at a distance: velocity is what the
 light arrives Doppler-shifted and aberrated by, and a hull's attitude is its silhouette.
@@ -454,7 +467,8 @@ from the beginning.
 Per tick:
 
 1. Advance `t`.
-2. Drain intents, validate, write events, schedule deliveries.
+2. Find the light that landed in `(t_prev, t]`, then drain intents, validate, write events and
+   send their light on its way.
 3. Query `deliveries` for `arrive_t` in `(t_prev, t]`, per connected observer.
 4. Push receptions.
 5. Run scheduled world updates whose time has come: burns completing, construction
