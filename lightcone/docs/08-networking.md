@@ -94,6 +94,16 @@ an event whose light has not arrived. What it can get wrong is a maneuvere since
 for at most a tick, which is the same thing a pursuer's dead reckoning gets wrong and for the
 same reason: it was not told.
 
+**A burning craft keeping pace with the observer is drawn at its offset from it** rather than
+reckoned on its own. A presence also says where the observer itself was when the light landed,
+and how fast; a contact under drive moving within `GALILEAN_BETA` of that is drawn at the stated
+offset from the observer's own present, drifting by the difference of the two velocities. On
+its own, a quarry being escorted coasted for up to a tick while its pursuer, drawn at its own
+present, went on matching the burn: thousands of kilometers apart and back again once a
+statement, at any speed. At an offset the shared motion cancels, and so does a client clock
+running a little off the shard's. A coasting contact is reckoned exactly and keeps its own line,
+so a ship that burns away from a companion does not drag it along.
+
 `beta` and `facing` are in it because both are measurable at a distance: velocity is what the
 light arrives Doppler-shifted and aberrated by, and a hull's attitude is its silhouette.
 

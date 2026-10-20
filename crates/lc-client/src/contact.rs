@@ -2,7 +2,7 @@
 
 use glam::DVec3;
 use lc_proto::{Presence, ShipId};
-use lc_world::sighted::Reckoning;
+use lc_world::sighted::{Receiver, Reckoning};
 use lc_world::system::LocalSystem;
 
 /// Another craft, as this ship currently sees it.
@@ -62,6 +62,10 @@ impl DriveAt {
             emit: lc_world::emit::Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w },
         }
     }
+
+    fn is_lit(&self) -> bool {
+        self.drive_w > 0.0 || self.emit.fore_w > 0.0 || self.emit.aft_w > 0.0
+    }
 }
 
 impl Contact {
@@ -73,6 +77,11 @@ impl Contact {
         let emitted_s = presence.emitted_t as f64 * 1.0e-6;
         let emit = lc_world::emit::Ends { fore_w: presence.emit_fore_w, aft_w: presence.emit_aft_w };
         let stated = DriveAt { at_s: emitted_s, drive_w: presence.drive_w, emit };
+        let receiver = Receiver {
+            position_ly: DVec3::from_array(presence.observer_ly),
+            beta: DVec3::from_array(presence.observer_beta),
+            at_s: presence.arrive_t as f64 * 1.0e-6,
+        };
         let sighting = lc_world::pursuit::Sighting {
             target: lc_world::motion::ShipId(presence.ship_id.0),
             position_ly,
@@ -96,7 +105,7 @@ impl Contact {
             building: presence.building.map(|b| (emitted_s, b)),
             glow: presence.glow.unwrap_or_else(|| lc_world::glow::Glow::unfitted(&lc_world::fitting::Balance::DEFAULT).into()),
             glare: presence.glare,
-            reckoning: Reckoning::new(system, sighting),
+            reckoning: Reckoning::new(system, sighting, stated.is_lit(), receiver),
             stated,
         }
     }
