@@ -2,6 +2,17 @@
 
 Bevy 0.19, wgpu, WGSL. One shader set for native and browser.
 
+**Status: partly built.** The sky is `lc-client`'s `starfield` (over
+`em_render::relativistic_starfield_material`), `resolved`, `surfaces`, `procedural`, `envelope`,
+`haze`, `tonemap`, `hull`, `plume` and `map*`, on `em_spectra::{mapping, extinction}` and
+`lc_world::{surface, climate, airless, giant, ground, rings}`. Not built: the god view beyond a
+coordinate-time map source behind the `godview` feature — no causality overlays, and no server
+gate, only the client reading its own ticket in `map_source::may_see_everything`; light cones as
+geometry; the skybox; per-tier depth ranges (`view::ScaleTier` only picks the map's unit, and the
+sky is one camera); and the CIE route for `natural`, which is still a direct assignment. Own-system
+bodies are drawn at coordinate time rather than retarded, and the map's lines use their own
+`MapLineMaterial` (`map_line.wgsl`), not `BodyWireframeMaterial`.
+
 ## View modes
 
 | mode | what it draws | who gets it |

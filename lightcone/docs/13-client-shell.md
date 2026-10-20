@@ -7,6 +7,16 @@ over a rendered background and is Bevy UI — see [The main menu](#the-main-menu
 [18-ui-style.md](18-ui-style.md) is the companion: this page is what the interface *is*, that
 one is how to draw a surface without it fighting what is already there.
 
+**Status: partly built.** In `lc-client`: states and `HAS_MAIN_MENU` in `app`, `Action` and
+`apply` in `action`, bindings in `input`, the readout in `hud`, windows in `panels`,
+`system_panel`, `radio_panel` and `telescope_panel`, the menu on `em-ui` in `menu`, the map in
+`map*` on `em-map`, and the flags in `dev` and `entry`. Not built: Settings (the panel and the
+menu's NewWorld, Load, Settings and About pages are placeholders; nothing persists and nothing
+rebinds), the debug window's causality overlay, scale-tier readout and retarded-solver
+statistics, the `Tab` scale-tier control, and an aggregate map source. Departures: the menu
+backdrop is 12 000 stars, Refit is a ledger with refits begun from the editor's Apply per
+[29-ship-form.md](29-ship-form.md), and the editor's `form_*` modules read `KeyCode` too.
+
 ## States
 
 ```
