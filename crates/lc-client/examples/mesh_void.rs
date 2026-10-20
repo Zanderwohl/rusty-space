@@ -23,6 +23,7 @@
 //! | `--aim <part>` | look at this part's center instead; with one form only. With `--zoom 0.3` it frames a spar's seams closely enough to see the bolts |
 //! | `--exposure <stops>` | open the exposure, in stops from `hull_void`'s, which is placed for a lit albedo of 0.3 and so clips anything lighter; `-1.5` by default |
 //! | `--sun <deg>` | the star's elevation; negative is night, where the living lights show |
+//! | `--fill <share>` | light on the side away from the star, as a share of its; 0.08 by default, which leaves an unlit side all but black |
 //! | `--frames <n>` / `--burst <n>` | frames after every mesh lands, and consecutive shots from there |
 //! | `--remesh <cells>` | on the first shot, ask every hull for this resolution. Each frame's wall time is logged until every new mesh has landed and been drawn, and a burst photographs the old meshes staying up until the new ones swap in |
 
@@ -91,6 +92,7 @@ struct Args {
     pitch_deg: f32,
     zoom: f32,
     sun_deg: f32,
+    fill: f32,
     exposure: f32,
     frames: u32,
     burst: u32,
@@ -133,6 +135,7 @@ impl Args {
             pitch_deg: value("--pitch").unwrap_or(25.0),
             zoom: value("--zoom").unwrap_or(1.0),
             sun_deg: value("--sun").unwrap_or(35.0),
+            fill: value("--fill").unwrap_or(0.08),
             exposure: value("--exposure").unwrap_or(-1.5),
             frames: value("--frames").unwrap_or(10.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
@@ -158,7 +161,7 @@ fn fixture(name: &str) -> Form {
 }
 
 /// The Mind and one part of a slot's volume: enclosing it, or for a spar, on a storage sphere
-/// enclosing it, as [`spar_fixture`] hangs one.
+/// enclosing it, as [`spar_fixture`] hangs one but on the side the default camera sees.
 fn lone_part(kind: &str, shape: &str) -> Form {
     let min_part_m3 = Balance::DEFAULT.min_part_m3;
     let kind = PART_KINDS.iter().find(|(k, _)| *k == kind).expect("checked when parsed").1;
@@ -174,7 +177,7 @@ fn lone_part(kind: &str, shape: &str) -> Form {
     match kind {
         Kind::Spar(_) => {
             let sphere = Primitive::Capsule { length: 0.0 };
-            let anchor = Mount::Attached { anchor: glam::DVec3::new(0.3, 1.0, 0.2), standoff: -0.3 };
+            let anchor = Mount::Attached { anchor: glam::DVec3::new(-0.5, -0.75, 0.45), standoff: -0.3 };
             Form {
                 parts: vec![
                     mind,
@@ -345,8 +348,7 @@ fn spawn(
     }
     let material = materials.add(HullMaterial {
         uniforms: HullUniform {
-            // Enough fill to see an unlit side against the black.
-            to_star: to_star.extend(0.08),
+            to_star: to_star.extend(args.fill),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
