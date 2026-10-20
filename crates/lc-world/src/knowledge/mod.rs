@@ -40,6 +40,7 @@ pub mod report;
 pub mod room;
 pub mod subject;
 pub mod survey;
+pub mod thread;
 pub mod transit;
 mod tracked;
 pub mod turns;
@@ -98,7 +99,7 @@ fn ranged_place(sightings: &[Sighting]) -> Option<Distance> {
 }
 
 fn better_name(held: Option<&Naming>, new: &Naming, owner: Witness) -> bool {
-    let rank = |n: &Naming| (n.kind.chosen(), n.witness == owner, n.stated_s);
+    let rank = |n: &Naming| (n.witness == owner, n.stated_s);
     match held {
         None => true,
         Some(held) => rank(new) > rank(held),
@@ -176,6 +177,8 @@ pub struct File {
     digests: Vec<Digest>,
     /// Keep this subject's logs whatever the pipeline concludes. This craft's own choice.
     retained: bool,
+    /// Notes and chosen names. [`File::names`] holds only what rules assigned.
+    thread: thread::Thread,
 }
 
 impl File {
@@ -193,6 +196,10 @@ impl File {
 
     pub fn names(&self) -> &[Naming] {
         &self.names
+    }
+
+    pub fn thread(&self) -> &thread::Thread {
+        &self.thread
     }
 
     pub fn orbits(&self) -> &[Orbit] {
@@ -377,6 +384,8 @@ pub struct Knowledge {
     consumed: Vec<Consumed>,
     /// What changed when, so what is new since a mark is found without walking every file.
     backlog: report::Backlog,
+    /// Subjects with a thread, by system: a report about a system carries every one of them.
+    threaded: BTreeMap<Subject, std::collections::BTreeSet<Subject>>,
     sampled: report::Recent,
     /// Subjects with samples added since their log was last read.
     unread: std::collections::BTreeSet<Subject>,
@@ -417,6 +426,7 @@ impl Knowledge {
             unsaved: Vec::new(),
             consumed: Vec::new(),
             backlog: Default::default(),
+            threaded: BTreeMap::new(),
             sampled: Default::default(),
             unread: Default::default(),
             analyzing: Default::default(),
@@ -547,21 +557,23 @@ impl Knowledge {
     /// since chosen.
     pub fn designation_of(&self, subject: impl Into<Subject>) -> Option<String> {
         let subject = subject.into();
-        let naming = self.files.get(&subject)?.best_naming(self.owner, |n| !n.kind.chosen())?;
+        let naming = self.files.get(&subject)?.naming(self.owner)?;
         self.read_naming(subject, naming, 0)
     }
 
-    /// The name somebody chose, if the name that wins is one.
+    /// The name somebody chose, from the subject's thread. See [`thread::Thread::name`].
     pub fn given_name_of(&self, subject: impl Into<Subject>) -> Option<String> {
-        let naming = self.files.get(&subject.into())?.naming(self.owner)?;
-        naming.kind.chosen().then(|| naming.name.clone())
+        self.files.get(&subject.into())?.thread.name(self.owner).map(str::to_string)
     }
 
     /// A report can carry a relative naming on a star, which would read after itself forever;
     /// past [`NAME_DEPTH`] the subject goes by its designation instead.
     fn name_at_depth(&self, subject: Subject, depth: usize) -> Option<String> {
-        let naming = self.files.get(&subject)?.naming(self.owner)?;
-        self.read_naming(subject, naming, depth)
+        let file = self.files.get(&subject)?;
+        if let Some(name) = file.thread.name(self.owner) {
+            return Some(name.to_string());
+        }
+        self.read_naming(subject, file.naming(self.owner)?, depth)
     }
 
     fn read_naming(&self, subject: Subject, naming: &Naming, depth: usize) -> Option<String> {
@@ -662,12 +674,9 @@ impl Knowledge {
     pub fn named(&mut self, subject: impl Into<Subject>, naming: Naming) {
         let subject = subject.into();
         let file = self.files.edit().entry(subject).or_default();
-        match file.names.iter_mut().find(|n| n.witness == naming.witness && n.kind.chosen() == naming.kind.chosen()) {
-            Some(held) if held.stated_s > naming.stated_s => {}
-            // A rule's assignment is frozen.
-            Some(held) if !held.kind.chosen() => {}
-            Some(held) => *held = naming,
-            None => file.names.push(naming),
+        // A rule's assignment is frozen: the first one a witness made stands.
+        if !file.names.iter().any(|n| n.witness == naming.witness) {
+            file.names.push(naming);
         }
         self.refresh(subject);
     }
@@ -683,16 +692,31 @@ impl Knowledge {
         }
     }
 
-    /// Give something this craft's own name for it.
-    pub fn name_it(&mut self, subject: impl Into<Subject>, name: impl Into<String>, now_s: f64) {
-        let naming = Naming {
-            witness: self.owner,
-            name: name.into(),
-            kind: NameKind::Given,
-            stated_s: now_s,
-            lineage: Lineage::new(),
-        };
-        self.named(subject, naming);
+    /// Append to a subject's thread, as of everything this craft holds on it now.
+    pub fn write(&mut self, subject: impl Into<Subject>, writing: lc_proto::Writing, scope: lc_proto::Scope, now_s: f64) -> thread::EntryId {
+        let subject = subject.into();
+        let owner = self.owner;
+        let file = self.files.edit().entry(subject).or_default();
+        let mut parents = file.thread.heads();
+        parents.sort();
+        let entry = thread::Entry { author: owner, written_s: now_s, parents, scope, writing };
+        let id = entry.id();
+        file.thread.add(thread::Held { entry, lineage: Lineage::new() });
+        self.refresh(subject);
+        id
+    }
+
+    /// Call something by a name, in the open: the name travels in any report about it.
+    pub fn name_it(&mut self, subject: impl Into<Subject>, name: impl Into<String>, now_s: f64) -> thread::EntryId {
+        self.write(subject, lc_proto::Writing::Name(name.into()), lc_proto::Scope::Open, now_s)
+    }
+
+    /// Hold a thread entry somebody else wrote.
+    pub fn heard_entry(&mut self, subject: impl Into<Subject>, held: thread::Held) {
+        let subject = subject.into();
+        if self.files.edit().entry(subject).or_default().thread.add(held) {
+            self.refresh(subject);
+        }
     }
 
     /// Record a planet this craft has found, and letter it against the letters it already uses
@@ -826,6 +850,9 @@ impl Knowledge {
         self.changed.insert(subject);
         if let Some(file) = self.files.get(&subject) {
             self.backlog.file(subject, file);
+            if !file.thread.is_empty() {
+                self.threaded.entry(subject.system()).or_default().insert(subject);
+            }
         }
         if let Some(belief) = self.files.get(&subject).and_then(|f| f.believe(subject, self.owner)) {
             self.beliefs.edit().insert(subject, belief);
@@ -1070,7 +1097,7 @@ mod tests {
             },
         );
 
-        let report = probe.report(Mark::default(), 1.0e7);
+        let report = probe.report(Mark::default(), 1.0e7, crate::knowledge::thread::Seal::Plain);
         assert_eq!(report.stars(), 1);
 
         let mut ship = Knowledge::new(Witness(1));
@@ -1106,13 +1133,13 @@ mod tests {
                 sigma: 1e-5,
             },
         );
-        let report = probe.report(Mark::default(), 1.0e7);
+        let report = probe.report(Mark::default(), 1.0e7, crate::knowledge::thread::Seal::Plain);
 
         let mut relay = Knowledge::new(Witness(3));
         relay.receive(&report, 2.0e7);
         let mut ship = Knowledge::new(Witness(1));
         ship.receive(&report, 3.0e7);
-        ship.receive(&relay.report(Mark::default(), 2.5e7), 4.0e7);
+        ship.receive(&relay.report(Mark::default(), 2.5e7, crate::knowledge::thread::Seal::Plain), 4.0e7);
 
         let file = ship.file(star).unwrap();
         assert_eq!(file.sightings().len(), 4, "not eight");
@@ -1135,7 +1162,7 @@ mod tests {
         let far = DVec3::X * 4.0;
         let mut there = Knowledge::new(Witness(2));
         there.sighted(star, sighting(2, far, truth - far, 1.0));
-        here.receive(&there.report(Mark::default(), 2.0), 3.0);
+        here.receive(&there.report(Mark::default(), 2.0, crate::knowledge::thread::Seal::Plain), 3.0);
 
         let belief = here.belief(star).unwrap();
         assert_eq!(belief.witnesses, 2);
@@ -1205,7 +1232,7 @@ mod tests {
             },
         );
         let mut ship = Knowledge::new(Witness(1));
-        ship.receive(&office.report(Mark::default(), 10.0), 20.0);
+        ship.receive(&office.report(Mark::default(), 10.0, crate::knowledge::thread::Seal::Plain), 20.0);
         let file = ship.file(star).unwrap();
         assert_eq!(file.claims().len(), 1);
         assert_eq!(
@@ -1236,19 +1263,15 @@ mod tests {
         assert_eq!(found.name, designation(DVec3::X));
 
         k.name_it(star, "Kettle", 100.0);
-        let named = k.belief(star).unwrap().name.clone().unwrap();
-        assert_eq!(named.name, "Kettle");
-        assert_eq!(named.kind, NameKind::Given);
+        assert_eq!(k.name_of(star).as_deref(), Some("Kettle"));
+        assert_eq!(k.designation_of(star), Some(designation(DVec3::X)), "the designation stays on file");
 
         // A later sighting does not re-designate something that has a name.
         k.sighted(star, sighting(1, DVec3::Y * 0.1, DVec3::X, 200.0));
-        assert_eq!(
-            k.belief(star).unwrap().name.as_ref().unwrap().name,
-            "Kettle"
-        );
+        assert_eq!(k.name_of(star).as_deref(), Some("Kettle"));
     }
 
-    /// Your own name wins on your own screen; theirs stays on file with its witness.
+    /// Your own name wins on your own screen; theirs stays in the thread with its author.
     #[test]
     fn a_name_is_something_somebody_said_and_carries_who_said_it() {
         let star = star_id(21);
@@ -1258,27 +1281,17 @@ mod tests {
 
         let mut ours = Knowledge::new(Witness(1));
         ours.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 5.0));
-        ours.receive(&theirs.report(Mark::default(), 20.0), 30.0);
+        ours.receive(&theirs.report(Mark::default(), 20.0, crate::knowledge::thread::Seal::Plain), 30.0);
 
-        // Theirs is a chosen name and ours is only a designation, so theirs is what we go by.
-        let belief = ours.belief(star).unwrap();
-        assert_eq!(belief.name.as_ref().unwrap().name, "Hearthlight");
-        assert_eq!(belief.name.as_ref().unwrap().witness, Witness(2));
-        assert_eq!(
-            belief.name.as_ref().unwrap().lineage.len(),
-            1,
-            "heard, not coined"
-        );
+        assert_eq!(ours.name_of(star).as_deref(), Some("Hearthlight"), "a chosen name beats a designation");
+        let thread = ours.file(star).unwrap().thread();
+        let (_, heard) = thread.ordered()[0];
+        assert_eq!(heard.entry.author, Witness(2));
+        assert_eq!(heard.lineage.len(), 1, "heard, not coined");
 
-        // Until we name it ourselves, at which point ours is what we call it and theirs is
-        // still on file.
         ours.name_it(star, "The Kettle", 40.0);
-        assert_eq!(
-            ours.belief(star).unwrap().name.as_ref().unwrap().name,
-            "The Kettle"
-        );
-        // Each crew's designation and each crew's chosen name.
-        assert_eq!(ours.file(star).unwrap().names().len(), 4);
+        assert_eq!(ours.name_of(star).as_deref(), Some("The Kettle"));
+        assert_eq!(ours.file(star).unwrap().thread().ordered().len(), 2, "theirs is still in the thread");
     }
 
     #[test]
@@ -1372,14 +1385,14 @@ mod tests {
             let (body, _) = planet(star, key);
             probe.found_planet(star, body, at_au(a, 2.0), 1.0, 2.0);
         }
-        let report = probe.report(Mark::default(), 3.0);
+        let report = probe.report(Mark::default(), 3.0, crate::knowledge::thread::Seal::Plain);
         assert_eq!(report.stars(), 1, "one system, not four entries");
         assert_eq!(report.entries[0].parts.len(), 4, "the star and its three planets");
 
         // Capped by systems: a second star's system does not split the first.
         let other = star_id(44);
         probe.sighted(other, sighting(2, DVec3::ZERO, DVec3::Y, 10.0));
-        let (first, _) = probe.report_upto(Mark::default(), 11.0, 1);
+        let (first, _) = probe.report_upto(Mark::default(), 11.0, 1, crate::knowledge::thread::Seal::Plain);
         assert_eq!(first.stars(), 1);
         assert_eq!(first.entries[0].parts.len(), 4);
     }
@@ -1405,7 +1418,7 @@ mod tests {
         let mine = probe.file(subject).unwrap().colors()[0].color(Band::R, Band::V).unwrap();
 
         let mut ship = Knowledge::new(Witness(1));
-        ship.receive(&probe.report(Mark::default(), 100.0), 200.0);
+        ship.receive(&probe.report(Mark::default(), 100.0, crate::knowledge::thread::Seal::Plain), 200.0);
 
         let held = ship.file(subject).expect("the body came across").colors();
         assert_eq!(held.len(), 1, "one digest, on the witness that folded it");
@@ -1419,7 +1432,7 @@ mod tests {
         assert!(belief.colors.is_some(), "and the digest is what a type hypothesis reads");
 
         // Absorbed again with nothing new in it, the longer run is kept rather than doubled.
-        ship.receive(&probe.report(Mark::default(), 400.0), 500.0);
+        ship.receive(&probe.report(Mark::default(), 400.0, crate::knowledge::thread::Seal::Plain), 500.0);
         assert_eq!(ship.file(subject).unwrap().colors().len(), 1);
     }
 
@@ -1437,7 +1450,7 @@ mod tests {
         let mut ship = Knowledge::new(Witness(1));
         ship.sighted(star, sighting(1, DVec3::Y * 0.1, DVec3::X, 0.5));
         ship.name_it(star, "Hearthlight", 0.6);
-        ship.receive(&probe.report(Mark::default(), 3.0), 10.0);
+        ship.receive(&probe.report(Mark::default(), 3.0, crate::knowledge::thread::Seal::Plain), 10.0);
 
         assert_eq!(ship.name_of(star).as_deref(), Some("Hearthlight"), "ours, not theirs");
         assert_eq!(ship.name_of(subject).as_deref(), Some("Hearthlight c"));
@@ -1488,7 +1501,7 @@ mod tests {
             held.measured(star, Witness(3), Band::V, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.1 });
         }
         let mut copy = Knowledge::new(Witness(3));
-        let first = held.report(Mark::default(), 5.0);
+        let first = held.report(Mark::default(), 5.0, crate::knowledge::thread::Seal::Plain);
         copy.absorb(&first);
         assert_eq!(copy.belief(star).unwrap().hops, 0, "its own, not relayed");
         assert!(copy.own_series(star, Band::V).is_none(), "a report carries no samples");
@@ -1522,7 +1535,7 @@ mod tests {
         for t in 10..=14 {
             k.measured(star, Witness(1), Band::K, Sample { observed_s: t as f64, deficit: 0.0, sigma: 0.01 });
         }
-        k.receive(&probe.report(Mark::default(), 4.0), 9.0);
+        k.receive(&probe.report(Mark::default(), 4.0, crate::knowledge::thread::Seal::Plain), 9.0);
 
         let (files, logs) = k.take_changes();
         assert_eq!(files.len(), 2, "the star and its planet");
@@ -1557,9 +1570,9 @@ mod tests {
         let star = star_id(3);
         let mut probe = Knowledge::new(Witness(2));
         probe.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 100.0));
-        assert!(probe.report(Mark::through(200.0), 300.0).is_empty(), "nothing since then");
-        assert_eq!(probe.report(Mark::through(50.0), 300.0).stars(), 1);
-        assert!(probe.report(Mark::default(), 99.0).is_empty(), "nor anything learned after it was sent");
+        assert!(probe.report(Mark::through(200.0), 300.0, crate::knowledge::thread::Seal::Plain).is_empty(), "nothing since then");
+        assert_eq!(probe.report(Mark::through(50.0), 300.0, crate::knowledge::thread::Seal::Plain).stars(), 1);
+        assert!(probe.report(Mark::default(), 99.0, crate::knowledge::thread::Seal::Plain).is_empty(), "nor anything learned after it was sent");
     }
 
     /// **The backlog is what the files hold, not everything they ever held.** A survey sights
@@ -1577,7 +1590,7 @@ mod tests {
         // A name is filed with the first look, so the backlog is one more than the looks held.
         let entries = probe.backlog.len();
         assert!(entries <= held + 1, "{entries} backlog entries for {held} looks");
-        assert_eq!(probe.report(Mark::default(), 1_000.0).stars(), 1, "and it still reports");
+        assert_eq!(probe.report(Mark::default(), 1_000.0, crate::knowledge::thread::Seal::Plain).stars(), 1, "and it still reports");
     }
 
     /// Oldest first, resumed where the last report ended, and pages through ties at one instant.
@@ -1587,14 +1600,14 @@ mod tests {
         for k in 0..10u64 {
             probe.sighted(star_id(k), sighting(2, DVec3::ZERO, DVec3::X, k as f64));
         }
-        let (first, through) = probe.report_upto(Mark::default(), 100.0, 4);
+        let (first, through) = probe.report_upto(Mark::default(), 100.0, 4, crate::knowledge::thread::Seal::Plain);
         assert_eq!(first.stars(), 4);
         assert_eq!(first.learned_through(), Some(3.0), "the four oldest");
 
-        let (second, through) = probe.report_upto(through.unwrap(), 200.0, 4);
+        let (second, through) = probe.report_upto(through.unwrap(), 200.0, 4, crate::knowledge::thread::Seal::Plain);
         assert_eq!(second.stars(), 4);
         assert_eq!(second.learned_through(), Some(7.0));
-        assert_eq!(probe.report_upto(through.unwrap(), 300.0, 4).0.stars(), 2, "and the rest");
+        assert_eq!(probe.report_upto(through.unwrap(), 300.0, 4, crate::knowledge::thread::Seal::Plain).0.stars(), 2, "and the rest");
 
         // The mark carries the system it stopped at as well as the time.
         let mut tied = Knowledge::new(Witness(2));
@@ -1604,13 +1617,13 @@ mod tests {
         let mut mark = Mark::default();
         let mut seen = std::collections::BTreeSet::new();
         for _ in 0..3 {
-            let (page, next) = tied.report_upto(mark, 100.0, 4);
+            let (page, next) = tied.report_upto(mark, 100.0, 4, crate::knowledge::thread::Seal::Plain);
             assert!(page.stars() <= 4);
             seen.extend(page.entries.iter().map(|e| e.system));
             mark = next.unwrap();
         }
         assert_eq!(seen.len(), 10, "all ten, over three pages");
-        assert!(tied.report_upto(mark, 100.0, 4).1.is_none(), "and then nothing");
+        assert!(tied.report_upto(mark, 100.0, 4, crate::knowledge::thread::Seal::Plain).1.is_none(), "and then nothing");
     }
 
     /// The home system is learned in one tick and does not fit one transmission, so a report
@@ -1631,7 +1644,7 @@ mod tests {
         let mut told = std::collections::BTreeSet::new();
         let mut reports = 0;
         loop {
-            let (report, next) = probe.report_within(mark, 10.0, 6);
+            let (report, next) = probe.report_within(mark, 10.0, 6, crate::knowledge::thread::Seal::Plain);
             let Some(next) = next else { break };
             assert!(report.entries.iter().map(|e| e.parts.len()).sum::<usize>() <= 6);
             for part in report.entries.iter().flat_map(|e| &e.parts) {
@@ -1644,10 +1657,10 @@ mod tests {
         assert_eq!(reports, 5, "four shares of the big system, then the next star");
 
         let mut saved = Reporting::default();
-        let (_, partway) = probe.report_within(Mark::default(), 10.0, 6);
+        let (_, partway) = probe.report_within(Mark::default(), 10.0, 6, crate::knowledge::thread::Seal::Plain);
         saved.sent(9, partway.unwrap());
         assert!(saved.since(9).within.is_some());
-        let (rest, _) = probe.report_upto(saved.since(9), 10.0, 64);
+        let (rest, _) = probe.report_upto(saved.since(9), 10.0, 64, crate::knowledge::thread::Seal::Plain);
         assert_eq!(rest.entries.iter().map(|e| e.parts.len()).sum::<usize>(), 16, "resumed where it stopped");
     }
 
@@ -1710,6 +1723,7 @@ mod tests {
                     orbits: Vec::new(),
                     conclusions: Vec::new(),
                     colors: Vec::new(),
+                    entries: Vec::new(),
                 }],
             }],
         };
@@ -1733,4 +1747,64 @@ mod tests {
         let (next, _) = planet(star, "next");
         assert_eq!(k.found_planet(star, next, at_au(0.062, 4.0), 1.0, 4.0), "bb", "b is still taken");
     }
+
+    /// A thread rides whole with its system, filtered by the report's seal, so a faction note an
+    /// open report passed over arrives with the next faction report, and a private one never.
+    #[test]
+    fn a_thread_travels_only_where_its_entries_may_and_is_never_left_behind() {
+        use lc_proto::{FactionId, Scope, Writing};
+        use thread::Seal;
+        let star = star_id(31);
+        let wake = FactionId(5);
+        let mut author = Knowledge::new(Witness(1));
+        author.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
+        author.write(star, Writing::Note("mine".into()), Scope::Own, 1.0);
+        author.write(star, Writing::Note("for Wake".into()), Scope::Faction(wake), 2.0);
+        author.write(star, Writing::Name("Kettle".into()), Scope::Open, 3.0);
+
+        let notes = |k: &Knowledge| {
+            let mut out: Vec<String> = k.file(star).map(|f| f.thread().ordered().into_iter().map(|(_, h)| match &h.entry.writing {
+                Writing::Note(t) | Writing::Name(t) => t.clone(),
+            }).collect()).unwrap_or_default();
+            out.sort();
+            out
+        };
+
+        // An open report first, which moves the mark past every entry.
+        let mut outsider = Knowledge::new(Witness(2));
+        let (open, mark) = author.report_upto(Mark::default(), 10.0, usize::MAX, Seal::Plain);
+        outsider.receive(&open, 20.0);
+        assert_eq!(notes(&outsider), vec!["Kettle"]);
+        assert_eq!(outsider.name_of(star).as_deref(), Some("Kettle"));
+
+        // Then something new about the star, and a faction report from that mark.
+        author.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 30.0));
+        let mut member = Knowledge::new(Witness(3));
+        member.receive(&author.report(mark.unwrap(), 40.0, Seal::Faction(wake)), 50.0);
+        assert_eq!(notes(&member), vec!["Kettle", "for Wake"], "the faction note was not left behind");
+
+        let mut replica = Knowledge::new(Witness(1));
+        replica.absorb(&author.report(Mark::default(), 40.0, Seal::Whole));
+        assert_eq!(notes(&replica), vec!["Kettle", "for Wake", "mine"]);
+    }
+
+    /// 11g's done-when, in knowledge: a note that arrives from a member who had not yet heard this
+    /// craft's own is concurrent with it.
+    #[test]
+    fn a_note_written_without_knowing_of_another_is_concurrent_with_it() {
+        use lc_proto::{Scope, Writing};
+        use thread::Seal;
+        let star = star_id(32);
+        let mut near = Knowledge::new(Witness(1));
+        let mut far = Knowledge::new(Witness(2));
+        near.sighted(star, sighting(1, DVec3::ZERO, DVec3::X, 0.0));
+        far.sighted(star, sighting(2, DVec3::ZERO, DVec3::X, 0.0));
+        let mine = near.write(star, Writing::Note("flares".into()), Scope::Open, 10.0);
+        let theirs = far.write(star, Writing::Note("steady".into()), Scope::Open, 12.0);
+        near.receive(&far.report(Mark::default(), 13.0, Seal::Plain), 40.0);
+        assert!(near.file(star).unwrap().thread().concurrent(mine, theirs));
+        let reply = near.write(star, Writing::Note("both, then".into()), Scope::Open, 41.0);
+        assert!(near.file(star).unwrap().thread().knew(reply, theirs));
+    }
 }
+

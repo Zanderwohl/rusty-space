@@ -9,6 +9,39 @@ use serde::{Deserialize, Serialize};
 /// The longest name a craft may give anything, in bytes.
 pub const NAME_LIMIT: usize = 64;
 
+/// The longest note, in bytes.
+pub const NOTE_LIMIT: usize = 1024;
+
+/// What a thread entry says. See `lightcone/docs/23-factions.md` §Notes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Writing {
+    Note(String),
+    /// What its author calls the subject from now on.
+    Name(String),
+}
+
+impl Writing {
+    /// Whether it says something, within its limit.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Writing::Note(text) => !text.trim().is_empty() && text.len() <= NOTE_LIMIT,
+            Writing::Name(name) => !name.trim().is_empty() && name.len() <= NAME_LIMIT,
+        }
+    }
+}
+
+/// Where an entry may travel: only ever in reports sealed to admit it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Scope {
+    /// Never leaves the ship that wrote it.
+    #[default]
+    Own,
+    /// In any report.
+    Open,
+    /// Only in reports sealed under this faction key.
+    Faction(crate::FactionId),
+}
+
 /// The most stars one watch rotation may hold.
 pub const WATCH_LIMIT: usize = 256;
 

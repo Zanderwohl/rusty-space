@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use em_spectra::Band;
 use serde::{Deserialize, Serialize};
 
+use super::thread::{Held, Seal};
 use super::{
     Claim, Colors, Conclusion, File, Hop, Knowledge, Lineage, Naming, Orbit, Sample, Sighting, Subject,
     Witness, learned_s,
@@ -31,6 +32,10 @@ pub struct Part {
     /// What each observer has folded of a body's colors. Fixed in size per witness however
     /// many visits went into it, which is what makes it cheap enough to send.
     pub colors: Vec<Colors>,
+    /// Every thread entry the report's seal admits, new or not: a thread rides whole with its
+    /// system, so an entry passed over by a report it could not go in is carried by the next
+    /// one it can. See `lightcone/docs/23-factions.md` §Notes.
+    pub entries: Vec<Held>,
 }
 
 impl Part {
@@ -41,6 +46,7 @@ impl Part {
             && self.names.is_empty()
             && self.orbits.is_empty()
             && self.colors.is_empty()
+            && self.entries.is_empty()
     }
 
     fn learned_through(&self) -> f64 {
@@ -50,12 +56,14 @@ impl Part {
         let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
         let colors = self.colors.iter().map(Colors::learned_s);
+        let entries = self.entries.iter().map(Held::learned_s);
         sightings
             .chain(claims)
             .chain(names)
             .chain(orbits)
             .chain(conclusions)
             .chain(colors)
+            .chain(entries)
             .fold(f64::NEG_INFINITY, f64::max)
     }
 }
@@ -284,8 +292,9 @@ impl Backlog {
 }
 
 impl File {
-    /// Everything here whose learned time `fresh` accepts, or `None` if nothing.
-    pub(super) fn part(&self, subject: Subject, fresh: impl Fn(f64) -> bool) -> Option<Part> {
+    /// Everything here whose learned time `fresh` accepts, and the whole thread `seal` admits, or
+    /// `None` if nothing.
+    pub(super) fn part(&self, subject: Subject, fresh: impl Fn(f64) -> bool, seal: Seal) -> Option<Part> {
         let part = Part {
             subject,
             sightings: self.sightings.iter().filter(|s| fresh(s.learned_s())).cloned().collect(),
@@ -294,6 +303,7 @@ impl File {
             orbits: self.orbits.iter().filter(|o| fresh(learned_s(&o.lineage, o.stated_s))).cloned().collect(),
             conclusions: self.conclusions.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
             colors: self.colors.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
+            entries: self.thread.sealed(seal).cloned().collect(),
         };
         (!part.is_empty()).then_some(part)
     }
@@ -306,31 +316,32 @@ impl File {
         let orbits = self.orbits.iter().map(|o| learned_s(&o.lineage, o.stated_s));
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
         let colors = self.colors.iter().map(Colors::learned_s);
-        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(colors)
+        let entries = self.thread.learned_times();
+        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(colors).chain(entries)
     }
 }
 
 impl Knowledge {
     /// Everything learned after `since`, by when it was learned rather than measured: a
     /// decade-old sighting relayed yesterday is news.
-    pub fn report(&self, since: Mark, sent_s: f64) -> Report {
-        self.report_upto(since, sent_s, usize::MAX).0
+    pub fn report(&self, since: Mark, sent_s: f64, seal: Seal) -> Report {
+        self.report_upto(since, sent_s, usize::MAX, seal).0
     }
 
     /// The same, oldest first, as much as `limit` systems will carry, and the mark to resume
     /// from (`None` when there is nothing to send). A planet rides with its star, and nothing
     /// learned after `sent_s` goes.
-    pub fn report_upto(&self, since: Mark, sent_s: f64, limit: usize) -> (Report, Option<Mark>) {
-        self.drain(since, sent_s, limit, usize::MAX)
+    pub fn report_upto(&self, since: Mark, sent_s: f64, limit: usize, seal: Seal) -> (Report, Option<Mark>) {
+        self.drain(since, sent_s, limit, usize::MAX, seal)
     }
 
     /// The oldest system alone, as much of it as `limit` subjects will carry: for a system too big
     /// for one transmission, which is then told over several.
-    pub fn report_within(&self, since: Mark, sent_s: f64, limit: usize) -> (Report, Option<Mark>) {
-        self.drain(since, sent_s, 1, limit)
+    pub fn report_within(&self, since: Mark, sent_s: f64, limit: usize, seal: Seal) -> (Report, Option<Mark>) {
+        self.drain(since, sent_s, 1, limit, seal)
     }
 
-    fn drain(&self, since: Mark, sent_s: f64, system_limit: usize, subject_limit: usize) -> (Report, Option<Mark>) {
+    fn drain(&self, since: Mark, sent_s: f64, system_limit: usize, subject_limit: usize, seal: Seal) -> (Report, Option<Mark>) {
         let mut systems: BTreeSet<Subject> = BTreeSet::new();
         let mut subjects: BTreeSet<Subject> = BTreeSet::new();
         let mut cut: Option<(f64, Subject, Subject)> = None;
@@ -355,9 +366,13 @@ impl Knowledge {
             key > since.key() && key <= mark.key()
         };
         let mut parts: BTreeMap<Subject, Vec<Part>> = BTreeMap::new();
+        // A system told whole carries every thread in it, not only the subjects with news. Not
+        // when it is told in shares: each share would carry them again.
+        let threaded = (!split).then(|| systems.iter().flat_map(|s| self.threaded.get(s).into_iter().flatten()));
+        let subjects: BTreeSet<Subject> = subjects.into_iter().chain(threaded.into_iter().flatten().copied()).collect();
         for subject in subjects {
             let system = subject.system();
-            if let Some(part) = self.files.get(&subject).and_then(|f| f.part(subject, |t| within(t, system, subject))) {
+            if let Some(part) = self.files.get(&subject).and_then(|f| f.part(subject, |t| within(t, system, subject), seal)) {
                 parts.entry(system).or_default().push(part);
             }
         }
@@ -407,6 +422,10 @@ impl Knowledge {
             for digest in &part.colors {
                 let lineage = heard(&digest.lineage);
                 self.absorb_colors(subject, Colors { lineage, ..digest.clone() });
+            }
+            for held in &part.entries {
+                let lineage = heard(&held.lineage);
+                self.heard_entry(subject, Held { lineage, ..held.clone() });
             }
             for conclusion in &part.conclusions {
                 // A replica drops the samples its original consumed.

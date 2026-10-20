@@ -571,11 +571,11 @@ mod tests {
         }
         let job = k.fit_job(subject, DVec3::ZERO, 100.0).expect("a job");
         // The client is told everything up to now while the fit is still running.
-        let (_, mark) = k.report_upto(crate::knowledge::Mark::default(), 101.0, usize::MAX);
+        let (_, mark) = k.report_upto(crate::knowledge::Mark::default(), 101.0, usize::MAX, crate::knowledge::thread::Seal::Plain);
         let mark = mark.expect("sightings to report");
 
         assert!(k.file_fit(solved(job.subject, 100.0, 1.0), 105.0));
-        let (report, _) = k.report_upto(mark, 105.0, usize::MAX);
+        let (report, _) = k.report_upto(mark, 105.0, usize::MAX, crate::knowledge::thread::Seal::Plain);
         let sent = report.entries.iter().flat_map(|e| &e.parts).flat_map(|p| &p.orbits).count();
         assert_eq!(sent, 1, "the orbit never left the craft");
     }

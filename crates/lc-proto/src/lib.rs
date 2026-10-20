@@ -1003,7 +1003,9 @@ pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spec
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
 
-pub use knowing::{DWELL_MAX_S, DWELL_MIN_S, Duty, Gaze, INTEGRATION_MAX_S, NAME_LIMIT, Subject, WATCH_LIMIT};
+pub use knowing::{
+    DWELL_MAX_S, DWELL_MIN_S, Duty, Gaze, INTEGRATION_MAX_S, NAME_LIMIT, NOTE_LIMIT, Scope, Subject, WATCH_LIMIT, Writing,
+};
 
 pub use radio::{
     ACK_DEPTH, Aim, Body, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,

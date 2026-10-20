@@ -665,7 +665,7 @@ mod tests {
         let (target, periods) = red_dwarf(true);
         let (mut knowledge, now) = stare(&target, 110.0);
         let mut replica = Knowledge::new(Witness(1));
-        replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now));
+        replica.absorb(&knowledge.report(crate::knowledge::Mark::default(), now, crate::knowledge::thread::Seal::Plain));
         replica.copy_logs(&knowledge.logs_upto(f64::NEG_INFINITY, usize::MAX).0);
         assert!(replica.file(target.id).unwrap().series().iter().any(|s| !s.is_empty()));
         let prior = Prior::measure(&neighborhood());
@@ -698,7 +698,7 @@ mod tests {
         assert!(knowledge.file(target.id).unwrap().series().iter().all(|s| s.is_empty()));
 
         // A replica drops the log with its original; anyone else holds the conclusion as told.
-        let report = knowledge.report(crate::knowledge::Mark::through(now - 1.0), now);
+        let report = knowledge.report(crate::knowledge::Mark::through(now - 1.0), now, crate::knowledge::thread::Seal::Plain);
         replica.absorb(&report);
         assert!(replica.file(target.id).unwrap().series().iter().all(|s| s.is_empty()));
         assert_eq!(replica.conclusion(target.id), Some(&conclusion));

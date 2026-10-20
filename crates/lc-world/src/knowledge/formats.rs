@@ -14,10 +14,11 @@
 //! copy of the old shape beside every one of them. Refusing an old file loudly is the point;
 //! reading it wrong quietly is what the number prevents.
 //!
-//! 13 is the move from postcard, which was positional and made every added field a bump.
+//! 13 is the move from postcard, which was positional and made every added field a bump. 14 moves
+//! chosen names into the thread.
 
 #[cfg(doc)]
 use super::File;
 
 /// What writes a file's bytes today.
-pub const FILE_FORMAT: i32 = 13;
+pub const FILE_FORMAT: i32 = 14;

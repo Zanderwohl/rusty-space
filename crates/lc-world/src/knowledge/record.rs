@@ -175,22 +175,14 @@ pub struct Naming {
     pub lineage: Lineage,
 }
 
-/// Whether a name was chosen or merely assigned.
+/// What a rule assigned. A name somebody chose is a thread entry: see `knowledge::thread`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NameKind {
-    /// Somebody decided to call it this.
-    Given,
     /// What an instrument wrote down when it found it. Always beaten by a name somebody chose.
     Designation,
     /// Assigned, and read after whatever the holder calls the subject's star. Ranked as a
     /// designation.
     Relative,
-}
-
-impl NameKind {
-    pub fn chosen(self) -> bool {
-        matches!(self, Self::Given)
-    }
 }
 
 /// A distance somebody states, for when the measurements behind it do not travel. A craft's own
