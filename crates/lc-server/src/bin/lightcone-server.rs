@@ -126,14 +126,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let catalog = std::sync::Arc::new(stars);
     server.load_world(World::from_shared(catalog.clone()));
 
+    // Kept to notice the administration surface's connection closing; see the loop.
+    let mut admin_db: Option<std::sync::Arc<tokio_postgres::Client>> = None;
     // Refused rather than silently skipped: a console pointed at a shard that quietly declined
     // to listen is a card reading "unavailable" with nothing to explain it.
     if let Some(addr) = &admin_bind {
         let (Some(url), Some(keys)) = (db.as_ref(), admin_keys) else {
             return Err("--admin-bind needs both --db and --jwks".into());
         };
+        let client = std::sync::Arc::new(connect(url).await?);
+        admin_db = Some(client.clone());
         let api = lc_server::admin::Api::new(
-            std::sync::Arc::new(connect(url).await?),
+            client,
             catalog.clone(),
             std::sync::Arc::new(keys),
         );
@@ -314,6 +318,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(line) = overruns.note(server.last_tick()) {
             eprintln!("WARNING: {line}");
+        }
+        // A failed write is survived; a closed connection is not, since nothing reopens it and
+        // every tick after it would be lost while the shard went on as if they were kept. Exit
+        // and let `--restart unless-stopped` bring the shard back from its last checkpoint, which
+        // also waits out a database that is still down.
+        if server.journal().is_closed()
+            || store.as_ref().is_some_and(|c| c.is_closed())
+            || admin_db.as_ref().is_some_and(|c| c.is_closed())
+        {
+            return Err("the database connection closed; exiting to restart from the last checkpoint".into());
         }
 
         // A finished write hands the connection back, and on failure what it was writing.

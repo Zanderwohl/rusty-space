@@ -300,6 +300,17 @@ pub enum Store {
     Durable(Postgres),
 }
 
+impl Store {
+    /// Whether the database connection has gone. It never comes back: `tokio_postgres` does not
+    /// reconnect, so every write after this fails.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Store::Ephemeral(_) => false,
+            Store::Durable(postgres) => postgres.client.is_closed(),
+        }
+    }
+}
+
 macro_rules! either {
     ($self:expr, $method:ident ( $($arg:expr),* )) => {
         match $self {

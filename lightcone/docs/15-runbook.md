@@ -673,6 +673,11 @@ clock and its identifier counter. Written every twenty real seconds and again on
 what it loses is *orders*, not flight: every motive is stamped in absolute coordinate time, so
 a checkpoint replayed forward puts a ship exactly where it would have been anyway.
 
+**Restarting the database restarts the shard.** Its connections do not reopen, so on finding one
+closed the shard exits with an error and `--restart unless-stopped` brings it back from its last
+checkpoint, retrying until the database answers. Nothing needs doing by hand. A write that merely
+fails is survived and reported; only a closed connection ends the process.
+
 The clock is the part that is easy to leave out and impossible to do without. Every motive
 carries an absolute coordinate time, so a shard that came back at zero would read every saved
 craft as one whose crossing has not begun, and fly them all again from decades in the past.
