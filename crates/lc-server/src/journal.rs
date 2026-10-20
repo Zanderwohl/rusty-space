@@ -244,9 +244,22 @@ impl Journal for Memory {
 
 /// How far ahead of `now` the tick keeps partitions made.
 ///
-/// One span is thirty days of coordinate time, about five real minutes at the design rate. The
-/// tick prepares before it writes, so two spans is slack rather than a deadline.
+/// One span is about a real hour at the design rate. The tick prepares before it writes, so two
+/// spans is slack rather than a deadline.
 pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
+
+/// Coordinate microseconds in a real hour at the design rate: a Julian year.
+pub const DESIGN_HOUR_US: i64 = crate::server::TICK_US * crate::server::TICKS_PER_SECOND as i64 * 3_600;
+
+/// What the shard keeps live behind its clock. Swept after every checkpoint, so a backlog of
+/// thousands is worked off in an hour or two.
+///
+/// A real day at the design rate: a client back after a day away is still sent every sighting it
+/// missed. The first tier of `lightcone/docs/02-event-store.md`, the light-crossing time of the
+/// playable volume, is for the light-cone cursor, which the shard does not run.
+#[cfg(feature = "storage")]
+pub const RETENTION: lc_store::retention::Policy =
+    lc_store::retention::Policy { kept_us: 24 * DESIGN_HOUR_US, most: 64 };
 
 
 #[cfg(test)]

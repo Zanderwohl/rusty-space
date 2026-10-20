@@ -107,8 +107,6 @@ pub async fn files_on(client: &Client, subject: &[u8]) -> Result<Vec<Filed>, Err
 
 /// Append samples. A duplicate is skipped rather than refused, so a retried checkpoint does not
 /// fail on what it wrote the first time.
-///
-/// The partitions for their learned times must exist: see [`crate::store::ensure_partitions`].
 pub async fn save_samples(client: &impl GenericClient, rows: &[LogRow]) -> Result<u64, Error> {
     if rows.is_empty() {
         return Ok(0);

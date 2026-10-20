@@ -328,7 +328,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // The snapshot is taken here, on the tick, so it is the shard at one tick; only the
             // writing is moved off it. It used to hold the tick for the whole transaction.
             let taken = take(&mut server);
-            saving = Some(tokio::spawn(write(client, shard_id, taken)));
+            saving = Some(tokio::spawn(async move {
+                let written = write(client, shard_id, taken).await;
+                if written.2.is_ok() {
+                    retire(&written.0, written.1.checkpoint.now_t).await;
+                }
+                written
+            }));
         }
     }
 
@@ -411,8 +417,6 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         let transaction = client.transaction().await?;
         lc_store::ships::forget(&transaction, &taken.destroyed).await?;
         lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
-        // The partitions the samples land in exist, because the journal keeps them ready ahead of
-        // the clock every tick and nothing is learned in the future.
         lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
         lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
         lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;
@@ -433,6 +437,21 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         eprintln!("checkpoint written in {:.0} ms", started.elapsed().as_secs_f64() * 1.0e3);
     }
     (client, taken, written)
+}
+
+/// Retention, on the checkpoint's connection and off the tick, by the clock just written.
+///
+/// By this shard's clock alone: one shard writes a world's tables.
+async fn retire(client: &tokio_postgres::Client, now_t: i64) {
+    match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+        Ok(swept) if swept.is_empty() => {}
+        Ok(swept) => eprintln!(
+            "retention: dropped {} delivery and archived {} event partitions",
+            swept.dropped.len(),
+            swept.archived.len(),
+        ),
+        Err(why) => eprintln!("ERROR: retention failed: {}", lc_server::journal::JournalError::from(why)),
+    }
 }
 
 /// A failed checkpoint is not a reason to stop the world. It is a reason to say so every time,

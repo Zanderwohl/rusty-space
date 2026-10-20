@@ -3,9 +3,12 @@
 **Status: partly built.** The schema, causality, partition and retention functions and the chat
 tables are `crates/lc-store/sql/`, applied by `lc_store::migrate`; `lc_store::id` mints the event
 ids, and the server's journal (`lc_server::journal::postgres`) writes events and delivery rows and
-reads deliveries back. `lc_store::cursor::LightConeCursor` and `lc_store::bvh` are built but run
-only in `lc-store`'s own tests, over an in-memory event source: nothing writes the `sources` or
-`systems` tables, and nothing schedules `lc_store::retention`.
+reads deliveries back. The shard sweeps retention after every checkpoint
+(`lc_store::retention::sweep`, under `lc_server::journal::RETENTION`), so the live partitions stay
+near thirty per table however long it runs. `lc_store::cursor::LightConeCursor` and
+`lc_store::bvh` are built but run only in `lc-store`'s own tests, over an in-memory event source:
+nothing writes the `sources` or `systems` tables. Shipping the archive to object storage is not
+built.
 
 ## What is an event
 
@@ -95,11 +98,18 @@ CREATE INDEX events_source_t ON events (source_id, t);
 CREATE INDEX events_t_brin ON events USING brin (t) WITH (pages_per_range = 32);
 ```
 
-Partitions are thirty-day spans of coordinate time (`lc_partition_span()`), numbered by floor
+Partitions are 360-day spans of coordinate time (`lc_partition_span()`), numbered by floor
 division rather than named after months, because coordinate time has no calendar. At 8766x one
-span is about five real minutes, so maintenance cannot be a cron job: the tick keeps two spans
-made ahead of now (`lc_server::journal::PREPARE_AHEAD_US`), and an event stamped further away
-gets its own partition when it is written.
+span is about a real hour, so maintenance cannot be a cron job: the tick keeps two spans made
+ahead of now (`lc_server::journal::PREPARE_AHEAD_US`), and a delivery landing further away gets
+its own partition when it is written.
+
+They were thirty days until a dev shard had run for a month and held 7 725 partitions of each
+table, which `pg_dump` and the shard's own boot query could no longer lock. A tick's window is
+minutes inside one span and retention takes them away whole, so neither wants them narrow; 360
+days is twelve of the old spans, so a slot that still holds old ones (named `_p`, where the new
+are `_s`) is filled out at their width rather than overlapping them, until retention has taken
+them.
 
 `lx/ly/lz/lt` carry the exact local-frame values. The global `gx/gy/gz/t` are the index.
 Both are stored because recomputing one from the other loses the 150 m of the grid.
@@ -280,10 +290,34 @@ so archival must be reversible, not destructive.
 
 ### How it is done
 
-`lc_detach_partition` takes a partition out of its table and records everything needed to put
-it back; `lc_attach_partition` puts it back. Nothing is ever dropped. Shipping the detached
-bytes to object storage is a deployment's job — it needs a bucket — so the crate records *where
-they went* and stops there, because that is the part a restore needs to survive a restart.
+The shard runs `lc_store::retention::sweep` after every checkpoint, on the checkpoint's
+connection and off the tick, by the clock it has just written. It keeps a real day at the design
+rate, `lc_server::journal::RETENTION`: twenty-four years of coordinate time, which is what a client
+back after a day away is sent on `ResumeFrom`. The first tier's lag, the light-crossing time of
+the playable volume, waits on the playable volume being decided ([09](09-open-questions.md)) and
+on the cursor running on the shard; until then only deliveries read events.
+
+- **Deliveries** landing before the cutoff are dropped. Nothing reads a landed delivery except a
+  client catching up, and the event it was about still says everything it did.
+- **Events** whose partition is wholly before the cutoff, and that no remaining delivery refers
+  to, are archived: `lc_detach_partition` moves the rows into `events_archive`, drops the
+  partition and records its bounds; `lc_attach_partition` makes it again and moves them back.
+  One archive table rather than the detached partition left standing, because `pg_dump` locks
+  every table, and a partition an hour detached is a table an hour.
+- One sweep retires at most `most` partitions, each a brief lock on its parent, so a store
+  thousands behind is caught up over an hour or two of checkpoints rather than in one stall.
+
+Shipping the archive to object storage is a deployment's job — it needs a bucket — so the crate
+records *where it went* and stops there, because that is the part a restore needs to survive a
+restart.
+
+`lc_samples` is not partitioned. Its rows are bounded by the room aboard each craft and leave by
+key when a log is consumed, never by age ([24](24-standing-instruments.md)), so a partition per
+span gave retention nothing to take.
+
+The boot read that keeps a restarted shard from minting identifiers it already used is
+`lc_last_event`, one row per shard, raised by the same statement that inserts the events. It
+was `max(event_id)` over every partition, which is what ran out of lock space first.
 
 The middle tier is the one a date comparison would get wrong. Light is in flight for years, so
 an event far past the horizon can still be the thing a scheduled delivery is *about*, and taking
@@ -348,8 +382,8 @@ than a bitmap scan. Cost on twenty thousand rows: 362 before, 39 after. *The hot
 index-only only while autovacuum keeps up* — a deployment requirement, not a schema one.
 
 With both, the plan is one `Index Only Scan` over one partition, no sort and no heap access.
-Partition pruning does the rest: a tick's window falls inside one thirty-day span, so the other
-partitions are never opened.
+Partition pruning does the rest: a tick's window falls inside one span, so the other partitions
+are never opened.
 
 A developer needs `createdb lc_store` and nothing else; `LC_STORE_URL` points elsewhere. Every
 test that needs the database **skips** when it cannot reach one, because the suite has to pass on

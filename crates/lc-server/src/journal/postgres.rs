@@ -23,9 +23,10 @@ pub struct Postgres {
     client: tokio_postgres::Client,
     /// The range already made ready, so the tick is one comparison rather than a round trip.
     prepared: Option<(i64, i64)>,
-    /// Partitions made outside that range, for arrivals beyond it. Kept so a system talking to
-    /// itself asks once rather than every tick.
-    distant: std::collections::HashSet<i64>,
+    /// Slots made beyond that range, by table, for arrivals beyond it. Kept so a system talking
+    /// to itself asks once rather than every tick. Only ahead of the clock: retention takes what
+    /// is behind it, and a slot remembered there would be one the store no longer has.
+    distant: std::collections::HashSet<(&'static str, i64)>,
 }
 
 impl Postgres {
@@ -51,21 +52,26 @@ impl Postgres {
     /// the light takes — so the first thing said within earshot of another system lands past
     /// any rolling window, and a row with no partition is an error.
     ///
-    /// One partition per arrival rather than the range up to it: every thirty-day slot between
-    /// here and a star would be thousands of empty tables.
-    async fn make_room(&mut self, times: impl Iterator<Item = i64>) -> Result<(), JournalError> {
+    /// One partition per arrival rather than the range up to it: every slot between here and a
+    /// star would be hundreds of empty tables. And only in the table the row goes in.
+    async fn make_room(
+        &mut self,
+        times: impl Iterator<Item = (&'static str, i64)>,
+    ) -> Result<(), JournalError> {
         // Nothing prepared yet is an empty range, which every time falls outside.
         let (lo, hi) = self.prepared.unwrap_or((i64::MAX, i64::MIN));
-        let wanted: std::collections::BTreeSet<i64> = times
-            .filter(|t| *t < lo || *t > hi)
-            .map(lc_store::store::partition_of)
-            .filter(|slot| !self.distant.contains(slot))
+        let wanted: std::collections::BTreeSet<(&'static str, i64)> = times
+            .filter(|(_, t)| *t < lo || *t > hi)
+            .map(|(table, t)| (table, lc_store::store::partition_of(t)))
+            .filter(|key| !self.distant.contains(key))
             .collect();
-        for slot in wanted {
+        for (table, slot) in wanted {
             // The slot's own start, so the call makes exactly the one partition.
             let at = slot.saturating_mul(lc_store::store::PARTITION_SPAN_US);
-            lc_store::store::ensure_partitions(&self.client, at, at).await?;
-            self.distant.insert(slot);
+            lc_store::store::ensure_partition(&self.client, table, at, at).await?;
+            if at > hi {
+                self.distant.insert((table, slot));
+            }
         }
         Ok(())
     }
@@ -96,6 +102,7 @@ impl Journal for Postgres {
         let last = lc_store::store::partition_of(to_t);
         let hi = last.saturating_add(1).saturating_mul(lc_store::store::PARTITION_SPAN_US) - 1;
         self.prepared = Some((from_t, hi));
+        self.distant.retain(|(_, slot)| *slot > last);
         Ok(())
     }
 
@@ -126,7 +133,10 @@ impl Journal for Postgres {
         // Both tables at once, and before either insert: an event is always inside the tick's
         // window, but the deliveries it schedules reach as far as the light does.
         self.make_room(
-            events.iter().map(|e| e.t).chain(deliveries.iter().map(|d| d.arrive_t)),
+            events
+                .iter()
+                .map(|e| ("events", e.t))
+                .chain(deliveries.iter().map(|d| ("deliveries", d.arrive_t))),
         )
         .await?;
         lc_store::store::insert_events(&self.client, &rows).await?;
