@@ -6,6 +6,12 @@ A player has a pile of measurements. Each was taken somewhere, at some time, by 
 instrument, and reached them by some route. What they call the universe is a fold over that
 pile, and another player folding a different pile is not wrong.
 
+**Status: partly built.** Records, beliefs, astrometry, survey, names and reports are
+`lc_world::knowledge` (§What is built lists its modules), run on the shard in `lc_server::instruments`, and reach the client as
+`Outbound::Learned` and `Logged`. Not built: navigation on beliefs, since `Order::Cross` still names
+a catalog `star` and `Course` a body by name, and instruments that are not the ship,
+`survey::Optics::joined` being called only by a test.
+
 [05-observation.md](05-observation.md) is what an instrument measures.
 [03-world-model.md](03-world-model.md) names the "known-world snapshot" and leaves it at that.
 This document is the shape of the pile: what a record is, what a belief made of records is,
@@ -342,7 +348,8 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::names` | designations, discovery designations, and planet letters against the `SPACING` table |
 | `knowledge::astrometry` | bearings, centroid precision, the two triangulations, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |
-| `knowledge::body` | `BodyBelief`, `Placed`, and the system plane folded out of the orbits |
+| `knowledge::body` | `BodyBelief`, and the system plane folded out of the orbits |
+| `knowledge::placed` | `Placed`: where a body is believed to be now, and the shape of that error |
 | `knowledge::arc` | the orbit fit: `Look`, `Fitted`, `fit`, `spread` |
 | `knowledge::turns` | which turn a look is on, when the cadence cannot say |
 | `knowledge::primary` | what a body goes round, and which body is due a fit |
@@ -354,6 +361,11 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::moments` | Welford, shared by everything that folds |
 | `knowledge::room` | what a craft has space to keep |
 | `knowledge::formats` | `FILE_FORMAT`; `lc_server::archive` refuses a file at any other |
+| `knowledge::called` | what a craft calls a body nobody has named |
+| `knowledge::follow_up` | looks at a satellite spaced to find an unknown period |
+| `knowledge::innovation` | whether a new look lands where the held orbit said |
+| `knowledge::host` | what a craft believes about its own star, derived and never stored |
+| `knowledge::mass` | what a body probably weighs, from the best evidence held |
 
 On the shard, since phase 11b: every craft's `Knowledge` and telescope live in
 `lc-server::instruments` and run whether or not anybody is flying them, and a report lands there.

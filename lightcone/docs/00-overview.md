@@ -1,5 +1,9 @@
 # Overview
 
+**Status: reference.** The premise, scope and rate the numbered documents assume, kept current
+against them. The design rate is compiled into `lc_server::server::TICK_US`; a shard runs at a
+multiple of it (`Server::set_rate`), which it states to clients in `Welcome` and `Clock`.
+
 ## What the game is
 
 A real-time strategy sandbox set across a volume of real stars. Each player controls one

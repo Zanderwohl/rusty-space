@@ -1,5 +1,10 @@
 # Crate layout
 
+**Status: partly built.** Every crate in the table exists, and `em-render` ships definitions only
+as revised below. The `libm` rule is unmet: only `lc_world::solar` and
+`lc_world::form` use it, while `lc-spacetime` and `em-foundations` use `std` transcendentals and
+the latter has no `deterministic` feature.
+
 ## Target state
 
 | crate | what it is | may depend on |
@@ -7,15 +12,17 @@
 | `crates/em-foundations` | orbital mechanics, reference frames, epochs | glam, serde, num-traits, scilib |
 | `crates/em-sim` | simulation state and propagation | em-foundations; `bevy_ecs` behind the `bevy` feature |
 | `crates/em-render` | **new.** reusable Bevy rendering for orbital scenes | em-foundations, em-sim, bevy |
-| `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | glam; bevy and egui behind features |
+| `crates/em-plot` | **new.** charts, curves, heat maps; see [11-plotting.md](11-plotting.md) | nothing; `tiny-skia` behind `raster` |
 | `crates/em-map` | **new.** what a spatial map draws: snapshots, reference planes, decade rings, an orbit camera | glam, em-plot, em-foundations; no engine |
 | `crates/em-spectra` | **new.** bands, blackbody, extinction, color, stellar relations, band-to-display mapping | serde only; no engine, no glam |
 | `crates/lc-spacetime` | event coordinates, intervals, retarded time, worldlines | glam, serde; no engine |
-| `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime |
-| `crates/lc-proto` | wire messages, serialization, versioning | serde, lc-spacetime, lc-world types |
-| `crates/lc-store` | Postgres schema, migrations, queries, the light-cone cursor | sqlx, lc-spacetime, lc-world |
+| `crates/em-ui` | Bevy-native menu widgets, in a palette the caller picks | bevy |
+| `crates/lc-world` | game rules, systems, structures, ships, resources, photometry | em-foundations, em-sim, em-spectra, lc-spacetime, lc-proto |
+| `crates/lc-proto` | wire messages, serialization, versioning | serde, postcard; nothing of the game's, so `lc-world` can name its types |
+| `crates/lc-store` | Postgres schema, migrations, queries, the light-cone cursor | tokio-postgres, lc-spacetime |
+| `crates/lc-books` | epubs: the archive, the spine, the document model, pagination over a caller's `Measure` | zip, quick-xml, serde |
 | `crates/lc-server` | authoritative server binary | lc-store, lc-world, lc-proto, tokio |
-| `crates/lc-client` | Bevy client, native and WASM | em-render, lc-world, lc-proto, bevy |
+| `crates/lc-client` | Bevy client, native and WASM | em-render, em-ui, em-map, lc-books, lc-world, lc-proto, bevy |
 | `.` (`exotic-matters`) | the existing TTRPG app | em-foundations, em-sim, em-render, bevy |
 
 The workspace already globs `crates/*`, so new crates are picked up with no manifest change.
@@ -166,18 +173,21 @@ No `bevy`, no `tokio`, no `sqlx`. `#![forbid(unsafe_code)]`, matching the other 
 Game rules and state transitions, engine-free so the server can run it headless and the
 client can run the same code for prediction.
 
+The plan was a handful of modules; it is now dozens, flat under `src/`. The ones the rest hang
+from:
+
 ```
 sky/           StarProvider, synthetic ids, the HYG importer, generation, metallicity
-system.rs      System, wrapping em_sim::System, plus structures and ships
-photometry.rs  the emission model of 04-stellar-photometry.md
-shell.rs       Oort shell geometry, crossings, baking
-ship.rs        worldlines, orders, proper time
-economy.rs     resources, energy, construction
-observer.rs    known-world snapshots, per-observer folds over received events
-apply.rs       the single `apply(event) -> state delta` entry point
+system.rs      LocalSystem, wrapping em_sim::System
+emission.rs    the emission model of 04-stellar-photometry.md; population, occluder, shell beside it
+craft.rs       Craft and Fleet: a ship's motion, fitting and field
+motion.rs      the fold: an order-carrying event in, a ship's state out
+flight.rs      crossings and stations, and the worldlines they fly
+fitting.rs     energy and refits, over the form's capacities in form/
+knowledge/     what a craft knows, and how it came to; see 22-provenance.md
 ```
 
-`apply.rs` matters more than the rest. **One function turns an event into a state change,
+`motion.rs` matters more than the rest. **One function turns an event into a state change,
 and both server and client call it.** Any rule implemented anywhere else is a rule the
 client and server can disagree about.
 
@@ -204,7 +214,7 @@ assuming it matters; Kepler solves are not the bottleneck at these object counts
 
 | target | crates |
 |---|---|
-| `lc-server` native | lc-store, lc-world, lc-spacetime, lc-proto, tokio, sqlx |
+| `lc-server` native | lc-store, lc-world, lc-spacetime, lc-proto, tokio, tokio-postgres |
 | `lc-client` native | lc-client, em-render, em-plot, lc-world, lc-spacetime, lc-proto, bevy |
 | `lc-client` wasm32-unknown-unknown | same, minus anything that touches the filesystem or threads |
 | `exotic-matters` | unchanged, plus em-render |

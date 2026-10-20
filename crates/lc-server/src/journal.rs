@@ -244,9 +244,8 @@ impl Journal for Memory {
 
 /// How far ahead of `now` the tick keeps partitions made.
 ///
-/// One span is thirty days of coordinate time, about four and a half real days at the design
-/// rate. Two of them is enough that a server has to be down for a week before a write finds no
-/// room.
+/// One span is thirty days of coordinate time, about five real minutes at the design rate. The
+/// tick prepares before it writes, so two spans is slack rather than a deadline.
 pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
 
 

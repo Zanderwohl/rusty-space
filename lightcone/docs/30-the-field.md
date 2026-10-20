@@ -3,11 +3,11 @@
 Every ship is wrapped in a field. It is the collector, the radiator and the shield, and when it
 fails, the ship is gone and the whole system sees it happen.
 
-**Status: in the account.** The closed forms are `lc_world::field`, with their anchors derived in
+**Status: built**, in the account. The closed forms are `lc_world::field`, with their anchors derived in
 `Balance::DEFAULT`. A fitting settles `Q` beside stored energy (`lc_world::fitting::heat`), `Fitted`
 carries it and a checkpoint keeps it. A field is Clear, Black or Auto, and a new ship starts in Auto
 (`lc_world::fitting::mode`, `lc_server::field`); a completed switch is an event. A field that
-reaches `Q_max` collapses (`lc_server::field`); its spike does not yet reach neighbors. A ship
+reaches `Q_max` collapses (`lc_server::field`), and its spike lands on neighbors at light delay. A ship
 whose storage has run down to what its motive has committed pays only as much of the living drain
 as conversion brings in, and the rest makes no heat, so an empty ship far from a star cools below
 400 K. A refit's transfers and a burn's spending are draws on storage inside the account, cut where

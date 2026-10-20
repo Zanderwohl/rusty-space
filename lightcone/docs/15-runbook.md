@@ -3,6 +3,8 @@
 How to build, publish, deploy and roll back. [14-hosting.md](14-hosting.md) is why any of it
 is shaped this way; this is the sequence of commands.
 
+**Status: reference.** Kept current against `tools/{build-wasm,publish-build,release,publish-books,build-icons,publish-icons}.sh`, `tools/proxy/`, `tools/dev-cdn/`, the three Dockerfiles, and the flags in `lightcone-server --help` and `lc_client::entry`.
+
 Everything runs on **`rocinante`**, a docker context over SSH to a home-lab machine that is
 natively `linux/amd64`. Ports 3000–3999 are this project's; 3000 belongs to another project.
 
@@ -73,7 +75,7 @@ version from the lock file is how the two stay together.
 ## Shipping a game build
 
 ```bash
-export RELEASE_TOKEN=...               # and LC_SITE if the site is not on localhost:3100
+export RELEASE_TOKEN=...               # see Secrets; LC_SITE and LC_CDN default to the dev host
 tools/build-wasm.sh                    # stages target/web/<build-id>/
 tools/publish-build.sh                 # uploads the most recent staged build
 tools/release.sh register <build-id>   # tells the site the build exists
@@ -205,16 +207,18 @@ docker --context rocinante build -f web/Dockerfile \
     --build-arg SITE_BUILD="$SITE_BUILD" \
     -t lightcone-web:"$SITE_BUILD" -t lightcone-web:latest web
 
-docker --context rocinante rm -f lightcone-web
-docker --context rocinante run -d --name lightcone-web --restart unless-stopped \
-    --read-only --cap-drop ALL --security-opt no-new-privileges \
-    -p 3100:3100 \
-    -e BASE_URL=https://lightcone.example \
-    -e CDN_BASE=https://cdn.lightcone.example \
-    -e DATABASE_URL="postgres://lc_site@lightcone-db/lc_site" \
-    -e FALLBACK_BUILD_ID=<build-id> \
-    -e RELEASE_TOKEN="$(cat ~/.lightcone-release-token)" \
-    lightcone-web:"$SITE_BUILD"
+# Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.
+ssh zandy@dev.lightconefrontier.com "
+  docker rm -f lightcone-web 2>/dev/null
+  docker run -d --name lightcone-web --restart unless-stopped \
+      --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --network lightcone -p 3100:3100 \
+      --env-file ~/.config/lightcone/web.env \
+      -e BASE_URL=https://lightcone.example \
+      -e CDN_BASE=https://cdn.lightcone.example \
+      -e DATABASE_URL=postgres://lc_site@lightcone-db/lc_site \
+      -e FALLBACK_BUILD_ID=<build-id> \
+      lightcone-web:$SITE_BUILD"
 ```
 
 **`--build-arg SITE_BUILD` is not optional.** Without it `build.rs` falls back to the crate
@@ -258,8 +262,9 @@ a different port, or close the tunnel first:
 
 ```bash
 lsof -nP -iTCP:3100 -sTCP:LISTEN     # says `ssh` when the tunnel has it
-``` Set `CDN_BASE=http://localhost:3101` if you want the assets
-through the tunnel too; either works, because an HTTP page may fetch HTTP subresources.
+```
+
+Set `CDN_BASE=http://localhost:3101` if you want the assets through the tunnel too; either works, because an HTTP page may fetch HTTP subresources.
 
 No certificates, nothing to trust, nothing to expire.
 
@@ -637,11 +642,13 @@ ssh zandy@dev.lightconefrontier.com '
   docker run -d --name lightcone-admin --restart unless-stopped --network lightcone \
       --env-file ~/.config/lightcone/admin.env lightcone-admin:<tag>'
 
-docker --context rocinante run -d --name lightcone-shard --restart unless-stopped \
-    --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
-    --bind 0.0.0.0:8080 --audience shard-1 \
-    --jwks http://lightcone-identity:3200/.well-known/jwks.json \
-    --sky http://lightcone-cdn:3101/game/<promoted-build>/assets/sky/catalog.lcsky
+ssh zandy@dev.lightconefrontier.com '
+  docker rm -f lightcone-shard 2>/dev/null
+  docker run -d --name lightcone-shard --restart unless-stopped \
+      --network lightcone --env-file ~/.config/lightcone/shard.env lightcone-shard:<tag> \
+      --bind 0.0.0.0:8080 --audience shard-1 \
+      --jwks http://lightcone-identity:3200/.well-known/jwks.json \
+      --sky http://lightcone-cdn:3101/game/<promoted-build>/assets/sky/catalog.lcsky'
 ```
 
 ### The shard's own database

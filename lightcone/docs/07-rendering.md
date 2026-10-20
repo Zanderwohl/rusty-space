@@ -2,6 +2,16 @@
 
 Bevy 0.19, wgpu, WGSL. One shader set for native and browser.
 
+**Status: partly built.** The sky is `lc-client`'s `starfield` (over
+`em_render::relativistic_starfield_material`), `resolved`, `surfaces`, `procedural`, `envelope`,
+`haze`, `tonemap`, `hull`, `plume` and `map*`, on `em_spectra::{mapping, extinction}` and
+`lc_world::{surface, climate, airless, giant, ground, rings}`. Not built: the god view beyond a
+coordinate-time map source behind the `godview` feature — no causality overlays, and no server
+gate, only the client reading its own ticket in `map_source::may_see_everything`; light cones as
+geometry; the skybox; per-tier depth ranges (`view::ScaleTier` only picks the map's unit, and the
+sky is one camera); and the CIE route for `natural`, which is still a direct assignment. Own-system
+bodies are drawn at coordinate time rather than retarded.
+
 ## View modes
 
 | mode | what it draws | who gets it |
@@ -80,9 +90,9 @@ Positions are `f64` in the simulation and `f32` on the GPU. WGSL has no `f64` at
 reduction happens on the CPU before upload. `f32` has a 24-bit mantissa: at 1e11 m the ulp is
 8 km, so absolute world coordinates are unusable and everything is camera-relative.
 
-`src/presentation/render_space.rs` already implements this as
+`em_render::render_space` implements this as
 `ToRender::to_render_relative(scale, camera_render_pos)`, subtracting in `f64` and narrowing
-after. It moves to `em-render` unchanged. Do not open-code the swizzle or the subtraction
+after. Do not open-code the swizzle or the subtraction
 anywhere else — the Z-up to Y-up conversion is a proper rotation, not a mirror, and getting
 it wrong silently flips handedness.
 
@@ -105,9 +115,9 @@ A second `Camera3d` on its own `RenderLayers`, rendering into an `Image` that eg
 carries **no `Hdr`, no bloom and no tone map**: the sky is a photograph and is metered like one,
 and a diagram is not. The wireframe shader's emissive range is aimed at the display instead.
 
-It reuses `BodyWireframeMaterial` and adds no shader of its own. With no suns the shader's
-day/night factor is one, which is exactly an unlit wireframe, and line weight already rides in
-vertex-color alpha — so a grid line, an equator and a decade ring differ by a vertex attribute
+Its lines are `lc_client::map_line::MapLineMaterial` (`map_line.wgsl`): tubes whose width the
+vertex shader holds in pixels, so no material is written per frame. Line weight rides in
+vertex-color alpha, so a grid line, an equator and a decade ring differ by a vertex attribute
 rather than by a material.
 
 ### Three cameras, and what each one costs

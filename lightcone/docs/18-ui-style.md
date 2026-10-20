@@ -2,6 +2,10 @@
 
 How a surface is built, which toolkit it belongs to, and what it may do to the one behind it.
 
+**Status: reference.** A style guide, kept current against `em_ui::{widgets::MenuUi,
+field::NumberField, theme::vfd}` and the client surfaces it names, `lc_client::{faces, reader,
+radio_panel, signin_ui, map_panel, pick, form_handles, draft}`.
+
 [13-client-shell.md](13-client-shell.md) is what the interface *is* — states, windows, and why
 the game never pauses. This is how to draw one without it fighting what is already there. Every
 rule below was learned by photographing something that looked wrong.

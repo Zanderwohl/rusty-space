@@ -8,6 +8,11 @@ So instruments run on the server, knowledge lives on the server, and the client 
 This document is that move, what gets stored, and how a star's raw log is turned into
 conclusions and then thrown away.
 
+**Status: built.** Phases 11b–11d: `lc_server::instruments`,
+`lc_world::knowledge::{observatory, transit, conclusion, room}`, and `lc_knowledge` and
+`lc_samples` from `lc-store/sql/0010_knowledge.sql`. Notes, relaying a report by order, routes
+and custody wait on [23-factions.md](23-factions.md), and a transmission costs nothing yet.
+
 ## Where things run
 
 | | before 11b | now |
@@ -82,7 +87,7 @@ meaning, and a file at any other version is refused rather than read: there are 
 |---|---|
 | files | `lc_knowledge`, one row per craft per subject, CBOR with `archive::KNOWLEDGE_FORMAT` — `sql/0010_knowledge.sql`. CBOR because it is exact for f64, which JSON is not, and names its fields, which postcard does not, so a field added to a file needs no format bump. The subject, a key matched byte for byte across files, samples and discards, stays postcard |
 | samples | `lc_samples`, partitioned by **learned** time, kept ready by the journal beside events and deliveries. Observation time is stored as the exact f64 it was stamped with: a sweep finishes a field at an instant that is not a whole microsecond |
-| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, save format 9 |
+| duty and report marks | the ship checkpoint, `persist::Saved::instruments`, `persist::SAVE_FORMAT` |
 | what is written | only what changed since the last checkpoint: `Knowledge::take_changes` hands over the files touched, without their samples, the samples taken, and the samples consumed to delete. All of it, the ships and the bookmarks go in one transaction, and a failed one hands everything back to be written next time |
 | what a client is sent | its craft's knowledge in byte-bounded pages, as `Learned` reports and `Logged` pages of its own samples, each under `lc_proto::FRAME_LIMIT`, which both ends of the websocket state |
 
@@ -90,11 +95,11 @@ One thing is true for now and will not stay true: **the store is not partitioned
 a shard loads every craft's knowledge and keeps what belongs to the craft it adopted, the same way
 it already loads every ship.
 
-### Data modules, and fullness
+### Data room, and fullness
 
-A craft's raw logs take room aboard. A **data module** ([19-ship-fitting.md](19-ship-fitting.md))
-holds `data_per_module`, and the logs have a fullness against the total exactly as stored energy
-does against storage.
+A craft's raw logs take room aboard: the form's data volume times `Balance::data_density_b`, plus
+`ONBOARD_DATA_BYTES` (`lc_world::form::capacity`, [29-ship-form.md](29-ship-form.md)). The logs
+have a fullness against it exactly as stored energy does against storage.
 
 **Only raw logs count.** Bearings, names, claims, conclusions and the digests of consumed logs
 are free: each is small and bounded per subject. Charging for them was tried, and a craft that had
@@ -191,7 +196,7 @@ custody of. A shard that restarts resumes all of it.
 | what | where |
 |---|---|
 | the search | `knowledge::transit`: box least squares over period, phase and duration, bands combined by inverse variance, scatter beyond the error bars found from the median absolute deviation and allowed for |
-| the probability | a marginal likelihood — the box's likelihood ratio averaged over every period, phase, duration and depth, weighted by a prior measured from the generator's own ladder (`sky::generate::ladder`) over the world's stars, with orientation integrated exactly. A planet the generator cannot make has zero prior and cannot be concluded |
+| the probability | a marginal likelihood — the box's likelihood ratio averaged over every period, phase, duration and depth, weighted by a prior measured from the generator's own ladder (`knowledge::prior`, over `sky::generate::planets_of`) across the world's stars, with orientation integrated exactly. A planet the generator cannot make has zero prior and cannot be concluded |
 | a lone deep dip | a planet too wide to transit twice in the log fits under a box at almost any period, and would win. Dips far out of the noise that no period repeats are set aside before the search, and a period is only believed if every transit it predicts that the log covers is there |
 | when it is read | `Knowledge::due`: after 96 new samples and half as many again as last time, so all the reads of a long watch cost a few times the last. A shard reads one log a tick, taking craft in turn |
 | nothing transiting | absence of evidence, not evidence of absence. Its probability is the chance of no planet times the log's **completeness** — the share of the transiting planets the generator makes, at every period, that the log would have found — and the rest is *a planet this log could not have found yet*. Two months on a red dwarf is a few percent; it takes a log as long as the generator's widest orbits to say much more |
@@ -215,11 +220,10 @@ then consumed with nothing left behind. Nothing yet concludes anything from one.
 ### As built: room
 
 A sample is a game unit, `SAMPLE_BYTES` (24), near what postcard writes, so counting is cheap and
-does not move with an encoding; nothing else is counted. `data_per_module` is one year of a
-thirty-minute stare in every band, about 2.95 MB across the seven of them; a craft with no data
-modules has
-`ONBOARD_DATA_BYTES`, 1 MiB, a couple of months of one star. The shard recounts a craft's
-room when its loadout changes, after its log is read, and otherwise one craft a tick; samples keep
+does not move with an encoding; nothing else is counted. `Balance::data_density_b` is anchored so that
+19's old data slot holds one year of a thirty-minute stare in every band, about 2.95 MB across the
+seven of them (`DATA_ANCHOR_S`); a craft with no data volume has `ONBOARD_DATA_BYTES`, 1 MiB, a
+couple of months of one star. The shard recounts a craft's room when its form changes, after its log is read, and otherwise one craft a tick; samples keep
 the count between recounts. The client shows the room and never enforces it: the shard is what
 decides what was kept.
 

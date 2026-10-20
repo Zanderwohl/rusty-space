@@ -2,6 +2,11 @@
 
 Books, to read while you are waiting for something.
 
+**Status: partly built.** `lc_books::{archive, opf, nav, paginate, grid, catalog}`,
+`lc_server::library`, `lc_store::reading`, the three `lc_proto` messages, `lc_client::{library, bookshelf, reader}`,
+`tools/publish-books.sh` and the dev CDN's epub header. Not built: jump to location (the reader
+shows "location N of M" but has no field).
+
 A crossing takes real minutes and a build takes real minutes, and both are time the player is
 sitting in front of a window with nothing to do. This is what they can do instead of tabbing
 away. The books are DRM-free public-domain epubs — Project Gutenberg, mostly — served from the
@@ -31,7 +36,7 @@ readout stays visible, notifications still land, and closing the book puts the k
 | piece | lives | why there |
 |---|---|---|
 | the bytes | CDN, `library/<file>.epub` | big, immutable, and wanted by both builds |
-| the catalog | `books.toml`, shipped with `lc-server` | edited by a person, read by everyone |
+| the catalog | `books.toml`, beside the epubs in `crates/lc-client/assets/books/`, handed to the shard by `--library` | edited by a person, read by everyone |
 | progress | `lc_store`, `(account, book)` | per-account, relational, and a checkpoint rather than an event |
 | the reader | `lc-books` + `lc-client` | parsing is engine-free; only egui can measure egui's fonts |
 
@@ -122,7 +127,7 @@ things to know before wiring it:
 # The catalog is a file
 
 Titles and authors are written by a person and read by everyone. That is the site's `content/`
-pattern, not a table: a `books.toml` shipped with the server, parsed at boot, failing the boot
+pattern, not a table: a `books.toml` the shard is given with `--library`, parsed at boot, failing the boot
 on a duplicate id or a malformed entry — for the reason the site's slug check exists, that
 serving whichever one won is worse than not starting.
 
@@ -184,7 +189,7 @@ cheat at. `location` and `locations` are stored alongside the locator purely so 
 say "34%" without downloading the book first.
 
 ```sql
--- 0005_reading.sql
+-- 0009_reading.sql
 CREATE TABLE IF NOT EXISTS reading (
     account     text NOT NULL,
     book        text NOT NULL,
@@ -462,18 +467,19 @@ the world does this, and a shelf that does not has a third of its stock under T.
 
 | reader | key |
 |---|---|
-| next page | `Space`, `→`, `PageDown` |
-| previous page | `Backspace`, `←`, `PageUp` |
-| chapter list | `C`, and it is a list of the TOC with the current entry marked |
-| jump to location | a number field, against the stable location count |
+| next page | `→`, `PageDown` |
+| previous page | `←`, `PageUp` |
+| chapter list | a button: a list of the TOC with the current entry marked |
+| jump to location | a number field, against the stable location count. Not built |
 | close | `Esc` |
 
 **The reader lays a few bindings over the cockpit's, and claims nothing else.** Arrow keys turn
 the view, so a book has to take them — but the first cut of this swapped the whole table, which
 took the telescope, the system window and the time controls with it. Worse, every panel added
 afterwards would have had to be remembered in a second place to keep working. So the reading
-table is an *overlay*: the paging keys, `C` for the contents, and `B` for the way back to the
-shelf. Anything it does not name falls through, and a test asserts exactly that — no key outside
+table is an *overlay*: the paging keys and `B` for the way back to the shelf. **Nothing mnemonic
+is claimed** — the contents wanted `C`, and `C` is Communications — and `Space` and `Backspace`
+are left alone too. Anything it does not name falls through, and a test asserts exactly that — no key outside
 the overlay changes meaning while a book is open. `Escape` is deliberately not claimed: it closes
 the top panel wherever you are, and a reader that made it mean something else would be the one
 window in this client where the key you already know does not work.
@@ -483,11 +489,10 @@ no book to leave, so the table is exactly the cockpit's.
 
 egui's `EguiWantsInput` cannot decide any of this, but it does decide one thing: while the
 filter field has focus the keyboard is entirely its own, or typing the name of a book closes the
-window on `b` and turns a page on the space bar.
+window on `b`.
 
-Everything the surface does is an `Action` — `OpenBook`, `CloseBook`, `TurnPage(i32)`,
-`JumpToChapter(usize)`, `JumpToLocation(u32)`, `SetShelfSort(Sort)`. The filter text and the
-scroll position of the shelf are the surface's own, the way the password form owns what is
+Everything the reader does is an `Action` — `OpenBook`, `CloseBook`, `TurnPage(i32)`, `GoTo`,
+`ToggleContents`. The shelf's sort, its filter text and its scroll position are the surface's own, the way the password form owns what is
 being typed.
 
 ## Style, and one deliberate departure
@@ -520,8 +525,8 @@ Each step is useful on its own, and the fun one does not wait for the server.
 | 1 | **built.** `lc-books`: zip, OPF, spine, TOC, the block model, locations, the paginator over `Measure` | a headless test paginates a real Gutenberg epub and round-trips a locator |
 | 2 | **built.** the shelf on the CDN: `publish-books.sh`, the Caddyfile header, the client's HTTP asset source | `curl` returns an epub with the right type and an immutable cache header |
 | 3 | **built, less the CDN.** the reader window: `EpubLoader`, plates, the serif, the panel, the mode | `--book <id> --shot` is a page of prose |
-| 4 | **built.** the catalog and progress over the wire: three messages, `0005_reading.sql`, the reporting rule | signing in on a second machine opens to the same sentence |
-| 5 | **built, less the badges.** the shelf's sorts and filter, the TOC, jump to location | the controls above all exist |
+| 4 | **built.** the catalog and progress over the wire: three messages, `0009_reading.sql`, the reporting rule | signing in on a second machine opens to the same sentence |
+| 5 | **built, less the badges and jump to location.** the shelf's sorts and filter, the TOC | the controls above all exist |
 
 Step 4 is `lc_server::library`, `lc_store::reading` and the two client systems that take the
 shelf and report a place. Three things it taught:

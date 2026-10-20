@@ -6,7 +6,7 @@
 //! is not sent; "set this course, at this time, with this drive" is sent, and
 //! [`Cruise::plan`](crate::flight::Cruise::plan) does the rest identically at both ends.
 //!
-//! See `lightcone/docs/08-networking.md`, which calls this fold `lc_world::apply`.
+//! See `lightcone/docs/08-networking.md`.
 
 use glam::DVec3;
 

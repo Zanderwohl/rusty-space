@@ -469,7 +469,7 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
             ui.visuals_mut().widgets.active.bg_fill = color(em_ui::vfd::BUTTON_HOVER);
             // What a text field is filled with. Darker than the panel, or a field with nothing
             // in it is invisible and the form looks like labels with no inputs.
-            ui.visuals_mut().extreme_bg_color = egui::Color32::from_rgb(4, 14, 8);
+            ui.visuals_mut().extreme_bg_color = color(em_ui::vfd::FIELD_BG);
             ui.visuals_mut().widgets.inactive.bg_stroke =
                 egui::Stroke::new(1.0_f32, color(em_ui::vfd::TEXT_DIM));
             let Some(form) = signin.form.as_mut() else { return };

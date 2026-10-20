@@ -6,6 +6,8 @@ website and the game both consume and neither implements.
 [14-hosting.md](14-hosting.md) deferred this and named the two places it slots in. This is what
 slots in.
 
+**Status: partly built.** The broker is `auth/lc-identity` (password and Google, PKCE, verified-email alignment, attempt budgets, levels and bans), the console `auth/lc-admin`, the site's half `web/lc-web/src/auth.rs`, the desktop's `lc_client::{auth, broker, vault}`, and the shard's `lc_server::{ticket, ability, admin, status}`. Missing: itch.io; key rotation (the JWKS publishes one key); linking accounts from settings; and the socket rules: no `Hello` deadline, no close on a message before `Hello`, no pre-auth budget keyed by address (unadmitted sockets share the per-connection bucket), and no cap on how far back `ResumeFrom` may rewind. Discord is listed but deliberately refused at boot.
+
 ## The service is a broker, not a login page
 
 It is an OAuth2 **client** facing upstream and, facing downstream, something much smaller than

@@ -10,6 +10,20 @@ reading list — a session working on phase 3 should not need phases 7 through 1
 Phases 1 to 6 are the prototype. **Phase 3 is the go/no-go**: it is the smallest program that
 either demonstrates the premise or shows that it does not work.
 
+## Where it stands
+
+| phase | status |
+|---|---|
+| 1a–9 | built |
+| 10 the game | partly built |
+| 11a–11d | built |
+| 11e factions, 11f relays | not started |
+| 11g naming and notes | partly built |
+
+Each phase opens with its own status line, which is the one to keep current; update this table in
+the same change. Workstreams cut finer than a phase live in [plans/](plans/) with a status line per
+task.
+
 ## Dependency shape
 
 ```
@@ -26,6 +40,8 @@ existing app, so it can run in parallel throughout.
 ---
 
 ## Phase 1a — `lc-spacetime`
+
+**Status: built.** `crates/lc-spacetime`, every module in the table below.
 
 **Before:** nothing. First code written.
 
@@ -58,6 +74,8 @@ why `retarded_times` returns a collection.
 
 ## Phase 1b — `em-spectra`
 
+**Status: built.** `crates/em-spectra`.
+
 **Before:** nothing. Independent of 1a.
 
 **Deliver:** `crates/em-spectra`, engine-free, per [06-crate-layout.md](06-crate-layout.md).
@@ -80,6 +98,8 @@ Bands, blackbody, extinction curves, color index, CIE conversion, `BandMapping` 
 ---
 
 ## Phase 2 — Photometry
+
+**Status: built.** `lc_world::{population, emission, occluder, flicker, shell}`. The shell bakes and round-trips, but nothing samples it yet: `EmissionModel::deficit` integrates the populations directly.
 
 **Before:** 1a, 1b.
 
@@ -108,6 +128,8 @@ document and this is the phase it exists for.
 ---
 
 ## Phase 3 — The premise
+
+**Status: built.** `lc_world::observation`; step 5 is `one_band_cannot_tell_a_swarm_from_dust_and_two_can`.
 
 **Before:** 2.
 
@@ -149,6 +171,8 @@ the retarded-time solver.
 
 ## Phase 4 — The sky
 
+**Status: built.** `lc_world::sky`: the HYG provider, chunked and generated systems, `metallicity`.
+
 **Before:** 1a, 1b. Can overlap 2 and 3.
 
 **Deliver:** the star data provider interface, the HYG importer behind it, synthetic stable
@@ -172,6 +196,8 @@ every system.
 ---
 
 ## Phase 5 — `em-render` and `em-plot`
+
+**Status: built**, as revised below: `em-render` ships definitions only.
 
 **Before:** nothing. Runs in parallel with everything; touches the existing app.
 
@@ -201,6 +227,8 @@ has two callers to be shaped by. See [06-crate-layout.md](06-crate-layout.md).
 
 ## Phase 6 — The client
 
+**Status: built.** `crates/lc-client`. It has since grown the network and the browser build of phases 8 and 9; god view is still compiled out.
+
 **Before:** 3, 4, 5.
 
 **Deliver:** `crates/lc-client`, single process, no server, no network. Scale tiers,
@@ -218,6 +246,8 @@ start rather than added and later removed.
 ---
 
 ## Phase 7 — The event store
+
+**Status: built.** `crates/lc-store`; causality in `sql/0001_causality.sql`, retention by partition in `retention.rs`. The cursor and `bvh` run only in `lc-store`'s own tests: the shard's journal reads deliveries by range, and nothing schedules retention.
 
 **Before:** 3. Can overlap 6.
 
@@ -242,6 +272,8 @@ scheduling, and the light-cone cursor.
 
 ## Phase 8 — Server and protocol
 
+**Status: built.** `crates/lc-proto`, `crates/lc-server`; the gate is `Cleared<T>`, which nothing but `clear` can construct.
+
 **Before:** 7.
 
 **Deliver:** `lc-proto`, `lc-server`, the tick loop, intent validation, and the single send
@@ -259,6 +291,8 @@ early. Every outbound message passes through one function and there is no second
 
 ## Phase 9 — WASM
 
+**Status: built.** `lc-client`'s `lightcone_web` binary, `tools/build-wasm.sh` and `tools/publish-build.sh`. [14-hosting.md](14-hosting.md) tracks its own W items.
+
 **Before:** 6, 8.
 
 **Deliver:** the browser build. WebGPU only, single-threaded Bevy, transport over WebTransport
@@ -275,6 +309,8 @@ and W4 are this phase's delivery half and can be worked separately.
 ---
 
 ## Phase 10 — The game
+
+**Status: partly built.** Energy, ships with orders and proper time, survey duties and refits are in ([19](19-ship-fitting.md), [20](20-solar-power.md), [25](25-system-knowledge.md), [29](29-ship-form.md)). Resources and deposits, construction beyond a ship's own refit, and replication are not started.
 
 **Before:** 9.
 
@@ -307,7 +343,7 @@ The reporting, naming and survey machinery these build on already exists and is 
 
 ### 11a — Subjects
 
-**Built.** Notes, which the done-when below mentions, arrive in 11g; everything else is in
+**Status: built.** Notes, which the done-when below mentions, arrive in 11g; everything else is in
 `lc_world::knowledge`. Protocol version 29, because a report's shape changed.
 
 **Before:** `lc_world::knowledge`, keyed by `StarId`.
@@ -329,7 +365,7 @@ because every later step stores or sends it.
 
 ### 11b — Instruments on the server
 
-**Built.** Protocol version 30. Notes are still 11g; persistence is 11c, so a shard restart
+**Status: built.** Protocol version 30. Notes are still 11g; persistence is 11c, so a shard restart
 still loses every craft's knowledge.
 
 **Before:** 11a.
@@ -350,7 +386,7 @@ for how an order becomes an event.
 
 ### 11c — Persistence
 
-**Built.** Save format 9; schema step `0010_knowledge`. A checkpoint writes only what changed.
+**Status: built.** Save format 9; schema step `0010_knowledge`. A checkpoint writes only what changed.
 
 **Before:** 11b.
 
@@ -368,7 +404,7 @@ for how `lc-store` applies and tests its schema.
 
 ### 11d — Conclusions
 
-**Built.** Protocol 32, save format 7, knowledge format 3 — and after the review of phase 11,
+**Status: built.** Protocol 32, save format 7, knowledge format 3 — and after the review of phase 11,
 protocol 34, save format 8, knowledge format 4, with every older knowledge format still read. Two questions per log, each with
 hypotheses summing to one: *transiting* — a rocky or giant planet, nothing transiting, or a
 planet the log could not yet have found — and *in orbit* — a swarm, or only the belts every
@@ -392,6 +428,8 @@ for what the signals look like, [24-standing-instruments.md](24-standing-instrum
 
 ### 11e — Factions
 
+**Status: not started.** No faction, key generation or certificate exists in code; ship keys (`OfferKey`) do.
+
 **Before:** 11c.
 
 **Deliver:** founding and naming a faction; membership of several at once, with a channel per
@@ -410,6 +448,8 @@ sending in the old generation until the new key reaches them.
 **Read:** [23-factions.md](23-factions.md), [05-observation.md](05-observation.md) on keys.
 
 ### 11f — Relays
+
+**Status: not started.** A transmission costs nothing, and a report reaches only who hears it.
 
 **Before:** 11e.
 
@@ -430,6 +470,8 @@ non-player craft to exist.
 **Read:** "Relays" in [23-factions.md](23-factions.md).
 
 ### 11g — Naming and notes, from anywhere
+
+**Status: partly built.** `Order::NameIt` and per-craft namings are in. Notes, the subject card, report transcript lines and dropping account names from `Presence` are not.
 
 **Before:** 11a; best after 11e, so notes can be shared.
 
