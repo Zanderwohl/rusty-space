@@ -2,6 +2,15 @@
 
 Books, to read while you are waiting for something.
 
+**Status: partly built.** `lc_books::{archive, opf, nav, paginate, grid, catalog}`,
+`lc_server::library`, `lc_store::reading`, the three `lc_proto` messages, `lc_client::{library, bookshelf, reader}`,
+`tools/publish-books.sh` and the dev CDN's epub header. Not built: jump to location (the reader
+shows "location N of M" but has no field), and `Space`, `Backspace` and `C` are unbound, `C` being
+Communications; the actions are `OpenBook`, `CloseBook`, `TurnPage`, `GoTo` and `ToggleContents`,
+with the sort and filter held by the shelf rather than sent as actions. The migration is
+`0009_reading.sql`, not `0005`, and `books.toml` lives in `crates/lc-client/assets/books/` and
+reaches the shard by `--library`.
+
 A crossing takes real minutes and a build takes real minutes, and both are time the player is
 sitting in front of a window with nothing to do. This is what they can do instead of tabbing
 away. The books are DRM-free public-domain epubs — Project Gutenberg, mostly — served from the

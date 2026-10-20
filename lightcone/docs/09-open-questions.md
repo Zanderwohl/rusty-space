@@ -3,6 +3,14 @@
 Decisions not yet made, grouped by what they block. Each topic document carries its own
 "Open" section; this is the index and the ordering.
 
+**Status: reference.** The index of open questions, kept current against each topic document's own
+"Open" section. Sixteen are decided (eleven under Resolved, the four prototype blockers, rate
+limiting) and two designed (identity, reconciliation), against thirty-four open; of the decided, von
+Neumann generation TTLs, per-body deposits and the skybox of distant galaxies have no code yet, and
+star proper motion is planned-not-built by its own entry. Two open rows trail the code: metallicity
+synthesis exists in `lc_world::sky::metallicity`, and the wire is `postcard` under
+`PROTOCOL_VERSION` over a WebSocket (`lc_proto::encode`, `lc_server::websocket`).
+
 ## Resolved
 
 | question | decision |

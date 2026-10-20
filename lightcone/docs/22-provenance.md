@@ -6,6 +6,13 @@ A player has a pile of measurements. Each was taken somewhere, at some time, by 
 instrument, and reached them by some route. What they call the universe is a fold over that
 pile, and another player folding a different pile is not wrong.
 
+**Status: partly built.** Records, beliefs, astrometry, survey, names and reports are
+`lc_world::knowledge` (§What is built lists most of its modules; `Placed` is in `knowledge::placed`,
+not `body`), run on the shard in `lc_server::instruments`, and reach the client as
+`Outbound::Learned` and `Logged`. Not built: navigation on beliefs, since `Order::Cross` still names
+a catalog `star` and `Course` a body by name, and instruments that are not the ship,
+`survey::Optics::joined` being called only by a test.
+
 [05-observation.md](05-observation.md) is what an instrument measures.
 [03-world-model.md](03-world-model.md) names the "known-world snapshot" and leaves it at that.
 This document is the shape of the pile: what a record is, what a belief made of records is,
