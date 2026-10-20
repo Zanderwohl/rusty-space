@@ -766,6 +766,37 @@ mod tests {
     }
 
 
+    /// The escorts hold station on the flotilla's lead all the way to its cap, once they have
+    /// caught up with its first burn: they learn of it a tick late.
+    #[tokio::test]
+    async fn the_flotilla_keeps_station_to_its_cap() {
+        let Some((mut server, mut wire, _, pov)) = staged(&lc_world::scenario::FLOTILLA) else {
+            return;
+        };
+        let lead = CraftId(lc_world::scenario::BASE_ID);
+        let escorts = [pov, CraftId(lc_world::scenario::BASE_ID + 1), CraftId(lc_world::scenario::BASE_ID + 2)];
+        let standoff = lc_world::pursuit::standoff_m(500.0, 500.0);
+        let caught_up = 50;
+        let (mut worst, mut beta) = (0.0f64, 0.0);
+        for n in 0..10_000 {
+            server.tick(&mut wire).await.unwrap();
+            let now_s = server.now_t() as f64 * 1.0e-6;
+            let quarry = server.fleet.get(lead).unwrap();
+            beta = motion::state_at(&quarry.motion, None, now_s).map_or(0.0, |(_, b)| b.length());
+            if n > caught_up {
+                for id in escorts {
+                    let at = server.fleet.get(id).unwrap().motion.position_ly;
+                    worst = worst.max((at.distance(quarry.motion.position_ly) * lc_world::system::M_PER_LY - standoff).abs());
+                }
+            }
+            if beta > 0.998 {
+                break;
+            }
+        }
+        assert!(beta > 0.998, "premise: the lead reached its cap, at {beta}");
+        assert!(worst < 0.01 * standoff, "an escort strayed {worst:.0} m off a {standoff:.0} m standoff");
+    }
+
     /// **Hanging about is following.** Alongside a quarry with the same five-g drive, the
     /// quarry flies off to Io. The pursuer used to refuse a quarry pulling as hard as it could,
     /// give the pursuit up and fall ballistic behind. It follows the burn instead, and is back

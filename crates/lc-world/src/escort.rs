@@ -112,30 +112,28 @@ impl Burning {
 
     /// The quarry's proper seconds since the sighting, at a world time.
     ///
-    /// Monotonic — `dt/dτ = γ cosh(ατ)(1 + β·β')` and neither factor can reach zero — so a
-    /// bracket doubled out from the coasting answer and halved a fixed number of times.
+    /// `world_elapsed` inverted in closed form. With `b = β·â` and `s = √(1 − b²)`, the elapsed
+    /// time is `γ/α (sinh φ + b (cosh φ − 1))`, so `φ = asinh x − asinh y` for `x = (αT/γ + b)/s`
+    /// and `y = b/s`, taken as one `asinh` in whichever of two forms does not cancel: the first
+    /// loses everything near the sighting, the second near `αT/γ = −2b`.
     pub fn tau_at(&self, now_s: f64) -> f64 {
         let elapsed = now_s - self.since_t;
-        let guess = elapsed / boost::gamma_of(self.beta);
-        let mut span = guess.abs().max(1.0);
-        let (mut lo, mut hi) = (guess - span, guess + span);
-        for _ in 0..64 {
-            if self.world_elapsed(lo) <= elapsed && self.world_elapsed(hi) >= elapsed {
-                break;
-            }
-            span *= 2.0;
-            lo = guess - span;
-            hi = guess + span;
+        let gamma = boost::gamma_of(self.beta);
+        let alpha = self.accel.length();
+        if alpha <= 0.0 {
+            return elapsed / gamma;
         }
-        for _ in 0..INVERT_STEPS {
-            let mid = 0.5 * (lo + hi);
-            if self.world_elapsed(mid) < elapsed {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        0.5 * (lo + hi)
+        let b = self.beta.dot(self.accel / alpha);
+        let s = ((1.0 - b) * (1.0 + b)).sqrt();
+        let k = alpha * elapsed / gamma;
+        let (x, y) = ((k + b) / s, b / s);
+        let (root_x, root_y) = ((1.0 + x * x).sqrt(), 1.0 / s);
+        let arg = if x * y > 0.0 {
+            k * (k + 2.0 * b) / (s * s) / (x * root_y + y * root_x)
+        } else {
+            x * root_y - y * root_x
+        };
+        arg.asinh() / alpha
     }
 
     /// Where it is and how fast, `tau` of its own seconds after the sighting.
@@ -153,10 +151,6 @@ impl Burning {
         self.at_tau(self.tau_at(now_s))
     }
 }
-
-/// How many halvings pin a proper time from a world time. Fixed rather than to a tolerance, so
-/// every machine takes the same steps to the same bits.
-const INVERT_STEPS: usize = 96;
 
 /// The quarry at `tau` proper seconds after the sighting, in the frame it was sighted at rest
 /// in: time, displacement in light-seconds, and velocity.
@@ -393,6 +387,24 @@ mod tests {
             beta,
             length_m: 500.0,
             emitted_s: 0.0,
+        }
+    }
+
+    /// Read back through `world_elapsed`, a proper time lands on the world time it was taken at:
+    /// at the sighting and years from it, before it, and at any speed or direction of burn.
+    #[test]
+    fn proper_time_inverts_world_time() {
+        for beta in [DVec3::ZERO, DVec3::X * 0.9, DVec3::new(-0.6, 0.7, 0.0), DVec3::X * -0.999_999] {
+            for accel in [DVec3::X * FIVE_G, DVec3::new(0.0, -FIVE_G, 0.0), DVec3::ZERO] {
+                let quarry = Burning { position_ly: DVec3::ZERO, beta, accel, since_t: 1.0e9 };
+                for after in [1.0e-6, 1.0, 438.0, 2.6e4, 3.0e7, 3.0e8, -1.0, -3.0e7] {
+                    let now_s = quarry.since_t + after;
+                    let elapsed = now_s - quarry.since_t;
+                    let back = quarry.world_elapsed(quarry.tau_at(now_s));
+                    let error = (back - elapsed).abs() / elapsed.abs();
+                    assert!(error < 1.0e-9, "beta {beta}, accel {accel}, {elapsed} s: back at {back}");
+                }
+            }
         }
     }
 

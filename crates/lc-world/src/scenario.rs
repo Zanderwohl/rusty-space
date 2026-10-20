@@ -168,7 +168,7 @@ pub struct Scenario {
 
 impl Scenario {
     /// Every scene there is.
-    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT];
+    pub const ALL: &'static [Scenario] = &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, FLOTILLA, CORONA, CASCADE, DISTANT];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -426,6 +426,63 @@ pub const CHASE: Scenario = Scenario {
         // Late enough that the quarry is plainly running, early enough that its light is still
         // minutes rather than hours away.
         Beat { after_s: 3_600.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) },
+    ],
+};
+
+/// Four ships crossing twelve light-years together, three of them escorting the fourth: the case
+/// `crate::sighted` draws at an offset. Up to 0.999 c, where a contact reckoned on its own line
+/// parts from its escort by thousands of kilometers a tick.
+///
+/// Out of 4 g, the lead reaches its cap a little over five light-years out, cruises, and brakes.
+/// The escorts pull 5 g so they have a gravity to spare for holding station.
+pub const FLOTILLA: Scenario = Scenario {
+    name: "flotilla",
+    blurb: "Three ships escort a fourth across twelve light-years, up to 0.999 c.",
+    star: "Sol",
+    // A year a minute: the cap in about five, the crossing in about twelve.
+    rate: 60.0,
+    watch: Slot::Pov,
+    pov: Member {
+        name: "Kestrel",
+        kind: Kind::Ship,
+        length_m: 500.0,
+        accel_g: 5.0,
+        start: Start::AsFound,
+        form: None,
+    },
+    // On station from the start: a Company standoff between two 500 m hulls is ten lengths.
+    cast: &[
+        Member {
+            name: "Flagship",
+            kind: Kind::Ship,
+            length_m: 500.0,
+            accel_g: 4.0,
+            start: Start::Beside { lengths: 10.0, bearing: [1.0, 0.0, 0.0] },
+            form: None,
+        },
+        Member {
+            name: "Wren",
+            kind: Kind::Ship,
+            length_m: 500.0,
+            accel_g: 5.0,
+            start: Start::Beside { lengths: 10.0, bearing: [1.0, 1.0, 0.0] },
+            form: None,
+        },
+        Member {
+            name: "Harrier",
+            kind: Kind::Ship,
+            length_m: 500.0,
+            accel_g: 5.0,
+            start: Start::Beside { lengths: 10.0, bearing: [1.0, -1.0, 0.0] },
+            form: None,
+        },
+    ],
+    beats: &[
+        Beat { after_s: 0.0, actor: Slot::Pov, act: Act::Chase(Slot::Cast(0)) },
+        Beat { after_s: 0.0, actor: Slot::Cast(1), act: Act::Chase(Slot::Cast(0)) },
+        Beat { after_s: 0.0, actor: Slot::Cast(2), act: Act::Chase(Slot::Cast(0)) },
+        // A few ticks in, once the escorts have taken station.
+        Beat { after_s: 86_400.0, actor: Slot::Cast(0), act: Act::Cross { bearing: [1.0, 0.0, 0.2], ly: 12.0 } },
     ],
 };
 
@@ -764,5 +821,13 @@ mod tests {
     fn the_chase_is_a_chase() {
         assert!(CHASE.pov.accel_g > CHASE.cast[0].accel_g, "the quarry is not being caught");
         assert!(CHASE.rate > 1.0, "three months at the design rate is a quarter of an hour");
+    }
+
+    /// An escort that cannot out-pull the lead falls behind it rather than holding station.
+    #[test]
+    fn the_flotilla_can_keep_up() {
+        let lead = FLOTILLA.cast[0].accel_g;
+        assert!(FLOTILLA.pov.accel_g > lead);
+        assert!(FLOTILLA.cast[1..].iter().all(|m| m.accel_g > lead));
     }
 }

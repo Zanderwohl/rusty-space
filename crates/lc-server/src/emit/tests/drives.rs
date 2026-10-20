@@ -317,15 +317,39 @@ fn thruster_leg(mut craft: Craft) -> Craft {
     craft
 }
 
-/// The receiver behind a burn, settled across a hundred seconds of it in one tick and in a hundred:
-/// the same instants are restated, so the two end in the same place.
+/// The receiver behind a burn, settled across a hundred seconds of it in ticks of half a second and
+/// of a quarter: each tick lands every step it has, so the same instants are restated and the two
+/// end in the same place.
 #[tokio::test]
-async fn one_leap_and_every_tick_agree() {
+async fn longer_ticks_within_their_budget_agree_with_shorter_ones() {
+    let ends = behind_a_burn([0.5, 0.25]).await;
+    let (leap, ticks) = (&ends[0], &ends[1]);
+    assert!(leap.2.len() > 20, "premise: restated as it went, {} times", leap.2.len());
+    assert_eq!(leap.2, ticks.2, "told differently");
+    assert!((leap.1 / ticks.1 - 1.0).abs() < 1.0e-9, "{} {}", leap.1, ticks.1);
+    assert!((leap.0 / ticks.0 - 1.0).abs() < 1.0e-9, "{} {}", leap.0, ticks.0);
+}
+
+/// The same hundred seconds in one tick has more steps than a tick may land: it lands its budget,
+/// the last at the tick's end, and ends on the share a step of the short ticks' with nearly their heat.
+#[tokio::test]
+async fn a_tick_past_its_budget_lands_the_budget_and_ends_right() {
+    let ends = behind_a_burn([100.0, 1.0]).await;
+    let (leap, ticks) = (&ends[0], &ends[1]);
+    assert!(ticks.2.len() > crate::emit::restate::MOST_CHANGES, "premise: {} steps", ticks.2.len());
+    assert_eq!(leap.2.len(), crate::emit::restate::MOST_CHANGES);
+    assert!((leap.1 / ticks.1 - 1.0).abs() < 0.01, "intake {} against {}", leap.1, ticks.1);
+    assert!((leap.0 / ticks.0 - 1.0).abs() < 0.1, "heat {} against {}", leap.0, ticks.0);
+}
+
+/// Heat, intake and what the receiver was told, a hundred seconds into a burn half its cooking
+/// distance in front of it, ticking at each of `ticks_s`.
+async fn behind_a_burn(ticks_s: [f64; 2]) -> Vec<(f64, f64, Vec<(i64, f64, i64)>)> {
     let b = Balance::DEFAULT;
     let cooking_m = cooking_distance_m(&b, anvil_w(), b.drive_spread_rad, 1.0);
     let at = -DVec3::X * 0.5 * cooking_m * US_PER_M;
     let mut ends = Vec::new();
-    for tick_s in [100.0, 1.0] {
+    for tick_s in ticks_s {
         let mut server = Server::new(Memory::default(), 0, 1);
         server.set_rate(ticking(tick_s));
         server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
@@ -338,11 +362,7 @@ async fn one_leap_and_every_tick_agree() {
         let fitting = receiver.fitting().unwrap();
         ends.push((fitting.heat_j_at(&receiver.motion, 101.0), fitting.lit_w(), told));
     }
-    let (leap, ticks) = (&ends[0], &ends[1]);
-    assert!(leap.2.len() > 20, "premise: restated as it went, {} times", leap.2.len());
-    assert_eq!(leap.2, ticks.2, "told differently");
-    assert!((leap.1 / ticks.1 - 1.0).abs() < 1.0e-9, "{} {}", leap.1, ticks.1);
-    assert!((leap.0 / ticks.0 - 1.0).abs() < 1.0e-9, "{} {}", leap.0, ticks.0);
+    ends
 }
 
 /// Restarted while a burn's light is on its way to a receiver, the shard lands it at its arrival
