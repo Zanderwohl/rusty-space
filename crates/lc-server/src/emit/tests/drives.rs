@@ -440,3 +440,22 @@ async fn an_emit_flown_as_a_burn_is_said_again_as_the_ship_lightens() {
     assert!((said[0] / power_w - 1.0).abs() < 1.0e-6, "{said:?}");
     assert!(said.windows(2).all(|w| w[1] / w[0] < 0.99 && w[1] / w[0] > 0.985), "{said:?}");
 }
+
+/// An event that puts out nothing is seen by what it stops, a tenth over: a cut by the drive it
+/// cuts, and with nothing running, by the hull's own glow.
+#[tokio::test]
+async fn an_event_that_puts_out_nothing_is_seen_by_what_it_stops() {
+    let mut server = Server::new(Memory::default(), 0, 1);
+    server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
+    server.fleet.insert(anvil(2));
+    let at = 50 * 1_000_000;
+    let at_s = at as f64 * 1.0e-6;
+    let burning_w = lc_world::ignition::putting_out_w(server.ship(ShipId(1)).unwrap(), &Balance::DEFAULT, at_s);
+    assert!(burning_w > 1.0e15, "premise: the drive is lit, at {burning_w} W");
+    assert_eq!(server.seen_w(CraftId(1), at, 0.0), crate::world::CANCEL_MARGIN * burning_w);
+
+    let dark = server.seen_w(CraftId(2), at, 0.0);
+    let glow = lc_world::glow::thermal_w(&lc_world::glow::Glow::unfitted(&Balance::DEFAULT));
+    assert!(dark > 0.0 && (dark - crate::world::CANCEL_MARGIN * glow).abs() <= 1.0e-9 * dark, "{dark} against {glow}");
+    assert_eq!(server.seen_w(CraftId(2), at, 5.0), 5.0, "a power of its own is its own");
+}

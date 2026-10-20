@@ -12,7 +12,7 @@ use lc_world::solar::SOLAR_STEP_S;
 use crate::server::{BURN_POWER_W, KIND_BURN, Server, motion_id, refusal_for};
 use crate::journal::Journal;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Park {
@@ -72,7 +72,7 @@ impl<J: Journal> Server<J> {
 
     /// Once a solar segment. A correction that is refused waits for the next check; the order
     /// stands.
-    pub(crate) fn steer_parks(&mut self, wire: &mut impl Transport, events: &mut Vec<Event>, deliveries: &mut Vec<Scheduled>) {
+    pub(crate) fn steer_parks(&mut self, wire: &mut impl Transport, events: &mut Vec<Event>) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
         let step_t = (SOLAR_STEP_S * 1.0e6) as i64;
@@ -92,7 +92,7 @@ impl<J: Journal> Server<J> {
             if !wants_repark(held_m, wanted_m) || self.fly_to_park(id, now_s).is_err() {
                 continue;
             }
-            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events, deliveries);
+            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events);
             self.tell_flying(wire, id);
         }
     }

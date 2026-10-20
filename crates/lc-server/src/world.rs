@@ -280,10 +280,10 @@ pub struct Event {
     pub payload: String,
 }
 
-/// An event on its way to an observer, with the time it gets there.
+/// An event's light reaching an observer, with the time it got there.
 ///
-/// Computed when the event is written, not when it is read. That is what makes the tick-time
-/// check a range scan rather than a pass over everything that has ever happened.
+/// Found as the light lands, on whatever craft is there then (see [`crate::front`]), and written
+/// so a client's catch-up is a range scan rather than a pass over everything that ever happened.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scheduled {
     pub observer: ShipId,
@@ -298,10 +298,29 @@ pub fn strength(power_w: f64, distance: f64) -> f32 {
     (power_w / distance.max(1.0).powi(2)) as f32
 }
 
+/// The faintest signal anything can detect, in [`strength`]'s unit: watts over light-microseconds
+/// squared.
+///
+/// About 1e-26 W/m², a large radio telescope's narrowband limit: a megawatt shout is heard a third
+/// of a light-year off and a burn three hundred, and a beam's gain carries either further along its
+/// axis. Below it nothing is told anything, so it is what gives an event's light an end.
+pub const FAINTEST: f32 = 1.13e-20;
+
+/// What a zero-power event is seen at, over the power of what it cancels: a drive cut is seen by
+/// the light of the drive, a lamp going out by the lamp's. More than that light by a margin, so it
+/// reaches every craft that saw what it stopped, one that has drifted outward since included.
+pub const CANCEL_MARGIN: f64 = 1.1;
+
+/// How far an event's light carries along its beam's axis before it is fainter than [`FAINTEST`],
+/// light-microseconds. Never past the edge of the world.
+pub fn reach_us(power_w: f64, beam: &Beam) -> f64 {
+    (power_w.max(0.0) * beam.gain() / FAINTEST as f64).sqrt().min(lc_spacetime::COORD_BOUND as f64)
+}
+
 /// When an event's light reaches a ship, and how strong it is when it does.
 ///
 /// `None` when it never does — the ship's worldline ends first, the light already went past
-/// before it began, or the observer is **off the beam**. The third is why a beam is a parameter
+/// before it began, it is fainter than [`FAINTEST`] by then, or the observer is **off the beam**. The third is why a beam is a parameter
 /// here rather than a strength multiplier applied afterwards: a receiver outside the cone gets
 /// no delivery row at all, which is what keeps a tight beam's fan-out smaller than a shout's
 /// rather than merely quieter.
@@ -321,6 +340,10 @@ pub fn schedule(event: &Event, beam: &Beam, observer: &Craft) -> Option<Schedule
     if !beam.reaches(offset, crate::field::shadow_radius_us(observer, -offset, arrive * 1.0e-6)) {
         return None;
     }
+    let strength = strength(event.power_w * beam.gain(), offset.length());
+    if strength < FAINTEST {
+        return None;
+    }
     Some(Scheduled {
         observer: ShipId(observer.id.0),
         event: event.id,
@@ -328,7 +351,7 @@ pub fn schedule(event: &Event, beam: &Beam, observer: &Craft) -> Option<Schedule
         // The same power, concentrated. A beam is not a bigger transmitter: it is the same
         // watts through a smaller solid angle, which is why the gain is the *only* thing that
         // changes and the inverse square underneath it does not.
-        strength: strength(event.power_w * beam.gain(), offset.length()),
+        strength,
     })
 }
 

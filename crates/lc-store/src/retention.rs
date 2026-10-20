@@ -67,25 +67,29 @@ pub struct Policy {
 pub struct Swept {
     pub dropped: Vec<Partition>,
     pub archived: Vec<Partition>,
+    /// Fronts forgotten, which are rows and not partitions.
+    pub fronts: u64,
 }
 
 impl Swept {
+    /// Partitions retired, which is what [`Policy::most`] counts.
     pub fn len(&self) -> usize {
         self.dropped.len() + self.archived.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len() == 0 && self.fronts == 0
     }
 }
 
 /// Retire what `policy` no longer keeps at coordinate time `now_t`, oldest first.
 ///
 /// Deliveries before events: an event partition stays while any kept delivery refers to it, so
-/// dropping the old deliveries is what lets their events go in the same sweep.
+/// dropping the old deliveries is what lets their events go in the same sweep. A front is kept as
+/// long past fading as a delivery is past landing, because a delivery it made is read through it.
 pub async fn sweep(client: &Client, now_t: i64, policy: Policy) -> Result<Swept, Error> {
     let cutoff = now_t.saturating_sub(policy.kept_us.max(0));
-    let mut swept = Swept::default();
+    let mut swept = Swept { fronts: crate::fronts::forget(client, cutoff).await?, ..Swept::default() };
     for partition in partitions(client, "deliveries").await? {
         if partition.to_t > cutoff || swept.len() >= policy.most {
             break;

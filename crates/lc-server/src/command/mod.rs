@@ -26,7 +26,7 @@ use crate::ability::Level;
 use crate::journal::Journal;
 use crate::server::Server;
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 pub const COMMANDS: &[Spec] = &[
     Spec {
@@ -343,11 +343,10 @@ impl<J: Journal> Server<J> {
         &mut self,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) {
         let queued: VecDeque<Queued> = std::mem::take(&mut self.commands);
         for command in queued {
-            let (ok, text) = match self.run(&command, wire, events, deliveries) {
+            let (ok, text) = match self.run(&command, wire, events) {
                 Ok(text) => (true, text),
                 Err(text) => (false, text),
             };
@@ -360,7 +359,6 @@ impl<J: Journal> Server<J> {
         command: &Queued,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<String, String> {
         let level = self.commanding(command.from);
         let parsed = parse(&command.line).map_err(|e| e.to_string())?;
@@ -368,7 +366,7 @@ impl<J: Journal> Server<J> {
         let args = bind(spec, &parsed, level).map_err(|e| e.to_string())?;
         match spec.verb {
             Verb::Help => help(args.text("command"), level),
-            Verb::Teleport => self.teleport_command(command.from, &args, wire, events, deliveries),
+            Verb::Teleport => self.teleport_command(command.from, &args, wire, events),
             Verb::Where => self.where_command(command.from, args.word("show") == Some("all")),
             Verb::Energize => {
                 let ship = self.ship_named(command.from, &args)?;
@@ -397,7 +395,7 @@ impl<J: Journal> Server<J> {
             }
             Verb::Field => {
                 let ship = self.ship_named(command.from, &args)?;
-                self.field_command(ship, args.word("mode").unwrap_or_default(), wire, events, deliveries)
+                self.field_command(ship, args.word("mode").unwrap_or_default(), wire, events)
             }
             Verb::Emit => {
                 let ship = self.ship_named(command.from, &args)?;

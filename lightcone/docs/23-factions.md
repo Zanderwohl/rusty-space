@@ -66,8 +66,8 @@ there are no keys, only the fact of having been told one — with a generation n
 | `holds(ship, F, g)` | the key is transmitted | its light lands: `learned_t <= now` |
 | `granted(issuer, subject, F, g, capabilities)` | the grant is transmitted | the same |
 
-Both are rows written at transmission and gated on arrival, like `lc_keyring` and
-`lc_message_receipts`. That is what lets a faction work for a craft nobody is flying.
+Both are rows written as the light lands, like `lc_keyring` and `lc_message_receipts`, on every
+craft it lands on. That is what lets a faction work for a craft nobody is flying.
 
 ### Rotation, and why removal is hard
 

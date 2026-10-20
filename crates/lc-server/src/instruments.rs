@@ -1187,6 +1187,7 @@ mod tests {
         new.load_world(World::new(sky()));
         assert!(new.adopt(checkpoint).is_empty());
         new.resume_conversations().await.unwrap();
+        new.resume_fronts().await.unwrap();
         let until = new.now_t() + 2 * 3_600 * 1_000_000;
         while new.now_t() < until {
             new.tick(&mut wire).await.unwrap();

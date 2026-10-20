@@ -3,7 +3,9 @@
 **Status: partly built.** The schema, causality, partition and retention functions and the chat
 tables are `crates/lc-store/sql/`, applied by `lc_store::migrate`; `lc_store::id` mints the event
 ids, and the server's journal (`lc_server::journal::postgres`) writes events and delivery rows and
-reads deliveries back. The shard sweeps retention after every checkpoint
+reads deliveries back. Light is followed as fronts (`lc_server::front`, kept in `lc_fronts`) and
+delivered to whatever craft it lands on, late joiners and ships that turned included. The shard
+sweeps retention after every checkpoint
 (`lc_store::retention::sweep`, under `lc_server::journal::RETENTION`), so the live partitions stay
 near thirty per table however long it runs. `lc_store::cursor::LightConeCursor` and
 `lc_store::bvh` are built but run only in `lc-store`'s own tests, over an in-memory event source:
@@ -145,9 +147,38 @@ is not defined. See [01-spacetime.md](01-spacetime.md).
 `numeric` exponentiation is slow (roughly 100x a float8 multiply). It is only for the exact
 test after an index prune, never inside a scan.
 
-## Delivery scheduling
+## Light fronts and deliveries
 
-For discrete signals with known receivers, do the work at write time instead of read time.
+Every event's light is a sphere growing at `c` from where it happened, and it is followed for as
+long as it is bright enough for anything to detect. That is fixed the moment it happens: strength
+falls as `1/r^2` from the event's power times its beam's gain, and below `FAINTEST`
+(`lc_server::world`, about 1e-26 W/m², a large radio telescope's narrowband limit) nothing is told
+anything. So every event has a **reach**, and its light a **time to live**: a megawatt shout a
+third of a light-year, a burn three hundred, a beam far more along its axis, and nothing past the
+edge of the world. An event that puts out nothing — a drive cut, a lamp going out, an order — is
+seen by what it stops, at `CANCEL_MARGIN` (110%) of its power, so it reaches everyone who saw the
+thing stop; with nothing running, by the hull's own glow (`lc_world::glow`).
+
+`lc_server::front` holds the light still in flight. Each tick, first of all, it finds every craft
+a front's surface passed during the tick — whichever craft there are by then, on the courses they
+actually flew — and each of those is a delivery, written as it lands. Light put out during the
+tick is crossed as it is put out, so a collapse's spike lands in time order among the collapses
+still to come in that tick. Speech is received, owed an answer, and teaches its keys at the same
+moment; an emission feeds energy; a report teaches what it carries.
+
+This replaced working deliveries out when the event was written, which was exact only for a craft
+that already existed and never changed course. Light is decades to millennia on the way, so a
+player who joined in the meantime never saw it, and a ship that turned away met it at a time
+nobody had scheduled. It also put a delivery row, and a partition, at every distinct arrival year:
+one event seen across the galaxy would have been tens of thousands of partitions.
+
+Finding the crossings is the textbook problem of growing spheres over moving points. Fronts are
+bucketed by where they happened, an hour of light on a side, each bucket in order of when; a craft
+asks each bucket for the narrow band of emission times whose surface can be at its distance now,
+and the exact solve (`schedule`) decides. Faded fronts are dropped every minute. Each front is kept
+in `lc_fronts` with a copy of its event, so a shard that comes back follows the same light on
+(`Server::resume_fronts`), and a delivery found centuries on can be read after its event's own
+partition has been archived.
 
 ```sql
 CREATE TABLE deliveries (
@@ -167,18 +198,17 @@ SELECT * FROM deliveries
  ORDER BY arrive_t;
 ```
 
-A single B-tree range scan. This is the mechanism that makes the game's core loop O(log n)
-instead of O(events).
+A single B-tree range scan, and what a client catching up reads. Every row is at or behind the
+clock, so the partitions it needs are only ever the ones the tick keeps ready.
 
-Fan-out is finite because signal strength falls as `1/r^2` and every receiver has a noise
-floor, so each emission has a maximum detection radius. That radius, not the world size,
-bounds the number of `deliveries` rows per emission. A transmitter that raises its power
-raises its fan-out cost, which is a fair place for a game-balance knob to live.
+Fan-out is finite because every event has a reach, so it is the reach, not the world size, that
+bounds the deliveries per emission. A transmitter that raises its power raises its fan-out cost,
+which is a fair place for a game-balance knob to live.
 
 | phenomenon | strategy | why |
 |---|---|---|
-| radio pulse, tight beam | write-time delivery rows | receivers known, fan-out bounded |
-| ship arrival, burn | write-time delivery rows | few observers care |
+| radio pulse, tight beam | front, delivered as it lands | receivers can appear or move while it flies |
+| ship arrival, burn | front, delivered as it lands | the same |
 | starlight | read-time, analytic | continuous; a function, not an event stream |
 | transit dimming | read-time, analytic | derived from the star's occluder list |
 | swarm reconfiguration | event, then read-time | the event changes the function's parameters |
@@ -257,19 +287,17 @@ geometry. "Everything this ship has said and been told" is a question about who 
 the second has to be answerable without walking the first.
 
 Everything in those tables is stamped with the time the light **lands**, never the time it left,
-and every read is gated on the clock having reached it. That is the same bargain the deliveries
-table makes — work it out at write time, gate it at read time — in a place where it happens to
-be the whole of a game mechanic rather than an optimization:
+and written as it lands:
 
 | row | written | readable |
 |---|---|---|
-| `lc_message_receipts` | when the message is transmitted | `arrive_t <= now` |
-| `lc_keyring` | when the key offer is transmitted | `learned_t <= now`, which is what makes a key take four years to cross four light-years |
+| `lc_messages` | when the message is transmitted | by its sender at once |
+| `lc_message_receipts` | when its light lands on a craft | `arrive_t <= now` |
+| `lc_keyring` | when the key offer's light lands on a craft | from then, which is what makes a key take four years to cross four light-years |
 
-Writing them at transmission rather than at arrival is also what makes them work for a craft
-nobody is flying. Arrivals are only walked for connected clients, because there is nobody to tell
-otherwise — and a key that only landed when its owner happened to be signed in would be a
-mechanic that depended on who was watching.
+Fronts are crossed against every craft, not only connected ones, so a craft nobody is flying hears
+the same: a key that only landed when its owner happened to be signed in would be a mechanic that
+depended on who was watching.
 
 ## Retention
 
@@ -285,6 +313,9 @@ Three tiers:
 | older, still referenced by a delivery row | live partitions |
 | older than both | detach partition, compress, archive to object storage |
 
+Light still in flight does not hold its event's partition: its front keeps a copy, until it has
+faded and the kept span past that.
+
 Replays and the god view (see [07-rendering.md](07-rendering.md)) read archived partitions,
 so archival must be reversible, not destructive.
 
@@ -297,6 +328,8 @@ back after a day away is sent on `ResumeFrom`. The first tier's lag, the light-c
 the playable volume, waits on the playable volume being decided ([09](09-open-questions.md)) and
 on the cursor running on the shard; until then only deliveries read events.
 
+- **Fronts** that faded before the cutoff are forgotten. Until then a delivery they made reads its
+  event through them.
 - **Deliveries** landing before the cutoff are dropped. Nothing reads a landed delivery except a
   client catching up, and the event it was about still says everything it did.
 - **Events** whose partition is wholly before the cutoff, and that no remaining delivery refers

@@ -24,7 +24,7 @@ use super::Bound;
 use crate::journal::Journal;
 use crate::server::{BURN_POWER_W, Server};
 use crate::transport::Transport;
-use crate::world::{Event, Scheduled};
+use crate::world::Event;
 
 struct Place {
     system: Arc<LocalSystem>,
@@ -45,7 +45,6 @@ impl<J: Journal> Server<J> {
         args: &Bound,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<String, String> {
         let ship = self.ship_named(from, args)?;
         let (landing, said) = match (args.id("target"), args.id("beside")) {
@@ -58,7 +57,7 @@ impl<J: Journal> Server<J> {
             (Some(_), Some(_)) => return Err("a target or beside:, not both".into()),
             (None, None) => return Err("a target or beside: is required".into()),
         };
-        let name = self.jump(ship, landing, wire, events, deliveries)?;
+        let name = self.jump(ship, landing, wire, events)?;
         Ok(format!("{name} is {said}"))
     }
 
@@ -138,7 +137,6 @@ impl<J: Journal> Server<J> {
         landing: Landing,
         wire: &mut impl Transport,
         events: &mut Vec<Event>,
-        deliveries: &mut Vec<Scheduled>,
     ) -> Result<String, String> {
         let at = self.now_t();
         let now_s = at as f64 * 1.0e-6;
@@ -156,8 +154,8 @@ impl<J: Journal> Server<J> {
         self.pursuits.remove(&id);
         // As loud as a burn, so that at a distance neither end is told apart from one by its
         // brightness alone.
-        self.emit_from(id, left, kind::VANISH, BURN_POWER_W, "{}".into(), at, events, deliveries);
-        self.emit_from(id, landed, kind::APPEAR, BURN_POWER_W, "{}".into(), at, events, deliveries);
+        self.emit_from(id, left, kind::VANISH, BURN_POWER_W, "{}".into(), at, events);
+        self.emit_from(id, landed, kind::APPEAR, BURN_POWER_W, "{}".into(), at, events);
         // No client can reach this by folding anything it sent.
         self.tell_flying(wire, id);
         Ok(name)

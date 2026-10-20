@@ -8,6 +8,7 @@ use lc_world::motion::LIGHT_US_PER_LY;
 
 use super::*;
 use crate::field::hold_black;
+use crate::server::KIND_COLLAPSE;
 use crate::journal::Memory;
 use crate::transport::Loopback;
 use crate::world::still;
@@ -452,12 +453,17 @@ async fn radio_is_charged_from_storage() {
 /// The shard as it comes back from `server`'s checkpoint and journal.
 #[cfg(feature = "storage")]
 async fn restart(server: &Server<Memory>, rate: f64, resume: bool) -> Server<Memory> {
-    let journal = Memory { events: server.journal().events.clone(), deliveries: server.journal().deliveries.clone(), ..Default::default() };
+    let journal = Memory {
+        events: server.journal().events.clone(),
+        deliveries: server.journal().deliveries.clone(),
+        fronts: server.journal().fronts.clone(),
+        ..Default::default()
+    };
     let mut restarted = Server::new(journal, 0, 2);
     restarted.set_rate(rate);
     assert!(restarted.adopt(server.checkpoint()).is_empty());
     if resume {
-        restarted.resume_landings().await.unwrap();
+        restarted.resume_fronts().await.unwrap();
     }
     restarted
 }
@@ -608,7 +614,7 @@ async fn a_beam_in_flight_comes_back_through_the_store() {
     let Ok(journal) = Postgres::open().await else { return };
     let mut restarted = Server::new(journal, 0, 12);
     assert!(restarted.adopt(checkpoint).is_empty());
-    restarted.resume_landings().await.unwrap();
+    restarted.resume_fronts().await.unwrap();
     let target = restarted.ship(ShipId(TARGET_ID)).unwrap().clone();
     restarted.admit(ClientId(2), target, 0.0);
     until(&mut restarted, &mut wire, arrive_t as f64 + 1.0).await;

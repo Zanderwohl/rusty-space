@@ -250,8 +250,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // against it: a shard that read these first would date every message it had ever
             // been told to the instant before it knew what time it was.
             server.resume_conversations().await?;
-            // After the craft, which the landings are for.
-            server.resume_landings().await?;
+            // After the craft, which the light lands on.
+            server.resume_fronts().await?;
             Some(client)
         }
         None => {
@@ -446,9 +446,10 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
     match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
         Ok(swept) if swept.is_empty() => {}
         Ok(swept) => eprintln!(
-            "retention: dropped {} delivery and archived {} event partitions",
+            "retention: dropped {} delivery and archived {} event partitions, forgot {} faded fronts",
             swept.dropped.len(),
             swept.archived.len(),
+            swept.fronts,
         ),
         Err(why) => eprintln!("ERROR: retention failed: {}", lc_server::journal::JournalError::from(why)),
     }

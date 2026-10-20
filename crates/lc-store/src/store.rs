@@ -149,7 +149,7 @@ pub async fn last_event_id(client: &Client) -> Result<Option<EventId>, Error> {
     Ok(row.get::<_, Option<i64>>(0).and_then(EventId::from_raw))
 }
 
-/// Schedule deliveries. Written when the event is written, not worked out when it is read.
+/// Record deliveries: an event's light reaching an observer, written as it lands.
 #[cfg(feature = "postgres")]
 pub async fn insert_deliveries(client: &Client, rows: &[Delivery]) -> Result<u64, Error> {
     if rows.is_empty() {
@@ -446,7 +446,7 @@ mod tests {
         clear(&client, band).await;
         ensure_partitions(&client, 0, SPAN_US).await.unwrap();
         // A shard number no other test mints with, so its row is this test's.
-        const SHARD: i64 = 11;
+        const SHARD: i64 = 1001;
         let kept = || async {
             client
                 .query_one("SELECT event_id FROM lc_last_event WHERE shard = $1", &[&SHARD])

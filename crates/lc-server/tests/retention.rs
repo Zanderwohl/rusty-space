@@ -56,9 +56,32 @@ fn heard(observer: i64, event: &Event, arrive_t: i64) -> Scheduled {
     Scheduled { observer: ShipId(observer), event: event.id, arrive_t, strength: 1.0 }
 }
 
+/// Light kept as a front, as the shard keeps it, faded `reach_us` after it left.
+fn front(event: &Event, reach_us: i64) -> lc_store::fronts::Front {
+    lc_store::fronts::Front {
+        event: lc_store::store::Event {
+            id: lc_store::id::EventId::from_raw(event.id).unwrap(),
+            source_id: event.source.0,
+            t: event.t,
+            g: [0, 0, 0],
+            system_id: None,
+            local: None,
+            kind: event.kind,
+            payload: event.payload.clone(),
+        },
+        until_t: event.t + reach_us,
+        spread: "{}".into(),
+    }
+}
+
 /// The acceptance test. A month at the design rate is 720 coordinate years, which without
-/// retention left a partition of each table per span: 730 of them. With it the count stays
-/// where the policy puts it, while every event something still needs is still there.
+/// retention left a partition of each table per span: 730 of them. With it the count stays where
+/// the policy puts it, whatever distance light is followed over, while everything a delivery
+/// still needs can be read.
+///
+/// Deliveries are written as light lands, so none waits ahead of the clock however far it comes.
+/// The far case is the first hour's event, bright enough to cross the galaxy: heard seven hundred
+/// light-years off at the end of the month, long after its own partition was archived.
 #[tokio::test]
 async fn a_month_of_real_time_holds_a_bounded_number_of_partitions() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -66,44 +89,56 @@ async fn a_month_of_real_time_holds_a_bounded_number_of_partitions() {
     let mut journal = Postgres::with(client);
     let mut minter = Minter::new(1).unwrap();
     const HOURS: i64 = 30 * 24;
-    const FAR_US: i64 = 4 * DESIGN_HOUR_US;
-    const DEEP_US: i64 = 50 * DESIGN_HOUR_US;
+    const NEAR_US: i64 = 4 * DESIGN_HOUR_US;
+    const GALAXY_US: i64 = lc_spacetime::COORD_BOUND;
+    const FAR_HOUR: i64 = 700;
     let start = DESIGN_HOUR_US;
-    let mut peak = (0, 0);
+    let mut peak = (0, 0, 0);
     let mut now = start;
+    let mut beacon = None;
 
     for hour in 0..HOURS {
         now = start + hour * DESIGN_HOUR_US;
         journal.prepare(now, now + PREPARE_AHEAD_US).await.unwrap();
-        // Said every hour: heard a light-second off and four light-years off, and the first of
-        // them fifty light-years off, so its light is in flight long after it is past keeping.
+        // Said every hour and heard a light-second off; followed for four years.
         let event = said(&mut minter, now);
-        let mut deliveries = vec![heard(2, &event, now + 1_000_000), heard(3, &event, now + FAR_US)];
+        let reach_us = if hour == 0 { GALAXY_US } else { NEAR_US };
+        let kept = front(&event, reach_us);
+        let mut deliveries = vec![heard(2, &event, now + 1_000_000)];
         if hour == 0 {
-            deliveries.push(heard(4, &event, now + DEEP_US));
+            beacon = Some(event.clone());
+        }
+        if hour == FAR_HOUR {
+            deliveries.push(heard(4, beacon.as_ref().unwrap(), now));
         }
         journal.write(&[event], &deliveries).await.unwrap();
+        lc_store::fronts::save(journal.client(), &[kept]).await.unwrap();
 
         let swept = sweep(journal.client(), now, RETENTION).await.unwrap();
         assert!(swept.len() <= RETENTION.most);
+        let fronts: i64 = journal.client().query_one("SELECT count(*) FROM lc_fronts", &[]).await.unwrap().get(0);
         peak.0 = peak.0.max(live(journal.client(), "events").await);
         peak.1 = peak.1.max(live(journal.client(), "deliveries").await);
+        peak.2 = peak.2.max(fronts);
 
-        if hour == 30 {
-            let landing = journal.due(ShipId(4), now, start + DEEP_US).await.unwrap();
-            assert_eq!(landing.len(), 1, "an event went while its light was still in flight");
+        if hour == FAR_HOUR {
+            let landed = journal.due(ShipId(4), now - 1, now).await.unwrap();
+            assert_eq!(landed.len(), 1, "light seven hundred years on its way was not read back");
+            assert_eq!(landed[0].1.t, start);
         }
     }
 
-    // Partitions meeting a stretch of time, plus the one the deep arrival keeps apart from it.
-    let bound = |stretch_us: i64| stretch_us / PARTITION_SPAN_US + 2 + 1;
-    // Deliveries from the cutoff to the farthest arrival. Events from as far behind the cutoff as
-    // a kept arrival can be about, to as far ahead as the tick prepares.
-    let deliveries = bound(RETENTION.kept_us + FAR_US);
-    let events = bound(FAR_US + RETENTION.kept_us + PREPARE_AHEAD_US);
+    // Partitions meeting a stretch of time.
+    let bound = |stretch_us: i64| stretch_us / PARTITION_SPAN_US + 2;
+    let deliveries = bound(RETENTION.kept_us + PREPARE_AHEAD_US);
+    let events = bound(RETENTION.kept_us + PREPARE_AHEAD_US);
     assert!(peak.0 <= events, "{} event partitions against {events}", peak.0);
     assert!(peak.1 <= deliveries, "{} delivery partitions against {deliveries}", peak.1);
     assert!(events < 40, "a bound of {events} is not one worth having");
+    // An hour's front a year, kept until four years after it left and the policy past that, and
+    // the galaxy's.
+    let fronts = (NEAR_US + RETENTION.kept_us) / DESIGN_HOUR_US + 2 + 1;
+    assert!(peak.2 <= fronts, "{} fronts against {fronts}", peak.2);
 
     // A client back after a day away is still sent everything it missed, events and all.
     let missed = journal.due(ShipId(2), now - RETENTION.kept_us, now).await.unwrap();

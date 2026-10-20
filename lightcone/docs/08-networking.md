@@ -53,11 +53,11 @@ send(client, event) requires:
     the event's light cone has reached W at or before the server's current t
 ```
 
-Implemented as the `deliveries` table from [02-event-store.md](02-event-store.md): arrival
-times are computed when the event is written, so the tick-time check is a B-tree range scan
-on `(observer_id, arrive_t)`. The server reads it through exactly that scan, and a second
-server started against the same database delivers what the first one scheduled — the tick loop
-holds no events of its own.
+Implemented as light fronts and the `deliveries` table from
+[02-event-store.md](02-event-store.md): each tick finds the craft a front's light passed, whichever
+craft exist by then, and writes the delivery as it lands, so the per-client check is a B-tree range
+scan on `(observer_id, arrive_t)`. A second server started against the same database follows the
+first one's light on from the fronts it kept.
 
 Storage sits behind a `Journal` trait with two implementations. The filter's own tests run
 against the in-memory one, because they are about causality and must not need a database to
@@ -467,7 +467,8 @@ from the beginning.
 Per tick:
 
 1. Advance `t`.
-2. Drain intents, validate, write events, schedule deliveries.
+2. Find the light that landed in `(t_prev, t]`, then drain intents, validate, write events and
+   send their light on its way.
 3. Query `deliveries` for `arrive_t` in `(t_prev, t]`, per connected observer.
 4. Push receptions.
 5. Run scheduled world updates whose time has come: burns completing, construction

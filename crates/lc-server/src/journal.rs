@@ -1,4 +1,4 @@
-//! Where events and their scheduled deliveries are kept.
+//! Where events, the light still on its way from them, and its deliveries are kept.
 //!
 //! A trait with two implementations. [`Memory`] is what the filter's own tests run against —
 //! they are about causality and must not need a database. [`Postgres`] is the real one, and
@@ -41,7 +41,7 @@ pub trait Journal {
         to_t: i64,
     ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
 
-    /// Append events and the deliveries already worked out for them.
+    /// Append events, and the deliveries of light that landed this tick.
     fn write(
         &mut self,
         events: &[Event],
@@ -60,14 +60,19 @@ pub trait Journal {
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
 
-    /// Every delivery of an event of `kind` that lands after `after_t`, with its event: what is
-    /// still in flight. Read once, when a shard comes back, for whatever it acts on when light
-    /// lands rather than merely shows.
-    fn in_flight(
+    /// Keep light the shard is following, so a shard that comes back follows it on. See
+    /// [`crate::front`].
+    fn keep_fronts(
+        &mut self,
+        fronts: &[crate::front::Front],
+    ) -> impl std::future::Future<Output = Result<(), JournalError>> + Send;
+
+    /// Every front something could still detect at `now_t`, with what was said for any that are
+    /// speech. Read once, when a shard comes back.
+    fn fronts(
         &self,
-        kind: i16,
-        after_t: i64,
-    ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+        now_t: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<crate::front::Front>, JournalError>> + Send;
 
     /// Append what was said, where it landed, and what keys that taught.
     ///
@@ -129,6 +134,7 @@ pub struct Transcript {
 pub struct Memory {
     pub events: Vec<Event>,
     pub deliveries: Vec<Scheduled>,
+    pub fronts: Vec<crate::front::Front>,
     pub messages: Vec<lc_store::chat::Message>,
     pub receipts: Vec<lc_store::chat::Receipt>,
     pub keys: Vec<lc_store::chat::Held>,
@@ -178,15 +184,13 @@ impl Journal for Memory {
         Ok(out)
     }
 
-    async fn in_flight(&self, kind: i16, after_t: i64) -> Result<Vec<(Scheduled, Event)>, JournalError> {
-        let mut out: Vec<(Scheduled, Event)> = self
-            .deliveries
-            .iter()
-            .filter(|d| d.arrive_t > after_t)
-            .filter_map(|d| self.events.iter().find(|e| e.id == d.event && e.kind == kind).map(|e| (*d, e.clone())))
-            .collect();
-        out.sort_by_key(|(d, _)| d.arrive_t);
-        Ok(out)
+    async fn keep_fronts(&mut self, fronts: &[crate::front::Front]) -> Result<(), JournalError> {
+        self.fronts.extend_from_slice(fronts);
+        Ok(())
+    }
+
+    async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
+        Ok(self.fronts.iter().filter(|f| f.until_t >= now_t).cloned().collect())
     }
 
     async fn record(
