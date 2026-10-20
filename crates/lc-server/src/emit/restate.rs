@@ -6,14 +6,18 @@
 //! again at the first microsecond it has moved a step from what was last taken, at every crossing
 //! of the cone's edge, and wherever a statement's light meets it. Each is found over the tick just
 //! finished and queued as a landing, which the account settles as a change of input like any
-//! other. The instants are the flight's and not the tick's, so one leap and many ticks find the
-//! same ones.
+//! other.
+//!
+//! **A pair costs the same whatever a tick spans.** It is looked at the tick's end and where its
+//! straight-line path relative to the emitter passes nearest the axis, and a change between two
+//! looks is bisected to its microsecond. Looking on a schedule of the flight's own instead cost a
+//! flotilla at a year a minute thousands of looks a pair a tick. So a change is missed only if it
+//! comes back within the tick off that straight line, and one leap and many ticks find the same
+//! instants only while the motion between the two is straight.
 //!
 //! The light left from where the emitter's worldline was at the retarded instant, while the
 //! emitter can still say, and otherwise from where the statement said. Only receivers within a
 //! beam's reach are followed; beyond it one is restated only as each statement's light lands.
-
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::DVec3;
 use lc_proto::ShipId;
@@ -31,14 +35,8 @@ use crate::server::Server;
 const REACH_FRACTION: f64 = 1.0e-6;
 /// A share is taken again once it has moved this fraction from what was last taken.
 const SHARE_STEP: f64 = 0.01;
-/// Of the time a step or the cone's edge could be reached in at the speed between the two, how
-/// far ahead the next look is: the speed is taken at the look, and either may be accelerating.
-const LOOK_AHEAD: f64 = 0.5;
-const SHORTEST_LOOK_US: i64 = 1_000;
-const LONGEST_LOOK_US: i64 = 10_000_000;
-/// A backstop on the looks one pair takes in a tick: past it, the rest of the tick is taken from
-/// where the next tick starts, and a leap and many ticks may differ.
-const MOST_LOOKS: usize = 100_000;
+/// Changes one pair may land in a tick. Past it, the share is taken at the tick's end.
+pub(crate) const MOST_CHANGES: usize = 8;
 
 /// How far a statement's light is followed, light-microseconds.
 pub(super) fn reach_us(emitted: &Emitted, balance: &Balance) -> f64 {
@@ -54,10 +52,6 @@ struct Seen {
     emitted: Emitted,
     lit: bool,
     share_w: f64,
-    /// Light-microseconds.
-    distance: f64,
-    /// Angle to the cone's edge, from whichever side.
-    to_edge_rad: f64,
 }
 
 /// What `receiver` takes at `t` of the beam `said` states, if any of its light is there.
@@ -80,8 +74,7 @@ fn seen(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, t: i64) -> Opt
     let lit = emitted.power_w > 0.0 && cone.reaches(offset, radius);
     let distance_m = offset.length() * LIGHT_MICROSECOND_M;
     let share_w = if lit { emitted.power_w * emitted.fraction(shadow_m2, distance_m) } else { 0.0 };
-    let to_edge_rad = cone.margin_rad(offset, radius).abs();
-    Some(Seen { said_t: s.t, emitted, lit, share_w, distance: offset.length(), to_edge_rad })
+    Some(Seen { said_t: s.t, emitted, lit, share_w })
 }
 
 /// What was last taken of a beam.
@@ -102,57 +95,81 @@ fn changed(was: Taken, now: Option<&Seen>) -> bool {
         || now.lit && (now.said_t != was.said_t || (now.share_w - was.share_w).abs() > SHARE_STEP * was.share_w)
 }
 
-/// How far ahead to look from `seen` at `t` so a step or an edge between the looks is not missed.
-fn look_us(emitter: Option<&Craft>, receiver: &Craft, seen: Option<&Seen>, t: i64) -> i64 {
-    let Some(seen) = seen else { return LONGEST_LOOK_US };
-    let theirs = emitter.map_or(DVec3::ZERO, |e| e.worldline().velocity_at(t as f64 - seen.distance));
-    let beta = (receiver.worldline().velocity_at(t as f64) - theirs).length();
-    if beta <= 0.0 {
-        return LONGEST_LOOK_US;
-    }
-    // Light-microseconds over a speed in c is microseconds. A share goes as the inverse square.
-    let to_step = if seen.lit { 0.5 * SHARE_STEP * seen.distance } else { f64::INFINITY };
-    let to_edge = seen.to_edge_rad * seen.distance;
-    let ahead = LOOK_AHEAD * to_step.min(to_edge) / beta;
-    (ahead as i64).clamp(SHORTEST_LOOK_US, LONGEST_LOOK_US)
+/// Where in `(after_t, now)` the receiver passes nearest the axis of `said`'s latest statement,
+/// along the straight line between where it is relative to the emitter at either end.
+fn nearest_axis_t(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, after_t: i64, now: i64) -> Option<i64> {
+    let (emitter, last) = (emitter?, said.last()?);
+    let axis = DVec3::from_array(last.emitted.axis).try_normalize()?;
+    let apart = |t: i64| receiver.position_at(t as f64) - emitter.position_at(t as f64);
+    let (from, by) = (apart(after_t), apart(now) - apart(after_t));
+    let (across, drift) = (from.cross(axis), by.cross(axis));
+    let s = -across.dot(drift) / drift.length_squared();
+    (s > 0.0 && s < 1.0).then(|| after_t + (s * (now - after_t) as f64) as i64)
+}
+
+/// Land what `there` is at `at`, and say what is taken now. `None` when there is nothing to land.
+fn land(found: &mut Vec<(i64, i64, Emitted)>, said: &[Said], at: i64, there: Option<Seen>) -> Option<Taken> {
+    let (said_t, emitted) = match there {
+        Some(seen) => (seen.said_t, seen.emitted),
+        // Gone dark: what is landed carries nothing.
+        None => {
+            let last = said.last()?;
+            (last.t, Emitted { power_w: 0.0, ..last.emitted })
+        }
+    };
+    found.push((at, said_t, emitted));
+    Some(taken(there.as_ref()))
+}
+
+/// How many share steps lie between what was taken and `now`, when only the share has moved.
+fn drift_steps(was: Taken, now: Option<&Seen>) -> Option<usize> {
+    let now = now.filter(|n| was.lit && n.lit && n.said_t == was.said_t && was.share_w > 0.0)?;
+    Some(((now.share_w / was.share_w).ln().abs() / SHARE_STEP.ln_1p()).ceil() as usize)
 }
 
 /// Every instant in `(after_t, now]` `receiver`'s share of the beam changes from `was`, and the
 /// statement to land there, from where its light left.
+///
+/// At most [`MOST_CHANGES`]. A drift with more steps than are left lands that many, where its
+/// share passes even ratios between its ends. Each is held to the next, so a falling share is
+/// overstated by up to a step, and a rising one understated.
 fn scan(emitter: Option<&Craft>, said: &[Said], receiver: &Craft, mut was: Taken, after_t: i64, now: i64) -> Vec<(i64, i64, Emitted)> {
     let look = |t: i64| seen(emitter, said, receiver, t);
+    let share = |t: i64| look(t).filter(|s| s.lit).map_or(0.0, |s| s.share_w);
+    let marks: Vec<i64> = nearest_axis_t(emitter, said, receiver, after_t, now).into_iter().chain([now]).collect();
     let mut found = Vec::new();
     let mut t = after_t;
-    for _ in 0..MOST_LOOKS {
-        if t >= now {
-            return found;
-        }
-        let next = (t + look_us(emitter, receiver, look(t).as_ref(), t)).min(now);
-        if !changed(was, look(next).as_ref()) {
+    let mut left = MOST_CHANGES;
+    while let Some(&next) = marks.iter().find(|m| **m > t) {
+        let there = look(next);
+        if !changed(was, there.as_ref()) {
             t = next;
             continue;
         }
-        let at = first(t, next, |m| changed(was, look(m).as_ref()));
-        let there = look(at);
-        let (said_t, emitted) = match there {
-            Some(seen) => (seen.said_t, seen.emitted),
-            // Gone dark: what is landed carries nothing.
-            None => match said.last() {
-                Some(last) => (last.t, Emitted { power_w: 0.0, ..last.emitted }),
-                None => break,
-            },
+        let at = match drift_steps(was, there.as_ref()) {
+            Some(steps) if steps > left => {
+                let (from_w, ratio) = (was.share_w, there.map_or(0.0, |s| s.share_w) / was.share_w);
+                for k in 1..left {
+                    let target_w = from_w * ratio.powf(k as f64 / left as f64);
+                    let at = first(t, next, |m| (share(m) - target_w) * (ratio - 1.0) >= 0.0);
+                    if land(&mut found, said, at, look(at)).is_none() {
+                        break;
+                    }
+                    t = at;
+                }
+                next
+            }
+            _ if left > 1 => first(t, next, |m| changed(was, look(m).as_ref())),
+            _ => next,
         };
-        found.push((at, said_t, emitted));
-        was = taken(there.as_ref());
+        let there = if at == next { there } else { look(at) };
+        let Some(now_taken) = land(&mut found, said, at, there) else { break };
+        was = now_taken;
         t = at;
-    }
-    if t < now && !CUT_SHORT.swap(true, Ordering::Relaxed) {
-        eprintln!("WARNING: a receiver's share was followed only to {t} of a tick ending {now}; the rest is taken next tick");
+        left = MOST_CHANGES.saturating_sub(found.len()).max(1);
     }
     found
 }
-
-static CUT_SHORT: AtomicBool = AtomicBool::new(false);
 
 impl<J: Journal> Server<J> {
     /// Queue a landing at every instant in `(after_t, now]` a receiver's share of a beam changes.

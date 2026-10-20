@@ -72,7 +72,7 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--map-plane <system\|galactic>` | which plane the map lays its rings in. `ecliptic` is the old spelling of `system` and still works. A system's plane is a belief, so the option is refused until one is solved — see `lightcone/docs/25-system-knowledge.md` |
 | `--error-bars` | draw the map's error bars, which are off by default |
 | `--map-focus <ship\|primary\|local\|star\|free>` | what the map's camera locks onto. A pin: `--map` on its own holds the ship, so a hand on the mouse cannot pan a shot two runs are meant to agree about |
-| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `kzinti` (the approach, Direct), `closing`, `chase`, `corona`, `cascade` (five hot ships, and the first vents), `distant` (a burn and a collapse a light-year off). Brings its own shard, and needs the catalog: without one the sky is three sample stars, none of them Sol, and nothing is staged |
+| `--demo <name>` | stage a scene: `traffic`, `meeting`, `approach`, `kzinti` (the approach, Direct), `closing`, `chase`, `flotilla` (three ships escorting a fourth to 0.999 c), `corona`, `cascade` (five hot ships, and the first vents), `distant` (a burn and a collapse a light-year off). Brings its own shard, and needs the catalog: without one the sky is three sample stars, none of them Sol, and nothing is staged |
 | `--field-k <kelvin>` | hold the player's field at a temperature, as drawn, metered and on the bar. `--field-mode clear\|black` holds its shade, `--field-switch <progress>` a switch into that shade frozen partway, and `--field-beam <watts>` a beam on it from beside the camera |
 | `--console <line>` | type a line at the console once the shard has welcomed the client, with the console open. With `--local` the shard is directing, so every command is available. Give it again for more lines, run in order: `--console "refit-magic plate fore:1" --console "emit both"` |
 | `--demo-cam <yaw:pitch:booms[:to]>` | pin the camera for the run, so two shots of a scene are the same shot. With `to`, the boom eases toward it once nothing is waiting to be drawn: `--frames 1 --burst 150` with `40:1.5` photographs every remesh of a hull on the way in |
@@ -119,8 +119,8 @@ A scene replaces what used to be `--traffic <n>` and `--chase`, and does more th
 craft have names, sizes and somewhere to be, and `lc_world::scenario` is where what they do is
 written. `--demo traffic` is the old fan of hulls. The clock is the scene's to state — `meeting`
 and `approach` run at a twentieth of the design rate because a low orbit otherwise sweeps the
-whole view past twice a second, `closing` at a tenth, and `chase` at twenty, which is where
-three months of running becomes about a minute of watching.
+whole view past twice a second, `closing` at a tenth, `chase` at twenty, which is where
+three months of running becomes about a minute of watching, and `flotilla` at sixty.
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.

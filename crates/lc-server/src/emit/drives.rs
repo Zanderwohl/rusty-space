@@ -3,6 +3,10 @@
 //! flown as a burn throttles the same way and is said again alike. Found after the fact over the
 //! tick just finished, as [`crate::drive`] finds the plume's transitions, at instants that depend
 //! only on the flight: the plan's own transitions, and the first microsecond a step is reached.
+//!
+//! A drift between transitions is looked for at the next transition or the tick's end and
+//! bisected back, rather than on a grid through the tick, so a craft costs the same whatever a
+//! tick spans. Mass and a frame's turning drift one way, so the bisection finds the same instant.
 
 use glam::DVec3;
 use lc_proto::Spectrum;
@@ -19,10 +23,8 @@ use crate::world::{Event, Scheduled};
 const POWER_STEP: f64 = 0.01;
 /// And its axis once it has turned this fraction of its half-angle.
 const AXIS_STEP: f64 = 0.1;
-/// Coordinate microseconds between the instants a lit drive is looked at for a drift, on a grid
-/// so that a leap and a tick look at the same ones. A frame's turning or the mass falling moves a
-/// step in hours; a change quicker than this is a transition of the plan, which is looked at too.
-const LOOK_US: i64 = 60_000_000;
+/// Drift steps one craft may state in a tick. Past it, what is lit is said once at the next mark.
+const MOST_DRIFTS: usize = 8;
 
 /// What a craft's lightings should say at one instant.
 #[derive(Default)]
@@ -94,15 +96,15 @@ impl<J: Journal> Server<J> {
             if marks.is_empty() && !stated && !self.drive_differs(id, now) {
                 continue;
             }
-            let grid = (after_t / LOOK_US + 1) * LOOK_US;
-            marks.extend((grid..=now).step_by(LOOK_US as usize));
             marks.push(now);
             marks.sort_unstable();
             marks.dedup();
 
             let mut from = after_t;
+            let mut drifts = 0;
             for mark in marks {
-                while mark - 1 > from && self.drive_differs(id, mark - 1) {
+                while drifts < MOST_DRIFTS && mark - 1 > from && self.drive_differs(id, mark - 1) {
+                    drifts += 1;
                     let t = first(from, mark - 1, |t| self.drive_differs(id, t));
                     self.state_drive(id, t, events, deliveries);
                     from = t;

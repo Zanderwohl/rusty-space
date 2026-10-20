@@ -250,19 +250,25 @@ close ahead of a burning quarry cannot keep pace without its exhaust on it while
   its beam, and said again at the first microsecond its power has moved 1% from what was last said,
   as the rocket law throttles a lightening ship, or its axis has turned a tenth of its half-angle.
   An emit flown as a burn is said again as it lightens alike. The instants are found after the
-  fact over the tick just finished, from the plan's own transitions and a look every sixty
-  coordinate seconds, so they are the flight's and not the tick's. A cut is the change of motion,
+  fact over the tick just finished: a drift is looked for at each of the plan's own transitions
+  and at the tick's end, and bisected back to its microsecond. Mass and a frame's turning drift one
+  way, so the instants are the flight's and not the tick's, at a cost that does not grow with what
+  a tick spans. A craft states at most eight drift steps a tick, and past them what is lit is said
+  at the next transition. A cut is the change of motion,
   stated at the order's instant; a collapse puts out the wreck's drives with everything else.
 - **A receiver's share is taken again as it moves**, at every instant it changes: when the light of
   a statement meets it, when it crosses the cone's edge, and at the first microsecond its share has
   moved 1% from what it last took, as its distance and shadow change. A craft that flies into a cone
   whose light is already passing is fed and told `Illuminated` from when it enters, and one that
-  leaves stops. Each instant is a landing like any other, settled in time order with collapses. The
-  looks between them are spaced at half the time the speed between the two needs to reach a step or
-  the edge, and a change is bisected to its microsecond, so one leap and many ticks settle the same
-  instants, unless one pair needs more than a hundred thousand looks in a tick, when the rest waits
-  for the next and the shard warns. A receiver's turn is not in that spacing; it is caught at the
-  next look.
+  leaves stops. Each instant is a landing like any other, settled in time order with collapses.
+  **A pair costs the same whatever a tick spans**: it is looked at at the tick's end and where its
+  straight-line path relative to the emitter passes nearest the axis, and a change between two
+  looks is bisected to its microsecond. Looking on a schedule of the flight's own cost a flotilla
+  at a year a minute thousands of looks a pair a tick. A pair lands at most eight changes a tick;
+  a drift with more steps than that lands as many, where its share passes even ratios between its
+  ends, each held to the next. So one leap and many ticks settle the same instants while the motion
+  between the two is straight within a tick and its steps fit; past that a change that comes back
+  within the tick is missed, and heat is off by up to a step.
 - **Where the light left** is the emitter's worldline at the retarded instant, while the emitter can
   still say, and otherwise where the statement said. Each statement is kept with its emitter, in
   its checkpoint, until the next one's light has gone past the reach.
