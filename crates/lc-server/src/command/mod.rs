@@ -33,7 +33,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "help",
         verb: Verb::Help,
         level: Level::PLAYER,
-        summary: "what the commands are, or what one of them takes",
+        summary: "list commands, or `/help {command}` for a specific command",
         args: &[ArgSpec {
             name: "command",
             // Text and not a word from the table: the list of choices in a refusal would name
@@ -48,7 +48,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "teleport",
         verb: Verb::Teleport,
         level: Level::DEBUG,
-        summary: "put a ship on station about a star or a body, without flying there",
+        summary: "put a ship on station about a star or body",
         args: &[
             ArgSpec {
                 name: "target",
@@ -94,7 +94,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "where",
         verb: Verb::Where,
         level: Level::DEBUG,
-        summary: "the ids of the star your ship is at and of the bodies around it",
+        summary: "the ids of the star your ship is near, and bodies around it",
         args: &[ArgSpec {
             name: "show",
             kind: Kind::Word(&["major", "all"]),
@@ -186,7 +186,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "chart",
         verb: Verb::Chart,
         level: Level::DEBUG,
-        summary: "learn every body's orbit in a system, as the charting office would have it",
+        summary: "instantly learn every body's orbit in a system",
         args: &[ArgSpec {
             name: "star",
             kind: Kind::Id,
@@ -199,21 +199,21 @@ pub const COMMANDS: &[Spec] = &[
         name: "refit",
         verb: Verb::Refit,
         level: Level::DEBUG,
-        summary: "begin a refit round toward a form, as the order does",
+        summary: "initiate refit",
         args: FORM_ARGS,
     },
     Spec {
         name: "refit-magic",
         verb: Verb::RefitMagic,
         level: Level::DEBUG,
-        summary: "rebuild a ship as a form at once and for nothing, dropping any round under way",
+        summary: "instantly transform ship fit, ignoring energy concerns",
         args: FORM_ARGS,
     },
     Spec {
         name: "field",
         verb: Verb::Field,
         level: Level::DEBUG,
-        summary: "set a ship's field Clear, Black or Auto, as the order does",
+        summary: "set a ship's field to Clear, Black, or Auto",
         args: &[
             ArgSpec {
                 name: "mode",
@@ -271,7 +271,7 @@ pub const COMMANDS: &[Spec] = &[
         name: "stage",
         verb: Verb::Stage,
         level: Level::DEBUG,
-        summary: "put a named scene in the world",
+        summary: "stage a named demo scene in the world",
         args: &[ArgSpec {
             name: "scene",
             kind: Kind::Word(SCENES),
@@ -315,7 +315,7 @@ const FORM_ARGS: &[ArgSpec] = &[
 ];
 
 /// `lc_world::scenario::Scenario::ALL` by name, which a `const` cannot collect for itself.
-const SCENES: &[&str] = &["traffic", "meeting", "approach", "kzinti", "closing", "chase", "corona", "cascade", "distant"];
+const SCENES: &[&str] = &["traffic", "meeting", "approach", "kzinti", "closing", "chase", "corona", "cascade", "distant", "wake", "schism"];
 
 pub fn find(name: &str, level: Level) -> Option<&'static Spec> {
     COMMANDS.iter().find(|spec| spec.name == name && level.at_least(spec.level))
