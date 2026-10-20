@@ -834,7 +834,12 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             effects.push(Effect::Notify("no server, so nothing to refit or fill".into()));
         }
         Action::GrantEnergy(joules) => effects.push(Effect::Grant(joules)),
-        Action::RunCommand(line) => effects.push(Effect::Command(line)),
+        // The console is opened by `/` and its hint reads `/help`, so a typed slash is the one
+        // already shown, not part of the command.
+        Action::RunCommand(line) => {
+            let line = line.trim();
+            effects.push(Effect::Command(line.strip_prefix('/').unwrap_or(line).trim_start().to_string()));
+        }
         Action::FillStorage => {
             let now = session.coordinate_time_s();
             if let Some(fitting) = session.ship.fitting() {
@@ -2059,6 +2064,14 @@ mod tests {
         // whoever the last scene was about.
         apply(Action::StageDemo("approach".into()), &mut ui, &mut s);
         assert_eq!(ui.perspective, None);
+    }
+
+    #[test]
+    fn a_command_typed_with_its_slash_is_the_command_without_one() {
+        let (mut ui, mut s) = fixture();
+        for typed in ["help", "/help", " /help "] {
+            assert_eq!(apply(Action::RunCommand(typed.into()), &mut ui, &mut s), vec![Effect::Command("help".into())], "{typed:?}");
+        }
     }
 
     /// A craft stays selected beside an armed course until something else is picked.
