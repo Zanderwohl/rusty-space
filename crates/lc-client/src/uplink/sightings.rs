@@ -59,17 +59,17 @@ pub(super) fn fold(
                 // talking is the news; what they said to each other is theirs, and repeating
                 // it into this ship's own events box reads as if it had been said here.
                 let faction = spoken.under.map(|key| match uplink.chat.faction(key) {
-                    Some(chat) if !chat.name.is_empty() => chat.name.clone(),
-                    _ => crate::chat::key_mark(key),
+                    Some(chat) => crate::radio_panel::faction_label(&uplink, key, chat, false),
+                    None => crate::chat::key_mark(key),
                 });
                 let notice = match (&spoken.body, uplink.chat.filing(spoken.to)) {
                     // News to the transcript, which marks a line delivered, and to nobody
                     // reading the box.
                     (Body::Ack, _) => None,
                     (Body::Faction(given), crate::chat::Filing::Conversation) => {
-                        Some(format!("{who}: gave you the key to {}", given.name))
+                        Some(format!("{who}: gave you the key to {} (gen {})", given.name, given.generation()))
                     }
-                    (Body::Faction(given), _) => Some(format!("{who} gave out the key to {}", given.name)),
+                    (Body::Faction(given), _) => Some(format!("{who} gave out the key to {} (gen {})", given.name, given.generation())),
                     (Body::Unreadable, _) if faction.is_some() && spoken.to.is_none() => {
                         Some(format!("{who} -> {}", faction.as_deref().unwrap_or_default()))
                     }

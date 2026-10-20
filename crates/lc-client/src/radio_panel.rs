@@ -274,28 +274,23 @@ fn faction_log(
     out: &mut MessageWriter<Requested>,
 ) {
     let lines = uplink.chat.faction(key).map(|f| f.lines.as_slice()).unwrap_or_default();
-    // Fixed height whether or not it is there, so the log does not jump when a key lands.
-    ui.allocate_ui(egui::vec2(LOG_WIDTH, BANNER_HEIGHT), |ui| {
-        let newer = uplink.chat.newer(key);
-        if newer.is_empty() {
-            return;
-        }
-        // Every branch, with who made it: a fork may be two loyal members who could not know
-        // of each other, or a traitor cutting part of the faction off.
+    let newer = uplink.chat.newer(key);
+    // Outside the log, so scrolling cannot hide it, and a row reserved even when empty, so the
+    // log does not jump when a key lands. One row per branch: a fork may be two loyal members
+    // who could not know of each other, or a traitor cutting part of the faction off.
+    let banner = BANNER_ROW * newer.len().max(1) as f32;
+    ui.allocate_ui(egui::vec2(LOG_WIDTH, banner), |ui| {
         let amber = egui::Color32::from_rgb(210, 165, 60);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(match newer.len() {
-                1 => "Superseded by",
-                _ => "Superseded twice over:",
-            }).color(amber));
-            for (k, chat) in &newer {
+        for (k, chat) in &newer {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Superseded by").color(amber));
                 if clickable_name(ui, &faction_label(uplink, *k, chat, true), amber).clicked() {
                     ask(out, Action::ChatWith(Channel::Faction(*k)));
                 }
-            }
-        });
+            });
+        }
     });
-    log_area(ui, "chat_faction", BODY_HEIGHT - COMPOSER_HEIGHT - BANNER_HEIGHT, |ui| {
+    log_area(ui, "chat_faction", BODY_HEIGHT - COMPOSER_HEIGHT - banner, |ui| {
         if lines.is_empty() {
             ui.weak("Nothing said under this key.");
             return;
@@ -324,13 +319,12 @@ fn forked(uplink: &crate::uplink::Uplink, key: FactionId) -> bool {
     })
 }
 
-/// Room for the line saying a chat's key has been superseded.
-const BANNER_HEIGHT: f32 = 22.0;
+/// Room for one line saying a chat's key has been superseded.
+const BANNER_ROW: f32 = 22.0;
 
 /// What a faction is shown as: its name, or a mark that tells keys apart until the name arrives,
-/// and its generation once there is more than one. With `founder`, who minted it, which is what
-/// tells the branches of a fork apart.
-fn faction_label(uplink: &crate::uplink::Uplink, key: FactionId, chat: &crate::chat::FactionChat, founder: bool) -> String {
+/// and always its generation. With `founder`, who minted it, which tells a fork's branches apart.
+pub(crate) fn faction_label(uplink: &crate::uplink::Uplink, key: FactionId, chat: &crate::chat::FactionChat, founder: bool) -> String {
     let name = match chat.name.is_empty() {
         true => crate::chat::key_mark(key),
         false => chat.name.clone(),
@@ -339,11 +333,10 @@ fn faction_label(uplink: &crate::uplink::Uplink, key: FactionId, chat: &crate::c
         true => "you".to_string(),
         false => uplink.name_of(f),
     });
-    match (chat.generation(), by) {
-        (1, None) => name,
-        (1, Some(by)) => format!("{name} ({by})"),
-        (g, None) => format!("{name} (gen {g})"),
-        (g, Some(by)) => format!("{name} (gen {g}, {by})"),
+    let g = chat.generation();
+    match by {
+        None => format!("{name} (gen {g})"),
+        Some(by) => format!("{name} (gen {g}, {by})"),
     }
 }
 
@@ -369,14 +362,20 @@ fn compose_faction(
             let name = star.map(|id| game.name_of(id)).unwrap_or_else(|| "the selected star".into());
             ui.selectable_value(aimed, Aimed::AtTheSelectedStar, "beam star").on_hover_text(name);
         });
-        if ui.button("send survey").clicked() {
-            ask(out, Action::SendReport { to: None, aim, secrecy });
-        }
-        // The next generation, under the same name. Nobody else holds it until it is given.
-        if ui.button("re-key").clicked() {
-            let name = uplink.chat.faction(key).map(|f| f.name.clone()).unwrap_or_default();
-            ask(out, Action::Found { name, replaces: Some(key) });
-        }
+        // The rarer actions, behind a menu at the row's end.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let more = hamburger(ui);
+            egui::Popup::menu(&more).show(|ui| {
+                if ui.button("send survey").clicked() {
+                    ask(out, Action::SendReport { to: None, aim, secrecy });
+                }
+                // The next generation, under the same name. Nobody else holds it until it is given.
+                if ui.button("re-key").clicked() {
+                    let name = uplink.chat.faction(key).map(|f| f.name.clone()).unwrap_or_default();
+                    ask(out, Action::Found { name, replaces: Some(key) });
+                }
+            });
+        });
     });
     ui.horizontal(|ui| {
         let field = ui.add(egui::TextEdit::singleline(draft).desired_width(LOG_WIDTH - 52.0));
@@ -386,6 +385,20 @@ fn compose_faction(
             field.request_focus();
         }
     });
+}
+
+/// A button of three bars. Painted, because the default font has no U+2630 and draws a box.
+fn hamburger(ui: &mut egui::Ui) -> egui::Response {
+    let response = ui.add(egui::Button::new("").min_size(egui::vec2(24.0, 18.0)));
+    let ink = ui.visuals().widgets.style(&response).fg_stroke.color;
+    let c = response.rect.center();
+    for dy in [-4.0, 0.0, 4.0] {
+        ui.painter().line_segment(
+            [egui::pos2(c.x - 6.0, c.y + dy), egui::pos2(c.x + 6.0, c.y + dy)],
+            egui::Stroke::new(1.5_f32, ink),
+        );
+    }
+    response
 }
 
 /// Naming a new faction. Founding puts nothing on the air; the key is held at once.
@@ -444,7 +457,7 @@ fn overheard_log(
                         ui.label(egui::RichText::new("offered its key").font(face.clone()).weak());
                     }
                     Body::Faction(faction) => {
-                        let gave = format!("gave the key to {}", faction.name);
+                        let gave = format!("gave the key to {} (gen {})", faction.name, faction.generation());
                         ui.label(egui::RichText::new(gave).font(face.clone()).weak());
                     }
                     Body::Ack => {}
@@ -624,12 +637,14 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
         Body::Key => ui.label(said("sent this ship its key".to_string()).color(RADIO)),
         Body::Faction(faction) if mine => ui.label(
             said(match to {
-                Some(to) => format!("gave {to} the key to {}", faction.name),
-                None => format!("gave out the key to {}", faction.name),
+                Some(to) => format!("gave {to} the key to {} (gen {})", faction.name, faction.generation()),
+                None => format!("gave out the key to {} (gen {})", faction.name, faction.generation()),
             })
             .weak(),
         ),
-        Body::Faction(faction) => ui.label(said(format!("gave the key to {}", faction.name)).color(RADIO)),
+        Body::Faction(faction) => {
+            ui.label(said(format!("gave the key to {} (gen {})", faction.name, faction.generation())).color(RADIO))
+        }
         Body::Text(body) => ui.label(said(body.clone()).color(color)),
         Body::Ack => ui.label(said("(acknowledgment)".to_string()).weak()),
         // Heard and unreadable, which is worth showing rather than hiding: a player can see
