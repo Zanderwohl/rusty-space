@@ -387,6 +387,36 @@ fn compose_faction(
     });
 }
 
+/// The faction keys this ship holds, to send: a submenu, disabled while it holds none.
+#[allow(clippy::too_many_arguments)]
+fn faction_keys(
+    ui: &mut egui::Ui,
+    uplink: &crate::uplink::Uplink,
+    to: Option<lc_proto::ShipId>,
+    aim: lc_proto::Aim,
+    secrecy: lc_proto::Secrecy,
+    sealed: bool,
+    out: &mut MessageWriter<Requested>,
+) {
+    let factions = uplink.chat.factions();
+    ui.add_enabled_ui(!factions.is_empty(), |ui| {
+        ui.menu_button("send faction key", |ui| {
+            for (key, faction) in &factions {
+                if ui.button(faction_label(uplink, *key, faction, forked(uplink, *key))).clicked() {
+                    ask(out, Action::GiveKey { key: *key, to, aim, secrecy });
+                    ui.close();
+                }
+            }
+        })
+        .response
+        // Open, it hands the key to everyone it reaches.
+        .on_hover_text(match sealed {
+            true => "sealed: only they will hold it",
+            false => "open: everyone it reaches will hold it",
+        });
+    });
+}
+
 /// A button of three bars. Painted, because the default font has no U+2630 and draws a box.
 fn hamburger(ui: &mut egui::Ui) -> egui::Response {
     let response = ui.add(egui::Button::new("").min_size(egui::vec2(24.0, 18.0)));
@@ -732,27 +762,29 @@ fn compose(
                 format!("{name}: the whole system, for when you do not know where in it they are"),
             );
         });
-        let factions = uplink.chat.factions();
-        ui.add_enabled_ui(!factions.is_empty(), |ui| {
-            // Sealed or not as the encrypt box says. Open, it hands the key to everyone it reaches.
-            let secrecy = match *seal {
-                true => lc_proto::Secrecy::Sealed,
-                false => lc_proto::Secrecy::Open,
-            };
-            ui.menu_button("give key", |ui| {
-                for (key, faction) in &factions {
-                    if ui.button(faction_label(uplink, *key, faction, forked(uplink, *key))).clicked() {
-                        ask(out, Action::GiveKey { key: *key, to: with, aim, secrecy });
-                        ui.close();
-                    }
-                }
-            })
-            .response
-            .on_hover_text(match *seal {
-                true => "sealed: only they will hold it",
-                false => "open: everyone it reaches will hold it",
-            });
-        });
+        // Sealed or not as the encrypt box says, for everything sent from here but a key offer.
+        let secrecy = match *seal {
+            true => lc_proto::Secrecy::Sealed,
+            false => lc_proto::Secrecy::Open,
+        };
+        match with {
+            // To one craft, the rarer transmissions are behind a menu at the row's end.
+            Some(_) => {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let more = hamburger(ui);
+                    egui::Popup::menu(&more).show(|ui| {
+                        if ui.button("send personal key").clicked() {
+                            ask(out, Action::OfferKey { to: with, aim });
+                        }
+                        faction_keys(ui, uplink, with, aim, secrecy, *seal, out);
+                        if ui.button("send survey").clicked() {
+                            ask(out, Action::SendReport { to: with, aim, secrecy });
+                        }
+                    });
+                });
+            }
+            None => faction_keys(ui, uplink, None, aim, secrecy, *seal, out),
+        }
     });
     ui.horizontal(|ui| {
         ui.add_enabled_ui(holds_key, |ui| {
@@ -769,8 +801,9 @@ fn compose(
         if !holds_key {
             *seal = false;
         }
-        if ui
-            .button("send key")
+        if with.is_none()
+            && ui
+            .button("send personal key")
             .on_hover_text(match with {
                 Some(_) => "so they can encrypt messages back; it travels at c like anything else",
                 // The reason to put a key on the public channel at all: it is the only way
@@ -783,7 +816,8 @@ fn compose(
         }
         // A report is a transmission and not a message: aimed and sealed the same way, and
         // filed at the far end as knowledge rather than as something somebody said.
-        if ui
+        if with.is_none()
+            && ui
             .button("send survey")
             .on_hover_text(
                 "everything learned since the last report to them, oldest first; \
