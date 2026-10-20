@@ -529,8 +529,13 @@ impl<J: Journal> Server<J> {
                 }
                 let subject = Subject::from(*subject);
                 let here = self.fleet.get(id).and_then(|craft| craft.system.clone());
+                // Naming itself is a claim every transmission carries, so it is public or nothing.
+                let itself = subject == Subject::Craft(id.0);
+                if itself && matches!(writing, lc_proto::Writing::Name(_)) && *scope != lc_proto::Scope::Open {
+                    return Err(Refusal::Impossible);
+                }
                 let knowledge = &mut self.aboard(id).knowledge;
-                if !knowledge.nameable(subject, here.as_deref()) {
+                if !itself && !knowledge.nameable(subject, here.as_deref()) {
                     return Err(Refusal::Impossible);
                 }
                 knowledge.write(subject, writing.clone(), *scope, at_s);

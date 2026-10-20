@@ -1094,6 +1094,7 @@ impl<J: Journal> Server<J> {
         // it: two sockets acting for one ship is two clients predicting different futures.
         self.clients.retain(|_, state| state.ship != ship);
         self.clients.insert(from, Connected::new(ship, claims.sub.clone(), crate::ability::Level::from_claim(claims.perm)));
+        self.claim_if_unnamed(CraftId(ship.0));
         // Being welcomed is not the same fact as owning the craft, and `act` checks the
         // second. Without this a signed-in client is welcomed, given a ship, and then refused
         // `NotYours` on every order it sends — which no in-process test caught, because the
@@ -1851,7 +1852,7 @@ use crate::transport::Loopback;
             ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
         });
         server.tick(&mut wire).await.unwrap();
-        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
+        assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
     }
 
     /// **A faster world is the same world.** Its tick buys coarser event timestamps and
@@ -2972,7 +2973,7 @@ mod hello_tests {
 
         says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)] =
+        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..] =
             said.as_slice()
         else {
             panic!("no welcome: {said:?}")
@@ -3038,7 +3039,7 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
         assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
@@ -3058,7 +3059,7 @@ mod hello_tests {
 
         // The real one, with the same identifier, still works.
         says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_)]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.

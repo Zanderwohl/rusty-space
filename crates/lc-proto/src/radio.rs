@@ -106,6 +106,18 @@ impl Body {
     }
 }
 
+/// The name a transmitter calls itself: its own newest name entry about itself, with what a
+/// receiver needs to file the identical entry, author being the sender. See
+/// `lightcone/docs/23-factions.md` §Craft that are not ours.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Claim {
+    pub name: String,
+    /// Coordinate seconds, at the sender.
+    pub written_s: f64,
+    /// Entry ids, sorted.
+    pub parents: Vec<u64>,
+}
+
 /// What a [`kind::MESSAGE`](crate::kind::MESSAGE) or [`kind::KEY`](crate::kind::KEY) event carries, as JSON in the payload.
 ///
 /// Stored whole and redacted per receiver on release, not duplicated per receiver at write: an
@@ -126,6 +138,9 @@ pub struct Spoken {
     /// one key are seen to be.
     #[serde(default)]
     pub under: Option<FactionId>,
+    /// What the sender calls itself. Readable by anyone who hears it, sealed or not.
+    #[serde(default)]
+    pub claim: Option<Claim>,
     pub body: Body,
     /// Event ids of the addressee's messages the sender had received, newest last. Ids rather
     /// than a count because the ends disagree on the count. See [`ACK_DEPTH`].
@@ -146,6 +161,8 @@ pub struct Reported {
     pub sealed: bool,
     #[serde(default)]
     pub under: Option<FactionId>,
+    #[serde(default)]
+    pub claim: Option<Claim>,
     /// The `lc_world::knowledge::Report`, as [`encode_report`] writes it. Its shape is part of
     /// this protocol: a change to it is a [`REPORT_FORMAT`] bump. `None` when this receiver may
     /// not read it.

@@ -388,7 +388,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::StareSelected => match (ui.selected_craft, ui.selected) {
             (Some(craft), _) => {
                 set_duty(ui, session, Duty::Stare(Gaze::Craft(craft.0)), &mut effects);
-                effects.push(Effect::Notify(format!("staring at ship {}", craft.0)));
+                effects.push(Effect::Notify(format!("staring at {}", crate::craft_names::unnamed(lc_proto::ShipId(craft.0)))));
             }
             (None, Some(id)) => {
                 let name = session.name_of(id);
@@ -902,7 +902,9 @@ fn write(session: &mut Session, subject: Subject, writing: lc_proto::Writing, sc
     if !writing.is_valid() {
         return;
     }
-    if !session.nameable(subject) {
+    // A craft can always speak about itself, which is how it names itself.
+    let itself = subject == Subject::Craft(session.knowledge.owner.0 as i64);
+    if !itself && !session.nameable(subject) {
         effects.push(Effect::Notify("nothing detected there to write about".into()));
     } else if session.remote {
         effects.push(Effect::Send(lc_proto::Order::Write { subject: subject.into(), writing, scope }));

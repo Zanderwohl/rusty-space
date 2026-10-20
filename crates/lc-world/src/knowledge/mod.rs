@@ -518,6 +518,14 @@ impl Knowledge {
         self.files.get(&subject.into())
     }
 
+    /// Every craft held a file on, by shard id.
+    pub fn crafts(&self) -> impl Iterator<Item = i64> + '_ {
+        self.files.range(Subject::Craft(i64::MIN)..=Subject::Craft(i64::MAX)).map(|(subject, _)| match subject {
+            Subject::Craft(id) => *id,
+            _ => unreachable!("the range holds only craft"),
+        })
+    }
+
     pub fn belief(&self, subject: impl Into<Subject>) -> Option<&Belief> {
         self.beliefs.get(&subject.into())
     }
@@ -709,6 +717,20 @@ impl Knowledge {
     /// Call something by a name, in the open: the name travels in any report about it.
     pub fn name_it(&mut self, subject: impl Into<Subject>, name: impl Into<String>, now_s: f64) -> thread::EntryId {
         self.write(subject, lc_proto::Writing::Name(name.into()), lc_proto::Scope::Open, now_s)
+    }
+
+    /// What this craft calls itself: its own newest name for itself, which every transmission
+    /// carries. See `lightcone/docs/23-factions.md` §Craft that are not ours.
+    pub fn own_claim(&self) -> Option<lc_proto::Claim> {
+        let me = Subject::Craft(self.owner.0 as i64);
+        let (_, held) = self.files.get(&me)?.thread.standing(self.owner)?;
+        (held.entry.author == self.owner).then(|| held.entry.claim()).flatten()
+    }
+
+    /// File what a craft said it is called, as heard.
+    pub fn heard_claim(&mut self, sender: Witness, claim: &lc_proto::Claim, lineage: Lineage) {
+        let entry = thread::Entry::claimed(sender, claim);
+        self.heard_entry(Subject::Craft(sender.0 as i64), thread::Held { entry, lineage });
     }
 
     /// Hold a thread entry somebody else wrote.

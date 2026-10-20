@@ -440,7 +440,6 @@ mod tests {
     fn presence(here_ly: DVec3, form: &Form, drive_w: f64, emit: Ends) -> lc_proto::Presence {
         lc_proto::Presence {
             ship_id: ShipId(1),
-            name: "ship 1".into(),
             length_m: 500.0,
             at_ly: (here_ly + DVec3::X * 500.0 / M_PER_LY).to_array(),
             beta: [0.0; 3],

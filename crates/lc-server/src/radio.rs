@@ -25,6 +25,7 @@ use lc_proto::{
 use glam::DVec3;
 use lc_world::craft::CraftId;
 use lc_world::knowledge::thread::Seal;
+use lc_world::knowledge::{Hop, Subject, Witness};
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_store::chat::Content;
 use lc_world::signal::{Beam, Transmitter};
@@ -179,6 +180,7 @@ impl<J: Journal> Server<J> {
                     idem: *idem,
                     sealed,
                     under,
+                    claim: self.claim_of(id),
                     body: Some(report),
                     format: lc_proto::REPORT_FORMAT,
                 };
@@ -196,6 +198,39 @@ impl<J: Journal> Server<J> {
             // Unreachable: `act` sends only the orders above here.
             _ => Err(Refusal::Impossible),
         }
+    }
+
+    /// What `id` calls itself, for every transmission it makes to carry.
+    fn claim_of(&self, id: CraftId) -> Option<lc_proto::Claim> {
+        self.instruments.aboard.get(&id).and_then(|aboard| aboard.knowledge.own_claim())
+    }
+
+    /// A craft with no name for itself yet takes the one it was made with: the account's, for a
+    /// player's. Written once, as the craft's own first claim.
+    pub(crate) fn claim_if_unnamed(&mut self, id: CraftId) {
+        let Some(name) = self.fleet.get(id).and_then(|craft| craft.name.clone()) else { return };
+        let now_s = self.now_t as f64 * 1.0e-6;
+        let knowledge = &mut self.aboard(id).knowledge;
+        if knowledge.own_claim().is_none() {
+            knowledge.write(Subject::Craft(id.0), lc_proto::Writing::Name(name), lc_proto::Scope::Open, now_s);
+        }
+    }
+
+    /// File the claim a transmission carried, as its light lands. Heard whether or not it can
+    /// be read: a sealed message still says who sent it.
+    pub(crate) fn heard_claim(&mut self, event: &Event, observer: CraftId, arrive_t: i64) {
+        if observer.0 == event.source.0 {
+            return;
+        }
+        let claim = match event.kind {
+            lc_proto::kind::MESSAGE | lc_proto::kind::KEY => serde_json::from_str::<Spoken>(&event.payload).ok().and_then(|s| s.claim),
+            lc_proto::kind::REPORT => serde_json::from_str::<Reported>(&event.payload).ok().and_then(|r| r.claim),
+            _ => None,
+        };
+        let Some(claim) = claim else { return };
+        let sender = Witness(event.source.0 as u64);
+        let hop = Hop { from: sender, to: Witness(observer.0 as u64), sent_s: event.t as f64 * 1.0e-6, received_s: arrive_t as f64 * 1.0e-6 };
+        self.aboard(observer).knowledge.heard_claim(sender, &claim, vec![hop]);
     }
 
     /// Whether a transmission is sealed to its addressee, and the faction key it is under.
@@ -245,6 +280,7 @@ impl<J: Journal> Server<J> {
             idem,
             sealed,
             under,
+            claim: self.claim_of(id),
             body: heard_as(&content, true, &self.factions),
             acks: acks.clone(),
         };
@@ -605,11 +641,13 @@ impl<J: Journal> Server<J> {
     /// both paths call one function rather than each deciding for itself.
     pub(crate) async fn backlog(&self, ship: ShipId, now: i64) -> Result<Option<Outbound>, JournalError> {
         let transcript = self.journal.transcript(ship).await?;
+        // What this ship calls each craft, never the account's name: a craft is called what it
+        // says it is, or what its observer calls it.
+        let knowledge = self.instruments.aboard.get(&CraftId(ship.0)).map(|a| &a.knowledge);
         let name_of = |id: i64| {
-            self.fleet
-                .get(CraftId(id))
-                .map(|craft| craft.designation())
-                .unwrap_or_else(|| format!("ship {id}"))
+            knowledge
+                .and_then(|k| k.name_of(Subject::Craft(id)))
+                .unwrap_or_else(|| format!("ship {}", ShipId(id).tag()))
         };
         let mut messages: Vec<Said> = Vec::new();
         for m in transcript.sent {
@@ -1474,4 +1512,35 @@ mod tests {
             "the answer in flight was lost with the process",
         );
     }
+
+    /// A craft is called what it says it is: every transmission carries its claim, sealed or
+    /// not, and a rename travels with the next one. Naming itself is public or nothing.
+    #[tokio::test]
+    async fn every_transmission_says_what_its_sender_calls_itself() {
+        use lc_proto::{Scope, Writing};
+        let (mut server, mut wire) = two_far_apart();
+        let me = lc_proto::Subject::Craft(1);
+        let call = |name: &str, scope| Order::Write { subject: me, writing: Writing::Name(name.into()), scope };
+        tell(&mut wire, ClientId(1), 1, call("Ada", Scope::Own), 0);
+        server.tick(&mut wire).await.unwrap();
+        assert!(wire.take(ClientId(1)).iter().any(|m| matches!(m, Outbound::Refused { reason: Refusal::Impossible, .. })));
+
+        tell(&mut wire, ClientId(1), 1, call("Ada", Scope::Open), server.now_t());
+        server.tick(&mut wire).await.unwrap();
+        tell(&mut wire, ClientId(1), 1, say(2, Aim::Omni, Secrecy::Open, "hello"), server.now_t());
+        let until = server.now_t() + TWO_LIGHT_HOURS as i64 + TICK_US;
+        run_until(&mut server, &mut wire, until).await;
+        let called = |server: &mut Server<Memory>| server.aboard(CraftId(2)).knowledge.name_of(lc_world::knowledge::Subject::Craft(1));
+        assert_eq!(called(&mut server).as_deref(), Some("Ada"));
+
+        tell(&mut wire, ClientId(1), 1, call("Vela", Scope::Open), server.now_t());
+        server.tick(&mut wire).await.unwrap();
+        tell(&mut wire, ClientId(1), 1, Order::OfferKey { to: Some(ShipId(2)), aim: Aim::Omni }, server.now_t());
+        let until = server.now_t() + TWO_LIGHT_HOURS as i64 + TICK_US;
+        run_until(&mut server, &mut wire, until).await;
+        assert_eq!(called(&mut server).as_deref(), Some("Vela"), "renamed with the next transmission, whatever it was");
+        let renames = server.aboard(CraftId(2)).knowledge.file(lc_world::knowledge::Subject::Craft(1)).unwrap().thread().standing_names().len();
+        assert_eq!(renames, 1, "the rename superseded the claim it followed");
+    }
 }
+

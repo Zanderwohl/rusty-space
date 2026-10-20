@@ -588,7 +588,6 @@ mod tests {
     fn contact(id: i64, form: &Form) -> crate::uplink::Contact {
         let presence = lc_proto::Presence {
             ship_id: ShipId(id),
-            name: format!("ship {id}"),
             length_m: 500.0,
             at_ly: [0.0; 3],
             beta: [0.0; 3],

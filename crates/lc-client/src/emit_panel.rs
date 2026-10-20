@@ -1016,7 +1016,6 @@ mod tests {
         let at_m = C_M_S;
         let presence = lc_proto::Presence {
             ship_id: ShipId(2),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: [at_m / M_PER_LY, 0.0, 0.0],
             beta: [0.0; 3],
@@ -1237,7 +1236,6 @@ mod tests {
     fn presence(emitted_s: f64, at_ls: DVec3, beta: DVec3, drive_w: f64) -> lc_proto::Presence {
         lc_proto::Presence {
             ship_id: ShipId(2),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: (at_ls / lc_world::flight::JULIAN_YEAR_S).to_array(),
             beta: beta.to_array(),

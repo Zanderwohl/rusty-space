@@ -92,7 +92,8 @@ impl Contact {
         };
         Self {
             ship_id: presence.ship_id,
-            name: presence.name,
+            // Named by `Uplink::relabel`, from what this ship knows; never from the wire.
+            name: crate::craft_names::unnamed(presence.ship_id),
             length_m: presence.length_m,
             position_ly,
             beta,
@@ -155,7 +156,6 @@ mod tests {
         let observer_beta = DVec3::X * 0.5;
         Presence {
             ship_id: ShipId(2),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: (observer_ly + DVec3::Y * APART_M / M_PER_LY).to_array(),
             beta: (observer_beta + DVec3::Y * 1.0e-4).to_array(),

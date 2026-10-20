@@ -87,6 +87,7 @@ pub mod surface_nets;
 pub mod surfaces;
 pub mod starfield;
 pub mod system_panel;
+pub mod craft_names;
 pub mod telescope_panel;
 pub mod thread_view;
 pub mod tonemap;

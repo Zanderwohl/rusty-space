@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 39;
+pub const PROTOCOL_VERSION: u32 = 40;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -32,6 +32,20 @@ pub struct ClientId(pub u64);
 /// A thing with a worldline that the server owns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipId(pub i64);
+
+impl ShipId {
+    /// What a player is shown in place of the id: stable, the same for every observer so it can
+    /// be quoted, and saying nothing about how many ships the shard holds or which came first.
+    /// Four hex digits collide among a few hundred craft, which a tag beside a name can bear.
+    pub fn tag(self) -> String {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ 0x5eed_7a65;
+        for b in self.0.to_le_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        format!("{:04x}", (h ^ (h >> 32)) & 0xffff)
+    }
+}
 
 /// Where a client is asking to go.
 ///
@@ -504,8 +518,8 @@ pub struct Sighting {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Presence {
     pub ship_id: ShipId,
-    /// What to call it on screen.
-    pub name: String,
+    // No name: what a craft is called is what it says it is, in every transmission, or what the
+    // observer calls it. See `lightcone/docs/23-factions.md` §Craft that are not ours.
     /// How long the hull is, meters. On the wire rather than derived from a kind, so craft
     /// varying in size costs no protocol version.
     pub length_m: f64,
@@ -1009,7 +1023,7 @@ pub use knowing::{
 };
 
 pub use radio::{
-    ACK_DEPTH, Aim, Body, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    ACK_DEPTH, Aim, Body, Claim, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
     decode_report, encode_report,
 };
 
@@ -1123,7 +1137,6 @@ mod tests {
             Cleared::<Presence>::clear(
                 Presence {
                     ship_id: ShipId(42),
-                    name: "Ada".into(),
                     length_m: 500.0,
                     at_ly: [4.2, 0.0, 0.0],
                     beta: [0.0, 0.001, 0.0],
@@ -1943,7 +1956,6 @@ mod tests {
         let now = 1_000_000;
         let at = |arrive_t: i64| Presence {
             ship_id: ShipId(7),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: [1.0, 0.0, 0.0],
             beta: [0.0; 3],

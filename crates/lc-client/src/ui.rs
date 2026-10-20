@@ -350,6 +350,8 @@ pub enum Channel {
     Faction(lc_proto::FactionId),
     /// Naming a new faction.
     Founding,
+    /// What this ship calls itself.
+    Myself,
 }
 
 #[derive(Clone, Debug, PartialEq)]

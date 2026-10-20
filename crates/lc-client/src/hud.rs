@@ -444,7 +444,7 @@ pub fn pursuit(
     };
     let how = format!("{near_or_far}, {manner}");
     let Some(quarry) = quarry else {
-        return format!("{doing} ship {} — {how}", pursuit.quarry.0);
+        return format!("{doing} {} — {how}", crate::craft_names::unnamed(pursuit.quarry));
     };
     let centers_m =
         session.ship.motion.position_ly.distance(quarry.position_ly) * crate::system::M_PER_LY;
@@ -692,10 +692,9 @@ mod tests {
         let (_, mut s) = fixture();
         s.ship.length_m = 500.0;
         let at_ly = s.ship.motion.position_ly + glam::DVec3::X * 3_750.0 / crate::system::M_PER_LY;
-        let quarry = crate::uplink::Contact::seen(
+        let mut quarry = crate::uplink::Contact::seen(
             lc_proto::Presence {
                 ship_id: lc_proto::ShipId(7),
-                name: "Anvil".into(),
                 length_m: 5_000.0,
                 at_ly: at_ly.to_array(),
                 beta: [0.0; 3],
@@ -716,6 +715,7 @@ mod tests {
             },
             None,
         );
+        quarry.name = "Anvil".into();
         let close = lc_proto::Pursuit {
             quarry: quarry.ship_id,
             closeness: lc_proto::Closeness::Intimate,
@@ -725,14 +725,15 @@ mod tests {
             pursuit(&s, close, Some(&quarry)),
             "alongside Anvil — 1.0 km between hulls — close in, direct",
         );
-        assert_eq!(pursuit(&s, close, None), "alongside ship 7 — close in, direct");
+        let unnamed = crate::craft_names::unnamed(lc_proto::ShipId(7));
+        assert_eq!(pursuit(&s, close, None), format!("alongside {unnamed} — close in, direct"));
 
         let polite = lc_proto::Pursuit {
             closeness: lc_proto::Closeness::Company,
             approach: lc_proto::Approach::Courteous,
             ..close
         };
-        assert_eq!(pursuit(&s, polite, None), "alongside ship 7 — in company, courteous");
+        assert_eq!(pursuit(&s, polite, None), format!("alongside {unnamed} — in company, courteous"));
     }
 
     #[test]

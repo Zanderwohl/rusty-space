@@ -14,8 +14,8 @@ in `lc_client::{chat, radio_panel}`. Notes and chosen names are built as threads
 `lc_world::knowledge::thread`, `Order::Write`, and `lc_client::thread_view` in the telescope and
 system panels. Not built: assets and their minimum generation, which wait for assets; out-of-game
 invitations; relays, bundles and transmission cost, with no `transmit_gain` (11f); the subject card
-opened from the map and the sky, report transcript lines, and self-claimed craft names, `Presence`
-still carrying the account's name (11g).
+opened from the map and the sky, and report transcript lines (11g). Craft names are claims every
+transmission carries (`lc_proto::Claim`, `lc_client::craft_names`).
 
 The rule that shapes all of it:
 
@@ -375,19 +375,38 @@ overridable like any other.
 
 ### Craft that are not ours
 
-A craft's name is information too. Today a contact arrives carrying its account's display name,
-straight from the server — the one place a name reaches a player without anybody having said it.
+A craft's name is information too, and nothing reaches a player as a name unless somebody said it.
+`Presence` carries none.
 
-Instead, **every transmission carries the name its sender calls itself**, and a receiver that
-has no name of its own for that craft takes the claim. It is a `Naming` with the craft as its own
-witness: overridden by any name this ship or its faction chose, and kept on file when it is.
-A craft seen but never heard is a designation — its discovery time — until it transmits in range.
+**Every transmission carries the name its sender calls itself** — its own newest name entry about
+itself, with what a receiver needs to file the identical entry. A receiver files it as the light
+lands, sealed message or not: who sent a signal is never hidden, only what it says. A craft starts
+by claiming the name it was made with, the account's for a player's, and renames itself with a
+name entry about itself, which is public or nothing.
+
+**Who sent something is not a claim.** The shard attributes every transmission to the craft that
+made it, so a craft's words, chats and thread entries hang off that craft and not off its name. A
+name is the one thing that can be borrowed, and the screen guards it:
+
+| a craft's name stands on | |
+|---|---|
+| this ship's word | anything this ship named it |
+| a faction's | a name under a faction key this ship holds, which is vouching for it |
+| anybody else's | a name some other craft gave it, in the open |
+| its own | what it claims |
+
+Stronger beats weaker, newer beats older within one. A craft whose name stands only on its own
+word, when another craft already goes by that name on a better one or claimed it first, is shown
+as **Wren (claimant 3fa1)**, and the parenthesis leads to the conversation with the Wren this ship
+knows. When a craft claims a new name the log says so where its message lands: "Wren changed name
+to Vela."
+
+**A craft is never shown by its shard id.** Unnamed, it is `ship 3fa1`: a tag hashed from the id,
+the same for every observer so it can be quoted, and saying nothing about how many ships there are
+or which came first.
 
 One language today, so a claimed name is always legible. When dictionaries arrive, a claim in a
 language the receiver cannot read is exactly the case they filter.
-
-`Presence` stops carrying names, and the chat log reads the sender's name from the message
-rather than from the server's account table. That is a protocol change, and it belongs to 11g.
 
 ### Later: dictionaries
 

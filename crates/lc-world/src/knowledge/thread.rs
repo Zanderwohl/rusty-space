@@ -41,6 +41,26 @@ impl Entry {
     }
 }
 
+impl Entry {
+    /// What a craft says it is called, as a transmission carries it. `None` for a note.
+    pub fn claim(&self) -> Option<lc_proto::Claim> {
+        let Writing::Name(name) = &self.writing else { return None };
+        Some(lc_proto::Claim { name: name.clone(), written_s: self.written_s, parents: self.parents.iter().map(|p| p.0).collect() })
+    }
+
+    /// The entry a claim heard from `sender` is: the sender's own, so every receiver files the
+    /// same one.
+    pub fn claimed(sender: Witness, claim: &lc_proto::Claim) -> Self {
+        Self {
+            author: sender,
+            written_s: claim.written_s,
+            parents: claim.parents.iter().copied().map(EntryId).collect(),
+            scope: Scope::Open,
+            writing: Writing::Name(claim.name.clone()),
+        }
+    }
+}
+
 /// An entry as one craft holds it, with how it got there.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Held {
@@ -149,21 +169,25 @@ impl Thread {
         out
     }
 
-    /// The name that stands: of the names no later name supersedes, `owner`'s own, else the most
-    /// recently written.
+    /// The name that stands, and on whose word. See [`Thread::standing`].
     pub fn name(&self, owner: Witness) -> Option<&str> {
-        self.standing_names()
-            .into_iter()
-            .max_by(|a, b| {
-                (a.1.entry.author == owner)
-                    .cmp(&(b.1.entry.author == owner))
-                    .then(a.1.entry.written_s.total_cmp(&b.1.entry.written_s))
-                    .then(a.0.cmp(&b.0))
-            })
-            .and_then(|(_, held)| match &held.entry.writing {
-                Writing::Name(name) => Some(name.as_str()),
-                Writing::Note(_) => None,
-            })
+        self.standing(owner).and_then(|(_, held)| match &held.entry.writing {
+            Writing::Name(name) => Some(name.as_str()),
+            Writing::Note(_) => None,
+        })
+    }
+
+    /// Of the names no later name supersedes: `owner`'s own, else one a faction vouched for, else
+    /// anybody's; the most recently written within each. A faction-scoped entry is held only by
+    /// way of a key held, so holding one is the vouching.
+    pub fn standing(&self, owner: Witness) -> Option<(EntryId, &Held)> {
+        let rank = |held: &Held| (held.entry.author == owner, matches!(held.entry.scope, Scope::Faction(_)));
+        self.standing_names().into_iter().max_by(|a, b| {
+            rank(a.1)
+                .cmp(&rank(b.1))
+                .then(a.1.entry.written_s.total_cmp(&b.1.entry.written_s))
+                .then(a.0.cmp(&b.0))
+        })
     }
 
     /// Names no later name supersedes. More than one is a disagreement nobody has settled.
@@ -257,6 +281,18 @@ mod tests {
         assert_eq!(thread.standing_names().len(), 2, "two names, neither aware of the other");
         assert_eq!(thread.name(Witness(2)), Some("Hearth"), "a craft's own stands for it");
         assert_eq!(thread.name(Witness(9)), Some("Spout"), "otherwise the latest written");
+    }
+
+    #[test]
+    fn a_name_a_faction_gave_beats_a_newer_one_from_anybody() {
+        let mut thread = Thread::default();
+        let mut vouched = entry(2, 1.0, &[], Writing::Name("Wren".into()));
+        vouched.entry.scope = Scope::Faction(FactionId(5));
+        thread.add(vouched);
+        thread.add(entry(3, 9.0, &[], Writing::Name("Not Wren".into())));
+        assert_eq!(thread.name(Witness(1)), Some("Wren"));
+        thread.add(entry(1, 0.5, &[], Writing::Name("My Wren".into())));
+        assert_eq!(thread.name(Witness(1)), Some("My Wren"), "and one's own beats both");
     }
 
     #[test]

@@ -118,9 +118,23 @@ pub struct Uplink {
     pub console: crate::console::Console,
     pub incoming: crate::field::Incoming,
     pub beams: crate::emit_panel::Beams,
+    /// What each named craft is called here. See [`crate::craft_names`].
+    pub labels: std::collections::BTreeMap<ShipId, crate::craft_names::Label>,
 }
 
 impl Uplink {
+    /// Work out every craft's name again, and put it where contacts and conversations show it.
+    pub fn relabel(&mut self, knowledge: &lc_world::knowledge::Knowledge) {
+        let ships = self.contacts.iter().map(|c| c.ship_id).chain(self.chat.conversations().into_iter().map(|(id, _)| id)).collect::<Vec<_>>();
+        self.labels = crate::craft_names::labels(knowledge, ships);
+        for contact in &mut self.contacts {
+            contact.name = self.labels.get(&contact.ship_id).map_or_else(|| crate::craft_names::unnamed(contact.ship_id), |l| l.text(contact.ship_id));
+        }
+        for (id, label) in &self.labels {
+            self.chat.rename(*id, &label.text(*id));
+        }
+    }
+
     // The link's lock is only ever held within one call, so a poisoned one means a panic
     // elsewhere already; the link it guards is still the link, and is taken as it is.
 
@@ -159,24 +173,23 @@ impl Uplink {
     /// One answer for the two places that show it, the map's mark and the radio window's own
     /// lines.
     pub fn own_name(&self) -> String {
-        self.joined()
-            .map(|joined| joined.name.clone())
+        let me = self.joined().map(|joined| joined.ship_id);
+        me.and_then(|me| self.labels.get(&me).filter(|l| l.word == crate::craft_names::Word::Own).map(|l| l.name.clone()))
+            .or_else(|| self.joined().map(|joined| joined.name.clone()))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| ANONYMOUS.to_string())
     }
 
     /// What a craft is called, from whatever this client knows of it.
     ///
-    /// A contact's name first, because that is what the server last said; then the name a
-    /// conversation already holds, which outlives the contact going out of sight; then its
-    /// number, which is always true and never useful.
+    /// Its label first, from what this ship knows; then the name a conversation already holds;
+    /// then its tag, never its id.
     pub fn name_of(&self, who: ShipId) -> String {
-        self.contacts
-            .iter()
-            .find(|c| c.ship_id == who)
-            .map(|c| c.name.clone())
+        self.labels
+            .get(&who)
+            .map(|label| label.text(who))
             .or_else(|| self.chat.get(who).map(|c| c.name.clone()).filter(|n| !n.is_empty()))
-            .unwrap_or_else(|| format!("ship {}", who.0))
+            .unwrap_or_else(|| crate::craft_names::unnamed(who))
     }
 
     /// Note that an order has just gone out, so its answer can be timed.
@@ -324,6 +337,7 @@ fn fold(
         }
         Outbound::Presets(list) => game.0.presets = list,
     }
+    uplink.relabel(&game.0.knowledge);
 }
 
 pub struct UplinkPlugin;

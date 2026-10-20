@@ -220,7 +220,6 @@ pub fn contacts(
             });
             let presence = Presence {
                 ship_id: ShipId(craft.id.0),
-                name: craft.designation(),
                 length_m: sighted.length_m,
                 at_ly: sighted.position_ly.to_array(),
                 beta: sighted.beta.to_array(),

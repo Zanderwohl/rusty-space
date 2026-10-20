@@ -233,6 +233,7 @@ pub(crate) fn chat(
                 compose_faction(ui, game, uplink, key, star, aim_of(*aimed, None, star), draft, aimed, out);
             }
             Channel::Founding => founding(ui, draft, out),
+            Channel::Myself => myself(ui, uplink, draft, out),
             Channel::With(with) => {
                 let star = state.0.selected;
                 let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
@@ -270,6 +271,10 @@ fn public_log(
             return;
         }
         for loose in &lines {
+            if loose.line.notice {
+                notice(ui, &loose.line);
+                continue;
+            }
             ui.horizontal_wrapped(|ui| {
                 match loose.from.filter(|_| !loose.line.mine) {
                     // Somebody else's, so the name is the way to them. The name and not a
@@ -321,6 +326,10 @@ fn faction_log(
             return;
         }
         for loose in lines {
+            if loose.line.notice {
+                notice(ui, &loose.line);
+                continue;
+            }
             ui.horizontal_wrapped(|ui| {
                 match loose.from.filter(|_| !loose.line.mine) {
                     Some(from) => {
@@ -399,6 +408,9 @@ fn compose_faction(
                     let name = uplink.chat.faction(key).map(|f| f.name.clone()).unwrap_or_default();
                     ask(out, Action::Found { name, replaces: Some(key) });
                 }
+                if ui.button("rename this ship").clicked() {
+                    ask(out, Action::ChatWith(Channel::Myself));
+                }
             });
         });
     });
@@ -456,6 +468,33 @@ fn hamburger(ui: &mut egui::Ui) -> egui::Response {
     response
 }
 
+/// A line this client added to a log rather than one somebody said.
+fn notice(ui: &mut egui::Ui, line: &crate::chat::Line) {
+    if let Body::Text(text) = &line.body {
+        ui.label(egui::RichText::new(text).italics().weak()).on_hover_text(reception(line));
+    }
+}
+
+/// What this ship calls itself: a claim every transmission carries from now on.
+fn myself(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, draft: &mut String, out: &mut MessageWriter<Requested>) {
+    let Some(me) = uplink.joined().map(|joined| joined.ship_id) else {
+        ui.weak("no server");
+        return;
+    };
+    ui.label(format!("This ship is {}.", uplink.own_name()));
+    ui.horizontal(|ui| {
+        let field = ui.add(egui::TextEdit::singleline(draft).desired_width(LOG_WIDTH - 72.0).hint_text("name"));
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.button("rename").clicked() || entered) && !draft.trim().is_empty() {
+            ask(out, Action::Write {
+                subject: lc_world::knowledge::Subject::Craft(me.0),
+                writing: lc_proto::Writing::Name(std::mem::take(draft)),
+                scope: lc_proto::Scope::Open,
+            });
+        }
+    });
+}
+
 /// Naming a new faction. Founding puts nothing on the air; the key is held at once.
 fn founding(ui: &mut egui::Ui, draft: &mut String, out: &mut MessageWriter<Requested>) {
     ui.horizontal(|ui| {
@@ -483,6 +522,10 @@ fn overheard_log(
             return;
         }
         for loose in &lines {
+            if loose.line.notice {
+                notice(ui, &loose.line);
+                continue;
+            }
             // Two lines: who was talking to whom, and then what crossed. Not the conversation
             // template, because this is not a conversation — there is no "you" in it, nothing
             // here is addressed to this ship, and there is nothing to acknowledge. No reply
@@ -547,6 +590,19 @@ fn conversation(
     aim: lc_proto::Aim,
     out: &mut MessageWriter<Requested>,
 ) {
+    // A craft borrowing another's name says whose, and leads to the one it borrows from.
+    if let Some(original) = uplink.labels.get(&with).and_then(|l| l.claimant_of) {
+        let name = uplink.labels.get(&with).map(|l| l.name.clone()).unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(name).color(RADIO));
+            if clickable_name(ui, &format!("(claimant {})", with.tag()), egui::Color32::from_rgb(210, 165, 60))
+                .on_hover_text(format!("not the {} you know", uplink.name_of(original)))
+                .clicked()
+            {
+                ask(out, Action::ChatWith(Channel::With(original)));
+            }
+        });
+    }
     let conversation = uplink.chat.get(with);
     log_area(ui, "chat_log", BODY_HEIGHT - COMPOSER_HEIGHT, |ui| {
         let Some(conversation) = conversation else {
@@ -554,6 +610,10 @@ fn conversation(
             return;
         };
         for line in &conversation.lines {
+            if line.notice {
+                notice(ui, line);
+                continue;
+            }
             ui.horizontal_wrapped(|ui| {
                 let said_by = match line.mine {
                     true => own,
@@ -804,6 +864,9 @@ fn compose(
                 faction_keys(ui, uplink, with, aim, secrecy, *seal, out);
                 if ui.button("send survey").clicked() {
                     ask(out, Action::SendReport { to: with, aim, secrecy });
+                }
+                if ui.button("rename this ship").clicked() {
+                    ask(out, Action::ChatWith(Channel::Myself));
                 }
             });
         });

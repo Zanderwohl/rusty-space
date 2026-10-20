@@ -7,6 +7,32 @@ use lc_proto::{Body, Outbound, ShipId, Sighting};
 
 use super::{Contact, Uplink};
 
+/// File what a transmission's sender says it is called, as the shard files it, and say so in the
+/// log when that changed: a new name is news, and a craft taking a name it had not used before
+/// is worth noticing.
+fn heard_claim(
+    uplink: &mut Uplink,
+    game: &mut crate::app::Game,
+    sighting: &Sighting,
+    claim: &lc_proto::Claim,
+    to: Option<i64>,
+    under: Option<lc_proto::FactionId>,
+) {
+    use lc_world::knowledge::{Hop, Witness};
+    let from = ShipId(sighting.source_id);
+    let sender = Witness(from.0 as u64);
+    let before = crate::craft_names::claimed(&game.0.knowledge, from);
+    let called = uplink.name_of(from);
+    let (sent_s, arrive_s) = (sighting.emitted_t as f64 * 1e-6, sighting.arrive_t as f64 * 1e-6);
+    let hop = Hop { from: sender, to: game.0.knowledge.owner, sent_s, received_s: arrive_s };
+    game.0.knowledge.heard_claim(sender, claim, vec![hop]);
+    let after = crate::craft_names::claimed(&game.0.knowledge, from);
+    uplink.relabel(&game.0.knowledge);
+    if let Some(after) = after.filter(|after| before.as_ref() != Some(after) && *after != called) {
+        uplink.chat.notice(from, to, under, format!("{called} changed name to {after}."), arrive_s);
+    }
+}
+
 /// Drive events remembered per craft. Only the latest before the instant drawn matters, and
 /// the instant drawn is never more than a tick or two behind the newest.
 const REMEMBERED_DRIVES: usize = 16;
@@ -51,6 +77,9 @@ pub(super) fn fold(
                     continue;
                 };
                 let from = ShipId(sighting.source_id);
+                if let Some(claim) = &spoken.claim {
+                    heard_claim(uplink, game, sighting, claim, spoken.to, spoken.under);
+                }
                 let name = uplink.contacts.iter().find(|c| c.ship_id == from).map(|c| c.name.clone());
                 // Said before it is folded, because what the box shows is what this craft can
                 // read — which for somebody else's sealed mail is the fact of it and no more.
@@ -108,6 +137,9 @@ pub(super) fn fold(
                     continue;
                 };
                 let from = ShipId(sighting.source_id);
+                if let Some(claim) = &reported.claim {
+                    heard_claim(uplink, game, sighting, claim, reported.to, reported.under);
+                }
                 let who = uplink.name_of(from);
                 let arrived_s = sighting.arrive_t as f64 * 1e-6;
                 let Some(body) = reported.body.as_deref() else {
@@ -175,7 +207,6 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         let presence = lc_proto::Presence {
             ship_id: ShipId(7),
-            name: "Vela".into(),
             length_m: 1_200.0,
             at_ly: [1.0, 2.0, 3.0],
             beta: [0.0, 0.1, 0.0],
@@ -198,7 +229,7 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, Outbound::Present(vec![cleared]));
 
         let [contact] = uplink.contacts.as_slice() else { panic!("{:?}", uplink.contacts) };
-        assert_eq!(contact.name, "Vela");
+        assert_eq!(contact.name, crate::craft_names::unnamed(contact.ship_id), "named by what it says, not the wire");
         assert_eq!(contact.length_m, 1_200.0);
         assert_eq!(contact.position_ly, glam::DVec3::new(1.0, 2.0, 3.0));
         // Normalized on the way in, so nothing downstream has to wonder.
@@ -244,7 +275,6 @@ mod tests {
             let emitted_s = 1_000.0 + statement as f64 * tick_s;
             let presence = lc_proto::Presence {
                 ship_id: ShipId(2),
-                name: "Vela".into(),
                 length_m: 500.0,
                 at_ly: station.place_at(&system, emitted_s).unwrap().to_array(),
                 beta: lc_world::coast::beta_of(station.velocity_at(&system, emitted_s).unwrap())
@@ -294,6 +324,7 @@ mod tests {
             idem: 3,
             sealed: false,
             under: None,
+            claim: None,
             body: Some(lc_proto::encode_report(&report)),
             format: lc_proto::REPORT_FORMAT,
         };
@@ -333,6 +364,7 @@ mod tests {
             idem: 4,
             sealed: true,
             under: None,
+            claim: None,
             body: None,
             format: lc_proto::REPORT_FORMAT,
         };
@@ -375,6 +407,7 @@ mod tests {
             idem: 11,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Text("are you there".into()),
             acks: Vec::new(),
         };
@@ -414,6 +447,7 @@ mod tests {
             idem: 14,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Ack,
             acks: vec![4242],
         };
@@ -438,6 +472,7 @@ mod tests {
                 idem: 12,
                 sealed: true,
                 under: None,
+                claim: None,
                 body: Body::Unreadable,
                 acks: Vec::new(),
             };
@@ -466,6 +501,7 @@ mod tests {
             idem: 21,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Text("rendezvous at the third moon".into()),
             acks: Vec::new(),
         };
@@ -491,6 +527,7 @@ mod tests {
             idem: 0,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Key,
             acks: Vec::new(),
         };
@@ -509,7 +546,6 @@ mod tests {
         let burning = 4.0e17;
         let presence = lc_proto::Presence {
             ship_id: ShipId(2),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: [0.0; 3],
             beta: [0.0; 3],
@@ -595,7 +631,6 @@ mod tests {
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let presence = lc_proto::Presence {
             ship_id: ShipId(2),
-            name: "Vela".into(),
             length_m: 500.0,
             at_ly: [0.0; 3],
             beta: [0.0; 3],
@@ -668,4 +703,43 @@ mod tests {
             "it kept the oldest instead of the newest",
         );
     }
+
+    /// A craft is called what it says it is; a new name is logged where its message lands; and
+    /// a second craft taking a name already in use is shown as the claimant it is.
+    #[test]
+    fn a_claim_names_a_craft_a_rename_is_logged_and_a_borrowed_name_is_a_claimant() {
+        use lc_proto::Claim;
+        use lc_world::knowledge::{Witness, thread::Entry};
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let me = uplink.joined().unwrap().ship_id.0;
+        let said = |claim: Claim| lc_proto::Spoken {
+            to: Some(me),
+            beamed: false,
+            idem: 0,
+            sealed: false,
+            under: None,
+            claim: Some(claim),
+            body: Body::Text("hello".into()),
+            acks: Vec::new(),
+        };
+        let wren = Claim { name: "Wren".into(), written_s: 1.0, parents: vec![] };
+        fold(&mut uplink, &mut game, &mut ui, heard(10, 2, said(wren.clone()), lc_proto::kind::MESSAGE));
+        assert_eq!(uplink.name_of(ShipId(2)), "Wren");
+
+        let vela = Claim { name: "Vela".into(), written_s: 2.0, parents: vec![Entry::claimed(Witness(2), &wren).id().0] };
+        fold(&mut uplink, &mut game, &mut ui, heard(11, 2, said(vela), lc_proto::kind::MESSAGE));
+        assert_eq!(uplink.name_of(ShipId(2)), "Vela");
+        let notices: Vec<String> = uplink.chat.get(ShipId(2)).unwrap().lines.iter().filter(|l| l.notice).map(|l| match &l.body {
+            Body::Text(text) => text.clone(),
+            other => format!("{other:?}"),
+        }).collect();
+        assert_eq!(notices.last().map(String::as_str), Some("Wren changed name to Vela."), "{notices:?}");
+
+        let impostor = Claim { name: "Vela".into(), written_s: 3.0, parents: vec![] };
+        fold(&mut uplink, &mut game, &mut ui, heard(12, 3, said(impostor), lc_proto::kind::MESSAGE));
+        assert_eq!(uplink.labels[&ShipId(3)].claimant_of, Some(ShipId(2)));
+        assert_eq!(uplink.name_of(ShipId(3)), format!("Vela (claimant {})", ShipId(3).tag()));
+    }
 }
+

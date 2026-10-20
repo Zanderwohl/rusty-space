@@ -42,6 +42,8 @@ pub struct Line {
     /// floor. `None` for one this ship sent — it never heard it — and for one recorded before
     /// the store kept the reading.
     pub strength: Option<f32>,
+    /// Said by this client about the log, not by anybody on the air: a craft changing its name.
+    pub notice: bool,
 }
 
 impl Line {
@@ -360,6 +362,43 @@ impl Chat {
         self.conversations.is_empty()
     }
 
+    /// What a craft is called now, wherever this log already names it.
+    pub fn rename(&mut self, with: ShipId, name: &str) {
+        if let Some(conversation) = self.conversations.get_mut(&with.0) {
+            conversation.name = name.to_string();
+        }
+        let lists = std::iter::once(&mut self.loose).chain(self.factions.values_mut().map(|f| &mut f.lines));
+        for list in lists {
+            for loose in list.iter_mut().filter(|l| l.from == Some(with)) {
+                loose.from_name = name.to_string();
+            }
+        }
+    }
+
+    /// A line this client adds about a craft, filed where a transmission from it to `to`, under
+    /// `under`, would be.
+    pub fn notice(&mut self, from: ShipId, to: Option<i64>, under: Option<FactionId>, text: String, at_s: f64) {
+        let line = Line {
+            event_ids: Vec::new(),
+            idem: 0,
+            mine: false,
+            sealed: false,
+            body: Body::Text(text),
+            acks: Vec::new(),
+            sent_s: at_s,
+            arrive_s: Some(at_s),
+            strength: None,
+            notice: true,
+        };
+        if under.is_none() && self.filing(to) == Filing::Conversation {
+            push_kept(&mut self.conversations.entry(from.0).or_default().lines, line);
+            return;
+        }
+        let held = under.is_some_and(|key| self.factions.contains_key(&key));
+        let lines = self.list_for(under, held);
+        push_kept(lines, Loose { from: Some(from), from_name: String::new(), to: to.map(ShipId), under, line });
+    }
+
     /// Start a conversation with a craft nothing has been said to yet, so the window has
     /// somewhere to put the first message.
     pub fn open(&mut self, with: ShipId, name: &str) {
@@ -471,7 +510,7 @@ impl Chat {
         if let Some(name) = name {
             conversation.name = name.to_string();
         } else if conversation.name.is_empty() {
-            conversation.name = format!("ship {}", from.0);
+            conversation.name = crate::craft_names::unnamed(from);
         }
         // **What it acknowledges is kept whatever becomes of the message itself.** Absorbed
         // first, because the usual carrier of an acknowledgment is a `Body::Ack`, which is
@@ -500,6 +539,7 @@ impl Chat {
             sent_s,
             arrive_s: Some(arrive_s),
             strength: Some(strength),
+            notice: false,
         });
     }
 
@@ -522,7 +562,7 @@ impl Chat {
             .or_else(|| {
                 self.conversations.get(&from.0).map(|c| c.name.clone()).filter(|n| !n.is_empty())
             })
-            .unwrap_or_else(|| format!("ship {}", from.0));
+            .unwrap_or_else(|| crate::craft_names::unnamed(from));
         let lines = self.list_for(spoken.under, spoken.body != Body::Unreadable);
         if lines.iter().any(|l| l.line.event_ids.contains(&event_id)) {
             return;
@@ -552,6 +592,7 @@ impl Chat {
                 sent_s,
                 arrive_s: Some(arrive_s),
                 strength: Some(strength),
+                notice: false,
             },
         });
     }
@@ -580,7 +621,7 @@ impl Chat {
                 let conversation = self.conversations.entry(to.0).or_default();
                 if conversation.name.is_empty() {
                     conversation.name =
-                        name.map(str::to_string).unwrap_or_else(|| format!("ship {}", to.0));
+                        name.map(str::to_string).unwrap_or_else(|| crate::craft_names::unnamed(to));
                 }
                 &mut conversation.lines
             }
@@ -604,6 +645,7 @@ impl Chat {
                         sent_s,
                         arrive_s: None,
                         strength: None,
+                        notice: false,
                     },
                 });
                 return;
@@ -631,6 +673,7 @@ impl Chat {
             sent_s,
             arrive_s: None,
             strength: None,
+            notice: false,
         });
     }
 }
@@ -691,6 +734,7 @@ fn line_of(said: Said) -> Line {
         // per-receiver one, and the arrival time beside this is the same kind of fact. Without
         // it a reconnection, which is the normal case, lost the reading on everything.
         strength: said.strength,
+        notice: false,
     }
 }
 
@@ -720,15 +764,15 @@ mod tests {
     }
 
     fn spoken(to: i64, body: Body, sealed: bool, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem: 0, sealed, under: None, body, acks }
+        Spoken { to: Some(to), beamed: false, idem: 0, sealed, under: None, claim: None, body, acks }
     }
 
     fn broadcast(body: &str) -> Spoken {
-        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: None, body: text(body), acks: vec![] }
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: None, claim: None, body: text(body), acks: vec![] }
     }
 
     fn keyed(to: i64, body: &str, idem: u64, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem, sealed: false, under: None, body: text(body), acks }
+        Spoken { to: Some(to), beamed: false, idem, sealed: false, under: None, claim: None, body: text(body), acks }
     }
 
     /// A line by its position, for a test that wants to talk about one.
@@ -970,6 +1014,7 @@ mod tests {
             idem: 5,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Ack,
             acks: vec![100],
         };
@@ -999,6 +1044,7 @@ mod tests {
             idem: 3,
             sealed: true,
             under: None,
+            claim: None,
             body: Body::Unreadable,
             acks: vec![],
         };
@@ -1015,6 +1061,7 @@ mod tests {
             idem: 0,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Key,
             acks: vec![],
         };
@@ -1048,6 +1095,7 @@ mod tests {
             idem: 1,
             sealed: false,
             under: None,
+            claim: None,
             body: text("loud"),
             acks: vec![],
         };
@@ -1162,7 +1210,7 @@ mod tests {
     }
 
     fn under(key: i64, body: Body) -> Spoken {
-        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: Some(FactionId(key)), body, acks: vec![] }
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: Some(FactionId(key)), claim: None, body, acks: vec![] }
     }
 
     #[test]

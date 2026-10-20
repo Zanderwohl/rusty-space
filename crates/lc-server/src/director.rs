@@ -190,6 +190,7 @@ impl<J: Journal> Server<J> {
                 craft.fit(formed_fitting(formed, &self.balance, now_s));
             }
             self.fleet.insert(craft);
+            self.claim_if_unnamed(id);
         }
 
         director.pov = Some(pov);

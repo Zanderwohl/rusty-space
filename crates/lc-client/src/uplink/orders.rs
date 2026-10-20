@@ -301,6 +301,7 @@ mod tests {
             idem: 13,
             sealed: false,
             under: None,
+            claim: None,
             body: Body::Text("got it".into()),
             acks: vec![4242],
         };
