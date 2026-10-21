@@ -33,10 +33,14 @@ pub(super) fn fold(
                 uplink.parked = false;
             }
             let said = match &order {
-                Order::SendReport { to, .. } => Some(match to.map(|t| uplink.name_of(t)) {
-                    Some(who) => format!("report sent to {who}"),
-                    None => "report broadcast".to_string(),
-                }),
+                Order::SendReport { to, secrecy, .. } => {
+                    // What it carried is the shard's to know; the log says that it went.
+                    uplink.chat.notice_sent(*to, under(secrecy), "You sent a report.".into(), at_s, event_id);
+                    Some(match to.map(|t| uplink.name_of(t)) {
+                        Some(who) => format!("report sent to {who}"),
+                        None => "report broadcast".to_string(),
+                    })
+                }
                 Order::SetDuty { duty, integration_s } => {
                     game.0.adopt_duty(duty, *integration_s);
                     None

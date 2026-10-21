@@ -29,7 +29,14 @@ fn heard_claim(
     let after = crate::craft_names::claimed(&game.0.knowledge, from);
     uplink.relabel(&game.0.knowledge);
     if let Some(after) = after.filter(|after| before.as_ref() != Some(after) && *after != called) {
-        uplink.chat.notice(from, to, under, format!("{called} changed name to {after}."), arrive_s);
+        uplink.chat.notice(from, to, under, format!("{called} changed name to {after}."), arrive_s, None);
+    }
+}
+
+fn stars_word(n: usize) -> &'static str {
+    match n {
+        1 => "star",
+        _ => "stars",
     }
 }
 
@@ -142,13 +149,25 @@ pub(super) fn fold(
                 }
                 let who = uplink.name_of(from);
                 let arrived_s = sighting.arrive_t as f64 * 1e-6;
+                // A line in the log where the report is filed, as a message would be: the
+                // conversation with its sender, a faction's chat, Public, or Overheard.
+                let to_me = reported.to.is_some() && uplink.chat.filing(reported.to) == crate::chat::Filing::Conversation;
+                let mut log = |text: String| {
+                    uplink.chat.notice(from, reported.to, reported.under, text, arrived_s, Some(sighting.event_id));
+                };
                 let Some(body) = reported.body.as_deref() else {
+                    log(format!("{who} sent a sealed report."));
                     ui.0.heard(from, format!("{who} sent a sealed report"), arrived_s);
                     continue;
                 };
                 // Only counted here. The shard folds it into this craft's knowledge when its light
                 // lands, signed in or not, and what it taught arrives in the next `Learned`.
                 let stars = lc_proto::decode_report::<lc_world::knowledge::Report>(body).map(|r| r.stars());
+                match (&stars, to_me) {
+                    (Ok(n), true) => log(format!("{who} told you about {n} {}.", stars_word(*n))),
+                    (Ok(n), false) => log(format!("{who} reported on {n} {}.", stars_word(*n))),
+                    (Err(_), _) => log(format!("{who} sent a report that made no sense.")),
+                }
                 let notice = match stars {
                     Ok(n) => format!("{who}: told you about {n} stars"),
                     Err(_) => format!("{who} sent a report that made no sense"),
@@ -318,8 +337,9 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let report = lc_world::knowledge::Report { from: lc_world::knowledge::Witness(7), sent_s: 1.0, entries: Vec::new() };
+        let me = uplink.joined().unwrap().ship_id.0;
         let reported = lc_proto::Reported {
-            to: Some(0),
+            to: Some(me),
             beamed: false,
             idem: 3,
             sealed: false,
@@ -338,12 +358,18 @@ mod tests {
             kind: lc_proto::kind::REPORT,
             payload: serde_json::to_string(&reported).unwrap(),
         };
-        fold(
-            &mut uplink,
-            &mut game,
-            &mut ui,
-            Outbound::Sightings(vec![lc_proto::Cleared::<Sighting>::clear(sighting, 4_000_000, 0.0).unwrap()]),
-        );
+        // Twice, as a reconnection replays it: one line in the log, not two.
+        for _ in 0..2 {
+            fold(
+                &mut uplink,
+                &mut game,
+                &mut ui,
+                Outbound::Sightings(vec![lc_proto::Cleared::<Sighting>::clear(sighting.clone(), 4_000_000, 0.0).unwrap()]),
+            );
+        }
+        let logged: Vec<String> = uplink.chat.get(ShipId(7)).unwrap().lines.iter().filter(|l| l.notice).map(|l| format!("{:?}", l.body)).collect();
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert!(logged[0].contains("told you about 0 stars."), "{logged:?}");
         assert!(
             ui.0.notifications.iter().any(|n| n.text.contains("told you about 0 stars")),
             "{:?}",
@@ -392,6 +418,11 @@ mod tests {
                 .iter()
                 .any(|n| n.text.contains("sealed report")),
             "but that it happened is not a secret",
+        );
+        let overheard = uplink.chat.overheard();
+        assert!(
+            overheard.iter().any(|l| l.line.notice && matches!(&l.line.body, Body::Text(t) if t.ends_with("sent a sealed report."))),
+            "and the log says so, among other craft's traffic",
         );
     }
 

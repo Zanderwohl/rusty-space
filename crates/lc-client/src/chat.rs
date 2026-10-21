@@ -376,10 +376,13 @@ impl Chat {
     }
 
     /// A line this client adds about a craft, filed where a transmission from it to `to`, under
-    /// `under`, would be.
-    pub fn notice(&mut self, from: ShipId, to: Option<i64>, under: Option<FactionId>, text: String, at_s: f64) {
+    /// `under`, would be. With `event`, once per event however often it is replayed.
+    pub fn notice(&mut self, from: ShipId, to: Option<i64>, under: Option<FactionId>, text: String, at_s: f64, event: Option<i64>) {
+        if event.is_some_and(|id| self.noticed(id)) {
+            return;
+        }
         let line = Line {
-            event_ids: Vec::new(),
+            event_ids: event.into_iter().collect(),
             idem: 0,
             mine: false,
             sealed: false,
@@ -397,6 +400,40 @@ impl Chat {
         let held = under.is_some_and(|key| self.factions.contains_key(&key));
         let lines = self.list_for(under, held);
         push_kept(lines, Loose { from: Some(from), from_name: String::new(), to: to.map(ShipId), under, line });
+    }
+
+    /// A line this client adds about something this ship sent, filed where what it sent would be.
+    pub fn notice_sent(&mut self, to: Option<ShipId>, under: Option<FactionId>, text: String, at_s: f64, event: i64) {
+        if self.noticed(event) {
+            return;
+        }
+        let line = Line {
+            event_ids: vec![event],
+            idem: 0,
+            mine: true,
+            sealed: false,
+            body: Body::Text(text),
+            acks: Vec::new(),
+            sent_s: at_s,
+            arrive_s: None,
+            strength: None,
+            notice: true,
+        };
+        match to {
+            Some(to) => push_kept(&mut self.conversations.entry(to.0).or_default().lines, line),
+            None => {
+                let lines = self.list_for(under, true);
+                push_kept(lines, Loose { from: None, from_name: String::new(), to: None, under, line });
+            }
+        }
+    }
+
+    /// Whether a notice about this event is already in some log.
+    fn noticed(&self, event: i64) -> bool {
+        let said = |line: &Line| line.notice && line.event_ids.contains(&event);
+        self.conversations.values().flat_map(|c| &c.lines).any(said)
+            || self.loose.iter().map(|l| &l.line).any(said)
+            || self.factions.values().flat_map(|f| &f.lines).map(|l| &l.line).any(said)
     }
 
     /// Start a conversation with a craft nothing has been said to yet, so the window has
