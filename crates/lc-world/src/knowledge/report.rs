@@ -36,6 +36,8 @@ pub struct Part {
     /// system, so an entry passed over by a report it could not go in is carried by the next
     /// one it can. See `lightcone/docs/23-factions.md` §Notes.
     pub entries: Vec<Held>,
+    /// Sightings of a craft, each with only the witnesses the seal admits.
+    pub whereabouts: Vec<super::whereabouts::Sighting>,
 }
 
 impl Part {
@@ -47,6 +49,7 @@ impl Part {
             && self.orbits.is_empty()
             && self.colors.is_empty()
             && self.entries.is_empty()
+            && self.whereabouts.is_empty()
     }
 
     fn learned_through(&self) -> f64 {
@@ -57,6 +60,7 @@ impl Part {
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
         let colors = self.colors.iter().map(Colors::learned_s);
         let entries = self.entries.iter().map(Held::learned_s);
+        let whereabouts = self.whereabouts.iter().flat_map(|s| s.witnesses.iter().map(|w| w.learned_s()));
         sightings
             .chain(claims)
             .chain(names)
@@ -64,6 +68,7 @@ impl Part {
             .chain(conclusions)
             .chain(colors)
             .chain(entries)
+            .chain(whereabouts)
             .fold(f64::NEG_INFINITY, f64::max)
     }
 }
@@ -305,6 +310,7 @@ impl File {
             conclusions: self.conclusions.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
             colors: self.colors.iter().filter(|c| fresh(c.learned_s())).cloned().collect(),
             entries: self.thread.sealed(seal).cloned().collect(),
+            whereabouts: self.whereabouts.sealed(seal, &fresh),
         };
         (!part.is_empty()).then_some(part)
     }
@@ -318,7 +324,15 @@ impl File {
         let conclusions = self.conclusions.iter().map(Conclusion::learned_s);
         let colors = self.colors.iter().map(Colors::learned_s);
         let entries = self.thread.learned_times();
-        sightings.chain(claims).chain(names).chain(orbits).chain(conclusions).chain(colors).chain(entries)
+        let whereabouts = self.whereabouts.learned_times();
+        sightings
+            .chain(claims)
+            .chain(names)
+            .chain(orbits)
+            .chain(conclusions)
+            .chain(colors)
+            .chain(entries)
+            .chain(whereabouts)
     }
 }
 
@@ -427,6 +441,15 @@ impl Knowledge {
             for held in &part.entries {
                 let lineage = heard(&held.lineage);
                 self.heard_entry(subject, Held { lineage, ..held.clone() });
+            }
+            if let Subject::Craft(craft) = subject {
+                for sighting in &part.whereabouts {
+                    let mut sighting = sighting.clone();
+                    for w in &mut sighting.witnesses {
+                        w.lineage = heard(&w.lineage);
+                    }
+                    self.spotted(craft, sighting);
+                }
             }
             for conclusion in &part.conclusions {
                 // A replica drops the samples its original consumed.

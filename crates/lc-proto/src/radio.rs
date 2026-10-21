@@ -177,7 +177,7 @@ pub struct Reported {
 }
 
 /// Bump it when `lc_world::knowledge::Report` changes shape, or how [`encode_report`] writes it.
-pub const REPORT_FORMAT: u32 = 12;
+pub const REPORT_FORMAT: u32 = 13;
 
 /// A report as [`Reported::body`] carries it: postcard, then base64 so it rides in the JSON a
 /// journaled payload must be.

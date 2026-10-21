@@ -44,6 +44,7 @@ pub mod thread;
 pub mod transit;
 mod tracked;
 pub mod turns;
+pub mod whereabouts;
 
 pub use astrometry::{Bearing, Distance};
 pub use body::{BodyBelief, SystemPlane};
@@ -179,6 +180,9 @@ pub struct File {
     retained: bool,
     /// Notes and chosen names. [`File::names`] holds only what rules assigned.
     thread: thread::Thread,
+    /// Where a craft has been. Empty for anything else.
+    #[serde(default)]
+    whereabouts: whereabouts::Whereabouts,
 }
 
 impl File {
@@ -200,6 +204,10 @@ impl File {
 
     pub fn thread(&self) -> &thread::Thread {
         &self.thread
+    }
+
+    pub fn whereabouts(&self) -> &whereabouts::Whereabouts {
+        &self.whereabouts
     }
 
     pub fn orbits(&self) -> &[Orbit] {
@@ -731,6 +739,22 @@ impl Knowledge {
     pub fn heard_claim(&mut self, sender: Witness, claim: &lc_proto::Claim, lineage: Lineage) {
         let entry = thread::Entry::claimed(sender, claim);
         self.heard_entry(Subject::Craft(sender.0 as i64), thread::Held { entry, lineage });
+    }
+
+    /// Hold a sighting of a craft, made here or heard.
+    pub fn spotted(&mut self, craft: i64, sighting: whereabouts::Sighting) {
+        let subject = Subject::Craft(craft);
+        if self.files.edit().entry(subject).or_default().whereabouts.add(sighting) {
+            self.refresh(subject);
+        }
+    }
+
+    /// Every craft ever placed, and where.
+    pub fn roster(&self) -> impl Iterator<Item = (i64, &whereabouts::Whereabouts)> + '_ {
+        self.crafts().filter_map(|id| {
+            let held = &self.files.get(&Subject::Craft(id))?.whereabouts;
+            (!held.is_empty()).then_some((id, held))
+        })
     }
 
     /// Hold a thread entry somebody else wrote.
@@ -1398,6 +1422,31 @@ mod tests {
     }
 
     #[test]
+    fn an_ally_learns_where_a_craft_was_with_the_witness_and_every_hop() {
+        use whereabouts::{Fix, Kind, Sighting as Spotted, Witnessed};
+        let key = lc_proto::FactionId(3);
+        let (osprey, wren, kite) = (Witness(1), Witness(2), Witness(3));
+        let mut seer = Knowledge::new(osprey);
+        let fix = Fix::Place { position_ly: DVec3::X, beta: DVec3::ZERO, sigma_ly: 1e-9 };
+        let witnessed = |scope| vec![Witnessed { witness: osprey, observed_s: 600.0, scope, lineage: Lineage::new() }];
+        seer.spotted(99, Spotted { kind: Kind::Seen, emitted_s: 5.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Open) });
+        seer.spotted(99, Spotted { kind: Kind::Stated, emitted_s: 500.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Faction(key)) });
+        let mut relay = Knowledge::new(wren);
+        relay.receive(&seer.report(Mark::default(), 700.0, thread::Seal::Faction(key)), 800.0);
+        let mut ally = Knowledge::new(kite);
+        ally.receive(&relay.report(Mark::default(), 900.0, thread::Seal::Faction(key)), 1000.0);
+        let (stay, last) = ally.file(Subject::Craft(99)).unwrap().whereabouts().last_known().unwrap();
+        assert_eq!(stay.system, Some(star_id(1)));
+        assert_eq!(last.kind, Kind::Stated);
+        let hops: Vec<_> = last.witnesses[0].lineage.iter().map(|h| (h.from, h.to)).collect();
+        assert_eq!((last.witnesses[0].witness, hops), (osprey, vec![(osprey, wren), (wren, kite)]));
+        let mut stranger = Knowledge::new(Witness(4));
+        stranger.receive(&relay.report(Mark::default(), 900.0, thread::Seal::Plain), 1000.0);
+        let heard: Vec<Kind> = stranger.roster().flat_map(|(_, w)| w.sightings().map(|s| s.kind)).collect();
+        assert_eq!(heard, vec![Kind::Seen], "the statement went only where it was said");
+    }
+
+    #[test]
     fn a_report_carries_a_system_as_one_entry() {
         let star = star_id(43);
         let mut probe = Knowledge::new(Witness(2));
@@ -1746,6 +1795,7 @@ mod tests {
                     conclusions: Vec::new(),
                     colors: Vec::new(),
                     entries: Vec::new(),
+                    whereabouts: Vec::new(),
                 }],
             }],
         };
