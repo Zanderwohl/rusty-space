@@ -318,4 +318,51 @@ mod tests {
         let stays = server.knowledge_of(ShipId(2)).unwrap().file(Subject::Craft(3)).unwrap().whereabouts().stays().len();
         assert_eq!(stays, 1);
     }
+
+    /// Whether Bry's beam, aimed at where Cy's report last put Ada, lands on Ada: Cy beside Ada
+    /// sees it, Bry two light-hours off never does. `moves` has Ada burn away once Cy has seen it.
+    async fn beamed_at_last_known(moves: bool) -> bool {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut wire = Loopback::new();
+        server.admit(ADA, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
+        server.admit(BRY, crate::world::still(ShipId(2), DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0)), 0.0);
+        server.admit(CY, crate::world::still(ShipId(3), DVec3::new(0.0, 1.0e6, 0.0)), 0.0);
+        run_for(&mut server, &mut wire, 2.0 * PASS_S * 1.0e6).await;
+        assert_eq!(sightings_of(&server, 3, 1, Kind::Seen).len(), 1, "Cy sees Ada");
+        let report = Order::SendReport { to: None, aim: Aim::Omni, secrecy: Secrecy::Open, idem: 1 };
+        tell(&server, &mut wire, CY, report);
+        if moves {
+            tell(&server, &mut wire, ADA, Order::Burn { beta: [0.0, 0.0, 0.01] });
+        }
+        run_for(&mut server, &mut wire, TWO_LIGHT_HOURS).await;
+
+        let bry = server.knowledge_of(ShipId(2)).unwrap();
+        assert!(bry.file(Subject::Craft(1)).unwrap().whereabouts().sightings().all(|s| s.kind != Kind::Seen || s.witnesses[0].witness != witness(CraftId(2))));
+        let (_, last) = bry.file(Subject::Craft(1)).unwrap().whereabouts().last_known().expect("Cy's report placed Ada");
+        assert_eq!(last.kind, Kind::Seen);
+        let hops: Vec<_> = last.witnesses[0].lineage.iter().map(|h| (h.from, h.to)).collect();
+        assert_eq!((last.witnesses[0].witness, hops), (witness(CraftId(3)), vec![(witness(CraftId(3)), witness(CraftId(2)))]));
+        let here = server.fleet.get(CraftId(2)).unwrap().position_at(server.now_t() as f64) / LIGHT_US_PER_LY;
+        let toward = last.aim_from(here, server.now_t() as f64 * 1.0e-6).unwrap();
+        let say = Order::Say { to: Some(ShipId(1)), aim: Aim::Bearing(toward.to_array()), secrecy: Secrecy::Open, body: "there?".into(), idem: 2 };
+        wire.take(ADA);
+        tell(&server, &mut wire, BRY, say);
+        run_for(&mut server, &mut wire, 1.5 * TWO_LIGHT_HOURS).await;
+        wire.take(ADA).iter().any(|m| match m {
+            Outbound::Sightings(list) => list.iter().any(|c| {
+                let s = c.get();
+                s.kind == lc_proto::kind::MESSAGE && s.source_id == 2
+            }),
+            _ => false,
+        })
+    }
+
+    /// 11h's done-when, its first two parts: a member who has never detected a craft learns where
+    /// it was from an ally's report, witness and hop, and a message beamed there lands if the
+    /// craft has stayed and misses if it has moved.
+    #[tokio::test]
+    async fn a_beam_at_a_place_learned_from_an_ally_lands_if_the_craft_stayed_and_misses_if_it_moved() {
+        assert!(beamed_at_last_known(false).await, "it stayed");
+        assert!(!beamed_at_last_known(true).await, "it moved");
+    }
 }

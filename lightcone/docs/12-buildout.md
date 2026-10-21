@@ -495,8 +495,13 @@ could have known of it.
 
 ### 11h — Where craft are
 
-**Status: not started.** A craft is seen whole by anything in its system's 1.6 ly shell and not at
-all beyond it, and nothing about where a craft was is kept.
+**Status: built.** Detection by light in `lc_server::chase::detects`; the records in
+`lc_world::knowledge::whereabouts`, filed by `lc_server::roster` for every craft, flown or not;
+`Order::ShareLocation` and the stated place on `Spoken` and `Reported`; share location and beam
+last known in `lc_client::radio_panel`, and the last known place on the card. Its done-when is
+`a_beam_at_a_place_learned_from_an_ally_lands_if_the_craft_stayed_and_misses_if_it_moved` and
+`a_location_shared_in_a_faction_chat_places_the_sender_for_every_holder_and_nobody_else`. Protocol
+42, report format 13.
 
 **Before:** 11e.
 

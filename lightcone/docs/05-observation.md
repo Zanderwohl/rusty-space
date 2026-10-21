@@ -15,8 +15,8 @@ detector families, self-emission, survey regimes) and `lc_world::knowledge` (see
 `ACK_DEPTH` acknowledgments, message keys, auto-ack and the beam flag — is `lc_world::signal`,
 `lc_proto::radio` and `lc_server::radio`. Not built: FFT and Lomb-Scargle, spectroscopy,
 interferometry, and the radiometer and sky-noise model, so every craft inside a beam hears it
-whatever the distance, at a fixed 10 GHz (`Transmitter::SHIP`); and seeing other craft by what
-reaches the observer (11h), which is still the 1.6 ly shell. The flicker knee is read from
+whatever the distance, at a fixed 10 GHz (`Transmitter::SHIP`). Seeing other craft is built (11h):
+`lc_server::chase::detects` against `lc_world::glow::detected`. The flicker knee is read from
 lagged autocovariance, not a fitted power spectrum.
 
 ## Photometry
@@ -251,12 +251,14 @@ resolving power `R`. Treat as photometry with a large constant factor.
 
 ## Seeing other craft
 
-**Not built: this is phase 11h.** Today a craft is seen whole — position, motion, hull — by
-anything sharing its system's 1.6 ly shell, and not at all beyond it (`lc_server::chase::in_sight`).
-That is far too generous inside the shell and says nothing about why anybody would build a bigger
-telescope.
+**Built (11h).** `lc_server::chase::sighting` solves the light cone and then asks
+`chase::detects`, which takes the quarry's reflected starlight and thermal glow
+(`lc_world::glow::light`) against the observer's sensor (`glow::detected`): signal-to-noise
+`DETECTION_SNR` 5 in `DETECTION_EXPOSURE_S` 60 s in any band. That anchor puts a Clear starting hull
+sunlit at 1 AU in sight to about 44 AU, and a Black one to about 4.5 AU. Heard sightings are filed
+by `lc_server::roster` from landings.
 
-Instead a craft is detected by **what reaches the observer from it**, against the same sensitivity
+A craft is detected by **what reaches the observer from it**, against the same sensitivity
 as everything else above:
 
 | what reaches you | from | gives |
@@ -564,10 +566,6 @@ without asking. Anything that changes rules — a detection that unlocks knowled
 position — is confirmed server-side from the same deterministic functions.
 
 ## Open
-
-- **The anchor for seeing craft**: one sentence fixing how far a starting ship sees a standard hull
-  lit by a Sun-like star, from which the reflected and thermal limits follow. Chosen when 11h
-  builds it.
 
 - Noise model beyond photon statistics: detector read noise, zodiacal background, and
   scintillation if any instrument is ever atmospheric. Photon noise alone makes large

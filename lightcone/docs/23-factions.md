@@ -15,7 +15,8 @@ in `lc_client::{chat, radio_panel}`. Naming and notes are built (11g): threads i
 telescope and system panels and the card (`lc_client::subject_panel`); craft names as claims every
 transmission carries (`lc_proto::Claim`, `lc_client::craft_names`); and report lines in the
 transcript. Not built: assets and their minimum generation, which wait for assets; out-of-game
-invitations; and relays, bundles and transmission cost, with no `transmit_gain` (11f).
+invitations; and relays, bundles and transmission cost, with no `transmit_gain` (11f). Sharing
+where you are is built (11h): `Order::ShareLocation`, kept by `lc_server::roster`.
 
 The rule that shapes all of it:
 
@@ -76,8 +77,7 @@ spoken under the key, and when their words landed.
 
 ### Sharing where you are
 
-**Not built: this is phase 11h.** A craft says where it is only on purpose. Beside the encrypt
-box, in the three-bar menu of a conversation and of a faction's chat, is **share location**: while
+**Built (11h).** A craft says where it is only on purpose. In the three-bar menu of a conversation and of a faction's chat, is **share location**: while
 it is on, every transmission in that chat carries a stated sighting of the sender — its system,
 position and motion as the light left — sealed as the transmission is, so only the addressee or
 the key's holders read it. Off by default; a craft that never ticks it is known only by what others

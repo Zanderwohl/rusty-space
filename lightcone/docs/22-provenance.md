@@ -10,8 +10,7 @@ pile, and another player folding a different pile is not wrong.
 `lc_world::knowledge` (§What is built lists its modules), run on the shard in `lc_server::instruments`, and reach the client as
 `Outbound::Learned` and `Logged`. Not built: navigation on beliefs, since `Order::Cross` still names
 a catalog `star` and `Course` a body by name; instruments that are not the ship,
-`survey::Optics::joined` being called only by a test; and where craft are (11h), of which only
-names and notes are kept today.
+and `survey::Optics::joined` being called only by a test.
 
 [05-observation.md](05-observation.md) is what an instrument measures.
 [03-world-model.md](03-world-model.md) names the "known-world snapshot" and leaves it at that.
@@ -339,8 +338,10 @@ passed everyone, so it lands on time on the shard that comes back.
 
 ## Where craft are
 
-**Not built: this is phase 11h.** A craft is a subject like a star, and where it has been is
-records like any other, kept for ever and carried in reports.
+**Built (11h).** `lc_world::knowledge::whereabouts` holds the records in a craft's `File`;
+`lc_server::roster` files them; the card in `lc_client::subject_panel` shows them. A craft is a
+subject like a star, and where it has been is records like any other, kept for ever and carried in
+reports.
 
 Every craft holds a **complete roster** of the craft it has ever detected. Nothing on it is
 forgotten when a craft goes out of sight; that is when the record starts to matter.
@@ -401,6 +402,7 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::innovation` | whether a new look lands where the held orbit said |
 | `knowledge::host` | what a craft believes about its own star, derived and never stored |
 | `knowledge::mass` | what a body probably weighs, from the best evidence held |
+| `knowledge::whereabouts` | where a craft has been: stays, their sightings, seen, heard or stated, each with its witnesses; the last known place |
 
 On the shard, since phase 11b: every craft's `Knowledge` and telescope live in
 `lc-server::instruments` and run whether or not anybody is flying them, and a report lands there.
