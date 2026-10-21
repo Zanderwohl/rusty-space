@@ -483,7 +483,8 @@ mod tests {
             ),
             "the cast is in a private copy of the system",
         );
-        assert!(crate::chase::in_sight(bystander, cast), "nobody can see the cast");
+        let seen = crate::chase::sighting(&server.fleet, &server.balance, true, bystander.id, ShipId(cast.id.0), server.now_t());
+        assert!(seen.is_some(), "nobody can see the cast");
     }
 
     /// A scene is arranged about the player, so it waits for one. A flag stages before anybody

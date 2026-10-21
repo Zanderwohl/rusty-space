@@ -101,6 +101,8 @@ async fn a_craft_in_the_cone_is_fed_at_its_light_delay_and_one_just_outside_is_n
     let inside = DVec3::new(LIGHT_HOUR_US, 0.9 * half * LIGHT_HOUR_US, 0.0);
     let outside = DVec3::new(LIGHT_HOUR_US, 1.1 * half * LIGHT_HOUR_US, 0.0);
     let mut server = Server::new(Memory::default(), 0, 1);
+    // About light delay, not seeing: these craft are too dark or too far to detect.
+    server.see_everything(true);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
     server.admit(ClientId(2), ship(2, inside, Form::starting()), 0.0);
     server.admit(ClientId(3), ship(3, outside, Form::starting()), 0.0);
@@ -161,6 +163,8 @@ async fn an_aimed_beam_misses_a_target_that_maneuvered_after_it_left() {
     for maneuvers in [false, true] {
         let target = DVec3::X * LIGHT_HOUR_US;
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
         server.admit(ClientId(2), ship(2, target, Form::starting()), 0.0);
         let mut wire = Loopback::new();
@@ -193,6 +197,8 @@ async fn a_beam_led_along_a_steady_burn_lands_and_one_led_coasting_misses() {
     for lead in [Lead::Burning, Lead::Coasting] {
         let target = DVec3::X * LIGHT_MINUTE_US;
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
         let mut burning = ship(2, target, Form::starting());
         let from_ly = target / LIGHT_US_PER_LY;
@@ -677,6 +683,8 @@ async fn watch(server: &mut Server<Memory>, wire: &mut Loopback, observer: Clien
 async fn a_balanced_emit_is_stated_at_both_ends_as_its_light_left() {
     let (power_w, duration_s) = (1.0e17, 3.0 * HOUR_S);
     let mut server = Server::new(Memory::default(), 0, 1);
+    // About light delay, not seeing: these craft are too dark or too far to detect.
+    server.see_everything(true);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
     server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_HOUR_US, Form::starting()), 0.0);
     let mut wire = Loopback::new();

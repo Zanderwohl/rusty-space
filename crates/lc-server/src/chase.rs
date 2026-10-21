@@ -22,7 +22,8 @@ use lc_world::fitting::Balance;
 use lc_world::glow::Glow;
 use lc_world::motion::{LIGHT_US_PER_LY, Motive};
 use lc_world::pursuit::{self, Closeness, Refused};
-use lc_world::system::LOCAL_SHELL_LY;
+use glam::DVec3;
+use lc_spacetime::LIGHT_MICROSECOND_M;
 
 use crate::server::Connected;
 
@@ -135,39 +136,30 @@ fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
     off_g > drive.accel_g * BURN_CHANGE_FRACTION
 }
 
-/// Whether an observer is entitled to know a craft exists at all.
-///
-/// Sharing a system, which is the same [`LOCAL_SHELL_LY`] rule both ends already use to decide
-/// where a ship is. Not an angular size: a hull five hundred meters long is well under a pixel
-/// from anywhere in a system, and a rule drawn there would leave a player unable to find
-/// traffic they are sitting in the middle of. Between the stars, where there is no system to
-/// share, the same radius serves as a plain range.
-///
-/// A *visibility* rule and not a causality one. What it decides is which craft are worth
-/// solving for; whether the light has arrived is [`Cleared::clear`]'s alone.
-///
-/// Against every system the other still remembers being in: a craft that jumped out of one is
-/// still arriving there as old light.
-pub fn in_sight(observer: &Craft, other: &Craft) -> bool {
-    match (&observer.system, &other.system) {
-        (Some(a), _) => other.has_been_in(a),
-        (None, None) => {
-            observer.motion.position_ly.distance(other.motion.position_ly) < LOCAL_SHELL_LY
-        }
-        _ => false,
-    }
+/// Whether `observer` sees `quarry`, whose light leaving at `left_s` from `at` (light-microseconds)
+/// reaches it at `here`: its reflected starlight and its field's glow against the observer's
+/// instrument, over [`lc_world::glow::DETECTION_EXPOSURE_S`]. Not the light's arrival, which is
+/// [`Cleared::clear`]'s alone. See `lightcone/docs/05-observation.md` §Seeing other craft.
+pub fn detects(observer: &Craft, quarry: &Craft, balance: &Balance, left_s: f64, at: DVec3, here: DVec3) -> bool {
+    let to_observer = here - at;
+    let glow = quarry.glow_at(left_s).unwrap_or_else(|| Glow::unfitted(balance));
+    // A craft with no form is taken to be the starting hull, which a convex envelope shows a
+    // quarter of on average, as `Glow::unfitted` takes its field to be the starting field.
+    let shadow_m2 = match quarry.fitting() {
+        Some(_) => crate::field::shadow_toward_m2(quarry, to_observer, left_s),
+        None => lc_world::fitting::STARTING_ENVELOPE_M2 * 0.25,
+    };
+    let starlit = quarry.starlit_at(left_s, to_observer);
+    let light = lc_world::glow::light(&glow, balance, shadow_m2, starlit, to_observer.length() * LIGHT_MICROSECOND_M);
+    lc_world::glow::detected(&observer.sensor, &light)
 }
 
-/// What one craft can currently see of another, or nothing at all.
-pub fn sighting(
-    fleet: &Fleet,
-    observer: CraftId,
-    quarry: ShipId,
-    now_t: i64,
-) -> Option<pursuit::Sighting> {
+/// Where `quarry` appears to `observer` now, whether or not it can be seen: the light-cone solve
+/// alone, for what has to account for every craft's light, seen or not.
+pub fn retarded(fleet: &Fleet, observer: CraftId, quarry: ShipId, now_t: i64) -> Option<pursuit::Sighting> {
     let observer = fleet.get(observer)?;
     let quarry = fleet.get(CraftId(quarry.0))?;
-    if quarry.id == observer.id || !in_sight(observer, quarry) {
+    if quarry.id == observer.id {
         return None;
     }
     let here = observer.position_at(now_t as f64);
@@ -186,6 +178,26 @@ pub fn sighting(
     })
 }
 
+/// What one craft can currently see of another, or nothing at all. `everything` skips the
+/// detection, for a test about light delay rather than about seeing.
+pub fn sighting(
+    fleet: &Fleet,
+    balance: &Balance,
+    everything: bool,
+    observer: CraftId,
+    quarry: ShipId,
+    now_t: i64,
+) -> Option<pursuit::Sighting> {
+    let seen = retarded(fleet, observer, quarry, now_t)?;
+    if everything {
+        return Some(seen);
+    }
+    let (watcher, craft) = (fleet.get(observer)?, fleet.get(CraftId(quarry.0))?);
+    let here = watcher.position_at(now_t as f64);
+    let at = seen.position_ly * LIGHT_US_PER_LY;
+    detects(watcher, craft, balance, seen.emitted_s, at, here).then_some(seen)
+}
+
 /// Where everybody else appeared to be, per connection.
 ///
 /// Every contact is a **retarded** sample. A craft a light-hour away is reported where it was
@@ -197,6 +209,7 @@ pub fn contacts(
     fleet: &Fleet,
     clients: &HashMap<ClientId, Connected>,
     balance: &Balance,
+    everything: bool,
     now_t: i64,
     glare: impl Fn(CraftId, ShipId) -> Option<lc_proto::Glare>,
 ) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
@@ -207,7 +220,7 @@ pub fn contacts(
         let here_ly = observer.position_at(now_t as f64) / LIGHT_US_PER_LY;
         let here_beta = observer.worldline().velocity_at(now_t as f64);
         for craft in fleet.iter() {
-            let Some(sighted) = sighting(fleet, observer.id, ShipId(craft.id.0), now_t) else {
+            let Some(sighted) = sighting(fleet, balance, everything, observer.id, ShipId(craft.id.0), now_t) else {
                 continue;
             };
             let then = craft.seen_at(sighted.emitted_s);
@@ -362,6 +375,7 @@ pub fn decide(
     fleet: &Fleet,
     pursuits: &mut HashMap<CraftId, Pursuit>,
     balance: &Balance,
+    everything: bool,
     now_t: i64,
 ) -> Vec<(CraftId, Option<Plan>)> {
     let now_s = now_t as f64 * 1.0e-6;
@@ -370,7 +384,7 @@ pub fn decide(
         let Some(pursuer) = fleet.get(*id) else { continue };
         // Out of sight is the end of it. A policy that survived would be one waiting to act on
         // a craft this one is no longer entitled to know about.
-        let Some(seen) = sighting(fleet, *id, pursuit.quarry, now_t) else {
+        let Some(seen) = sighting(fleet, balance, everything, *id, pursuit.quarry, now_t) else {
             decided.push((*id, None));
             continue;
         };
@@ -428,6 +442,8 @@ mod tests {
     #[tokio::test]
     async fn a_glow_arrives_with_the_light_and_not_before() {
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let (owner, watcher) = (ClientId(1), ClientId(2));
         let mut hot = still(ShipId(1), DVec3::new(APART_US, 0.0, 0.0));
@@ -543,4 +559,21 @@ mod tests {
         assert!((DVec3::from_array(seen.observer_ly) - expected).length() < 1e-15, "{:?}", seen.observer_ly);
         assert!((DVec3::from_array(seen.observer_beta) - beta).length() < 1e-12, "{:?}", seen.observer_beta);
     }
+
+    /// Seen by what reaches the observer: an unlit hull's own glow carries a few AU and no further.
+    /// See `lightcone/docs/05-observation.md` §Seeing other craft.
+    #[test]
+    fn a_dark_craft_is_seen_close_by_its_glow_and_not_far_off() {
+        let au_us = lc_world::navigation::AU / LIGHT_MICROSECOND_M;
+        let seen_at = |au: f64| {
+            let mut fleet = Fleet::default();
+            fleet.insert(still(ShipId(1), DVec3::ZERO));
+            fleet.insert(still(ShipId(2), DVec3::X * au * au_us));
+            let now_t = (au * au_us) as i64 + 1;
+            sighting(&fleet, &Balance::DEFAULT, false, CraftId(1), ShipId(2), now_t).is_some()
+        };
+        assert!(seen_at(0.5), "close enough to see by its heat");
+        assert!(!seen_at(50.0), "too far for a 400 K hull with no star on it");
+    }
 }
+

@@ -502,7 +502,7 @@ impl<J: Journal> Server<J> {
                 }
                 // Only a craft it can see, or the order would say which craft exist.
                 if let lc_proto::Duty::Stare { at: lc_proto::Gaze::Craft(craft) } = duty
-                    && crate::chase::sighting(&self.fleet, id, ShipId(*craft), self.now_t).is_none()
+                    && crate::chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, ShipId(*craft), self.now_t).is_none()
                 {
                     return Err(Refusal::NotInSight);
                 }

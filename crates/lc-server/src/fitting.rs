@@ -525,6 +525,8 @@ mod tests {
     async fn another_ship_sees_a_refit_only_when_its_light_arrives() {
         const APART_US: f64 = 10.0 * 3_600.0 * 1.0e6;
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let (actor, watcher) = (ClientId(1), ClientId(2));
         for (client, at) in [(actor, DVec3::ZERO), (watcher, DVec3::new(APART_US, 0.0, 0.0))] {
@@ -592,6 +594,8 @@ mod tests {
     async fn another_ship_sees_a_cancel_only_when_its_light_arrives() {
         const APART_US: f64 = 10.0 * 3_600.0 * 1.0e6;
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let (actor, watcher) = (ClientId(1), ClientId(2));
         for (client, at) in [(actor, DVec3::ZERO), (watcher, DVec3::new(APART_US, 0.0, 0.0))] {

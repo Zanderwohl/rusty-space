@@ -335,8 +335,8 @@ impl<J: Journal> Server<J> {
     /// measured from two of `id`'s sightings [`LEAD_BASELINE_US`] apart, as an escort measures its
     /// quarry's, and coasting when its plume was dark or it has not been watched that long.
     fn lead_along_burn(&self, id: CraftId, target: ShipId, at: i64) -> Result<DVec3, Refusal> {
-        let seen = crate::chase::sighting(&self.fleet, id, target, at).ok_or(Refusal::NotInSight)?;
-        let previous = crate::chase::sighting(&self.fleet, id, target, at - LEAD_BASELINE_US);
+        let seen = crate::chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, target, at).ok_or(Refusal::NotInSight)?;
+        let previous = crate::chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, target, at - LEAD_BASELINE_US);
         let accel = crate::chase::burn_of(&self.fleet, &seen, previous.as_ref()).unwrap_or(DVec3::ZERO);
         let from_ly = self.fleet.get(id).ok_or(Refusal::NotYours)?.position_at(at as f64) / LIGHT_US_PER_LY;
         lc_world::emit::lead(from_ly, at as f64 * 1.0e-6, &seen, accel).map(|led| led.axis).ok_or(Refusal::Impossible)

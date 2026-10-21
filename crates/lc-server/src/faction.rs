@@ -341,6 +341,8 @@ mod tests {
             use lc_proto::{Scope, Writing};
             use lc_world::knowledge::{Bearing, Sighting, Subject, Witness};
             let (mut server, mut wire) = three();
+            // About light delay, not seeing: these craft are too dark or too far to detect.
+            server.see_everything(true);
             let star = lc_world::sky::StarId::synthesize("notes", 1);
             server.aboard(CraftId(1)).knowledge.sighted(star, Sighting {
                 witness: Witness(1),

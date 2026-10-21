@@ -419,6 +419,8 @@ async fn where_names_bodies_a_teleport_can_reach() {
 async fn a_ship_that_jumps_is_seen_to_go_only_when_the_light_of_it_arrives() {
     let far = stars()[2].id.get();
     let (mut server, mut wire) = shard(Level::ADMIN);
+    // About light delay, not seeing: these craft are too dark or too far to detect.
+    server.see_everything(true);
     // Settle into the system, so both are contacts of each other.
     server.tick(&mut wire).await.unwrap();
     server.tick(&mut wire).await.unwrap();

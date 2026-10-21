@@ -29,7 +29,7 @@ impl Lights for Seen<'_> {
     fn sighted(&self, id: i64, here: DVec3, at_s: f64) -> Option<DVec3> {
         let at_t = at_s * 1.0e6;
         let now_t = at_t.round() as i64;
-        if let Some(seen) = crate::chase::sighting(self.fleet, self.observer, ShipId(id), now_t) {
+        if let Some(seen) = crate::chase::retarded(self.fleet, self.observer, ShipId(id), now_t) {
             return Some(seen.position_ly * LIGHT_US_PER_LY);
         }
         let wreck = self.fleet.get(CraftId(id))?;

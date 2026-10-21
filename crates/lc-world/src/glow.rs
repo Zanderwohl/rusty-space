@@ -103,6 +103,18 @@ pub fn thermal(glow: &Glow, distance_m: f64) -> PerBand<f64> {
     }))
 }
 
+/// The look that decides whether one craft sees another: [`DETECTION_SNR`] in any band over this
+/// long. The anchor: a starting ship sees the starting hull, sunlit at 1 AU, out to about 44 AU in
+/// Clear and 4.5 AU in Black. See `lightcone/docs/05-observation.md` §Seeing other craft.
+pub const DETECTION_EXPOSURE_S: f64 = 60.0;
+pub const DETECTION_SNR: f64 = 5.0;
+
+/// Whether `instrument` sees a craft whose light at it is `light`.
+pub fn detected(instrument: &Instrument, light: &Light) -> bool {
+    let total = light.total();
+    Band::ALL.into_iter().any(|band| snr(instrument, band, total[band], DETECTION_EXPOSURE_S) >= DETECTION_SNR)
+}
+
 /// Signal over noise for `flux_w_m2` in `band`, against the instrument's own glow: whether it sees
 /// a craft there.
 pub fn snr(instrument: &Instrument, band: Band, flux_w_m2: f64, exposure_s: f64) -> f64 {
@@ -130,6 +142,17 @@ mod tests {
 
     fn glow(temperature_k: f64, shade: Mode) -> Glow {
         Glow { temperature_k, shade, envelope_m2: crate::fitting::STARTING_ENVELOPE_M2, switch: None }
+    }
+
+    /// The detection anchor: a Clear hull is seen across a planetary system, a Black one only near.
+    #[test]
+    fn a_clear_hull_is_seen_across_a_system_and_a_black_one_only_close() {
+        let seen_at = |shade, au: f64| {
+            let star = Some(Starlit { teff_k: SUN_K, radius_m: em_spectra::stellar::SOLAR_RADIUS, distance_m: AU, cos_phase: 1.0 });
+            detected(&crate::instrument::Instrument::SHIP, &light(&glow(B.field_idle_k, shade), &B, 58_000.0, star, au * AU))
+        };
+        assert!(seen_at(Mode::Clear, 40.0) && !seen_at(Mode::Clear, 50.0));
+        assert!(seen_at(Mode::Black, 4.0) && !seen_at(Mode::Black, 5.0));
     }
 
     /// 30's anchor: an idle field, a thousand kilometers off, broadside in sunlight at 1 AU.
@@ -225,3 +248,4 @@ mod tests {
         assert!(light(&glow(4600.0, Mode::Black), &B, 0.0, None, 1.0).thermal[Band::V] > 1.0e9 * light(&glow(400.0, Mode::Black), &B, 0.0, None, 1.0).thermal[Band::V]);
     }
 }
+

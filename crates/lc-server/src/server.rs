@@ -151,6 +151,8 @@ pub struct Server<J: Journal> {
     /// Whether a connection whose ticket does not verify is admitted anyway. See
     /// [`Server::admit_without_tickets`].
     open: bool,
+    /// See [`Server::see_everything`].
+    pub(crate) sees_everything: bool,
     /// Accounts whose saved craft could not be read. See [`crate::persist::Unreadable`].
     pub(crate) blocked: HashMap<String, String>,
     /// Who is chasing whom.
@@ -247,6 +249,7 @@ impl<J: Journal> Server<J> {
             pending: Vec::new(),
             budgets: HashMap::new(),
             open: false,
+            sees_everything: false,
             blocked: HashMap::new(),
             pursuits: HashMap::new(),
             parks: HashMap::new(),
@@ -347,6 +350,12 @@ impl<J: Journal> Server<J> {
     /// reason this is not a deployment mode.
     pub fn admit_without_tickets(&mut self, yes: bool) {
         self.open = yes;
+    }
+
+    /// **Tests only: every craft sees every other, however dark or far**, for what is about
+    /// light delay rather than seeing. See [`crate::chase::detects`].
+    pub fn see_everything(&mut self, yes: bool) {
+        self.sees_everything = yes;
     }
 
     /// **Development only: let a client stage a scene.**
@@ -876,7 +885,7 @@ impl<J: Journal> Server<J> {
                 // player who presses the button sees the ship move on the same round trip as
                 // any other order. What keeps it flying is the standing policy below.
                 let now_s = at as f64 * 1.0e-6;
-                let seen = chase::sighting(&self.fleet, id, quarry, at)
+                let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, quarry, at)
                     .ok_or(Refusal::NotInSight)?;
                 // Closing in on the quarry already being chased keeps what has been measured of
                 // it, so an escort does not lose its acceleration for a tick.
@@ -1210,7 +1219,7 @@ impl<J: Journal> Server<J> {
     ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
-        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, &self.balance, now) {
+        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, &self.balance, self.sees_everything, now) {
             let Some(craft) = self.fleet.get_mut(id) else { continue };
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
@@ -1281,7 +1290,7 @@ impl<J: Journal> Server<J> {
         let now = self.now_t;
         let emissions = &self.emissions;
         let mut contacts =
-            chase::contacts(&self.fleet, &self.clients, &self.balance, now, |observer, source| emissions.glare(observer, source));
+            chase::contacts(&self.fleet, &self.clients, &self.balance, self.sees_everything, now, |observer, source| emissions.glare(observer, source));
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());
@@ -1942,6 +1951,8 @@ use crate::transport::Loopback;
     #[tokio::test]
     async fn a_contact_is_reported_where_its_light_left_and_not_where_it_is() {
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let watcher = ClientId(2);
         server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
@@ -2277,6 +2288,8 @@ use crate::transport::Loopback;
     #[tokio::test]
     async fn a_pursuer_cannot_react_to_a_burn_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let hunter = ClientId(1);
         let prey = ClientId(2);
@@ -2358,6 +2371,8 @@ use crate::transport::Loopback;
     #[tokio::test]
     async fn a_contact_is_not_seen_to_maneuvere_before_its_light_arrives() {
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let watcher = ClientId(1);
         let mover = ClientId(2);
@@ -2420,6 +2435,8 @@ use crate::transport::Loopback;
     #[tokio::test]
     async fn an_intercept_matches_a_quarry_running_at_four_fifths_of_c() {
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let mut wire = Loopback::new();
         let hunter = ClientId(1);
         let mut chaser = crate::world::still(ShipId(1), DVec3::ZERO);

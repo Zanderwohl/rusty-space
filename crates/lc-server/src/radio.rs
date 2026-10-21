@@ -526,7 +526,7 @@ impl<J: Journal> Server<J> {
                 // Unreachable: the `let else` above is this arm.
                 Aim::Omni => return Ok(Beam::OMNI),
                 Aim::Ship(target) => {
-                    let seen = chase::sighting(&self.fleet, sender, *target, at)
+                    let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, sender, *target, at)
                         .ok_or(Refusal::NotInSight)?;
                     lc_world::signal::aim_at(
                         from,
@@ -1138,6 +1138,8 @@ mod tests {
     async fn a_tight_beam_is_not_heard_off_its_axis() {
         let mut wire = Loopback::new();
         let mut server = Server::new(Memory::default(), 0, 1);
+        // About light delay, not seeing: these craft are too dark or too far to detect.
+        server.see_everything(true);
         let (ada, bry, nosy) = (ClientId(1), ClientId(2), ClientId(3));
         let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
         server.admit(ada, crate::world::still(ShipId(1), DVec3::ZERO), 0.0);
