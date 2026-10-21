@@ -164,6 +164,7 @@ fn act(response: &egui::Response, thing: &Seen<'_>, out: &mut MessageWriter<Requ
     }
     if response.double_clicked() {
         ask(out, Action::FocusMap(MapFocus::Item(thing.key)));
+        ask(out, Action::OpenPanel(crate::ui::Panel::Subject));
     }
 }
 

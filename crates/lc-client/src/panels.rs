@@ -425,6 +425,8 @@ pub struct Remembered {
     seal: bool,
     listing: crate::radio_panel::Listing,
     emit: crate::emit_panel::Draft,
+    /// The card's, apart from the panels', so a half-written note does not follow a pick.
+    card_draft: crate::thread_view::Draft,
     /// Whether `--chat found:<name>` has been typed into the radio's field yet.
     drafted: bool,
 }
@@ -454,6 +456,7 @@ pub fn open_panels(
         seal,
         listing,
         emit,
+        card_draft,
         drafted,
     } = &mut *held_over;
     if !*drafted {
@@ -466,7 +469,7 @@ pub fn open_panels(
     let panels = ui_state.open_panels().to_vec();
     // Once for every panel drawn this frame, and the map already asked for the same second,
     // so this is a read.
-    let wants = panels.iter().any(|p| matches!(p, Panel::System | Panel::Telescope));
+    let wants = panels.iter().any(|p| matches!(p, Panel::System | Panel::Telescope | Panel::Subject));
     let held = beliefs.held_if(wants, &game.0);
     for panel in panels {
         // The book brings its own window: it is not a readout, and egui's chrome around it
@@ -512,6 +515,7 @@ pub fn open_panels(
             Panel::Refit => crate::refit_panel::refit(ui, &ui_state.0, &game, &mut out),
             Panel::DevActions => crate::refit_panel::dev_actions(ui, &game, &mut out),
             Panel::Emit => crate::emit_panel::emit(ui, &ui_state, &game, &uplink, emit, &mut out),
+            Panel::Subject => crate::subject_panel::card(ui, &ui_state, &game, held, &uplink, card_draft, &mut out),
             Panel::Chat => crate::radio_panel::chat(
                 ui,
                 &ui_state,

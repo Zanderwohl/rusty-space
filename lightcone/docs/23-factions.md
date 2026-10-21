@@ -10,12 +10,12 @@ planet letters and the descriptor ladder in `lc_world::knowledge::{subject, name
 hop added to every record a report carries (`lc_world::knowledge::record::Hop`). Factions are built
 (11e): keys and generations in `lc_server::faction`, `Order::{Found, GiveKey}` and
 `Secrecy::Faction` in `lc_server::radio`, rows in `lc_store::chat` (`0014_factions`), and the chats
-in `lc_client::{chat, radio_panel}`. Notes and chosen names are built as threads (11g, in part):
-`lc_world::knowledge::thread`, `Order::Write`, and `lc_client::thread_view` in the telescope and
-system panels. Not built: assets and their minimum generation, which wait for assets; out-of-game
-invitations; relays, bundles and transmission cost, with no `transmit_gain` (11f); the subject card
-opened from the map and the sky (11g). Report transcript lines are built. Craft names are claims every
-transmission carries (`lc_proto::Claim`, `lc_client::craft_names`).
+in `lc_client::{chat, radio_panel}`. Naming and notes are built (11g): threads in
+`lc_world::knowledge::thread` written by `Order::Write`, read in `lc_client::thread_view` from the
+telescope and system panels and the card (`lc_client::subject_panel`); craft names as claims every
+transmission carries (`lc_proto::Claim`, `lc_client::craft_names`); and report lines in the
+transcript. Not built: assets and their minimum generation, which wait for assets; out-of-game
+invitations; and relays, bundles and transmission cost, with no `transmit_gain` (11f).
 
 The rule that shapes all of it:
 

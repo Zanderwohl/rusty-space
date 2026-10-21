@@ -163,6 +163,7 @@ pub(super) fn fold(
                     Err(_) => log(format!("{who} sent a report that made no sense.")),
                 }
                 let notice = match stars {
+                    Ok(1) => format!("{who}: told you about 1 star"),
                     Ok(n) => format!("{who}: told you about {n} stars"),
                     Err(_) => format!("{who} sent a report that made no sense"),
                 };

@@ -59,10 +59,12 @@ pub enum Panel {
     Reader,
     /// Drawn by [`crate::console`], not as a window.
     Console,
+    /// The card: whatever was last picked, its names, sources and notes.
+    Subject,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 14] = [
+    pub const ALL: [Panel; 15] = [
         Panel::Escape,
         Panel::Settings,
         Panel::Debug,
@@ -77,6 +79,7 @@ impl Panel {
         Panel::Emit,
         Panel::Reader,
         Panel::Console,
+        Panel::Subject,
     ];
 
     /// A panel by the name a development flag would use.
@@ -100,6 +103,7 @@ impl Panel {
             Panel::Emit => "Emit",
             Panel::Reader => "Reader",
             Panel::Console => "Console",
+            Panel::Subject => "Subject",
         }
     }
 }
@@ -480,6 +484,8 @@ pub struct UiState {
     /// Here rather than in the panel because picking a body out of the sky will set the same
     /// two fields, and because naming a world later has to change what this is pointing at.
     pub focus: Option<crate::navigation::Target>,
+    /// What the card shows: the last thing picked, kept when a selection is cleared.
+    pub card: Option<lc_world::knowledge::Subject>,
     pub course: Option<crate::navigation::Course>,
     pub look: Look,
     /// Which mode of play the main view is showing. See [`ViewMode`].
@@ -580,6 +586,7 @@ impl Default for UiState {
             selected: None,
             selected_craft: None,
             focus: None,
+            card: None,
             course: None,
             look: Look::default(),
             view: ViewMode::default(),

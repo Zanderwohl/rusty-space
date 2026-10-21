@@ -140,6 +140,17 @@ switches to it rather than opening anything.
 Panels are windows rather than menu pages because the clock never stops: a player has to be
 able to watch a curve and fly at the same time.
 
+### The card
+
+The **Subject** window, `I`, shows whatever was last picked — a star, a body, a belt or a craft,
+picked in the sky, on the map or in a list — and keeps it when a selection is cleared, so it is
+never empty after the first pick. A double click on a pick in the sky or on the map opens it. It
+holds what the thing is called and on whose word, where what is known of it came from, the
+summary its kind has (a star's range, a body's type and distance, a craft's tag, whether it is a
+claimant, and its conversation), and its notes. One card that follows the pick, not one per
+subject: the telescope and system panels keep their own names and notes for where a player is
+already working.
+
 ### The communications window
 
 **A list of chats on the left, one log on the right.** Everything in it is minutes to years old

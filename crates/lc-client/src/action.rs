@@ -382,6 +382,9 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         Action::SelectTarget(id) => {
             ui.selected = id;
             ui.selected_craft = None;
+            if let Some(id) = id {
+                ui.card = Some(Subject::Star(id));
+            }
             session.describe(id);
         }
         // A craft picked out is the later pick: choosing a star clears it.
@@ -613,10 +616,18 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
         }
         Action::FocusTarget(target) => {
             ui.course = None;
+            if let Some(subject) = target.as_ref().and_then(|t| target_subject(session, t)) {
+                ui.card = Some(subject);
+            }
             ui.focus = target;
             ui.selected_craft = None;
         }
-        Action::SelectCraft(craft) => ui.selected_craft = craft,
+        Action::SelectCraft(craft) => {
+            if let Some(craft) = craft {
+                ui.card = Some(Subject::Craft(craft.0));
+            }
+            ui.selected_craft = craft;
+        }
         Action::ChooseCourse(course) => ui.course = course,
         // Both of these only exist against a server. An intercept is a *standing* order and
         // what makes it stand is the authority re-solving it against sightings; a client
@@ -890,6 +901,22 @@ fn set_duty(ui: &UiState, session: &mut Session, duty: Duty, effects: &mut Vec<E
     match duty {
         Duty::Stare(Gaze::Star(id)) => session.point_at(Some(id)),
         duty => session.take_up(duty),
+    }
+}
+
+/// What a target in the local system is, as knowledge files it: the star by its id, a body by
+/// the id its key hashes to, a band by its index.
+fn target_subject(session: &Session, target: &crate::navigation::Target) -> Option<Subject> {
+    let system = session.system.as_ref()?;
+    match target {
+        crate::navigation::Target::Band(index) => Some(Subject::Population { star: system.star, index: *index as u32 }),
+        crate::navigation::Target::Body(key) => {
+            let star = system.inventory().iter().any(|e| &e.target == target && e.kind == crate::navigation::Kind::Star);
+            Some(match star {
+                true => Subject::Star(system.star),
+                false => Subject::Body { star: system.star, body: lc_world::knowledge::BodyId::of(system.star, key) },
+            })
+        }
     }
 }
 
@@ -2073,6 +2100,29 @@ mod tests {
         for typed in ["help", "/help", " /help "] {
             assert_eq!(apply(Action::RunCommand(typed.into()), &mut ui, &mut s), vec![Effect::Command("help".into())], "{typed:?}");
         }
+    }
+
+    /// The card follows the last pick of any kind, and keeps it when a selection is cleared.
+    #[test]
+    fn the_card_follows_the_last_pick_and_outlives_a_cleared_one() {
+        let (mut ui, mut s) = fixture();
+        let id = s.stars[0].id;
+        apply(Action::SelectTarget(Some(id)), &mut ui, &mut s);
+        assert_eq!(ui.card, Some(Subject::Star(id)));
+        apply(Action::SelectCraft(Some(lc_proto::ShipId(7))), &mut ui, &mut s);
+        assert_eq!(ui.card, Some(Subject::Craft(7)));
+        apply(Action::SelectCraft(None), &mut ui, &mut s);
+        assert_eq!(ui.card, Some(Subject::Craft(7)), "clearing a selection is not picking something else");
+
+        let star = lc_world::sky::StarProvider::stars(&AuthoredStars::sample())[2].clone();
+        s.ship.motion.position_ly = star.position_ly;
+        s.sync_system();
+        let system = s.system.clone().expect("a system at the star");
+        apply(Action::FocusTarget(Some(Target::Band(0))), &mut ui, &mut s);
+        assert_eq!(ui.card, Some(Subject::Population { star: system.star, index: 0 }));
+        let star_target = system.inventory().iter().find(|e| e.kind == crate::navigation::Kind::Star).map(|e| e.target.clone()).unwrap();
+        apply(Action::FocusTarget(Some(star_target)), &mut ui, &mut s);
+        assert_eq!(ui.card, Some(Subject::Star(system.star)), "the system's own star is the star, not a body");
     }
 
     /// A craft stays selected beside an armed course until something else is picked.

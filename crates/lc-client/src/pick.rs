@@ -38,6 +38,9 @@ const HOVER_RING_PX: f32 = 14.0;
 const BRACKET_ARM_PX: f32 = 8.0;
 pub(crate) const ARROW_PX: f32 = 11.0;
 
+/// The longest gap between two presses that still makes a double click, seconds: egui's own.
+const DOUBLE_CLICK_S: f64 = 0.3;
+
 /// What a candidate turned out to be, and what to call it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
@@ -161,6 +164,8 @@ fn survey(
     egui: Res<EguiWantsInput>,
     mut picked: ResMut<Picked>,
     mut out: MessageWriter<Requested>,
+    time: Res<Time<Real>>,
+    mut last_click: Local<Option<(Subject, f64)>>,
 ) {
     *picked = Picked::default();
     // Nothing on the sky is being pointed at from the map's mode: the world is a thumbnail in
@@ -226,6 +231,13 @@ fn survey(
             && let Some(action) = seen.subject.select()
         {
             out.write(Requested(action));
+            // A second click on the same thing opens its card, as a double click on the map does.
+            let now = time.elapsed_secs_f64();
+            let again = last_click.as_ref().is_some_and(|(was, at)| was.is(&seen.subject) && now - at < DOUBLE_CLICK_S);
+            if again {
+                out.write(Requested(Action::OpenPanel(crate::ui::Panel::Subject)));
+            }
+            *last_click = (!again).then(|| (seen.subject.clone(), now));
         }
     }
 
