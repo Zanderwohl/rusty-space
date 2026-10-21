@@ -202,12 +202,19 @@ fn focused(
     out: &mut MessageWriter<Requested>,
 ) {
     // A body's detail is its belief, whether or not anything in the arena answers to it.
-    if let Some(belief) = picked.and_then(|body| held.bodies.iter().find(|b| b.body == body)) {
+    let belief = picked.and_then(|body| held.bodies.iter().find(|b| b.body == body));
+    if let Some(belief) = belief {
         details(ui, belief, game, system, uplink, draft, out);
     }
+    // Notes go under everything else, the maneuvers included: names belong with what a thing is,
+    // notes with what is said about it.
+    let mut noted = belief.map(|b| b.subject);
     let Some(target) = state.focus.as_ref() else {
         if picked.is_none() {
             ui.label("Pick something to go to.");
+        }
+        if let Some(subject) = noted {
+            notes(ui, game, uplink, subject, draft, out);
         }
         return;
     };
@@ -224,7 +231,8 @@ fn focused(
             // about the one body the craft is sitting inside.
             lc_world::navigation::Kind::Star => {
                 ui.heading(game.name_of(system.star));
-                crate::thread_view::naming_and_notes(ui, game, uplink, Subject::Star(system.star), true, draft, out);
+                crate::thread_view::names(ui, game, uplink, Subject::Star(system.star), true, draft, out);
+                noted = Some(Subject::Star(system.star));
                 let host = host(game, system, parked);
                 if host == lc_world::knowledge::Host::default() {
                     ui.weak("star — nothing measured");
@@ -235,7 +243,8 @@ fn focused(
                 let Target::Band(index) = entry.target else { return };
                 ui.heading(game.band_label(index));
                 let subject = Subject::Population { star: system.star, index: index as u32 };
-                crate::thread_view::naming_and_notes(ui, game, uplink, subject, true, draft, out);
+                crate::thread_view::names(ui, game, uplink, subject, true, draft, out);
+                noted = Some(subject);
                 ui.weak(format!(
                     "{} — {} out, {} away",
                     entry.kind.label(),
@@ -271,6 +280,21 @@ fn focused(
         }
         ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
     });
+    if let Some(subject) = noted {
+        notes(ui, game, uplink, subject, draft, out);
+    }
+}
+
+fn notes(
+    ui: &mut egui::Ui,
+    game: &Game,
+    uplink: &crate::uplink::Uplink,
+    subject: Subject,
+    draft: &mut crate::thread_view::Draft,
+    out: &mut MessageWriter<Requested>,
+) {
+    ui.separator();
+    crate::thread_view::notes(ui, game, uplink, subject, true, draft, out);
 }
 
 /// Orbits as a grid of plane by height and libration points of kind by point, to save height.
@@ -388,7 +412,7 @@ fn details(
     if belief.given.is_some() {
         ui.weak(game.called(&BodyBelief { given: None, ..belief.clone() }));
     }
-    crate::thread_view::naming_and_notes(ui, game, uplink, belief.subject, true, draft, out);
+    crate::thread_view::names(ui, game, uplink, belief.subject, true, draft, out);
     // The range its own orbit implies, never the one the arena holds. A body the list calls
     // "distance unknown" has no range to give, and printing the true one here said what the
     // craft has not measured.

@@ -27,7 +27,8 @@ pub struct Draft {
 const NOTES_HEIGHT: f32 = 140.0;
 const FIELD_WIDTH: f32 = 180.0;
 
-/// The names and notes for one subject. With `writable`, the fields that add to them.
+/// The names and notes for one subject, together. With `writable`, and when this ship knows the
+/// subject, the fields that add to them; each half also stands alone.
 pub(crate) fn naming_and_notes(
     ui: &mut egui::Ui,
     game: &Game,
@@ -37,7 +38,6 @@ pub(crate) fn naming_and_notes(
     draft: &mut Draft,
     out: &mut MessageWriter<Requested>,
 ) {
-    let writable = writable && game.nameable(subject);
     names(ui, game, uplink, subject, writable, draft, out);
     notes(ui, game, uplink, subject, writable, draft, out);
 }
@@ -53,6 +53,7 @@ pub(crate) fn names(
     draft: &mut Draft,
     out: &mut MessageWriter<Requested>,
 ) {
+    let writable = writable && game.nameable(subject);
     let owner = game.knowledge.owner;
     let file = game.knowledge.file(subject);
     let mut standing: Vec<&Held> =
@@ -104,6 +105,7 @@ pub(crate) fn notes(
     draft: &mut Draft,
     out: &mut MessageWriter<Requested>,
 ) {
+    let writable = writable && game.nameable(subject);
     let owner = game.knowledge.owner;
     if let Some(thread) = game.knowledge.file(subject).map(|f| f.thread()) {
         let ordered: Vec<_> =
@@ -113,7 +115,6 @@ pub(crate) fn notes(
                 for (at, (id, held)) in ordered.iter().enumerate() {
                     let Writing::Note(text) = &held.entry.writing else { continue };
                     ui.horizontal_wrapped(|ui| {
-                        ui.strong(format!("{}:", author(uplink, owner, held)));
                         ui.label(text);
                         source(ui, game, uplink, held, out);
                     });
@@ -149,8 +150,8 @@ pub(crate) fn notes(
     });
 }
 
-/// Whose word an entry is on: a faction's, as a link to its chat; this ship's; or somebody's in
-/// the open.
+/// Whose word an entry is on: its faction, as a link to its chat, if it has one; then the ship.
+/// Last in its row, which it leaves unspaced.
 fn source(
     ui: &mut egui::Ui,
     game: &Game,
@@ -158,17 +159,19 @@ fn source(
     held: &Held,
     out: &mut MessageWriter<Requested>,
 ) {
-    match held.entry.scope {
-        Scope::Faction(key) => {
-            if quiet_link(ui, &scope_label(uplink, Scope::Faction(key))).on_hover_text("open its chat").clicked() {
-                ask(out, Action::OpenPanel(Panel::Chat));
-                ask(out, Action::ChatWith(Channel::Faction(key)));
-            }
+    let ship = author(uplink, game.knowledge.owner, held);
+    // Spaced by hand, in the row it ends, so the comma sits against the faction and a long line
+    // still wraps rather than widening the window.
+    ui.spacing_mut().item_spacing.x = 0.0;
+    quiet(ui, " ");
+    if let Scope::Faction(key) = held.entry.scope {
+        if quiet_link(ui, &scope_label(uplink, Scope::Faction(key))).on_hover_text("open its chat").clicked() {
+            ask(out, Action::OpenPanel(Panel::Chat));
+            ask(out, Action::ChatWith(Channel::Faction(key)));
         }
-        Scope::Own => quiet(ui, "yours"),
-        Scope::Open if held.entry.author == game.knowledge.owner => quiet(ui, "yours, public"),
-        Scope::Open => quiet(ui, &format!("public, {}", author(uplink, game.knowledge.owner, held))),
+        quiet(ui, ", ");
     }
+    quiet(ui, &ship);
 }
 
 /// Whose word something is on: small and weak, beside what it is about.
