@@ -44,11 +44,13 @@ pub struct Director {
     pov: Option<CraftId>,
     /// The faction keys the scene has founded, in order: what [`Act::GiveKey`] and the rest count.
     keys: Vec<lc_proto::FactionId>,
+    /// The scene's star, once staged: what [`Act::Write`] is about.
+    star: Option<lc_world::sky::StarId>,
 }
 
 impl Director {
     pub fn new(scenario: &'static Scenario) -> Self {
-        Self { scenario, started_t: None, next: 0, pov: None, keys: Vec::new() }
+        Self { scenario, started_t: None, next: 0, pov: None, keys: Vec::new(), star: None }
     }
 
     pub fn scenario(&self) -> &'static Scenario {
@@ -194,6 +196,7 @@ impl<J: Journal> Server<J> {
         }
 
         director.pov = Some(pov);
+        director.star = Some(system.star);
         director.started_t = Some(self.now_t());
         // The player's craft has been put somewhere it did not ask to be, which is a state it
         // cannot reach by folding anything it sent. Handed one, and it takes it.
@@ -231,9 +234,40 @@ impl<J: Journal> Server<J> {
                 let idem = lc_world::rng::hash(&[id.0 as u64, at as u64]).max(1);
                 Order::Say { to: None, aim: Aim::Omni, secrecy: Secrecy::Faction(key), body: text.to_string(), idem }
             }
+            Act::Write { name, text, key: k } => {
+                let Some(star) = director.star else { return true };
+                let scope = match k {
+                    Some(k) => match key(k) {
+                        Some(key) => lc_proto::Scope::Faction(key),
+                        None => return true,
+                    },
+                    None => lc_proto::Scope::Open,
+                };
+                let writing = match name {
+                    true => lc_proto::Writing::Name(text.to_string()),
+                    false => lc_proto::Writing::Note(text.to_string()),
+                };
+                let now_s = at as f64 * 1.0e-6;
+                self.aboard(id).knowledge.write(lc_world::knowledge::Subject::Star(star), writing, scope, now_s);
+                return true;
+            }
+            Act::Report { key: k } => {
+                let secrecy = match k {
+                    Some(k) => match key(k) {
+                        Some(key) => Secrecy::Faction(key),
+                        None => return true,
+                    },
+                    None => Secrecy::Open,
+                };
+                let idem = lc_world::rng::hash(&[id.0 as u64, at as u64, 0x5e]).max(1);
+                Order::SendReport { to: None, aim: Aim::Omni, secrecy, idem }
+            }
             _ => return false,
         };
         if let Ok(spoken) = self.compose(id, ShipId(id.0), &order, at) {
+            if let Some((to, seal, through)) = spoken.reported {
+                self.reported(id, to, seal, through);
+            }
             let _ = self.put_on_air(
                 id, at, spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, &spoken.beam, true, spoken.said, events,
             );
@@ -310,7 +344,7 @@ impl<J: Journal> Server<J> {
                 self.pursuits.remove(&id);
                 None
             }
-            Act::Vent(_) | Act::Found { .. } | Act::GiveKey { .. } | Act::Speak { .. } => None,
+            Act::Vent(_) | Act::Found { .. } | Act::GiveKey { .. } | Act::Speak { .. } | Act::Write { .. } | Act::Report { .. } => None,
         };
         if let Some(change) = change {
             let event = motion::Event { ship: motion::ShipId(id.0), at_t: now_s, change };
@@ -1025,7 +1059,7 @@ mod tests {
     async fn the_faction_scenes_leave_the_player_holding_what_the_story_says() {
         for (scene, held) in [(&lc_world::scenario::WAKE, 2), (&lc_world::scenario::SCHISM, 3)] {
             let (mut server, mut wire, _, pov) = staged(scene).expect("the sample sky has Sol");
-            let until = server.now_t() + 14 * 3_600 * 1_000_000;
+            let until = server.now_t() + 17 * 3_600 * 1_000_000;
             while server.now_t() < until {
                 server.tick(&mut wire).await.unwrap();
             }
@@ -1035,6 +1069,14 @@ mod tests {
             let shrike = CraftId(lc_world::scenario::BASE_ID + 2);
             let loyal = mine.iter().find(|f| f.generation() == 2 && f.founder == ShipId(lc_world::scenario::BASE_ID)).unwrap();
             assert!(!server.factions.holds(shrike, loyal.key, now), "{}: Shrike was handed Osprey's new key", scene.name);
+            if scene.name == "wake" {
+                let star = server.fleet.get(pov).and_then(|c| c.system.as_ref()).map(|s| s.star).unwrap();
+                let knowledge = &server.aboard(pov).knowledge;
+                let sol = lc_world::knowledge::Subject::Star(star);
+                assert_eq!(knowledge.name_of(sol).as_deref(), Some("Hearth"), "Osprey's name for the star, under the new key");
+                let notes = knowledge.file(sol).map(|f| f.thread().ordered().len()).unwrap_or(0);
+                assert_eq!(notes, 3, "the name and both notes");
+            }
         }
     }
 }

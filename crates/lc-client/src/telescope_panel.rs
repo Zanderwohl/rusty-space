@@ -352,12 +352,7 @@ fn details(
         ui.weak("Nothing detected under the crosshair yet.");
         return;
     };
-    for name in names(game, id) {
-        ui.strong(name);
-    }
-    if state.selected == Some(id) {
-        crate::thread_view::thread(ui, game, uplink, id.into(), draft, out);
-    }
+    crate::thread_view::naming_and_notes(ui, game, uplink, id.into(), state.selected == Some(id), draft, out);
     let Some(belief) = game.belief(id) else { return };
     let here = game.ship.motion.position_ly;
     ui.label(format!("Estimated range: {}", crate::range::short(Some(belief), here)));
@@ -366,20 +361,6 @@ fn details(
             ui.small(note);
         }
     });
-}
-
-/// The chosen name first, then every designation, each once.
-fn names(game: &Game, id: StarId) -> Vec<String> {
-    let mut names: Vec<String> = game.knowledge.given_name_of(id).into_iter().collect();
-    for naming in game.knowledge.file(id).map(|f| f.names().to_vec()).unwrap_or_default() {
-        if !names.contains(&naming.name) {
-            names.push(naming.name);
-        }
-    }
-    if names.is_empty() {
-        names.push(game.name_of(id));
-    }
-    names
 }
 
 fn curve(

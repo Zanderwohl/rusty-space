@@ -128,9 +128,6 @@ fn list(
     }
 
     egui::ScrollArea::vertical().max_height(LIST_HEIGHT).show(ui, |ui| {
-        if known.is_empty() {
-            ui.weak("Nothing known here yet. What the telescope finds appears in this list.");
-        }
         for belief in known {
             let target = held.target(belief.body).cloned();
             let on = *picked == Some(belief.body);
@@ -227,6 +224,7 @@ fn focused(
             // about the one body the craft is sitting inside.
             lc_world::navigation::Kind::Star => {
                 ui.heading(game.name_of(system.star));
+                crate::thread_view::naming_and_notes(ui, game, uplink, Subject::Star(system.star), true, draft, out);
                 let host = host(game, system, parked);
                 if host == lc_world::knowledge::Host::default() {
                     ui.weak("star — nothing measured");
@@ -237,7 +235,7 @@ fn focused(
                 let Target::Band(index) = entry.target else { return };
                 ui.heading(game.band_label(index));
                 let subject = Subject::Population { star: system.star, index: index as u32 };
-                crate::thread_view::thread(ui, game, uplink, subject, draft, out);
+                crate::thread_view::naming_and_notes(ui, game, uplink, subject, true, draft, out);
                 ui.weak(format!(
                     "{} — {} out, {} away",
                     entry.kind.label(),
@@ -390,7 +388,7 @@ fn details(
     if belief.given.is_some() {
         ui.weak(game.called(&BodyBelief { given: None, ..belief.clone() }));
     }
-    crate::thread_view::thread(ui, game, uplink, belief.subject, draft, out);
+    crate::thread_view::naming_and_notes(ui, game, uplink, belief.subject, true, draft, out);
     // The range its own orbit implies, never the one the arena holds. A body the list calls
     // "distance unknown" has no range to give, and printing the true one here said what the
     // craft has not measured.

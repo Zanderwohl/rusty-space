@@ -145,6 +145,11 @@ pub enum Act {
     GiveKey { key: usize, to: Option<Slot> },
     /// Say something in the `key`th key's chat.
     Speak { key: usize, text: &'static str },
+    /// Write about the scene's star: a name with `name`, else a note; under the `key`th key, or in
+    /// the open.
+    Write { name: bool, text: &'static str, key: Option<usize> },
+    /// Report everything new, to whoever hears it, under the `key`th key or in the open.
+    Report { key: Option<usize> },
 }
 
 /// A scene: who is in it, where they start, and what they do.
@@ -572,6 +577,11 @@ pub const WAKE: Scenario = Scenario {
         Beat { after_s: 10.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 1, text: "New key. Shrike has been talking to the Ceres yard." } },
         Beat { after_s: 11.0 * HOUR_S, actor: WREN, act: Act::Speak { key: 1, text: "Copy. Going quiet on the old one." } },
         Beat { after_s: 12.0 * HOUR_S, actor: SHRIKE, act: Act::Speak { key: 0, text: "Osprey? Wren? Anyone?" } },
+        Beat { after_s: 13.0 * HOUR_S, actor: OSPREY, act: Act::Write { name: true, text: "Hearth", key: Some(1) } },
+        Beat { after_s: 13.0 * HOUR_S, actor: OSPREY, act: Act::Write { name: false, text: "Muster at the L4 trojans. Ceres yard is compromised.", key: Some(1) } },
+        Beat { after_s: 13.5 * HOUR_S, actor: OSPREY, act: Act::Report { key: Some(1) } },
+        Beat { after_s: 14.0 * HOUR_S, actor: WREN, act: Act::Write { name: false, text: "Flare activity is up this week.", key: None } },
+        Beat { after_s: 14.5 * HOUR_S, actor: WREN, act: Act::Report { key: None } },
     ],
 };
 
