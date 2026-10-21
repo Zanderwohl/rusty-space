@@ -22,26 +22,31 @@ pub enum Content {
     Key,
     /// A faction's key, given: whoever can read it on landing holds it.
     Faction(i64),
+    /// A survey report, by how many stars it carried. The report itself is not kept here: what
+    /// it taught is in the receiver's knowledge.
+    Report(i32),
 }
 
 #[cfg(feature = "postgres")]
 impl Content {
-    /// The `content`, `body` and `faction` columns.
-    fn columns(&self) -> (&'static str, Option<&str>, Option<i64>) {
+    /// The `content`, `body`, `faction` and `stars` columns.
+    fn columns(&self) -> (&'static str, Option<&str>, Option<i64>, Option<i32>) {
         match self {
-            Content::Text(text) => ("text", Some(text), None),
-            Content::Ack => ("ack", None, None),
-            Content::Key => ("key", None, None),
-            Content::Faction(faction) => ("faction", None, Some(*faction)),
+            Content::Text(text) => ("text", Some(text), None, None),
+            Content::Ack => ("ack", None, None, None),
+            Content::Key => ("key", None, None, None),
+            Content::Faction(faction) => ("faction", None, Some(*faction), None),
+            Content::Report(stars) => ("report", None, None, Some(*stars)),
         }
     }
 
     /// The table's CHECK admits no other combination.
-    fn from_columns(content: &str, body: Option<String>, faction: Option<i64>) -> Self {
-        match (content, body, faction) {
-            ("text", Some(text), _) => Content::Text(text),
+    fn from_columns(content: &str, body: Option<String>, faction: Option<i64>, stars: Option<i32>) -> Self {
+        match (content, body, faction, stars) {
+            ("text", Some(text), ..) => Content::Text(text),
             ("key", ..) => Content::Key,
-            ("faction", _, Some(faction)) => Content::Faction(faction),
+            ("faction", _, Some(faction), _) => Content::Faction(faction),
+            ("report", .., Some(stars)) => Content::Report(stars),
             _ => Content::Ack,
         }
     }
@@ -58,6 +63,8 @@ pub struct Message {
     pub sealed: bool,
     /// The faction key it is sealed to, which files it in that faction's chat.
     pub under: Option<i64>,
+    /// What the sender called itself when it sent this.
+    pub claim: Option<String>,
     pub content: Content,
     /// Event ids of the addressee's messages the sender had received when this went out.
     pub acks: Vec<i64>,
@@ -119,12 +126,12 @@ pub const BACKLOG_LIMIT: i64 = 500;
 pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64, Error> {
     let mut written = 0;
     for m in messages {
-        let (content, body, faction) = m.content.columns();
+        let (content, body, faction, stars) = m.content.columns();
         written += client
             .execute(
                 "INSERT INTO lc_messages
-                     (event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     (event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction, stars, claim)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT (event_id) DO NOTHING",
                 &[
                     &m.event_id,
@@ -138,6 +145,8 @@ pub async fn save_messages(client: &Client, messages: &[Message]) -> Result<u64,
                     &m.idem,
                     &m.under,
                     &faction,
+                    &stars,
+                    &m.claim,
                 ],
             )
             .await?;
@@ -192,16 +201,17 @@ fn message_from(row: &tokio_postgres::Row) -> Message {
         sender: row.get(1),
         addressee: row.get(2),
         sealed: row.get(3),
-        content: Content::from_columns(row.get(4), row.get(5), row.get(10)),
+        content: Content::from_columns(row.get(4), row.get(5), row.get(10), row.get(11)),
         acks: row.get(6),
         sent_t: row.get(7),
         idem: row.get(8),
         under: row.get(9),
+        claim: row.get(12),
     }
 }
 
 #[cfg(feature = "postgres")]
-const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction";
+const COLUMNS: &str = "event_id, sender, addressee, sealed, content, body, acks, sent_t, idem, under, faction, stars, claim";
 
 /// The messages these events carried, in no order.
 #[cfg(feature = "postgres")]
@@ -249,7 +259,7 @@ pub async fn heard_by(
         )
         .await?;
     let mut out: Vec<(Message, i64, Option<f32>)> =
-        rows.iter().map(|row| (message_from(row), row.get(11), row.get(12))).collect();
+        rows.iter().map(|row| (message_from(row), row.get(13), row.get(14))).collect();
     out.reverse();
     Ok(out)
 }
@@ -352,7 +362,7 @@ pub async fn recent_heard(client: &Client, depth: i64) -> Result<Vec<(i64, i64, 
                         row_number() OVER (PARTITION BY r.observer, m.sender
                                            ORDER BY r.arrive_t DESC) AS n
                    FROM lc_message_receipts r JOIN lc_messages m USING (event_id)
-                  WHERE m.content NOT IN ('key', 'faction')
+                  WHERE m.content NOT IN ('key', 'faction', 'report')
              ) ranked
               WHERE n <= $1
               ORDER BY observer, sender, arrive_t",
@@ -397,6 +407,7 @@ mod tests {
             addressee: Some(to),
             sealed: false,
             under: None,
+            claim: None,
             content: Content::Text(body.into()),
             acks: Vec::new(),
             sent_t,
@@ -542,6 +553,19 @@ mod tests {
         clear(&client, (ada, bry)).await;
         let _ = client.execute("DELETE FROM lc_faction_keys WHERE faction = $1", &[&faction]).await;
         let _ = client.execute("DELETE FROM lc_factions WHERE faction = $1", &[&faction]).await;
+    }
+
+    #[tokio::test]
+    async fn a_report_line_and_a_claim_read_back() {
+        let Some(client) = store().await else { return };
+        let (ada, bry) = scratch(6);
+        clear(&client, (ada, bry)).await;
+        let report = Message { content: Content::Report(64), claim: Some("Kestrel".into()), ..message(950_001, ada, bry, "", 100) };
+        save_messages(&client, std::slice::from_ref(&report)).await.unwrap();
+        assert_eq!(sent_by(&client, ada).await.unwrap(), vec![report]);
+        let window = recent_heard(&client, 10).await.unwrap();
+        assert!(!window.iter().any(|(_, _, event)| *event == 950_001), "a report is not something to acknowledge");
+        clear(&client, (ada, bry)).await;
     }
 }
 

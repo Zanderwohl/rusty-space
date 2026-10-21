@@ -14,7 +14,7 @@ in `lc_client::{chat, radio_panel}`. Notes and chosen names are built as threads
 `lc_world::knowledge::thread`, `Order::Write`, and `lc_client::thread_view` in the telescope and
 system panels. Not built: assets and their minimum generation, which wait for assets; out-of-game
 invitations; relays, bundles and transmission cost, with no `transmit_gain` (11f); the subject card
-opened from the map and the sky, and report transcript lines (11g). Craft names are claims every
+opened from the map and the sky (11g). Report transcript lines are built. Craft names are claims every
 transmission carries (`lc_proto::Claim`, `lc_client::craft_names`).
 
 The rule that shapes all of it:
@@ -467,16 +467,21 @@ own reports under that key, which is how a thread grows across a faction by rela
 
 ## Transcripts
 
-A report is not a conversation, but it is an event in one. **As built**, the receiving client
-says so in a notification, not a transcript row:
+A report is not a conversation, but it is an event in one, and the log says so where the report
+is filed, as a message would be: the conversation with its sender, a faction's chat, Public, or
+Overheard.
 
-> **Kestrel:** told you about 64 stars
+> Kestrel told you about 64 stars.
 
-Nothing is written to `lc_messages`, and a test holds it there, for the reason
-[22-provenance.md](22-provenance.md#reports-on-the-air) gives: its content lives in the
-receiver's knowledge from the moment it lands. A transcript line — a row with a summary body and
-a flag, "relayed Osprey's survey of 12 stars" among them — is the plan once relays make it worth
-reading back, and is 11g's to build.
+Sealed to somebody else, it is "Kestrel sent a sealed report."; this ship's own reads "You sent a
+report." where it went. The transcript keeps a row for it — `content` `report`, with the number
+of star systems it carried — and never its contents, which live in the receiver's knowledge from
+the moment it lands.
+
+Every row also keeps what its sender called itself when it sent it, so a sign-in rebuilds the
+"changed name" lines where they were heard. Both survive a reconnection because both are rebuilt
+from what the shard kept, not remembered by the client. "Relayed Osprey's survey of 12 stars" is
+11f's to add.
 
 ## Open
 

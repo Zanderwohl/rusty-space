@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 40;
+pub const PROTOCOL_VERSION: u32 = 41;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1735,6 +1735,7 @@ mod tests {
                     arrive_t: Some(1_000_000),
                     strength: Some(0.25),
                     under: Some(FactionId(11)),
+                    claim: Some("Ada".into()),
                 }],
                 keys: vec![ShipId(7)],
             },

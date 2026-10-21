@@ -474,7 +474,7 @@ non-player craft to exist.
 
 ### 11g — Naming and notes, from anywhere
 
-**Status: partly built.** Notes and chosen names are threads (`lc_world::knowledge::thread`, `Order::Write`), scoped for me, public or to a faction, and read and written in the telescope and system panels. Knowledge format 14, report format 12, protocol 39. Craft name themselves in every transmission and `Presence` carries no name, with a borrowed name shown as a claimant; protocol 40. Not built: the subject card opened from a pick in the map or the sky, and report transcript lines.
+**Status: partly built.** Notes and chosen names are threads (`lc_world::knowledge::thread`, `Order::Write`), scoped for me, public or to a faction, and read and written in the telescope and system panels. Knowledge format 14, report format 12, protocol 39. Craft name themselves in every transmission and `Presence` carries no name, with a borrowed name shown as a claimant; protocol 40. Reports are transcript lines, and a sender's claim rides on every transcript row, so both survive a sign-in; schema step `0021_transcript`, protocol 41. Not built: the subject card opened from a pick in the map or the sky.
 
 **Before:** 11a; best after 11e, so notes can be shared.
 

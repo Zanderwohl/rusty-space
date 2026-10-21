@@ -33,13 +33,6 @@ fn heard_claim(
     }
 }
 
-fn stars_word(n: usize) -> &'static str {
-    match n {
-        1 => "star",
-        _ => "stars",
-    }
-}
-
 /// Drive events remembered per craft. Only the latest before the instant drawn matters, and
 /// the instant drawn is never more than a tick or two behind the newest.
 const REMEMBERED_DRIVES: usize = 16;
@@ -102,6 +95,8 @@ pub(super) fn fold(
                     // News to the transcript, which marks a line delivered, and to nobody
                     // reading the box.
                     (Body::Ack, _) => None,
+                    // Never a message's body: a report is a report sighting, below.
+                    (Body::Report { .. }, _) => None,
                     (Body::Faction(given), crate::chat::Filing::Conversation) => {
                         Some(format!("{who}: gave you the key to {} (gen {})", given.name, given.generation()))
                     }
@@ -156,17 +151,16 @@ pub(super) fn fold(
                     uplink.chat.notice(from, reported.to, reported.under, text, arrived_s, Some(sighting.event_id));
                 };
                 let Some(body) = reported.body.as_deref() else {
-                    log(format!("{who} sent a sealed report."));
+                    log(crate::chat::report_line(&who, None, false));
                     ui.0.heard(from, format!("{who} sent a sealed report"), arrived_s);
                     continue;
                 };
                 // Only counted here. The shard folds it into this craft's knowledge when its light
                 // lands, signed in or not, and what it taught arrives in the next `Learned`.
                 let stars = lc_proto::decode_report::<lc_world::knowledge::Report>(body).map(|r| r.stars());
-                match (&stars, to_me) {
-                    (Ok(n), true) => log(format!("{who} told you about {n} {}.", stars_word(*n))),
-                    (Ok(n), false) => log(format!("{who} reported on {n} {}.", stars_word(*n))),
-                    (Err(_), _) => log(format!("{who} sent a report that made no sense.")),
+                match &stars {
+                    Ok(n) => log(crate::chat::report_line(&who, Some(*n as u32), to_me)),
+                    Err(_) => log(format!("{who} sent a report that made no sense.")),
                 }
                 let notice = match stars {
                     Ok(n) => format!("{who}: told you about {n} stars"),

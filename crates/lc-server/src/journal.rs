@@ -245,7 +245,7 @@ impl Journal for Memory {
             else {
                 continue;
             };
-            if matches!(message.content, lc_store::chat::Content::Key | lc_store::chat::Content::Faction(_)) {
+            if matches!(message.content, lc_store::chat::Content::Key | lc_store::chat::Content::Faction(_) | lc_store::chat::Content::Report(_)) {
                 continue;
             }
             out.push((receipt.observer, message.sender, receipt.event_id, receipt.arrive_t));

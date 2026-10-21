@@ -95,6 +95,9 @@ pub enum Body {
     Unreadable,
     /// A faction's key, given. Appended last.
     Faction(Faction),
+    /// A survey report, in a transcript: how many stars it carried, or `None` sealed to somebody
+    /// else. Appended last.
+    Report { stars: Option<u32> },
 }
 
 impl Body {
@@ -219,4 +222,6 @@ pub struct Said {
     pub strength: Option<f32>,
     /// The faction key it was sealed to: a line in that faction's chat. Appended last.
     pub under: Option<FactionId>,
+    /// What the sender called itself when it sent this. Appended last.
+    pub claim: Option<String>,
 }

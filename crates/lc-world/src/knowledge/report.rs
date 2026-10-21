@@ -181,9 +181,10 @@ impl Report {
             .fold(None, |best: Option<f64>, t| Some(best.map_or(t, |b| b.max(t))))
     }
 
-    /// Systems it carries, which is what a transcript line counts.
+    /// Star systems it carries, which is what a transcript line counts. Not craft: a report also
+    /// carries what is said about craft, its sender's own name among it.
     pub fn stars(&self) -> usize {
-        self.entries.len()
+        self.entries.iter().filter(|e| matches!(e.system, Subject::Star(_))).count()
     }
 }
 

@@ -457,7 +457,31 @@ impl Chat {
             faction.lines.clear();
         }
         self.keys = keys.into_iter().map(|k| k.0).collect();
+        // What each sender last called itself, so a change is logged where it was heard, as it
+        // was when it happened.
+        let mut claims: BTreeMap<i64, String> = BTreeMap::new();
         for said in messages {
+            let heard_s = said.arrive_t.unwrap_or(said.sent_t) as f64 * 1.0e-6;
+            let to = said.to.map(|t| t.0);
+            if let (false, Some(from), Some(claim)) = (said.mine, said.with, said.claim.clone()) {
+                let before = claims.insert(from.0, claim.clone());
+                if before.as_ref() != Some(&claim) {
+                    let called = before.unwrap_or_else(|| crate::craft_names::unnamed(from));
+                    self.notice(from, to, said.under, format!("{called} changed name to {claim}."), heard_s, None);
+                }
+            }
+            if let Body::Report { stars } = said.body {
+                match (said.mine, said.with) {
+                    (true, _) => self.notice_sent(said.to, said.under, "You sent a report.".into(), heard_s, said.event_id),
+                    (false, Some(from)) => {
+                        let to_me = to.is_some() && self.filing(to) == Filing::Conversation;
+                        let text = report_line(&said.with_name, stars, to_me);
+                        self.notice(from, to, said.under, text, heard_s, Some(said.event_id));
+                    }
+                    (false, None) => {}
+                }
+                continue;
+            }
             if let Body::Faction(faction) = &said.body {
                 self.hold(faction.clone());
             }
@@ -712,6 +736,17 @@ impl Chat {
             strength: None,
             notice: false,
         });
+    }
+}
+
+/// What the log says of a report heard from `who`: how many stars it told of, or that it was
+/// sealed to somebody else.
+pub fn report_line(who: &str, stars: Option<u32>, to_me: bool) -> String {
+    let stars_word = |n: u32| if n == 1 { "star" } else { "stars" };
+    match (stars, to_me) {
+        (None, _) => format!("{who} sent a sealed report."),
+        (Some(n), true) => format!("{who} told you about {n} {}.", stars_word(n)),
+        (Some(n), false) => format!("{who} reported on {n} {}.", stars_word(n)),
     }
 }
 
@@ -1165,6 +1200,7 @@ mod tests {
                 sent_t: 1_000_000,
                 arrive_t: Some(4_000_000),
                 strength: Some(4.0),
+                claim: None,
             }],
             vec![ShipId(7)],
         );
@@ -1196,6 +1232,7 @@ mod tests {
                 sent_t: 1_000_000,
                 arrive_t: Some(4_000_000),
                 strength: Some(100.0),
+                claim: None,
             }],
             Vec::new(),
         );
@@ -1222,6 +1259,7 @@ mod tests {
             sent_t,
             arrive_t: None,
             strength: None,
+            claim: None,
         };
         chat.restore(vec![said(1, 1_000_000), said(2, 9_000_000)], Vec::new());
         let conversation = chat.get(ShipId(7)).unwrap();
@@ -1310,6 +1348,7 @@ mod tests {
             arrive_t: Some(2_000_000),
             strength: Some(1.0),
             under: Some(FactionId(5)),
+            claim: None,
         };
         chat.restore(vec![heard], vec![]);
         let wake = chat.faction(FactionId(5)).expect("still held");
@@ -1341,4 +1380,41 @@ mod tests {
         let newer: Vec<(i64, Option<ShipId>)> = chat.newer(FactionId(1)).into_iter().map(|(k, c)| (k.0, c.founder)).collect();
         assert_eq!(newer, vec![(4, Some(ShipId(1))), (3, Some(ShipId(9)))], "2 is replaced by 4, so it is no tip");
     }
+
+    /// What a sign-in hands back makes the same lines the live path made: a sender's change of
+    /// name where it was heard, and a report as the fact of it.
+    #[test]
+    fn a_restored_transcript_says_again_who_renamed_and_who_reported() {
+        let mut chat = Chat::default();
+        chat.i_am(ShipId(1));
+        let said = |event_id: i64, arrive_t: i64, claim: &str, body: Body| Said {
+            event_id,
+            idem: event_id as u64,
+            with: Some(ShipId(2)),
+            to: Some(ShipId(1)),
+            with_name: "Vela".into(),
+            mine: false,
+            sealed: false,
+            body,
+            acks: vec![],
+            sent_t: arrive_t - 1,
+            arrive_t: Some(arrive_t),
+            strength: Some(1.0),
+            under: None,
+            claim: Some(claim.into()),
+        };
+        chat.restore(
+            vec![
+                said(10, 100, "Wren", text("hello")),
+                said(11, 200, "Vela", text("new name")),
+                said(12, 300, "Vela", Body::Report { stars: Some(3) }),
+            ],
+            vec![],
+        );
+        let notices: Vec<String> = chat.get(ShipId(2)).unwrap().lines.iter().filter(|l| l.notice).map(|l| format!("{:?}", l.body)).collect();
+        assert_eq!(notices.len(), 3, "{notices:?}");
+        assert!(notices[1].contains("Wren changed name to Vela."), "{notices:?}");
+        assert!(notices[2].contains("Vela told you about 3 stars."), "{notices:?}");
+    }
 }
+

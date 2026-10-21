@@ -61,6 +61,8 @@ pub(crate) struct Utterance {
     under: Option<FactionId>,
     content: Content,
     acks: Vec<i64>,
+    /// What the sender called itself when it sent this, for the transcript.
+    claim: Option<String>,
 }
 
 #[cfg(feature = "storage")]
@@ -74,6 +76,7 @@ impl Utterance {
             under: message.under.map(FactionId),
             content: message.content.clone(),
             acks: message.acks.clone(),
+            claim: message.claim.clone(),
         }
     }
 }
@@ -173,7 +176,7 @@ impl<J: Journal> Server<J> {
                     Some(key) => Seal::Faction(key),
                     None => Seal::Plain,
                 };
-                let (report, through) = self.report_for(id, *to, seal, at as f64 * 1.0e-6)?;
+                let (report, through, stars) = self.report_for(id, *to, seal, at as f64 * 1.0e-6)?;
                 let reported = Reported {
                     to: to.map(|t| t.0),
                     beamed: !beam.is_omni(),
@@ -188,10 +191,18 @@ impl<J: Journal> Server<J> {
                     kind: lc_proto::kind::REPORT,
                     payload: serde_json::to_string(&reported).unwrap_or_else(|_| "{}".into()),
                     beam,
-                    // No utterance: a report is not a conversation. Nothing files it in a
-                    // transcript, nothing acknowledges it, and what it does at the far end is
-                    // fold into what that craft knows. See `lightcone/docs/22-provenance.md`.
-                    said: None,
+                    // In the transcript as a line saying it happened, never what it said: what it
+                    // does at the far end is fold into what that craft knows, and nothing
+                    // acknowledges it. See `lightcone/docs/23-factions.md` §Transcripts.
+                    said: Some(Utterance {
+                        to: *to,
+                        idem: *idem,
+                        sealed,
+                        under,
+                        content: Content::Report(stars.min(i32::MAX as usize) as i32),
+                        acks: Vec::new(),
+                        claim: self.claim_of(id).map(|c| c.name),
+                    }),
                     reported: Some((*to, seal, through)),
                 })
             }
@@ -291,7 +302,7 @@ impl<J: Journal> Server<J> {
             },
             payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
             beam,
-            said: Some(Utterance { to, idem, sealed, under, content, acks }),
+            said: Some(Utterance { to, idem, sealed, under, content, acks, claim: self.claim_of(id).map(|c| c.name) }),
             reported: None,
         })
     }
@@ -304,6 +315,7 @@ impl<J: Journal> Server<J> {
             addressee: said.to.map(|t| t.0),
             sealed: said.sealed,
             under: said.under.map(|key| key.0),
+            claim: said.claim.clone(),
             content: said.content.clone(),
             acks: said.acks.clone(),
             sent_t: at,
@@ -336,6 +348,8 @@ impl<J: Journal> Server<J> {
                 .entry(ShipId(sender.0))
                 .and_modify(|learned| *learned = (*learned).min(arrive_t))
                 .or_insert(arrive_t);
+        } else if let Content::Report(_) = said.content {
+            // A receipt and nothing more: a report is not something anybody acknowledges.
         } else if let Content::Faction(key) = said.content {
             // The same bargain as a ship key: whoever can read it holds it.
             if readable(&self.factions, observer, said.to, said.sealed, said.under, arrive_t) {
@@ -670,6 +684,7 @@ impl<J: Journal> Server<J> {
                 // A sender never hears its own signal, so there is no reading to have.
                 strength: None,
                 under: m.under.map(FactionId),
+                claim: m.claim,
             });
         }
         for (m, arrive_t, strength) in transcript.heard {
@@ -695,6 +710,7 @@ impl<J: Journal> Server<J> {
                 arrive_t: Some(arrive_t),
                 strength,
                 under,
+                claim: m.claim,
             });
         }
         // By when this ship knew of each, which for a conversation across light delay is not
@@ -775,6 +791,8 @@ fn readable(
 fn heard_as(content: &Content, readable: bool, factions: &crate::faction::Factions) -> Body {
     match content {
         Content::Text(_) | Content::Faction(_) if !readable => Body::Unreadable,
+        Content::Report(_) if !readable => Body::Report { stars: None },
+        Content::Report(stars) => Body::Report { stars: Some((*stars).max(0) as u32) },
         Content::Text(text) => Body::Text(text.clone()),
         Content::Ack => Body::Ack,
         Content::Key => Body::Key,
@@ -956,10 +974,11 @@ mod tests {
         assert!(!server.knowledge_of(ShipId(3)).is_some_and(|k| k.knows(secret)), "the eavesdropper does not");
     }
 
-    /// A report is not a conversation: nothing files one in a transcript, so a ship signing in
-    /// again is not handed everything anybody ever surveyed at it.
+    /// A report is in the transcript as the fact of it — who, when, how many stars — and never
+    /// what it said, so a ship signing in again is told that it was reported to, not handed
+    /// everything anybody ever surveyed at it.
     #[tokio::test]
-    async fn a_report_is_not_filed_as_a_conversation() {
+    async fn a_report_is_in_the_transcript_as_a_line_and_not_its_contents() {
         let mut wire = Loopback::new();
         let mut server = Server::new(Memory::default(), 0, 1);
         let (ada, bry) = (ClientId(1), ClientId(2));
@@ -970,32 +989,28 @@ mod tests {
             0.0,
         );
         teach(&mut server, 1, 1);
-        wire.client_says(
-            ada,
-            Inbound::Act(Intent {
-                ship_id: ShipId(1),
-                order: Order::SendReport {
-                    to: Some(ShipId(2)),
-                    aim: Aim::Omni,
-                    secrecy: Secrecy::Open,
-                            idem: next_key(),
-                },
-                issued_at_client_t: 0,
-            }),
-        );
+        tell(&mut wire, ada, 1, Order::Write {
+            subject: lc_proto::Subject::Craft(1),
+            writing: lc_proto::Writing::Name("Ada".into()),
+            scope: lc_proto::Scope::Open,
+        }, 0);
         server.tick(&mut wire).await.unwrap();
+        let report = Order::SendReport { to: Some(ShipId(2)), aim: Aim::Omni, secrecy: Secrecy::Open, idem: next_key() };
+        tell(&mut wire, ada, 1, report, server.now_t());
+        let until = server.now_t() + TWO_LIGHT_HOURS as i64 + TICK_US;
+        run_until(&mut server, &mut wire, until).await;
         server.write_conversations().await.unwrap();
-        let backlog = server.backlog(ShipId(1), server.now_t()).await.unwrap();
-        match backlog {
-            Some(Outbound::Backlog { messages, .. }) => {
-                assert!(
-                    messages.is_empty(),
-                    "a survey is not something anybody said"
-                )
-            }
-            None => {}
+        let transcript = |messages: Option<Outbound>| match messages {
+            Some(Outbound::Backlog { messages, .. }) => messages,
             other => panic!("{other:?}"),
-        }
+        };
+        let sent = transcript(server.backlog(ShipId(1), server.now_t()).await.unwrap());
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].body, Body::Report { stars: Some(1) });
+        let heard = transcript(server.backlog(ShipId(2), server.now_t()).await.unwrap());
+        let line = heard.iter().find(|m| matches!(m.body, Body::Report { .. })).expect("the report, heard");
+        assert_eq!(line.body, Body::Report { stars: Some(1) });
+        assert_eq!(line.claim.as_deref(), Some("Ada"), "and what its sender called itself");
     }
 
     /// A report is written by the shard from what the craft holds, so a craft that has

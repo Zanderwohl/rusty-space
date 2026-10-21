@@ -290,7 +290,7 @@ behaves.
 |---|---|---|
 | event kind | `MESSAGE` | `REPORT` |
 | what it is | something somebody said | what somebody has learned |
-| filed as | a line in a transcript, kept for ever | records folded into the receiver's knowledge |
+| filed as | a line in a transcript, kept for ever | records folded into the receiver's knowledge, and a line in the transcript saying so |
 | acknowledged | yes, and automatically if asked | never — two craft reporting to each other would trade surveys for ever |
 | sealed | to one addressee | the same rule, the same keyring |
 | overheard | an eavesdropper sees that something was sent | an eavesdropper **reads an open report**, which is why sealing one is worth the key |
@@ -324,11 +324,12 @@ is a player's decision, made by sending again after marking the recipient as nee
 its own could report anything it liked. A craft with nothing new to say is refused with
 `NothingNew`, which is the correct amount of radio traffic for having learned nothing.
 
-**The report itself is not filed as a conversation**, and no transcript row is written for it:
-the receiving client says in a notification who told it about how many stars. A transcript is
-read long after everything in it has arrived; a report is folded the moment it lands and its
-content lives in the receiver's knowledge from then on. Putting surveys in `lc_messages` would
-hand every sign-in a backlog of somebody else's astrometry.
+**The report itself is not filed as a conversation.** Its transcript row says only that it went:
+who, when, sealed or not, and how many star systems it carried. A transcript is read long after
+everything in it has arrived; a report is folded the moment it lands and its content lives in the
+receiver's knowledge from then on. Putting the surveys themselves in `lc_messages` would hand
+every sign-in a backlog of somebody else's astrometry. See
+[23-factions.md](23-factions.md#transcripts).
 
 A report lands on the shard, whether or not anybody is signed in to the craft it lands on, and
 is written down with the rest of that craft's knowledge. **A report still in flight when a shard

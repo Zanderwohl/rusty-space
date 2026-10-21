@@ -563,14 +563,14 @@ impl<J: Journal> Server<J> {
     /// Shrunk until it fits [`lc_proto::REPORT_LIMIT`]: [`ENTRIES_PER_REPORT`] counts systems,
     /// and a system that does not fit alone — the home system does not — is told a share of its
     /// subjects at a time.
-    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, seal: Seal, at_s: f64) -> Result<(String, Mark), Refusal> {
+    pub(crate) fn report_for(&self, id: CraftId, to: Option<ShipId>, seal: Seal, at_s: f64) -> Result<(String, Mark, usize), Refusal> {
         let aboard = self.instruments.aboard.get(&id).ok_or(Refusal::NothingNew)?;
         let since = aboard.reporting.since(told(to, seal));
         let knowledge = &aboard.knowledge;
         let fits = |(report, through): (Report, Option<Mark>)| {
             let through = through.ok_or(Refusal::NothingNew)?;
             let body = lc_proto::encode_report(&report);
-            Ok((body.len() <= lc_proto::REPORT_LIMIT).then_some((body, through)))
+            Ok((body.len() <= lc_proto::REPORT_LIMIT).then_some((body, through, report.stars())))
         };
         let mut limit = ENTRIES_PER_REPORT;
         while limit > 0 {
@@ -1261,7 +1261,7 @@ mod tests {
         let mut told = std::collections::BTreeSet::new();
         let mut reports = 0;
         loop {
-            let (body, through) = match server.report_for(CraftId(far.0), Some(near), Seal::Plain, now_s) {
+            let (body, through, _) = match server.report_for(CraftId(far.0), Some(near), Seal::Plain, now_s) {
                 Ok(sent) => sent,
                 Err(Refusal::NothingNew) => break,
                 Err(other) => panic!("refused {other:?} after {reports} reports"),

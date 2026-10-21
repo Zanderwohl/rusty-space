@@ -548,6 +548,8 @@ fn overheard_log(
             ui.horizontal_wrapped(|ui| {
                 ui.add_space(12.0);
                 match &loose.line.body {
+                    // A report is logged as a notice, which is drawn above.
+                    Body::Report { .. } => {}
                     Body::Text(body) => {
                         ui.label(egui::RichText::new(body).font(face.clone()));
                     }
@@ -742,6 +744,8 @@ fn body_of(ui: &mut egui::Ui, line: &crate::chat::Line, mine: bool, to: Option<&
     let face = logged(ui);
     let said = |text: String| egui::RichText::new(text).font(face.clone());
     match &line.body {
+        // Logged as a notice, never as a line somebody said.
+        Body::Report { .. } => ui.weak(""),
         Body::Key if mine => ui.label(
             said(match to {
                 Some(to) => format!("sent key to {to}"),
