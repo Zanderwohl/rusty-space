@@ -519,14 +519,7 @@ fn draw(
         .collect();
     let frame = Frame::with(safe, &occupied, ARROW_PX);
 
-    // Foreground, not background. Panels paint in `Order::Background` and floating notices in
-    // `Order::Middle`, so a mark on either of those layers is covered by whatever the interface
-    // happens to have open — which is how the first version lost its edge arrow under a notice
-    // box. Keeping the marks inside `available` is what stops this from drawing over a panel.
-    let painter = context.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
-        egui::Id::new("lc_pick_marks"),
-    ));
+    let painter = context.layer_painter(marks_layer(context));
 
     // Contacts first and faint, so the one under the cursor or selected draws over them.
     for mark in &picked.contacts {
@@ -541,6 +534,26 @@ fn draw(
     {
         paint(&painter, mark, Vec2::ZERO, viewport, frame, color, bracketed);
     }
+}
+
+/// The layer the marks paint on: under every window and notice, which [`occupied_rects`] already
+/// keeps arrows and labels clear of.
+///
+/// Registered as an area each frame because egui draws a bare `layer_painter` layer after every
+/// area of its order, and in hash order among other bare layers; an area is drawn first in
+/// `Order::Background`, under the panels' own layer and everything above it.
+fn marks_layer(context: &egui::Context) -> egui::LayerId {
+    let id = marks_id();
+    egui::Area::new(id)
+        .order(egui::Order::Background)
+        .interactable(false)
+        .fixed_pos(egui::Pos2::ZERO)
+        .show(context, |_| {});
+    egui::LayerId::new(egui::Order::Background, id)
+}
+
+fn marks_id() -> egui::Id {
+    egui::Id::new("lc_pick_marks")
 }
 
 pub(crate) const HOVER: egui::Color32 = egui::Color32::from_rgb(150, 170, 190);
@@ -569,7 +582,7 @@ pub(crate) fn occupied_rects(context: &egui::Context, except: &[egui::Id]) -> Ve
             .visible_layer_ids()
             .iter()
             .filter(|layer| layer.order < egui::Order::Foreground)
-            .filter(|layer| !except.contains(&layer.id))
+            .filter(|layer| layer.id != marks_id() && !except.contains(&layer.id))
             .filter_map(|layer| memory.area_rect(layer.id))
             .collect()
     })
