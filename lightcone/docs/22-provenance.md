@@ -9,8 +9,9 @@ pile, and another player folding a different pile is not wrong.
 **Status: partly built.** Records, beliefs, astrometry, survey, names and reports are
 `lc_world::knowledge` (§What is built lists its modules), run on the shard in `lc_server::instruments`, and reach the client as
 `Outbound::Learned` and `Logged`. Not built: navigation on beliefs, since `Order::Cross` still names
-a catalog `star` and `Course` a body by name, and instruments that are not the ship,
-`survey::Optics::joined` being called only by a test.
+a catalog `star` and `Course` a body by name; instruments that are not the ship,
+`survey::Optics::joined` being called only by a test; and where craft are (11h), of which only
+names and notes are kept today.
 
 [05-observation.md](05-observation.md) is what an instrument measures.
 [03-world-model.md](03-world-model.md) names the "known-world snapshot" and leaves it at that.
@@ -335,6 +336,39 @@ A report lands on the shard, whether or not anybody is signed in to the craft it
 is written down with the rest of that craft's knowledge. **A report still in flight when a shard
 stops is replayed on boot** from the journal's deliveries, which are kept until their light has
 passed everyone, so it lands on time on the shard that comes back.
+
+## Where craft are
+
+**Not built: this is phase 11h.** A craft is a subject like a star, and where it has been is
+records like any other, kept for ever and carried in reports.
+
+Every craft holds a **complete roster** of the craft it has ever detected. Nothing on it is
+forgotten when a craft goes out of sight; that is when the record starts to matter.
+
+The records are shaped by what is cheap to know and what is not. **Which system a craft is in is
+the primary record**: a craft, a system (or the space between them, with a region), and the span
+of time it is known to have been there. Inside it, each **sighting** is a sub-record — when, where,
+how well, and the list of witnesses, ships and drones, that claim the same sighting. Two
+witnesses reporting one moment of one craft is one sighting held by two, as a relayed name is one
+name held by several.
+
+A sighting is one of three kinds:
+
+| kind | made by | says |
+|---|---|---|
+| **seen** | detecting its light ([05-observation.md](05-observation.md#seeing-other-craft)) | where it was and how it was moving, as the light left |
+| **heard** | a transmission or burn landing from out of sight | a bearing and a strength; which system, when the bearing settles it |
+| **stated** | the craft itself saying where it is ([23-factions.md](23-factions.md#sharing-where-you-are)) | whatever it chose to say, which may be a lie |
+
+A craft's **last known place** is folded from these as a star's belief is: the best sighting,
+carried forward on the motion last seen, its uncertainty growing with age, with the witness and
+hops of each kept so a player can see that it is Osprey's fix, two weeks old, relayed by Wren.
+Stated places are weighed as what they are: a craft's word about itself.
+
+A report carries a craft's records like a star's, under the report's seal, so sending one under a
+faction key tells allies where everybody you have seen was. Aiming at a last known place needs no
+help from the shard: the client extrapolates the belief across the light time and sends
+`Aim::Bearing`, which lands if the belief was right and misses if it was not.
 
 ## What is built
 

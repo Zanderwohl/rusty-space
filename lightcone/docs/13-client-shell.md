@@ -184,7 +184,10 @@ the same menu holds sending this ship's personal key, sending a faction key, and
 survey, each sealed or open as the encrypt box says, but for the personal key, which is always
 open. Every menu also leads to renaming this ship. A craft is listed by what this ship knows it
 as; one borrowing a name another craft holds reads "Wren (claimant 3fa1)", with a link to the Wren
-it is not, and a craft claiming a new name leaves a line in the log where its message lands. See [23-factions.md](23-factions.md).
+it is not, and a craft claiming a new name leaves a line in the log where its message lands.
+The menu of a conversation and of a faction's chat will also hold **share location** (11h), and
+the aim row a **beam last known** for a craft out of sight, aimed at where this ship believes it
+is. See [23-factions.md](23-factions.md).
 
 A message addressed to one craft is not public however openly it was sent. Anyone in range can
 read it, but it was still somebody's mail, and being in earshot of it is what Overheard is.

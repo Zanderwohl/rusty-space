@@ -74,6 +74,18 @@ A faction's chat is every message sealed to its key, shouted or beamed like any 
 There is no members list to show, because there is no membership. What a player sees is who has
 spoken under the key, and when their words landed.
 
+### Sharing where you are
+
+**Not built: this is phase 11h.** A craft says where it is only on purpose. Beside the encrypt
+box, in the three-bar menu of a conversation and of a faction's chat, is **share location**: while
+it is on, every transmission in that chat carries a stated sighting of the sender — its system,
+position and motion as the light left — sealed as the transmission is, so only the addressee or
+the key's holders read it. Off by default; a craft that never ticks it is known only by what others
+see and hear of it.
+
+A stated place is a claim. The shard does not check it, a traitor can state anything, and the
+receiver's belief weighs it as the craft's own word.
+
 ## Membership is not exclusive
 
 Nothing about holding one key stops a craft holding another. A craft can belong to as many
@@ -206,6 +218,11 @@ by every member that receives it, subject to three rules, all standard:
 
 Flooding needs no routes at all, which is why it is the default: it works on a network nobody
 has a current map of.
+
+**Forwarding is aimed where it can be.** Re-broadcasting everything in every direction is loud,
+costly and visible; a relay that holds a last known place for the craft a bundle is going toward
+beams it there instead, down the believed bearing ([22-provenance.md](22-provenance.md#where-craft-are)).
+An omnidirectional shout is for when nobody's place is known.
 
 **To one craft: routed.** An addressed bundle goes toward its destination by whatever route
 looks cheapest. Each craft keeps a table of `destination -> (next hop, cost, as of)`:

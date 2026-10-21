@@ -15,7 +15,8 @@ detector families, self-emission, survey regimes) and `lc_world::knowledge` (see
 `ACK_DEPTH` acknowledgments, message keys, auto-ack and the beam flag — is `lc_world::signal`,
 `lc_proto::radio` and `lc_server::radio`. Not built: FFT and Lomb-Scargle, spectroscopy,
 interferometry, and the radiometer and sky-noise model, so every craft inside a beam hears it
-whatever the distance, at a fixed 10 GHz (`Transmitter::SHIP`). The flicker knee is read from
+whatever the distance, at a fixed 10 GHz (`Transmitter::SHIP`); and seeing other craft by what
+reaches the observer (11h), which is still the 1.6 ly shell. The flicker knee is read from
 lagged autocovariance, not a fitted power spectrum.
 
 ## Photometry
@@ -247,6 +248,38 @@ Same light, dispersed. Gives effective temperature, composition of any transitin
 atmosphere, and radial velocity via Doppler shift. Cost scales the same way but needs more
 photons per resolution element, so it is roughly `R` times more expensive than photometry at
 resolving power `R`. Treat as photometry with a large constant factor.
+
+## Seeing other craft
+
+**Not built: this is phase 11h.** Today a craft is seen whole — position, motion, hull — by
+anything sharing its system's 1.6 ly shell, and not at all beyond it (`lc_server::chase::in_sight`).
+That is far too generous inside the shell and says nothing about why anybody would build a bigger
+telescope.
+
+Instead a craft is detected by **what reaches the observer from it**, against the same sensitivity
+as everything else above:
+
+| what reaches you | from | gives |
+|---|---|---|
+| reflected starlight | its cross-section and albedo, lit by the flux where it is | a sighting: bearing, flux |
+| its field's glow | the field's area and temperature, `sigma T^4`; a collapse spike far brighter | a sighting |
+| a burn or an emit | the drive's or the apertures' power, already an event | a sighting, already delivered |
+| a transmission | what it sent, already an event above the noise floor | a bearing, and who sent it |
+
+A craft whose reflected or thermal flux at the observer clears the instrument's limit for the
+integration it has is **seen**; one whose light does not, but whose transmissions or burns arrive,
+is only **heard** — a bearing and a strength, no place. The limit is the photometry's: aperture,
+throughput and integration time. So a cold, dark, quiet hull a few AU off is invisible to a
+starting ship, a hot one or a burning one is visible across a system, and **seeing further is a
+matter of building**: a swarm with a joined aperture, or an interferometer, raises the limit, which
+is the reason to have one.
+
+What a sighting gives inside the limit is, for now, what a contact gives today — position and
+motion as the light left — until range has to be earned the way a star's is (parallax across a
+baseline, or two witnesses). That refinement is open.
+
+Every craft ever detected is remembered, with where and by whom: see
+[22-provenance.md](22-provenance.md#where-craft-are).
 
 ## Radio
 
@@ -531,6 +564,10 @@ without asking. Anything that changes rules — a detection that unlocks knowled
 position — is confirmed server-side from the same deterministic functions.
 
 ## Open
+
+- **The anchor for seeing craft**: one sentence fixing how far a starting ship sees a standard hull
+  lit by a Sun-like star, from which the reflected and thermal limits follow. Chosen when 11h
+  builds it.
 
 - Noise model beyond photon statistics: detector read noise, zodiacal background, and
   scintillation if any instrument is ever atmospheric. Photon noise alone makes large

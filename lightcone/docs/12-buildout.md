@@ -329,14 +329,16 @@ added to it.
 
 ## Phase 11 — What a craft knows
 
-Knowledge, factions and relays. Seven steps, in this order because each changes something the
+Knowledge, factions and relays. Eight steps, in this order because each changes something the
 next one stores or sends:
 
 ```
   11a subjects ─> 11b server instruments ─> 11c persistence ─┬─> 11d conclusions
-                                                             └─> 11e factions ─> 11f relays
+                                                             └─> 11e factions ─> 11h where craft are ─> 11f relays
                                            11g naming and notes from the map (after 11a; best after 11e)
 ```
+
+11h is lettered last because it was added last; it comes before 11f, whose routing needs it.
 
 The reporting, naming and survey machinery these build on already exists and is described in
 [22-provenance.md](22-provenance.md).
@@ -454,7 +456,7 @@ the old key until the new one reaches them.
 
 **Status: not started.** A transmission costs nothing, and a report reaches only who hears it.
 
-**Before:** 11e.
+**Before:** 11e, and 11h, for where to aim a forwarded bundle.
 
 **Deliver:** first, transmission cost — every transmission draws stored energy by link-budget
 physics times `transmit_gain`, at a range the sender chooses, and that range sets its fan-out.
@@ -490,6 +492,37 @@ could have known of it.
 **Do not:** build dictionaries.
 
 **Read:** [23-factions.md](23-factions.md).
+
+### 11h — Where craft are
+
+**Status: not started.** A craft is seen whole by anything in its system's 1.6 ly shell and not at
+all beyond it, and nothing about where a craft was is kept.
+
+**Before:** 11e.
+
+**Deliver:** detection of craft by what reaches the observer — reflected starlight from their
+cross-section, their field's glow, burns and transmissions — against the photometry's limit, in
+place of the shell ([05-observation.md](05-observation.md#seeing-other-craft)). A complete roster
+per craft of every craft it has detected, never forgotten: a record per craft per system with the
+span it was there, and inside it each sighting with its witnesses, of three kinds — seen, heard,
+stated ([22-provenance.md](22-provenance.md#where-craft-are)). A last known place folded from them,
+carried in reports under their seal. **Share location**, a checkbox in the three-bar menu of a
+conversation and of a faction's chat, putting a stated sighting of the sender on every
+transmission there ([23-factions.md](23-factions.md#sharing-where-you-are)). **Beam last known**,
+aiming at a believed place by `Aim::Bearing`.
+
+**Done when:** a member who has never detected a craft learns which system it was in and where it
+was last seen from an ally's report, with the witness and every hop; a message beamed at that place
+lands on the craft if it has not moved and misses if it has; and a craft whose location is shared
+in a faction chat is placed by every holder and by nobody else.
+
+**Do not:** earn range from parallax yet — a sighting inside the limit places a craft as a contact
+does today. Do not build swarms or interferometers to raise the limit; the limit is what they will
+raise.
+
+**Read:** [05-observation.md](05-observation.md#seeing-other-craft),
+[22-provenance.md](22-provenance.md#where-craft-are), "Sharing where you are" in
+[23-factions.md](23-factions.md).
 
 ---
 

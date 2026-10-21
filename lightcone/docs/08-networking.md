@@ -124,7 +124,9 @@ system, which is the same `LOCAL_SHELL_LY` both ends already use to decide where
 an angular size — a five-hundred-meter hull is well under a pixel from anywhere in a system,
 and a rule drawn there would leave a player unable to find traffic they are sitting in the
 middle of. A client hears nothing at all about craft outside it, so a system with nobody in it
-and a system whose traffic is all elsewhere look the same from inside.
+and a system whose traffic is all elsewhere look the same from inside. Phase 11h replaces the
+shell with detection by what reaches the observer; see
+[05-observation.md](05-observation.md#seeing-other-craft).
 
 ### Drive transitions
 
