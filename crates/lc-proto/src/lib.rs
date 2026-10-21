@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Clients lag server deploys — a browser tab left open across a release is the normal case —
 /// so a connection states its version and is refused rather than misread.
-pub const PROTOCOL_VERSION: u32 = 41;
+pub const PROTOCOL_VERSION: u32 = 42;
 
 /// Who is connected. Assigned by the server; a client never chooses its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -442,6 +442,9 @@ pub enum Order {
     Found { name: String, key: FactionId, replaces: Option<FactionId> },
     /// Send a faction key: whoever can read it when it lands holds it. Appended last.
     GiveKey { key: FactionId, to: Option<ShipId>, aim: Aim, secrecy: Secrecy },
+    /// Say where this craft is on everything it sends in `chat` from now on, or stop. Standing,
+    /// like [`Order::AutoAck`], and answered by [`Outbound::SharingLocation`]. Appended last.
+    ShareLocation { chat: Chat, on: bool },
 }
 
 /// A client's request. Never authoritative about anything.
@@ -896,6 +899,9 @@ pub enum Outbound {
     Parked { ship_id: ShipId },
     /// The faction keys held by now, on sign-in when there are any; later ones arrive as messages.
     Factions { ship_id: ShipId, factions: Vec<Faction> },
+    /// Every chat this ship shares its location in, whole: on signing in when there is any, and
+    /// after each [`Order::ShareLocation`].
+    SharingLocation { ship_id: ShipId, chats: Vec<Chat> },
 }
 
 /// The longest command line a shard will read, in bytes.
@@ -1023,7 +1029,7 @@ pub use knowing::{
 };
 
 pub use radio::{
-    ACK_DEPTH, Aim, Body, Claim, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken,
+    ACK_DEPTH, Aim, Body, Chat, Claim, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken, Stated,
     decode_report, encode_report,
 };
 

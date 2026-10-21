@@ -209,6 +209,8 @@ pub struct Chat {
     me: Option<ShipId>,
     /// Craft this ship answers automatically, as the server last said. See [`Chat::auto_acks`].
     auto_ack: std::collections::BTreeSet<i64>,
+    /// Chats this ship says where it is in, as the server last said.
+    sharing: std::collections::BTreeSet<lc_proto::Chat>,
     /// Whose public keys this ship holds, and can therefore encrypt a message to.
     ///
     /// Learned when a key offer's **light arrives**, never when it is sent. The client's copy of
@@ -356,6 +358,15 @@ impl Chat {
     /// Everyone this ship answers automatically, as the server states it.
     pub fn auto_acking(&mut self, with: Vec<ShipId>) {
         self.auto_ack = with.into_iter().map(|w| w.0).collect();
+    }
+
+    pub fn shares(&self, chat: lc_proto::Chat) -> bool {
+        self.sharing.contains(&chat)
+    }
+
+    /// Every chat this ship shares its location in, as the server states it.
+    pub fn sharing(&mut self, chats: Vec<lc_proto::Chat>) {
+        self.sharing = chats.into_iter().collect();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -836,15 +847,15 @@ mod tests {
     }
 
     fn spoken(to: i64, body: Body, sealed: bool, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem: 0, sealed, under: None, claim: None, body, acks }
+        Spoken { to: Some(to), beamed: false, idem: 0, sealed, under: None, claim: None, body, acks, stated: None }
     }
 
     fn broadcast(body: &str) -> Spoken {
-        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: None, claim: None, body: text(body), acks: vec![] }
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: None, claim: None, body: text(body), acks: vec![], stated: None }
     }
 
     fn keyed(to: i64, body: &str, idem: u64, acks: Vec<i64>) -> Spoken {
-        Spoken { to: Some(to), beamed: false, idem, sealed: false, under: None, claim: None, body: text(body), acks }
+        Spoken { to: Some(to), beamed: false, idem, sealed: false, under: None, claim: None, body: text(body), acks, stated: None }
     }
 
     /// A line by its position, for a test that wants to talk about one.
@@ -1089,6 +1100,7 @@ mod tests {
             claim: None,
             body: Body::Ack,
             acks: vec![100],
+            stated: None,
         };
         chat.received(ShipId(7), Some("Ada"), 200, bare, 9.0, 12.0, 1.0);
 
@@ -1119,6 +1131,7 @@ mod tests {
             claim: None,
             body: Body::Unreadable,
             acks: vec![],
+            stated: None,
         };
         chat.received(ShipId(7), None, 400, sealed, 1.0, 3.0, 1.0);
         assert_eq!(chat.get(ShipId(7)).unwrap().lines.len(), 1);
@@ -1136,6 +1149,7 @@ mod tests {
             claim: None,
             body: Body::Key,
             acks: vec![],
+            stated: None,
         };
         chat.received(ShipId(7), None, 500, offer, 1.0, 3.0, 1.0);
         let conversation = chat.get(ShipId(7)).unwrap();
@@ -1170,6 +1184,7 @@ mod tests {
             claim: None,
             body: text("loud"),
             acks: vec![],
+            stated: None,
         };
         chat.received(ShipId(7), None, 200, said, 1.0, 2.0, 100.0);
         let heard = &chat.get(ShipId(7)).unwrap().lines[0];
@@ -1285,7 +1300,7 @@ mod tests {
     }
 
     fn under(key: i64, body: Body) -> Spoken {
-        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: Some(FactionId(key)), claim: None, body, acks: vec![] }
+        Spoken { to: None, beamed: false, idem: 0, sealed: false, under: Some(FactionId(key)), claim: None, body, acks: vec![], stated: None }
     }
 
     #[test]

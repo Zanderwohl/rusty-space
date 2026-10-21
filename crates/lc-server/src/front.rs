@@ -315,6 +315,7 @@ impl<J: Journal> Server<J> {
                 self.owe(sender, front.event.at, !front.beam.is_omni(), said, observer, landing.arrive_t);
             }
             self.heard_claim(&front.event, observer, landing.arrive_t);
+            self.heard_place(&front.event, observer, landing.arrive_t, landing.strength);
             self.queue_landings(&front.event, std::slice::from_ref(&landing));
             self.schedule_landings(std::slice::from_ref(&front.event), std::slice::from_ref(&landing));
             self.fronts.crossed.push(landing);

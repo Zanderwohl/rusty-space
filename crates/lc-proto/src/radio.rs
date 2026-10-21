@@ -121,6 +121,22 @@ pub struct Claim {
     pub parents: Vec<u64>,
 }
 
+/// Where a transmitter says it was as it sent: light-years in the shard's frame, and velocity as a
+/// fraction of c. Its own word, which a receiver weighs as that. See
+/// `lightcone/docs/23-factions.md` §Sharing where you are.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Stated {
+    pub at_ly: [f64; 3],
+    pub beta: [f64; 3],
+}
+
+/// A conversation: with one craft, or among a faction key's holders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Chat {
+    With(ShipId),
+    Faction(FactionId),
+}
+
 /// What a [`kind::MESSAGE`](crate::kind::MESSAGE) or [`kind::KEY`](crate::kind::KEY) event carries, as JSON in the payload.
 ///
 /// Stored whole and redacted per receiver on release, not duplicated per receiver at write: an
@@ -149,6 +165,9 @@ pub struct Spoken {
     /// than a count because the ends disagree on the count. See [`ACK_DEPTH`].
     #[serde(default)]
     pub acks: Vec<i64>,
+    /// Where the sender says it is, when it shares that here. Read as the body is.
+    #[serde(default)]
+    pub stated: Option<Stated>,
 }
 
 /// A survey report on the air. Not a [`Spoken`]: it is not filed in a conversation and earns no
@@ -174,6 +193,8 @@ pub struct Reported {
     /// so a reader must detect a format it cannot parse. Zero predates the field.
     #[serde(default)]
     pub format: u32,
+    #[serde(default)]
+    pub stated: Option<Stated>,
 }
 
 /// Bump it when `lc_world::knowledge::Report` changes shape, or how [`encode_report`] writes it.

@@ -147,6 +147,11 @@ impl World {
         self.system_for(id, now_s)
     }
 
+    /// The star whose system holds `position_ly`, without loading it.
+    pub fn star_containing(&self, position_ly: DVec3) -> Option<StarId> {
+        Some(self.stars[self.containing(position_ly)?].id)
+    }
+
     /// The first star in catalog order whose shell holds `position_ly`: where shells overlap,
     /// the client's linear scan picks that one, so this must too.
     fn containing(&self, position_ly: DVec3) -> Option<usize> {

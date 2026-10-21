@@ -195,7 +195,7 @@ pub(super) fn fold(
                     None
                 }
                 // Answered by `AutoAcking`, never accepted.
-                Order::AutoAck { .. } => None,
+                Order::AutoAck { .. } | Order::ShareLocation { .. } => None,
             };
             info!(?ship_id, at_t, ?order, "accepted");
             uplink.applied = said;
@@ -308,6 +308,7 @@ mod tests {
             claim: None,
             body: Body::Text("got it".into()),
             acks: vec![4242],
+            stated: None,
         };
         fold(&mut uplink, &mut game, &mut ui, heard(43, 2, spoken, lc_proto::kind::MESSAGE));
         assert!(uplink.chat.get(ShipId(2)).unwrap().delivered(&sent));

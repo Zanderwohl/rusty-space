@@ -342,6 +342,7 @@ mod tests {
             claim: None,
             body: Some(lc_proto::encode_report(&report)),
             format: lc_proto::REPORT_FORMAT,
+            stated: None,
         };
         let sighting = Sighting {
             event_id: 21,
@@ -388,6 +389,7 @@ mod tests {
             claim: None,
             body: None,
             format: lc_proto::REPORT_FORMAT,
+            stated: None,
         };
         let sighting = Sighting {
             event_id: 22,
@@ -436,6 +438,7 @@ mod tests {
             claim: None,
             body: Body::Text("are you there".into()),
             acks: Vec::new(),
+            stated: None,
         };
         fold(&mut uplink, &mut game, &mut ui, heard(99, 2, spoken, lc_proto::kind::MESSAGE));
 
@@ -476,6 +479,7 @@ mod tests {
             claim: None,
             body: Body::Ack,
             acks: vec![4242],
+            stated: None,
         };
         fold(&mut uplink, &mut game, &mut ui, heard(44, 2, ack(7), lc_proto::kind::MESSAGE));
         fold(&mut uplink, &mut game, &mut ui, heard(45, 3, ack(99), lc_proto::kind::MESSAGE));
@@ -501,6 +505,7 @@ mod tests {
                 claim: None,
                 body: Body::Unreadable,
                 acks: Vec::new(),
+                stated: None,
             };
         fold(&mut uplink, &mut game, &mut ui, heard(98, 2, spoken, lc_proto::kind::MESSAGE));
 
@@ -530,6 +535,7 @@ mod tests {
             claim: None,
             body: Body::Text("rendezvous at the third moon".into()),
             acks: Vec::new(),
+            stated: None,
         };
         fold(&mut uplink, &mut game, &mut ui, heard(97, 2, spoken, lc_proto::kind::MESSAGE));
 
@@ -556,6 +562,7 @@ mod tests {
             claim: None,
             body: Body::Key,
             acks: Vec::new(),
+            stated: None,
         };
         fold(&mut uplink, &mut game, &mut ui, heard(50, 2, spoken, lc_proto::kind::KEY));
         assert!(uplink.chat.holds_key(ShipId(2)));
@@ -748,6 +755,7 @@ mod tests {
             claim: Some(claim),
             body: Body::Text("hello".into()),
             acks: Vec::new(),
+            stated: None,
         };
         let wren = Claim { name: "Wren".into(), written_s: 1.0, parents: vec![] };
         fold(&mut uplink, &mut game, &mut ui, heard(10, 2, said(wren.clone()), lc_proto::kind::MESSAGE));

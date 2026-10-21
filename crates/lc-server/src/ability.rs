@@ -106,7 +106,8 @@ impl Act {
             | Order::SendReport { .. }
             | Order::AutoAck { .. }
             | Order::Found { .. }
-            | Order::GiveKey { .. } => Act::Speak,
+            | Order::GiveKey { .. }
+            | Order::ShareLocation { .. } => Act::Speak,
         }
     }
 }

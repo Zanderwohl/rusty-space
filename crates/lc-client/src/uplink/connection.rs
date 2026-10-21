@@ -143,7 +143,10 @@ pub fn pump(
         // An answer to an order stops the clock on it, whether the answer was yes or no.
         if matches!(
             message,
-            Outbound::Accepted { .. } | Outbound::Refused { .. } | Outbound::AutoAcking { .. }
+            Outbound::Accepted { .. }
+                | Outbound::Refused { .. }
+                | Outbound::AutoAcking { .. }
+                | Outbound::SharingLocation { .. }
         )
             && let Some(asked_at) = uplink.asked_at.take()
         {

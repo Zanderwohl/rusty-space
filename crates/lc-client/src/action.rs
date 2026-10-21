@@ -243,6 +243,8 @@ pub enum Action {
     OfferKey { to: Option<lc_proto::ShipId>, aim: lc_proto::Aim },
     /// Answer this craft automatically, or stop.
     AutoAck { with: lc_proto::ShipId, on: bool },
+    /// Say where this ship is on everything it sends in a chat, or stop.
+    ShareLocation { chat: lc_proto::Chat, on: bool },
     /// Mint a faction key with this name: the next generation of `replaces`, or a first. See
     /// `lightcone/docs/23-factions.md`.
     Found { name: String, replaces: Option<lc_proto::FactionId> },
@@ -711,6 +713,13 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
                 effects.push(Effect::Send(lc_proto::Order::AutoAck { with, on }));
             } else {
                 effects.push(Effect::Notify("no server, so nobody to answer".into()));
+            }
+        }
+        Action::ShareLocation { chat, on } => {
+            if session.remote {
+                effects.push(Effect::Send(lc_proto::Order::ShareLocation { chat, on }));
+            } else {
+                effects.push(Effect::Notify("no server, so nobody to tell".into()));
             }
         }
         Action::OfferKey { to, aim } => {

@@ -207,6 +207,9 @@ pub struct Server<J: Journal> {
     /// Who each craft answers automatically. Standing state, like `pursuits`, and for the same
     /// reason: it goes on answering with nobody flying the ship. See [`crate::radio::Owed`].
     pub(crate) auto_ack: HashMap<CraftId, std::collections::BTreeSet<ShipId>>,
+    /// The chats each craft says where it is in. Standing, like `auto_ack`.
+    pub(crate) sharing: HashMap<CraftId, std::collections::BTreeSet<lc_proto::Chat>>,
+    pub(crate) roster: crate::roster::Roster,
     /// Messages addressed to each craft that have not landed yet, each a possible answer.
     pub(crate) owed: HashMap<CraftId, Vec<crate::radio::Owed>>,
     /// The messages each craft has lately answered, so a resend is not answered again. In memory
@@ -261,6 +264,8 @@ impl<J: Journal> Server<J> {
             factions: Default::default(),
             instruments: Default::default(),
             auto_ack: HashMap::new(),
+            sharing: HashMap::new(),
+            roster: Default::default(),
             owed: HashMap::new(),
             answered: HashMap::new(),
             rate: 1.0,
@@ -522,6 +527,7 @@ impl<J: Journal> Server<J> {
         // After motion, so every instrument looks from where its craft now is, and after the
         // intents, so a report composed this tick carries nothing its craft learns in it.
         self.run_instruments();
+        self.watch_crafts();
         // 3. A staged scene, if one is running. Before the pursuits and after the intents for
         // the same reason they are after the intents: a chase a beat ordered is not re-solved
         // against the plan it has only just made.
@@ -593,6 +599,13 @@ impl<J: Journal> Server<J> {
                 // Nothing is said back. A bookmark is not an order and there is no outcome to
                 // report; the client already knows where it is, because it is the one reading.
                 self.library.set(&account, mark);
+            }
+            Inbound::Act(Intent { ship_id, order: Order::ShareLocation { chat, on }, .. }) => {
+                if self.set_sharing(from, ship_id, chat, on) {
+                    self.tell_sharing(wire, from, ship_id);
+                } else {
+                    wire.send(from, Outbound::Refused { ship_id, reason: Refusal::NotYours });
+                }
             }
             Inbound::Act(Intent { ship_id, order: Order::AutoAck { with, on }, .. }) => {
                 if self.set_auto_ack(from, ship_id, with, on) {
@@ -668,6 +681,9 @@ impl<J: Journal> Server<J> {
         self.tell_observing(wire, from, CraftId(ship_id.0));
         if self.auto_ack.contains_key(&CraftId(ship_id.0)) {
             self.tell_auto_acking(wire, from, ship_id);
+        }
+        if self.sharing.contains_key(&CraftId(ship_id.0)) {
+            self.tell_sharing(wire, from, ship_id);
         }
         let factions = self.factions.held_by(CraftId(ship_id.0), self.now_t);
         if !factions.is_empty() {
@@ -976,7 +992,7 @@ impl<J: Journal> Server<J> {
                 (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
             }
             // Unreachable: `handle` takes it before it gets here, because it makes no event.
-            Order::AutoAck { .. } => return Err(Refusal::Impossible),
+            Order::AutoAck { .. } | Order::ShareLocation { .. } => return Err(Refusal::Impossible),
         };
 
         // A flight order replaces whatever the ship was doing, the standing intercept included.

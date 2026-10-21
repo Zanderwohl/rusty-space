@@ -186,6 +186,7 @@ impl<J: Journal> Server<J> {
                     claim: self.claim_of(id),
                     body: Some(report),
                     format: lc_proto::REPORT_FORMAT,
+                    stated: self.stated_by(id, *to, under, at),
                 };
                 Ok(Transmission {
                     kind: lc_proto::kind::REPORT,
@@ -294,6 +295,7 @@ impl<J: Journal> Server<J> {
             claim: self.claim_of(id),
             body: heard_as(&content, true, &self.factions),
             acks: acks.clone(),
+            stated: self.stated_by(id, to, under, at),
         };
         Ok(Transmission {
             kind: match content {
@@ -759,6 +761,7 @@ pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(
         };
         if !may_read(reported.to, reported.sealed, reported.under) {
             reported.body = None;
+            reported.stated = None;
         }
         return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
     }
@@ -770,6 +773,7 @@ pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(
     };
     if !may_read(spoken.to, spoken.sealed, spoken.under) {
         spoken.body = Body::Unreadable;
+        spoken.stated = None;
     }
     serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
 }

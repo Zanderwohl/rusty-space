@@ -87,6 +87,8 @@ pub struct Standing {
 pub struct Radio {
     pub auto_ack: Vec<ShipId>,
     pub owed: Vec<Owed>,
+    #[serde(default)]
+    pub sharing: Vec<lc_proto::Chat>,
 }
 
 /// A craft's instruments, as a checkpoint carries them.
@@ -287,6 +289,7 @@ impl<J: Journal> Server<J> {
                             .map(|with| with.iter().copied().collect())
                             .unwrap_or_default(),
                         owed: self.owed.get(&craft.id).cloned().unwrap_or_default(),
+                        sharing: crate::roster::saved(&self.sharing, craft.id),
                     };
                     let afterglow = self.afterglows.get(&craft.id).copied();
                     save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), afterglow, self.now_t)
@@ -360,6 +363,9 @@ impl<J: Journal> Server<J> {
                         }
                         if !radio.owed.is_empty() {
                             self.owed.insert(craft.id, radio.owed);
+                        }
+                        if !radio.sharing.is_empty() {
+                            self.sharing.insert(craft.id, radio.sharing.into_iter().collect());
                         }
                     }
                     // Taken up again on the next tick, which plans as for a fresh order.
@@ -576,6 +582,7 @@ mod tests {
         let radio = Radio {
             auto_ack: vec![ShipId(7)],
             owed: vec![Owed { due_t: 9, from: ShipId(7), idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
+            sharing: vec![lc_proto::Chat::Faction(lc_proto::FactionId(4))],
         };
         let row = save(&a_craft(), None, Standing::default(), None, radio.clone(), Light::default(), None, 0);
         assert_eq!(decode(&row).expect("it reads").radio, radio);

@@ -306,6 +306,11 @@ fn fold(
                 uplink.chat.auto_acking(with);
             }
         }
+        Outbound::SharingLocation { ship_id, chats } => {
+            if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
+                uplink.chat.sharing(chats);
+            }
+        }
         Outbound::Answered { seq, ok, text } => uplink.console.answered(seq, ok, text),
         Outbound::Analyzing { left } => game.0.analyzing = left as usize,
         Outbound::Doing { observing, fitting } => {

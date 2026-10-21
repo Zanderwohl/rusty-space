@@ -118,6 +118,7 @@ pub(super) fn fold(
             game.0.knowledge = lc_world::knowledge::Knowledge::new(lc_world::knowledge::Witness(ship_id.0 as u64));
             // Nobody, until the server says otherwise straight after this.
             uplink.chat.auto_acking(Vec::new());
+            uplink.chat.sharing(Vec::new());
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,

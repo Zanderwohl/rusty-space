@@ -43,6 +43,7 @@ pub mod planets;
 pub mod presets;
 pub mod radio;
 pub mod rate;
+pub(crate) mod roster;
 pub mod server;
 #[cfg(feature = "storage")]
 pub mod status;
