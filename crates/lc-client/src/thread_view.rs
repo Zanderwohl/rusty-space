@@ -160,22 +160,31 @@ fn source(
 ) {
     match held.entry.scope {
         Scope::Faction(key) => {
-            let label = scope_label(uplink, Scope::Faction(key));
-            if crate::radio_panel::clickable_name(ui, &label, crate::radio_panel::RADIO).on_hover_text("open its chat").clicked() {
+            if quiet_link(ui, &scope_label(uplink, Scope::Faction(key))).on_hover_text("open its chat").clicked() {
                 ask(out, Action::OpenPanel(Panel::Chat));
                 ask(out, Action::ChatWith(Channel::Faction(key)));
             }
         }
-        Scope::Own => {
-            ui.weak("yours");
-        }
-        Scope::Open if held.entry.author == game.knowledge.owner => {
-            ui.weak("yours, public");
-        }
-        Scope::Open => {
-            ui.weak(format!("public, {}", author(uplink, game.knowledge.owner, held)));
-        }
+        Scope::Own => quiet(ui, "yours"),
+        Scope::Open if held.entry.author == game.knowledge.owner => quiet(ui, "yours, public"),
+        Scope::Open => quiet(ui, &format!("public, {}", author(uplink, game.knowledge.owner, held))),
     }
+}
+
+/// Whose word something is on: small and weak, beside what it is about.
+fn quiet(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).small().color(ui.visuals().weak_text_color()));
+}
+
+/// A link that stays in the background: small and weak, underlined only under the cursor.
+fn quiet_link(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let color = ui.visuals().weak_text_color();
+    let response = ui.add(egui::Label::new(egui::RichText::new(text).small().color(color)).sense(egui::Sense::click()));
+    if response.hovered() {
+        let rect = response.rect;
+        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0_f32, color));
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn author(uplink: &crate::uplink::Uplink, owner: lc_world::knowledge::Witness, held: &Held) -> String {
