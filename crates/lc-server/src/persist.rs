@@ -289,7 +289,11 @@ impl<J: Journal> Server<J> {
                             .map(|with| with.iter().copied().collect())
                             .unwrap_or_default(),
                         owed: self.owed.get(&craft.id).cloned().unwrap_or_default(),
-                        sharing: crate::roster::saved(&self.sharing, craft.id),
+                        sharing: self
+                            .sharing
+                            .get(&craft.id)
+                            .map(|with| with.iter().copied().collect())
+                            .unwrap_or_default(),
                     };
                     let afterglow = self.afterglows.get(&craft.id).copied();
                     save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), afterglow, self.now_t)

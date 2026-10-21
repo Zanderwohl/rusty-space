@@ -65,6 +65,8 @@ pub enum Aimed {
     Omni,
     AtThem,
     AtTheSelectedStar,
+    /// Where they were last known to be, carried forward to when the light lands.
+    AtLastKnown,
 }
 
 /// Which kinds of chat the list shows. Public goes with Group; Overheard is always shown.
@@ -217,39 +219,41 @@ pub(crate) fn chat(
                 let star = state.0.selected;
                 // No craft to aim at, so that choice is not offered: a beam at one ship is not
                 // a broadcast, whatever the panel is showing.
-                if *aimed == Aimed::AtThem || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                if matches!(*aimed, Aimed::AtThem | Aimed::AtLastKnown) || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
                 {
                     *aimed = Aimed::Omni;
                 }
                 public_log(ui, uplink, &own, out);
-                compose(ui, game, uplink, None, star, false, aim_of(*aimed, None, star), draft, aimed, seal, out);
+                compose(ui, game, uplink, None, star, false, None, aim_of(*aimed, None, star, None), draft, aimed, seal, out);
             }
             Channel::Faction(key) => {
                 let star = state.0.selected;
-                if *aimed == Aimed::AtThem || (*aimed == Aimed::AtTheSelectedStar && star.is_none()) {
+                if matches!(*aimed, Aimed::AtThem | Aimed::AtLastKnown) || (*aimed == Aimed::AtTheSelectedStar && star.is_none()) {
                     *aimed = Aimed::Omni;
                 }
                 faction_log(ui, uplink, key, &own, out);
-                compose_faction(ui, game, uplink, key, star, aim_of(*aimed, None, star), draft, aimed, out);
+                compose_faction(ui, game, uplink, key, star, aim_of(*aimed, None, star, None), draft, aimed, out);
             }
             Channel::Founding => founding(ui, draft, out),
             Channel::Myself => myself(ui, uplink, draft, out),
             Channel::With(with) => {
                 let star = state.0.selected;
                 let in_sight = uplink.contacts.iter().any(|c| c.ship_id == with);
+                let last_known = (!in_sight).then(|| last_known_aim(game, with)).flatten();
                 // Corrected once, here, so the log's resend button and the composer's send
                 // button cannot disagree about where a message is pointed. A choice the panel
                 // offered and the world has since withdrawn — the contact left, or the
                 // telescope moved — falls back to a shout rather than a beam at nothing.
                 if (*aimed == Aimed::AtThem && !in_sight)
                     || (*aimed == Aimed::AtTheSelectedStar && star.is_none())
+                    || (*aimed == Aimed::AtLastKnown && last_known.is_none())
                 {
                     *aimed = Aimed::Omni;
                 }
-                let aim = aim_of(*aimed, Some(with), star);
+                let aim = aim_of(*aimed, Some(with), star, last_known);
                 conversation(ui, uplink, with, &own, aim, out);
                 compose(
-                    ui, game, uplink, Some(with), star, in_sight, aim, draft, aimed, seal, out,
+                    ui, game, uplink, Some(with), star, in_sight, last_known, aim, draft, aimed, seal, out,
                 );
             }
         });
@@ -403,6 +407,7 @@ fn compose_faction(
                 if ui.button("send survey").clicked() {
                     ask(out, Action::SendReport { to: None, aim, secrecy });
                 }
+                share_location(ui, uplink, lc_proto::Chat::Faction(key), out);
                 // The next generation, under the same name. Nobody else holds it until it is given.
                 if ui.button("re-key").clicked() {
                     let name = uplink.chat.faction(key).map(|f| f.name.clone()).unwrap_or_default();
@@ -452,6 +457,21 @@ fn faction_keys(
             false => "open: everyone it reaches will hold it",
         });
     });
+}
+
+/// Whether everything sent in `chat` says where this ship is. What the server last said, not
+/// what was clicked.
+fn share_location(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, chat: lc_proto::Chat, out: &mut MessageWriter<Requested>) {
+    let mut on = uplink.chat.shares(chat);
+    if ui.checkbox(&mut on, "share location").changed() {
+        ask(out, Action::ShareLocation { chat, on });
+    }
+}
+
+/// Which way to beam at where `with` was last known to be, from here and now.
+fn last_known_aim(game: &Game, with: lc_proto::ShipId) -> Option<glam::DVec3> {
+    let (_, best) = game.knowledge.file(lc_world::knowledge::Subject::Craft(with.0))?.whereabouts().last_known()?;
+    best.aim_from(game.ship.motion.position_ly, game.coordinate_time_s())
 }
 
 /// A button of three bars. Painted, because the default font has no U+2630 and draws a box.
@@ -823,6 +843,7 @@ fn compose(
     with: Option<lc_proto::ShipId>,
     star: Option<StarId>,
     in_sight: bool,
+    last_known: Option<glam::DVec3>,
     aim: lc_proto::Aim,
     draft: &mut String,
     aimed: &mut Aimed,
@@ -844,6 +865,9 @@ fn compose(
                     false => "nothing in sight to aim at",
                 });
             });
+            if last_known.is_some() {
+                ui.selectable_value(aimed, Aimed::AtLastKnown, "beam last known");
+            }
         }
         ui.add_enabled_ui(star.is_some(), |ui| {
             let name = star.map(|id| game.name_of(id)).unwrap_or_else(|| "the selected star".into());
@@ -868,6 +892,9 @@ fn compose(
                 faction_keys(ui, uplink, with, aim, secrecy, *seal, out);
                 if ui.button("send survey").clicked() {
                     ask(out, Action::SendReport { to: with, aim, secrecy });
+                }
+                if let Some(with) = with {
+                    share_location(ui, uplink, lc_proto::Chat::With(with), out);
                 }
                 if ui.button("rename this ship").clicked() {
                     ask(out, Action::ChatWith(Channel::Myself));
@@ -933,8 +960,12 @@ fn compose(
     }
 }
 
-fn aim_of(aimed: Aimed, with: Option<lc_proto::ShipId>, star: Option<StarId>) -> lc_proto::Aim {
+fn aim_of(aimed: Aimed, with: Option<lc_proto::ShipId>, star: Option<StarId>, last_known: Option<glam::DVec3>) -> lc_proto::Aim {
     match (aimed, star) {
+        (Aimed::AtLastKnown, _) => match last_known {
+            Some(toward) => lc_proto::Aim::Bearing(toward.to_array()),
+            None => lc_proto::Aim::Omni,
+        },
         (Aimed::Omni, _) => lc_proto::Aim::Omni,
         (Aimed::AtThem, _) => match with {
             Some(with) => lc_proto::Aim::Ship(with),

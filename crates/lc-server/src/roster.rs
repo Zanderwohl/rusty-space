@@ -2,7 +2,7 @@
 //! stated by the craft itself where it shares its location. Runs for every craft, flown or not.
 //! See `lightcone/docs/22-provenance.md` §Where craft are.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use glam::DVec3;
 use lc_proto::{Chat, FactionId, Outbound, Reported, Scope, ShipId, Spoken, Stated};
@@ -208,11 +208,6 @@ impl<J: Journal> Server<J> {
         };
         self.aboard(observer).knowledge.spotted(sender.0, sighting);
     }
-}
-
-/// Every chat each craft shares its location in, as a checkpoint carries it.
-pub(crate) fn saved(sharing: &HashMap<CraftId, BTreeSet<Chat>>, id: CraftId) -> Vec<Chat> {
-    sharing.get(&id).map(|set| set.iter().copied().collect()).unwrap_or_default()
 }
 
 #[cfg(test)]

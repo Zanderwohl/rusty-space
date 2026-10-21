@@ -6,7 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 
 use lc_proto::ShipId;
-use lc_world::knowledge::Subject;
+use lc_world::knowledge::whereabouts::Kind;
+use lc_world::knowledge::{Subject, Witness};
 
 use crate::action::Action;
 use crate::app::{Game, Ui};
@@ -86,13 +87,61 @@ fn craft(
     });
     crate::thread_view::names(ui, game, uplink, Subject::Craft(id.0), true, draft, out);
     let in_sight = uplink.contacts.iter().any(|c| c.ship_id == id);
-    ui.weak(match in_sight {
-        true => "in sight",
-        false => "out of sight",
-    });
+    if in_sight {
+        ui.weak("in sight");
+    }
+    whereabouts(ui, game, uplink, id);
     if ui.button("conversation").clicked() {
         ask(out, Action::OpenPanel(Panel::Chat));
         ask(out, Action::ChatWith(Channel::With(id)));
+    }
+}
+
+/// Where the craft was last known to be, how that is known and on whose word, and every stay
+/// before it.
+fn whereabouts(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink, id: ShipId) {
+    let Some(held) = game.knowledge.file(Subject::Craft(id.0)).map(|f| f.whereabouts()) else { return };
+    let Some((stay, best)) = held.last_known() else { return };
+    let now_s = game.coordinate_time_s();
+    let place = |system: Option<lc_world::sky::StarId>| match system {
+        Some(star) => game.name_of(star),
+        None => "between the stars".to_string(),
+    };
+    let how = match best.kind {
+        Kind::Seen => "seen",
+        Kind::Heard => "heard",
+        Kind::Stated => "on its own word",
+    };
+    ui.label(format!("Last known: {}, {} ago, {how}", place(stay.system), crate::panels::duration(now_s - best.emitted_s)));
+    let owner = game.knowledge.owner;
+    let lines: Vec<String> = best
+        .witnesses
+        .iter()
+        .map(|w| {
+            let who = |witness: Witness| match witness == owner {
+                true => uplink.own_name(),
+                false => uplink.name_of(ShipId(witness.0 as i64)),
+            };
+            let relays: Vec<String> = w.lineage.iter().skip(1).map(|hop| who(hop.from)).collect();
+            match relays.is_empty() {
+                true => who(w.witness),
+                false => format!("{}, relayed by {}", who(w.witness), relays.join(", ")),
+            }
+        })
+        .collect();
+    sources(ui, lines);
+    if held.stays().len() > 1 {
+        egui::CollapsingHeader::new("Where it has been").default_open(false).show(ui, |ui| {
+            for stay in held.stays().iter().rev() {
+                let (first, last) = stay.span_s();
+                ui.weak(format!(
+                    "{}: {} to {} ago",
+                    place(stay.system),
+                    crate::panels::duration(now_s - first),
+                    crate::panels::duration(now_s - last)
+                ));
+            }
+        });
     }
 }
 

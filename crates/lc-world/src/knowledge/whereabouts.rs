@@ -112,6 +112,18 @@ impl Sighting {
         let years = (at_s - self.emitted_s) / JULIAN_YEAR_S;
         Some((position_ly + beta * years, sigma_ly + WANDER_BETA * years.abs()))
     }
+
+    /// Which way light sent from `from_ly` at `now_s` must go to meet the craft where this
+    /// reckons it will be when the light gets there. `None` for a bearing alone.
+    pub fn aim_from(&self, from_ly: DVec3, now_s: f64) -> Option<DVec3> {
+        let (mut at, _) = self.place_at(now_s)?;
+        // Converges because the craft is slower than its light: each pass shrinks the error by beta.
+        for _ in 0..8 {
+            let lands_s = now_s + from_ly.distance(at) * JULIAN_YEAR_S;
+            at = self.place_at(lands_s)?.0;
+        }
+        Some((at - from_ly).normalize_or_zero())
+    }
 }
 
 /// A craft in one system, or between systems, over the span its sightings cover.
@@ -252,6 +264,16 @@ mod tests {
         let (_, fresh) = s.place_at(0.0).unwrap();
         let (_, old) = s.place_at(JULIAN_YEAR_S).unwrap();
         assert!((old - fresh - WANDER_BETA).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_aim_leads_a_moving_craft_by_its_light_time() {
+        let mut s = seen(1, 0.0, None, 1.0);
+        s.fix = Fix::Place { position_ly: DVec3::X, beta: DVec3::Y * 0.1, sigma_ly: 0.0 };
+        let aim = s.aim_from(DVec3::ZERO, 0.0).unwrap();
+        // Light takes t years to cover the hypotenuse to (1, 0.1 t): t² = 1 + 0.01 t².
+        let t = (1.0f64 / 0.99).sqrt();
+        assert!(aim.distance(DVec3::new(1.0, 0.1 * t, 0.0).normalize()) < 1e-9, "{aim}");
     }
 
     #[test]
