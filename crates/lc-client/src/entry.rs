@@ -350,6 +350,14 @@ pub fn server_from_page() -> Option<String> {
         .filter(|at| !at.is_empty())
 }
 
+/// Leave the game for a page of the site it was launched from.
+#[cfg(target_arch = "wasm32")]
+pub fn leave_for(path: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().set_href(path);
+    }
+}
+
 /// The game ticket the launching page put on `#boot`.
 ///
 /// An attribute and **not** a query parameter, deliberately. A ticket in the URL is a ticket in

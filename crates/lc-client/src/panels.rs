@@ -542,6 +542,11 @@ fn escape(ui: &mut egui::Ui, out: &mut MessageWriter<Requested>) {
     if crate::app::HAS_MAIN_MENU && ui.button("Quit").clicked() {
         ask(out, Action::Quit);
     }
+    // The site holds a browser's session, so signing out is the site's: it ends the session
+    // and goes home.
+    if !crate::app::HAS_MAIN_MENU && ui.button("Sign out").clicked() {
+        ask(out, Action::SignOut);
+    }
 }
 
 fn settings(ui: &mut egui::Ui, state: &Ui) {

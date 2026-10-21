@@ -710,10 +710,12 @@ pub(crate) fn dispatch(
                     let at = game.coordinate_time_s();
                     ui.notify(said, at);
                 }
-                Effect::SignIn
-                | Effect::CancelSignIn
-                | Effect::SignInWithPassword { .. }
-                | Effect::SignOut => {}
+                // The desktop's is `crate::signin_ui`, which forgets the stored grant.
+                Effect::SignOut => {
+                    #[cfg(target_arch = "wasm32")]
+                    crate::entry::leave_for("/signout");
+                }
+                Effect::SignIn | Effect::CancelSignIn | Effect::SignInWithPassword { .. } => {}
             }
         }
     }
