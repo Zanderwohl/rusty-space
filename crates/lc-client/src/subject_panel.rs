@@ -103,16 +103,26 @@ fn whereabouts(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink, i
     let Some(held) = game.knowledge.file(Subject::Craft(id.0)).map(|f| f.whereabouts()) else { return };
     let Some((stay, best)) = held.last_known() else { return };
     let now_s = game.coordinate_time_s();
+    let here = game.system.as_ref().map(|s| s.star);
     let place = |system: Option<lc_world::sky::StarId>| match system {
-        Some(star) => game.name_of(star),
+        Some(star) => match game.knowledge.name_of(star) {
+            Some(name) => name,
+            None if Some(star) == here => "this system".to_string(),
+            None => "an unnamed system".to_string(),
+        },
         None => "between the stars".to_string(),
     };
-    let how = match best.kind {
+    let how = |kind: Kind| match kind {
         Kind::Seen => "seen",
         Kind::Heard => "heard",
         Kind::Stated => "on its own word",
     };
-    ui.label(format!("Last known: {}, {} ago, {how}", place(stay.system), crate::panels::duration(now_s - best.emitted_s)));
+    let ago = |s: &lc_world::knowledge::whereabouts::Sighting| crate::panels::duration(now_s - s.emitted_s);
+    ui.label(format!("Last known: {}, {} ago, {}", place(stay.system), ago(best), how(best.kind)));
+    // A bearing places nothing, so say where it was last placed as well.
+    if let Some(placed) = held.last_placed().filter(|p| !std::ptr::eq(*p, best)) {
+        ui.label(format!("Last placed: {}, {} ago, {}", place(placed.system), ago(placed), how(placed.kind)));
+    }
     let owner = game.knowledge.owner;
     let lines: Vec<String> = best
         .witnesses

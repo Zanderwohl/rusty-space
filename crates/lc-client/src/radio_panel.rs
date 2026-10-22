@@ -132,6 +132,13 @@ pub(crate) fn chat(
                 entries.push((f64::NEG_INFINITY, Channel::With(contact.ship_id), contact.name.clone()));
             }
         }
+        // And every craft ever placed, out of sight or not: what beam last known is for.
+        for (id, _) in game.knowledge.roster() {
+            let id = lc_proto::ShipId(id);
+            if !entries.iter().any(|(_, ch, _)| *ch == Channel::With(id)) {
+                entries.push((f64::NEG_INFINITY, Channel::With(id), uplink.name_of(id)));
+            }
+        }
     }
     entries.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
 
@@ -470,13 +477,19 @@ fn share_location(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, chat: lc_pr
 
 /// Which way to beam at where `with` was last known to be, from here and now.
 fn last_known_aim(game: &Game, with: lc_proto::ShipId) -> Option<glam::DVec3> {
-    let (_, best) = game.knowledge.file(lc_world::knowledge::Subject::Craft(with.0))?.whereabouts().last_known()?;
-    best.aim_from(game.ship.motion.position_ly, game.coordinate_time_s())
+    let placed = game.knowledge.file(lc_world::knowledge::Subject::Craft(with.0))?.whereabouts().last_placed()?;
+    placed.aim_from(game.ship.motion.position_ly, game.coordinate_time_s())
 }
+
+/// `--chat-menu`: open the next three-bar menu drawn, once.
+pub(crate) static OPEN_MENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// A button of three bars. Painted, because the default font has no U+2630 and draws a box.
 fn hamburger(ui: &mut egui::Ui) -> egui::Response {
     let response = ui.add(egui::Button::new("").min_size(egui::vec2(24.0, 18.0)));
+    if OPEN_MENU.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
+    }
     let ink = ui.visuals().widgets.style(&response).fg_stroke.color;
     let c = response.rect.center();
     for dy in [-4.0, 0.0, 4.0] {

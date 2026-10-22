@@ -150,8 +150,13 @@ pub struct DevEntry {
     /// like `--at` and the framing, until there is somebody in the contact list.
     pub say: Option<String>,
     /// `--chat`: the radio window's channel to show once it exists. `found[:<name typed>]`, or
-    /// `faction:<name>:<generation>[:<founder>]`. The only way to photograph a faction's chat.
+    /// `faction:<name>:<generation>[:<founder>]`, or `with:<craft>`. The only way to photograph a
+    /// faction's chat.
     pub chat: Option<String>,
+    /// `--chat-menu`: the shown chat's three-bar menu, open. A shot cannot click.
+    pub chat_menu: bool,
+    /// `--card <craft>`: the card, on the craft this ship calls that, once it calls anything that.
+    pub card: Option<String>,
     /// Sent once the shard has welcomed this client, in order, one a `--console`. The only way to
     /// photograph an answer.
     pub console: Vec<String>,
@@ -478,6 +483,7 @@ pub(crate) fn open_the_channel(
     }
     let channel = match spec.split(':').collect::<Vec<_>>().as_slice() {
         ["found", ..] => Some(crate::ui::Channel::Founding),
+        ["with", name] => craft_called(&uplink, name).map(crate::ui::Channel::With),
         ["faction", name, generation, by @ ..] => uplink
             .chat
             .factions()
@@ -492,8 +498,32 @@ pub(crate) fn open_the_channel(
     };
     let Some(channel) = channel else { return };
     *done = true;
+    if dev.chat_menu {
+        crate::radio_panel::OPEN_MENU.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Chat)));
     out.write(Requested(Action::ChatWith(channel)));
+}
+
+fn craft_called(uplink: &crate::uplink::Uplink, name: &str) -> Option<lc_proto::ShipId> {
+    uplink.labels.iter().find(|(_, label)| label.name == name).map(|(id, _)| *id)
+}
+
+/// `--card`: polled until this ship calls some craft by the name asked for.
+pub(crate) fn open_the_card(
+    dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
+    mut out: MessageWriter<Requested>,
+    mut done: Local<bool>,
+) {
+    let Some(name) = dev.card.as_deref() else { return };
+    if *done {
+        return;
+    }
+    let Some(id) = craft_called(&uplink, name) else { return };
+    *done = true;
+    out.write(Requested(Action::SelectCraft(Some(id))));
+    out.write(Requested(Action::OpenPanel(crate::ui::Panel::Subject)));
 }
 
 pub(crate) fn type_at_the_console(

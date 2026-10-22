@@ -293,6 +293,8 @@ pub fn parse(args: &[String]) -> Entry {
         open_password_form: flag("--password"),
         say: after("--say"),
         chat: after("--chat"),
+        chat_menu: flag("--chat-menu"),
+        card: after("--card"),
         console: args.windows(2).filter(|w| w[0] == "--console").map(|w| w[1].clone()).collect(),
         apply: flag("--apply"),
         emit: flag("--emit"),

@@ -206,6 +206,11 @@ impl Whereabouts {
         Some((stay, best))
     }
 
+    /// The latest sighting that places the craft, which a bearing heard since does not.
+    pub fn last_placed(&self) -> Option<&Sighting> {
+        self.sightings().filter(|s| matches!(s.fix, Fix::Place { .. })).max_by(|a, b| a.emitted_s.total_cmp(&b.emitted_s))
+    }
+
     pub(super) fn sealed(&self, seal: Seal, fresh: impl Fn(f64) -> bool) -> Vec<Sighting> {
         self.sightings().filter_map(|s| s.sealed(seal, &fresh)).collect()
     }

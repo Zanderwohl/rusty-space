@@ -150,6 +150,8 @@ pub enum Act {
     Write { name: bool, text: &'static str, key: Option<usize> },
     /// Report everything new, to whoever hears it, under the `key`th key or in the open.
     Report { key: Option<usize> },
+    /// Say where the actor is on everything it says under the `key`th key from now on.
+    Share { key: usize },
 }
 
 /// A scene: who is in it, where they start, and what they do.
@@ -181,7 +183,7 @@ pub struct Scenario {
 impl Scenario {
     /// Every scene there is.
     pub const ALL: &'static [Scenario] =
-        &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT, WAKE, SCHISM];
+        &[TRAFFIC, MEETING, APPROACH, KZINTI, CLOSING, CHASE, CORONA, CASCADE, DISTANT, WAKE, SCHISM, MUSTER];
 
     /// The one whose name starts with `prefix`, if exactly one does.
     ///
@@ -615,6 +617,28 @@ const OSPREY: Slot = Slot::Cast(0);
 const WREN: Slot = Slot::Cast(1);
 const SHRIKE: Slot = Slot::Cast(2);
 
+/// Where craft are, for the card. Osprey shares where it is in Wake; Shrike burns out of sight and
+/// is heard from afar; Wren reports what it saw. See `lightcone/docs/22-provenance.md` §Where craft
+/// are.
+pub const MUSTER: Scenario = Scenario {
+    name: "muster",
+    blurb: "One member shares where it is; another leaves and is heard from afar.",
+    star: "Sol",
+    rate: 10.0,
+    watch: Slot::Pov,
+    pov: Member { name: "Kestrel", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::AsFound, form: None },
+    cast: &FACTION_CAST,
+    beats: &[
+        Beat { after_s: 0.5 * HOUR_S, actor: OSPREY, act: Act::Found { name: "Wake", replaces: None } },
+        Beat { after_s: 1.0 * HOUR_S, actor: OSPREY, act: Act::GiveKey { key: 0, to: None } },
+        Beat { after_s: 1.5 * HOUR_S, actor: OSPREY, act: Act::Share { key: 0 } },
+        Beat { after_s: 2.0 * HOUR_S, actor: OSPREY, act: Act::Speak { key: 0, text: "Holding here. Come to me." } },
+        Beat { after_s: 3.0 * HOUR_S, actor: SHRIKE, act: Act::Cross { bearing: [0.0, 0.0, 1.0], ly: 0.05 } },
+        Beat { after_s: 4.0 * HOUR_S, actor: WREN, act: Act::Report { key: Some(0) } },
+        Beat { after_s: 12.0 * DAY_S, actor: SHRIKE, act: Act::Speak { key: 0, text: "Still with you. Long way out." } },
+    ],
+};
+
 const FACTION_CAST: [Member; 3] = [
     Member { name: "Osprey", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::Beside { lengths: 16.0, bearing: [1.0, 0.28, 0.0] }, form: None },
     Member { name: "Wren", kind: Kind::Ship, length_m: 500.0, accel_g: 5.0, start: Start::Beside { lengths: 16.0, bearing: [1.0, -0.28, 0.0] }, form: None },
@@ -622,6 +646,7 @@ const FACTION_CAST: [Member; 3] = [
 ];
 
 const HOUR_S: f64 = 3_600.0;
+const DAY_S: f64 = 86_400.0;
 const YEAR_S: f64 = crate::flight::JULIAN_YEAR_S;
 /// Of `Q_max`, a field at rest: 400 K against the 4 600 K it fails at, heat going as `T⁴`.
 const IDLE: f64 = 5.7e-5;

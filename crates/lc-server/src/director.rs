@@ -251,6 +251,12 @@ impl<J: Journal> Server<J> {
                 self.aboard(id).knowledge.write(lc_world::knowledge::Subject::Star(star), writing, scope, now_s);
                 return true;
             }
+            Act::Share { key: k } => {
+                if let Some(key) = key(k) {
+                    self.sharing.entry(id).or_default().insert(lc_proto::Chat::Faction(key));
+                }
+                return true;
+            }
             Act::Report { key: k } => {
                 let secrecy = match k {
                     Some(k) => match key(k) {
@@ -344,7 +350,13 @@ impl<J: Journal> Server<J> {
                 self.pursuits.remove(&id);
                 None
             }
-            Act::Vent(_) | Act::Found { .. } | Act::GiveKey { .. } | Act::Speak { .. } | Act::Write { .. } | Act::Report { .. } => None,
+            Act::Vent(_)
+            | Act::Found { .. }
+            | Act::GiveKey { .. }
+            | Act::Speak { .. }
+            | Act::Write { .. }
+            | Act::Report { .. }
+            | Act::Share { .. } => None,
         };
         if let Some(change) = change {
             let event = motion::Event { ship: motion::ShipId(id.0), at_t: now_s, change };
