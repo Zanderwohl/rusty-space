@@ -111,8 +111,13 @@ pub const DETECTION_SNR: f64 = 5.0;
 
 /// Whether `instrument` sees a craft whose light at it is `light`.
 pub fn detected(instrument: &Instrument, light: &Light) -> bool {
-    let total = light.total();
-    Band::ALL.into_iter().any(|band| snr(instrument, band, total[band], DETECTION_EXPOSURE_S) >= DETECTION_SNR)
+    detected_over(instrument, &light.total(), DETECTION_EXPOSURE_S)
+}
+
+/// Whether `instrument` sees a mean flux held over `exposure_s`: for light that changes faster than
+/// a look, as a collapse's spike and afterglow do.
+pub fn detected_over(instrument: &Instrument, flux: &PerBand<f64>, exposure_s: f64) -> bool {
+    Band::ALL.into_iter().any(|band| snr(instrument, band, flux[band], exposure_s) >= DETECTION_SNR)
 }
 
 /// Signal over noise for `flux_w_m2` in `band`, against the instrument's own glow: whether it sees

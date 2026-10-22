@@ -360,6 +360,7 @@ A sighting is one of three kinds:
 | **seen** | detecting its light ([05-observation.md](05-observation.md#seeing-other-craft)) | where it was and how it was moving, as the light left |
 | **heard** | a transmission or burn landing from out of sight | a bearing and a strength; which system, when the bearing settles it |
 | **stated** | the craft itself saying where it is ([23-factions.md](23-factions.md#sharing-where-you-are)) | whatever it chose to say, which may be a lie |
+| **collapse** | a collapse's spike or afterglow ([30-the-field.md](30-the-field.md#collapse)) | where a craft was when it collapsed, and when, which the cooling dates; a craft never seen before is placed by it |
 
 A craft's **last known place** is folded from these as a star's belief is: the best sighting,
 carried forward on the motion last seen, its uncertainty growing with age, with the witness and

@@ -27,6 +27,9 @@ pub enum Kind {
     Heard,
     /// The craft's own word about itself, which may be a lie.
     Stated,
+    /// A collapse's light where it was: the spike, or the afterglow cooling from the field's
+    /// limit. Dated to the collapse, which the cooling says.
+    Collapse,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -77,6 +80,8 @@ impl Sighting {
             (Kind::Seen, Fix::Place { position_ly: a, sigma_ly: sa, .. }, Fix::Place { position_ly: b, sigma_ly: sb, .. }) => {
                 (self.emitted_s - other.emitted_s).abs() <= SAME_MOMENT_S && a.distance(b) <= 3.0 * sa.hypot(sb)
             }
+            // One collapse, dated by its light, wherever each witness put it.
+            (Kind::Collapse, _, _) => self.emitted_s.to_bits() == other.emitted_s.to_bits(),
             // One statement or one transmission, landed on several.
             _ => self.emitted_s.to_bits() == other.emitted_s.to_bits() && self.fix == other.fix,
         }

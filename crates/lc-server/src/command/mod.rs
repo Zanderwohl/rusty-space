@@ -315,7 +315,7 @@ const FORM_ARGS: &[ArgSpec] = &[
 ];
 
 /// `lc_world::scenario::Scenario::ALL` by name, which a `const` cannot collect for itself.
-const SCENES: &[&str] = &["traffic", "meeting", "approach", "kzinti", "closing", "chase", "corona", "cascade", "distant", "wake", "schism"];
+const SCENES: &[&str] = &["traffic", "meeting", "approach", "kzinti", "closing", "chase", "corona", "cascade", "distant", "wake", "schism", "muster"];
 
 pub fn find(name: &str, level: Level) -> Option<&'static Spec> {
     COMMANDS.iter().find(|spec| spec.name == name && level.at_least(spec.level))

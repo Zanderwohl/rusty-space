@@ -37,6 +37,9 @@ const HEARD_SIGMA_RAD: f64 = 1e-2;
 pub struct Roster {
     filed: HashMap<(CraftId, CraftId), Filed>,
     next_t: i64,
+    /// When the last pass ran: a collapse's light is looked for over everything since, so a
+    /// spike between two passes is not missed.
+    last_t: Option<i64>,
 }
 
 #[derive(Clone, Copy)]
@@ -114,6 +117,8 @@ impl<J: Journal> Server<J> {
             return;
         }
         self.roster.next_t = self.now_t + (PASS_S * 1.0e6) as i64;
+        let since_t = self.roster.last_t.replace(self.now_t).unwrap_or(self.now_t - (PASS_S * 1.0e6) as i64);
+        self.watch_collapses(since_t);
         let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
         let mut news = Vec::new();
         for &observer in &ids {
@@ -152,6 +157,48 @@ impl<J: Journal> Server<J> {
                 witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
             };
             self.aboard(observer).knowledge.spotted(quarry.0, sighting);
+        }
+    }
+
+    /// File, for every craft, each collapse whose light it has just seen: the spike if it landed
+    /// since `since_t`, or the afterglow over that span. Once per collapse; a craft never placed
+    /// before is placed by it, as somebody that was there.
+    fn watch_collapses(&mut self, since_t: i64) {
+        let exposure_s = (self.now_t - since_t) as f64 * 1.0e-6;
+        if exposure_s <= 0.0 {
+            return;
+        }
+        let mut news = Vec::new();
+        for (&wreck, afterglow) in &self.afterglows {
+            for observer in self.fleet.iter().filter(|c| c.ended_s().is_none()) {
+                if self.roster.filed.get(&(observer.id, wreck)).is_some_and(|f| f.emitted_s >= afterglow.at_s) {
+                    continue;
+                }
+                let here = observer.position_at(self.now_t as f64);
+                let delay_s = afterglow.position().distance(here) * 1.0e-6;
+                let left_s = self.now_t as f64 * 1.0e-6 - delay_s;
+                if left_s < afterglow.at_s {
+                    continue;
+                }
+                let flux = afterglow.mean_flux(left_s - exposure_s, left_s, delay_s * 1.0e6 * LIGHT_MICROSECOND_M);
+                if self.sees_everything || lc_world::glow::detected_over(&observer.sensor, &flux, exposure_s) {
+                    news.push((observer.id, wreck, afterglow.position() / LIGHT_US_PER_LY, afterglow.at_s, here / LIGHT_US_PER_LY));
+                }
+            }
+        }
+        let now_s = self.now_t as f64 * 1.0e-6;
+        for (observer, wreck, position_ly, at_s, here) in news {
+            let system = self.world.star_containing(position_ly);
+            let filed = Filed { emitted_s: at_s, position_ly, beta: DVec3::ZERO, system };
+            self.roster.filed.insert((observer, wreck), filed);
+            let sighting = Sighting {
+                kind: Kind::Collapse,
+                emitted_s: at_s,
+                system,
+                fix: Fix::Place { position_ly, beta: DVec3::ZERO, sigma_ly: SEEN_SIGMA_RAD * here.distance(position_ly) },
+                witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
+            };
+            self.aboard(observer).knowledge.spotted(wreck.0, sighting);
         }
     }
 

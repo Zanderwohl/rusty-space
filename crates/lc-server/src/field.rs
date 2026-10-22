@@ -494,7 +494,9 @@ mod tests {
         let fitting = craft.fitting().unwrap();
         assert_eq!(fitting.form(), &Form::starting());
         assert_eq!(fitting.stored_j_at(&craft.motion, server.now_t() as f64 * 1.0e-6), fitting.hull().capacities.storage_j);
-        assert!(server.instruments.aboard.get(&CraftId(successor.0)).is_none_or(|a| a.knowledge.is_empty()));
+        // Nothing inherited: what it holds is only the craft it has seen around it since.
+        let knows = server.instruments.aboard.get(&CraftId(successor.0)).map(|a| a.knowledge.files().map(|(s, _)| s).collect::<Vec<_>>());
+        assert!(knows.unwrap_or_default().iter().all(|s| matches!(s, lc_world::knowledge::Subject::Craft(_))));
         assert_eq!(server.ship(DYING).unwrap().ended_s(), Some(collapsed.at_t as f64 * 1.0e-6));
 
         wire.client_says(OWNER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));

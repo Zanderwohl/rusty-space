@@ -205,4 +205,26 @@ mod tests {
         assert!(heat.len() >= 4, "{heat:?}");
         assert!(heat.iter().all(|s| s.deficit > 5.0 * s.sigma), "{heat:?}");
     }
+
+    /// A collapse is seen by its light, three light-days off, once that light arrives: filed once,
+    /// where the ship was, dated to the collapse.
+    #[tokio::test]
+    async fn a_collapse_is_seen_by_its_light_and_filed_once() {
+        use lc_world::knowledge::whereabouts::Kind;
+        let Some((mut server, mut wire)) = scene() else { return };
+        let collapsed = until_collapse(&mut server, &mut wire).await;
+        let collapses = |server: &Server<Memory>| -> Vec<f64> {
+            server
+                .knowledge_of(WATCHING)
+                .and_then(|k| k.file(Subject::Craft(DYING.0)))
+                .map(|f| f.whereabouts().sightings().filter(|s| s.kind == Kind::Collapse).map(|s| s.emitted_s).collect())
+                .unwrap_or_default()
+        };
+        assert!(collapses(&server).is_empty(), "its light has three days to go");
+        let until = collapsed.at_t + APART_US as i64 + 2 * 86_400_000_000;
+        while server.now_t() < until {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert_eq!(collapses(&server), vec![collapsed.at_t as f64 * 1.0e-6]);
+    }
 }
