@@ -48,6 +48,7 @@ pub fn draw_reticle(
     };
     let Some(viewport) = camera.logical_viewport_size() else { return };
 
+    let reticle_id = egui::Id::new("em_reticle");
     let available = context.viewport_rect();
     let inset = reticle::EDGE_INSET_PX;
     let safe = bevy::math::Rect::from_corners(
@@ -62,7 +63,7 @@ pub fn draw_reticle(
             .areas()
             .visible_layer_ids()
             .iter()
-            .filter(|layer| layer.order < egui::Order::Foreground)
+            .filter(|layer| layer.order < egui::Order::Foreground && layer.id != reticle_id)
             .filter_map(|layer| memory.area_rect(layer.id))
             .map(|r| {
                 bevy::math::Rect::from_corners(
@@ -74,13 +75,15 @@ pub fn draw_reticle(
     });
     let frame = Frame::with(safe, &occupied, ARROW_PX);
 
-    // Foreground, not background: panels paint in `Order::Background` and floating windows in
-    // `Order::Middle`, so a mark on either is covered by whatever happens to be open. Keeping
-    // the marks inside `available` is what stops this from drawing over a docked panel.
-    let painter = context.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
-        egui::Id::new("em_reticle"),
-    ));
+    // Under every window, which `occupied` already keeps arrows clear of. An area rather than a
+    // bare `layer_painter`: egui draws bare layers after every area of their order, and in hash
+    // order among themselves, so only an area is reliably first in `Order::Background`.
+    egui::Area::new(reticle_id)
+        .order(egui::Order::Background)
+        .interactable(false)
+        .fixed_pos(egui::Pos2::ZERO)
+        .show(context, |_| {});
+    let painter = context.layer_painter(egui::LayerId::new(egui::Order::Background, reticle_id));
 
     let camera_gt = GlobalTransform::from(*camera_at);
     let view_from_world = camera_gt.to_matrix().inverse();
