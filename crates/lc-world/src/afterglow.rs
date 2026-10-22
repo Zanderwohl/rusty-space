@@ -212,4 +212,23 @@ mod tests {
         let farther = (1.0 + of_spike).sqrt() - 1.0;
         assert!(farther < 0.03, "{farther}");
     }
+
+    /// 30 has a full starting ship's collapse seen from five light-years, over one roster pass at
+    /// the design rate. The afterglow does it a hundred times over; the spike, a 10⁷ K blackbody
+    /// with little in any band an instrument has, only just.
+    #[test]
+    fn a_starting_ships_collapse_is_seen_from_five_light_years() {
+        let e_j = 40.0 * B.module_energy_j();
+        let a = Afterglow::of(DVec3::ZERO, 0.0, e_j, &B);
+        let five_ly_m = 5.0 * crate::system::M_PER_LY;
+        let pass_s = 438.0;
+        let flux = a.mean_flux(-1.0, pass_s - 1.0, five_ly_m);
+        assert!(crate::glow::detected_over(&crate::instrument::Instrument::SHIP, &flux, pass_s));
+        let spike_alone = PerBand::new(std::array::from_fn(|i| {
+            let band = Band::ALL[i];
+            let share = std::f64::consts::PI * blackbody::band_radiance(band, B.collapse_spike_k) / blackbody::radiant_exitance(B.collapse_spike_k);
+            a.spike_j * share / (4.0 * std::f64::consts::PI * five_ly_m * five_ly_m) / pass_s
+        }));
+        assert!(crate::glow::detected_over(&crate::instrument::Instrument::SHIP, &spike_alone, pass_s), "the spike alone too");
+    }
 }

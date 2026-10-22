@@ -249,12 +249,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_collapse_of_a_ship_never_seen_is_nobodys() {
+    async fn a_collapse_three_light_years_off_is_seen_and_nobodys() {
         if scene().is_none() {
             return;
         }
-        // A ship at its limit glows to about sixty light-days; its collapse carries much further.
-        let (seen, was, on_the_ship, at_s) = watched(false, 50.0).await;
+        // A ship at its limit glows to about sixty light-days; its collapse, light-years.
+        let three_ly = 3.0 * 365.25 * 86_400.0e6 / APART_US;
+        let (seen, was, on_the_ship, at_s) = watched(false, three_ly).await;
         assert_eq!(seen, vec![at_s], "its light is seen all the same");
         assert_eq!((was, on_the_ship), (None, false), "and says nothing of whose it was");
     }
