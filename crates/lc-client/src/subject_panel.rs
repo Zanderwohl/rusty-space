@@ -116,7 +116,7 @@ fn whereabouts(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink, i
         Kind::Seen => "seen",
         Kind::Heard => "heard",
         Kind::Stated => "on its own word",
-        Kind::Collapse => "collapsing, by its light",
+        Kind::Collapse => "collapse",
     };
     let ago = |s: &lc_world::knowledge::whereabouts::Sighting| crate::panels::duration(now_s - s.emitted_s);
     ui.label(format!("Last known: {}, {} ago, {}", place(stay.system), ago(best), how(best.kind)));
