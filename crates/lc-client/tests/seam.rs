@@ -402,9 +402,16 @@ async fn a_report_crosses_the_seam_and_is_learned_at_the_far_end() {
         order: Order::SetDuty { duty: lc_proto::Duty::stare(star.get()), integration_s: 1.0 },
         issued_at_client_t: i64::MAX,
     }));
+    // Waiting for the star itself: the other craft, seen from the first pass, is learned too.
+    let mut mine_copy = Knowledge::new(Witness(mine.0 as u64));
     let deadline = tokio::time::Instant::now() + PATIENCE;
     loop {
-        if sender.poll().iter().any(|m| matches!(m, Outbound::Learned { .. })) {
+        for message in sender.poll() {
+            if let Outbound::Learned { report } = message {
+                mine_copy.absorb(&lc_proto::decode(&report).expect("a report"));
+            }
+        }
+        if mine_copy.knows(star) {
             break;
         }
         assert!(tokio::time::Instant::now() < deadline, "the stare found nothing to report");
