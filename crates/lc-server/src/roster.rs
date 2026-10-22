@@ -2,14 +2,14 @@
 //! stated by the craft itself where it shares its location. Runs for every craft, flown or not.
 //! See `lightcone/docs/22-provenance.md` §Where craft are.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use glam::DVec3;
 use lc_proto::{Chat, FactionId, Outbound, Reported, Scope, ShipId, Spoken, Stated};
 use lc_spacetime::{LIGHT_MICROSECOND_M, Worldline};
 use lc_world::craft::CraftId;
 use lc_world::flight::JULIAN_YEAR_S;
-use lc_world::knowledge::Bearing;
+use lc_world::knowledge::{Bearing, Subject};
 use lc_world::knowledge::whereabouts::{Fix, Kind, Sighting, Witnessed};
 use lc_world::motion::LIGHT_US_PER_LY;
 
@@ -40,6 +40,10 @@ pub struct Roster {
     /// When the last pass ran: a collapse's light is looked for over everything since, so a
     /// spike between two passes is not missed.
     last_t: Option<i64>,
+    /// Who each craft saw on the last pass: a collapse is known for whose only by a craft that
+    /// had it in sight until its light went out.
+    in_sight: HashSet<(CraftId, CraftId)>,
+    collapses_seen: HashSet<(CraftId, CraftId)>,
 }
 
 #[derive(Clone, Copy)]
@@ -120,16 +124,20 @@ impl<J: Journal> Server<J> {
         let since_t = self.roster.last_t.replace(self.now_t).unwrap_or(self.now_t - (PASS_S * 1.0e6) as i64);
         self.watch_collapses(since_t);
         let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
+        // A wreck too, whose hull is seen until the light of its end arrives.
+        let quarries: Vec<CraftId> = self.fleet.iter().map(|c| c.id).collect();
         let mut news = Vec::new();
+        let mut in_sight = HashSet::new();
         for &observer in &ids {
             let Some(here) = self.fleet.get(observer).map(|c| c.position_at(self.now_t as f64) / LIGHT_US_PER_LY) else {
                 continue;
             };
-            for &quarry in &ids {
+            for &quarry in &quarries {
                 let Some(seen) = chase::sighting(&self.fleet, &self.balance, self.sees_everything, observer, ShipId(quarry.0), self.now_t)
                 else {
                     continue;
                 };
+                in_sight.insert((observer, quarry));
                 let sigma_ly = SEEN_SIGMA_RAD * here.distance(seen.position_ly);
                 let system = self.world.star_containing(seen.position_ly);
                 let due = match self.roster.filed.get(&(observer, quarry)) {
@@ -146,6 +154,7 @@ impl<J: Journal> Server<J> {
                 }
             }
         }
+        self.roster.in_sight = in_sight;
         let now_s = self.now_t as f64 * 1.0e-6;
         for (observer, quarry, filed, sigma_ly) in news {
             self.roster.filed.insert((observer, quarry), filed);
@@ -156,13 +165,13 @@ impl<J: Journal> Server<J> {
                 fix: Fix::Place { position_ly: filed.position_ly, beta: filed.beta, sigma_ly },
                 witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
             };
-            self.aboard(observer).knowledge.spotted(quarry.0, sighting);
+            self.aboard(observer).knowledge.spotted(Subject::Craft(quarry.0), sighting);
         }
     }
 
     /// File, for every craft, each collapse whose light it has just seen: the spike if it landed
-    /// since `since_t`, or the afterglow over that span. Once per collapse; a craft never placed
-    /// before is placed by it, as somebody that was there.
+    /// since `since_t`, or the afterglow over that span. Once per collapse, as a collapse and
+    /// nobody's: only a craft that had the ship in sight until then knows whose it was.
     fn watch_collapses(&mut self, since_t: i64) {
         let exposure_s = (self.now_t - since_t) as f64 * 1.0e-6;
         if exposure_s <= 0.0 {
@@ -171,7 +180,7 @@ impl<J: Journal> Server<J> {
         let mut news = Vec::new();
         for (&wreck, afterglow) in &self.afterglows {
             for observer in self.fleet.iter().filter(|c| c.ended_s().is_none()) {
-                if self.roster.filed.get(&(observer.id, wreck)).is_some_and(|f| f.emitted_s >= afterglow.at_s) {
+                if self.roster.collapses_seen.contains(&(observer.id, wreck)) {
                     continue;
                 }
                 let here = observer.position_at(self.now_t as f64);
@@ -182,15 +191,15 @@ impl<J: Journal> Server<J> {
                 }
                 let flux = afterglow.mean_flux(left_s - exposure_s, left_s, delay_s * 1.0e6 * LIGHT_MICROSECOND_M);
                 if self.sees_everything || lc_world::glow::detected_over(&observer.sensor, &flux, exposure_s) {
-                    news.push((observer.id, wreck, afterglow.position() / LIGHT_US_PER_LY, afterglow.at_s, here / LIGHT_US_PER_LY));
+                    let collapse = Subject::collapse(afterglow.at_s, afterglow.from);
+                    news.push((observer.id, wreck, collapse, afterglow.position() / LIGHT_US_PER_LY, afterglow.at_s, here / LIGHT_US_PER_LY));
                 }
             }
         }
         let now_s = self.now_t as f64 * 1.0e-6;
-        for (observer, wreck, position_ly, at_s, here) in news {
+        for (observer, wreck, collapse, position_ly, at_s, here) in news {
+            self.roster.collapses_seen.insert((observer, wreck));
             let system = self.world.star_containing(position_ly);
-            let filed = Filed { emitted_s: at_s, position_ly, beta: DVec3::ZERO, system };
-            self.roster.filed.insert((observer, wreck), filed);
             let sighting = Sighting {
                 kind: Kind::Collapse,
                 emitted_s: at_s,
@@ -198,7 +207,13 @@ impl<J: Journal> Server<J> {
                 fix: Fix::Place { position_ly, beta: DVec3::ZERO, sigma_ly: SEEN_SIGMA_RAD * here.distance(position_ly) },
                 witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
             };
-            self.aboard(observer).knowledge.spotted(wreck.0, sighting);
+            let whose = self.roster.in_sight.contains(&(observer, wreck));
+            let knowledge = &mut self.aboard(observer).knowledge;
+            knowledge.spotted(collapse, sighting.clone());
+            if whose {
+                knowledge.spotted(Subject::Craft(wreck.0), sighting);
+                knowledge.write(collapse, lc_proto::Writing::Was(Some(ShipId(wreck.0))), Scope::Open, now_s);
+            }
         }
     }
 
@@ -253,7 +268,7 @@ impl<J: Journal> Server<J> {
                 Sighting { kind: Kind::Heard, emitted_s, system, fix: Fix::Toward { bearing, flux }, witnesses: held(Scope::Open) }
             }
         };
-        self.aboard(observer).knowledge.spotted(sender.0, sighting);
+        self.aboard(observer).knowledge.spotted(Subject::Craft(sender.0), sighting);
     }
 }
 

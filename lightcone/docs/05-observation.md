@@ -258,7 +258,7 @@ resolving power `R`. Treat as photometry with a large constant factor.
 sunlit at 1 AU in sight to about 44 AU, and a Black one to about 4.5 AU. A hot field is seen further
 by its own heat, whatever its shade. A collapse is seen by its spike and its afterglow
 (`lc_world::afterglow::Afterglow::mean_flux`, against `glow::detected_over` across everything since
-the last look), filed once as a collapse where the ship was. Heard sightings are filed by
+the last look), filed once as a collapse where the ship was and, unless the ship was in sight, as nobody's. Heard sightings are filed by
 `lc_server::roster` from landings.
 
 A craft is detected by **what reaches the observer from it**, against the same sensitivity

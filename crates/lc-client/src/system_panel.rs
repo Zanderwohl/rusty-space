@@ -104,6 +104,7 @@ fn list(
     ui.separator();
     if *tab == SystemTab::Ships {
         ships(ui, game, uplink, out);
+        collapses(ui, game, uplink, system.star, out);
         return;
     }
 
@@ -282,6 +283,36 @@ fn focused(
     });
     if let Some(subject) = noted {
         notes(ui, game, uplink, subject, draft, out);
+    }
+}
+
+/// Collapses seen in this system, newest first, each as whose it is held to have been.
+fn collapses(ui: &mut egui::Ui, game: &Game, uplink: &crate::uplink::Uplink, star: lc_world::sky::StarId, out: &mut MessageWriter<Requested>) {
+    let owner = game.knowledge.owner;
+    let mut rows: Vec<(f64, u64, String)> = game
+        .knowledge
+        .collapses()
+        .filter_map(|(key, file)| {
+            let (stay, best) = file.whereabouts().last_known()?;
+            (stay.system == Some(star)).then_some(())?;
+            let whose = match file.thread().was(owner) {
+                Some((Some(craft), _)) => uplink.name_of(craft),
+                _ => "unknown".to_string(),
+            };
+            Some((best.emitted_s, key, whose))
+        })
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    ui.separator();
+    for (at_s, key, whose) in rows {
+        let line = format!("Collapse, {} ago: {whose}", crate::panels::duration(game.coordinate_time_s() - at_s));
+        if crate::radio_panel::clickable_name(ui, &line, ui.visuals().text_color()).clicked() {
+            ask(out, Action::Card(Subject::Collapse(key)));
+            ask(out, Action::OpenPanel(crate::ui::Panel::Subject));
+        }
     }
 }
 

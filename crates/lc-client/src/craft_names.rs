@@ -51,7 +51,7 @@ pub fn claimed(knowledge: &Knowledge, id: ShipId) -> Option<String> {
         .max_by(|a, b| a.1.entry.written_s.total_cmp(&b.1.entry.written_s))
         .and_then(|(_, held)| match &held.entry.writing {
             Writing::Name(name) => Some(name.clone()),
-            Writing::Note(_) => None,
+            Writing::Note(_) | Writing::Was(_) => None,
         })
 }
 

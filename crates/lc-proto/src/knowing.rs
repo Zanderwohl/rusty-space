@@ -18,6 +18,9 @@ pub enum Writing {
     Note(String),
     /// What its author calls the subject from now on.
     Name(String),
+    /// Which craft its author holds a collapse was, or, with `None`, that it holds it was nobody
+    /// known. Appended last.
+    Was(Option<crate::ShipId>),
 }
 
 impl Writing {
@@ -26,6 +29,7 @@ impl Writing {
         match self {
             Writing::Note(text) => !text.trim().is_empty() && text.len() <= NOTE_LIMIT,
             Writing::Name(name) => !name.trim().is_empty() && name.len() <= NAME_LIMIT,
+            Writing::Was(_) => true,
         }
     }
 }
@@ -118,4 +122,6 @@ pub enum Subject {
     Craft(i64),
     /// A point a stare was aimed at, light-microseconds. Appended last.
     Place([i64; 3]),
+    /// A collapse seen by its light, by its moment and place, whoever it was. Appended last.
+    Collapse(u64),
 }

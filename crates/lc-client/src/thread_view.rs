@@ -21,6 +21,9 @@ pub struct Draft {
     pub name_scope: Scope,
     pub note: String,
     pub note_scope: Scope,
+    /// Whose a collapse was, as about to be said.
+    pub was: Option<ShipId>,
+    pub was_scope: Scope,
 }
 
 /// How tall the list of notes may grow before it scrolls.
@@ -152,7 +155,7 @@ pub(crate) fn notes(
 
 /// Whose word an entry is on: its faction, as a link to its chat, if it has one; then the ship.
 /// Last in its row, which it leaves unspaced.
-fn source(
+pub(crate) fn source(
     ui: &mut egui::Ui,
     game: &Game,
     uplink: &crate::uplink::Uplink,
@@ -197,7 +200,7 @@ fn author(uplink: &crate::uplink::Uplink, owner: lc_world::knowledge::Witness, h
     }
 }
 
-fn scope_picker(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, id: (&str, Subject), scope: &mut Scope) {
+pub(crate) fn scope_picker(ui: &mut egui::Ui, uplink: &crate::uplink::Uplink, id: (&str, Subject), scope: &mut Scope) {
     egui::ComboBox::from_id_salt(id).selected_text(scope_label(uplink, *scope)).show_ui(ui, |ui| {
         for choice in scopes(uplink) {
             ui.selectable_value(scope, choice, scope_label(uplink, choice));

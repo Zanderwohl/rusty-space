@@ -442,14 +442,12 @@ impl Knowledge {
                 let lineage = heard(&held.lineage);
                 self.heard_entry(subject, Held { lineage, ..held.clone() });
             }
-            if let Subject::Craft(craft) = subject {
-                for sighting in &part.whereabouts {
-                    let mut sighting = sighting.clone();
-                    for w in &mut sighting.witnesses {
-                        w.lineage = heard(&w.lineage);
-                    }
-                    self.spotted(craft, sighting);
+            for sighting in &part.whereabouts {
+                let mut sighting = sighting.clone();
+                for w in &mut sighting.witnesses {
+                    w.lineage = heard(&w.lineage);
                 }
+                self.spotted(subject, sighting);
             }
             for conclusion in &part.conclusions {
                 // A replica drops the samples its original consumed.

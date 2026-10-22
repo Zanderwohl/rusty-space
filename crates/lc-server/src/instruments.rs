@@ -521,7 +521,12 @@ impl<J: Journal> Server<J> {
                 let writing = match writing {
                     lc_proto::Writing::Note(text) => lc_proto::Writing::Note(text.trim().to_string()),
                     lc_proto::Writing::Name(name) => lc_proto::Writing::Name(name.trim().to_string()),
+                    lc_proto::Writing::Was(craft) => lc_proto::Writing::Was(*craft),
                 };
+                // Whose a collapse was is all `Was` says, and a collapse is all it says it of.
+                if matches!(writing, lc_proto::Writing::Was(_)) != matches!(subject, lc_proto::Subject::Collapse(_)) {
+                    return Err(Refusal::Impossible);
+                }
                 if let lc_proto::Scope::Faction(key) = scope
                     && !self.factions.holds(id, *key, (at_s * 1.0e6) as i64)
                 {

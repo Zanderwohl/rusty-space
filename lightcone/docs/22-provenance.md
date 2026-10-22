@@ -360,7 +360,14 @@ A sighting is one of three kinds:
 | **seen** | detecting its light ([05-observation.md](05-observation.md#seeing-other-craft)) | where it was and how it was moving, as the light left |
 | **heard** | a transmission or burn landing from out of sight | a bearing and a strength; which system, when the bearing settles it |
 | **stated** | the craft itself saying where it is ([23-factions.md](23-factions.md#sharing-where-you-are)) | whatever it chose to say, which may be a lie |
-| **collapse** | a collapse's spike or afterglow ([30-the-field.md](30-the-field.md#collapse)) | where a craft was when it collapsed, and when, which the cooling dates; a craft never seen before is placed by it |
+| **collapse** | a collapse's spike or afterglow ([30-the-field.md](30-the-field.md#collapse)) | where something collapsed, and when, which the cooling dates — and nothing of whose it was |
+
+A collapse is a subject of its own (`Subject::Collapse`, keyed by its moment and place, so every
+witness's report of it meets in one file), not a record about a craft. Its light says nothing of
+whose it was: a battle seen from afar does not say whether an ally died. Only a craft that had the
+ship in sight until its light went out knows, and files it under that craft as well as saying so.
+Whose a collapse was is otherwise a claim in its thread, `Writing::Was`, written by a player or
+received in a report, scoped like any entry and standing as a name does; `Was(None)` takes one back.
 
 A craft's **last known place** is folded from these as a star's belief is: the best sighting,
 carried forward on the motion last seen, its uncertainty growing with age, with the witness and

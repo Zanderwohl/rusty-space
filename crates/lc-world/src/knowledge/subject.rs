@@ -59,6 +59,9 @@ pub enum Subject {
     Population { star: StarId, index: u32 },
     /// Another craft, by the id its shard gave it.
     Craft(i64),
+    /// A collapse seen by its light, keyed by [`Subject::collapse`]: whose it was is a claim in
+    /// its thread, never part of what it is.
+    Collapse(u64),
     /// A point a stare was aimed at, light-microseconds in the shard's frame. Last, so it orders
     /// after everything else.
     Place([i64; 3]),
@@ -72,7 +75,7 @@ impl Subject {
             Self::Star(star) | Self::Body { star, .. } | Self::Population { star, .. } => {
                 Some(star)
             }
-            Self::Craft(_) | Self::Place(_) => None,
+            Self::Craft(_) | Self::Collapse(_) | Self::Place(_) => None,
         }
     }
 
@@ -94,8 +97,16 @@ impl Subject {
             Self::Body { star, body } => rng::hash(&[star.get(), body.get()]),
             Self::Population { star, index } => rng::hash(&[star.get(), index as u64, 0x_b_e_1_7]),
             Self::Craft(id) => rng::hash(&[id as u64, 0x_c_2_a_f_7]),
+            Self::Collapse(key) => rng::hash(&[key, 0x_c_0_1_1]),
             Self::Place([x, y, z]) => rng::hash(&[x as u64, y as u64, z as u64, 0x_9_1_a_c_e]),
         }
+    }
+
+    /// A collapse, by when it happened, coordinate seconds, and where, light-microseconds: the same
+    /// for every witness, so their reports of it meet in one file.
+    pub fn collapse(at_s: f64, from_us: [f64; 3]) -> Self {
+        let [x, y, z] = from_us.map(|c| c.round() as i64 as u64);
+        Self::Collapse(rng::hash(&[at_s.to_bits(), x, y, z]))
     }
 
     pub fn as_star(self) -> Option<StarId> {
@@ -119,6 +130,7 @@ impl From<Subject> for lc_proto::Subject {
             Subject::Body { star, body } => Self::Body { star: star.get(), body: body.get() },
             Subject::Population { star, index } => Self::Population { star: star.get(), index },
             Subject::Craft(id) => Self::Craft(id),
+            Subject::Collapse(key) => Self::Collapse(key),
             Subject::Place(at) => Self::Place(at),
         }
     }
@@ -135,6 +147,7 @@ impl From<lc_proto::Subject> for Subject {
                 Self::Population { star: StarId::from_raw(star), index }
             }
             lc_proto::Subject::Craft(id) => Self::Craft(id),
+            lc_proto::Subject::Collapse(key) => Self::Collapse(key),
             lc_proto::Subject::Place(at) => Self::Place(at),
         }
     }

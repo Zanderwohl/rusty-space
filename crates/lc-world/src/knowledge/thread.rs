@@ -173,7 +173,7 @@ impl Thread {
     pub fn name(&self, owner: Witness) -> Option<&str> {
         self.standing(owner).and_then(|(_, held)| match &held.entry.writing {
             Writing::Name(name) => Some(name.as_str()),
-            Writing::Note(_) => None,
+            _ => None,
         })
     }
 
@@ -181,8 +181,22 @@ impl Thread {
     /// anybody's; the most recently written within each. A faction-scoped entry is held only by
     /// way of a key held, so holding one is the vouching.
     pub fn standing(&self, owner: Witness) -> Option<(EntryId, &Held)> {
+        Self::best(owner, self.standing_names())
+    }
+
+    /// Which craft a collapse was, as [`Thread::standing`] ranks names, and on whose word. The
+    /// outer `None` when nobody has said.
+    pub fn was(&self, owner: Witness) -> Option<(Option<lc_proto::ShipId>, &Held)> {
+        let (_, held) = Self::best(owner, self.standing_of(|w| matches!(w, Writing::Was(_))))?;
+        match held.entry.writing {
+            Writing::Was(craft) => Some((craft, held)),
+            _ => None,
+        }
+    }
+
+    fn best(owner: Witness, standing: Vec<(EntryId, &Held)>) -> Option<(EntryId, &Held)> {
         let rank = |held: &Held| (held.entry.author == owner, matches!(held.entry.scope, Scope::Faction(_)));
-        self.standing_names().into_iter().max_by(|a, b| {
+        standing.into_iter().max_by(|a, b| {
             rank(a.1)
                 .cmp(&rank(b.1))
                 .then(a.1.entry.written_s.total_cmp(&b.1.entry.written_s))
@@ -192,9 +206,14 @@ impl Thread {
 
     /// Names no later name supersedes. More than one is a disagreement nobody has settled.
     pub fn standing_names(&self) -> Vec<(EntryId, &Held)> {
-        let names: Vec<(EntryId, &Held)> =
-            self.held.iter().filter(|(_, h)| matches!(h.entry.writing, Writing::Name(_))).map(|(id, h)| (*id, h)).collect();
-        names.iter().copied().filter(|(id, _)| !names.iter().any(|(other, _)| self.knew(*other, *id))).collect()
+        self.standing_of(|w| matches!(w, Writing::Name(_)))
+    }
+
+    /// Entries of one kind that no later one of that kind supersedes.
+    fn standing_of(&self, kind: impl Fn(&Writing) -> bool) -> Vec<(EntryId, &Held)> {
+        let said: Vec<(EntryId, &Held)> =
+            self.held.iter().filter(|(_, h)| kind(&h.entry.writing)).map(|(id, h)| (*id, h)).collect();
+        said.iter().copied().filter(|(id, _)| !said.iter().any(|(other, _)| self.knew(*other, *id))).collect()
     }
 
     /// What a report under `seal` may carry.
@@ -293,6 +312,19 @@ mod tests {
         assert_eq!(thread.name(Witness(1)), Some("Wren"));
         thread.add(entry(1, 0.5, &[], Writing::Name("My Wren".into())));
         assert_eq!(thread.name(Witness(1)), Some("My Wren"), "and one's own beats both");
+    }
+
+    #[test]
+    fn whose_a_collapse_was_stands_as_a_name_does_and_can_be_taken_back() {
+        let mut thread = Thread::default();
+        assert!(thread.was(Witness(1)).is_none(), "nobody has said");
+        let osprey = entry(2, 1.0, &[], Writing::Was(Some(lc_proto::ShipId(7))));
+        let osprey_id = osprey.entry.id();
+        thread.add(osprey);
+        assert_eq!(thread.was(Witness(1)).map(|(c, _)| c), Some(Some(lc_proto::ShipId(7))));
+        thread.add(entry(1, 2.0, &[osprey_id], Writing::Was(None)));
+        assert_eq!(thread.was(Witness(1)).map(|(c, _)| c), Some(None), "one's own word, unsaying it");
+        assert_eq!(thread.name(Witness(1)), None, "and it is no name");
     }
 
     #[test]

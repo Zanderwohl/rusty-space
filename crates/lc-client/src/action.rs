@@ -174,6 +174,8 @@ pub enum Action {
     FocusTarget(Option<Target>),
     /// Pick out another craft. Picking anything else puts it down.
     SelectCraft(Option<lc_proto::ShipId>),
+    /// Show this subject's card.
+    Card(Subject),
     /// Arm one of the focused target's courses, without flying it.
     ChooseCourse(Option<Course>),
     /// Go somewhere in the local system, and hold there once arrived. What Go sends.
@@ -624,6 +626,7 @@ pub fn apply(action: Action, ui: &mut UiState, session: &mut Session) -> Vec<Eff
             ui.focus = target;
             ui.selected_craft = None;
         }
+        Action::Card(subject) => ui.card = Some(subject),
         Action::SelectCraft(craft) => {
             if let Some(craft) = craft {
                 ui.card = Some(Subject::Craft(craft.0));
@@ -934,6 +937,7 @@ fn write(session: &mut Session, subject: Subject, writing: lc_proto::Writing, sc
     let writing = match writing {
         lc_proto::Writing::Note(text) => lc_proto::Writing::Note(text.trim().to_string()),
         lc_proto::Writing::Name(name) => lc_proto::Writing::Name(name.trim().to_string()),
+        lc_proto::Writing::Was(craft) => lc_proto::Writing::Was(craft),
     };
     if !writing.is_valid() {
         return;

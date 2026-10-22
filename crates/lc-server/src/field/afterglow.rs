@@ -206,25 +206,56 @@ mod tests {
         assert!(heat.iter().all(|s| s.deficit > 5.0 * s.sigma), "{heat:?}");
     }
 
-    /// A collapse is seen by its light, three light-days off, once that light arrives: filed once,
-    /// where the ship was, dated to the collapse.
-    #[tokio::test]
-    async fn a_collapse_is_seen_by_its_light_and_filed_once() {
+    const FAR: ShipId = ShipId(3);
+
+    /// What `FAR`, `apart` times three light-days off, holds of the collapse `collapsed` once its light has had two days past
+    /// arriving: the collapse's sightings, whose it says it was, and whether the ship's own file
+    /// has it.
+    async fn watched(see_everything: bool, apart: f64) -> (Vec<f64>, Option<Option<ShipId>>, bool, f64) {
         use lc_world::knowledge::whereabouts::Kind;
-        let Some((mut server, mut wire)) = scene() else { return };
+        let (mut server, mut wire) = scene().expect("the sample star");
+        server.see_everything(see_everything);
+        let dying_at = server.ship(DYING).unwrap().motion.position_ly * LIGHT_US_PER_LY;
+        server.fleet.insert(still(FAR, dying_at - DVec3::Y * apart * APART_US));
+        server.next_ship = 4;
         let collapsed = until_collapse(&mut server, &mut wire).await;
-        let collapses = |server: &Server<Memory>| -> Vec<f64> {
-            server
-                .knowledge_of(WATCHING)
-                .and_then(|k| k.file(Subject::Craft(DYING.0)))
-                .map(|f| f.whereabouts().sightings().filter(|s| s.kind == Kind::Collapse).map(|s| s.emitted_s).collect())
-                .unwrap_or_default()
-        };
-        assert!(collapses(&server).is_empty(), "its light has three days to go");
-        let until = collapsed.at_t + APART_US as i64 + 2 * 86_400_000_000;
+        let until = collapsed.at_t + (apart * APART_US) as i64 + 2 * 86_400_000_000;
         while server.now_t() < until {
             server.tick(&mut wire).await.unwrap();
         }
-        assert_eq!(collapses(&server), vec![collapsed.at_t as f64 * 1.0e-6]);
+        let knowledge = server.knowledge_of(FAR).unwrap();
+        let mut collapses = knowledge.collapses();
+        let (_, file) = collapses.next().expect("the collapse was seen");
+        assert!(collapses.next().is_none());
+        let seen: Vec<f64> = file.whereabouts().sightings().filter(|s| s.kind == Kind::Collapse).map(|s| s.emitted_s).collect();
+        let was = file.thread().was(knowledge.owner).map(|(craft, _)| craft);
+        let on_the_ship = knowledge
+            .file(Subject::Craft(DYING.0))
+            .is_some_and(|f| f.whereabouts().sightings().any(|s| s.kind == Kind::Collapse));
+        (seen, was, on_the_ship, collapsed.at_t as f64 * 1.0e-6)
+    }
+
+    /// A collapse is seen by its light, three light-days off, once that light arrives, and filed
+    /// once, dated to the collapse. Whose it was only a craft that had the ship in sight knows.
+    #[tokio::test]
+    async fn a_collapse_seen_with_the_ship_in_sight_is_known_for_whose() {
+        if scene().is_none() {
+            return;
+        }
+        let (seen, was, on_the_ship, at_s) = watched(true, 1.0).await;
+        assert_eq!(seen, vec![at_s]);
+        assert_eq!(was, Some(Some(DYING)));
+        assert!(on_the_ship);
+    }
+
+    #[tokio::test]
+    async fn a_collapse_of_a_ship_never_seen_is_nobodys() {
+        if scene().is_none() {
+            return;
+        }
+        // A ship at its limit glows to about sixty light-days; its collapse carries much further.
+        let (seen, was, on_the_ship, at_s) = watched(false, 50.0).await;
+        assert_eq!(seen, vec![at_s], "its light is seen all the same");
+        assert_eq!((was, on_the_ship), (None, false), "and says nothing of whose it was");
     }
 }

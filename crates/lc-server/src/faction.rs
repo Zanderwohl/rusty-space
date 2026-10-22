@@ -375,6 +375,7 @@ mod tests {
                 knowledge.file(Subject::Star(star)).map(|f| {
                     f.thread().ordered().into_iter().map(|(_, h)| match &h.entry.writing {
                         Writing::Note(t) | Writing::Name(t) => t.clone(),
+                        Writing::Was(_) => String::new(),
                     }).collect()
                 }).unwrap_or_default()
             };

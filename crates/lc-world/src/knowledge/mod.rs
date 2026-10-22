@@ -741,9 +741,8 @@ impl Knowledge {
         self.heard_entry(Subject::Craft(sender.0 as i64), thread::Held { entry, lineage });
     }
 
-    /// Hold a sighting of a craft, made here or heard.
-    pub fn spotted(&mut self, craft: i64, sighting: whereabouts::Sighting) {
-        let subject = Subject::Craft(craft);
+    /// Hold a sighting of a craft or a collapse, made here or heard.
+    pub fn spotted(&mut self, subject: Subject, sighting: whereabouts::Sighting) {
         if self.files.edit().entry(subject).or_default().whereabouts.add(sighting) {
             self.refresh(subject);
         }
@@ -754,6 +753,14 @@ impl Knowledge {
         self.crafts().filter_map(|id| {
             let held = &self.files.get(&Subject::Craft(id))?.whereabouts;
             (!held.is_empty()).then_some((id, held))
+        })
+    }
+
+    /// Every collapse held, by its key.
+    pub fn collapses(&self) -> impl Iterator<Item = (u64, &File)> + '_ {
+        self.files.range(Subject::Collapse(0)..=Subject::Collapse(u64::MAX)).map(|(subject, file)| match subject {
+            Subject::Collapse(key) => (*key, file),
+            _ => unreachable!("the range holds only collapses"),
         })
     }
 
@@ -1429,8 +1436,8 @@ mod tests {
         let mut seer = Knowledge::new(osprey);
         let fix = Fix::Place { position_ly: DVec3::X, beta: DVec3::ZERO, sigma_ly: 1e-9 };
         let witnessed = |scope| vec![Witnessed { witness: osprey, observed_s: 600.0, scope, lineage: Lineage::new() }];
-        seer.spotted(99, Spotted { kind: Kind::Seen, emitted_s: 5.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Open) });
-        seer.spotted(99, Spotted { kind: Kind::Stated, emitted_s: 500.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Faction(key)) });
+        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Seen, emitted_s: 5.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Open) });
+        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Stated, emitted_s: 500.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Faction(key)) });
         let mut relay = Knowledge::new(wren);
         relay.receive(&seer.report(Mark::default(), 700.0, thread::Seal::Faction(key)), 800.0);
         let mut ally = Knowledge::new(kite);
@@ -1837,6 +1844,7 @@ mod tests {
         let notes = |k: &Knowledge| {
             let mut out: Vec<String> = k.file(star).map(|f| f.thread().ordered().into_iter().map(|(_, h)| match &h.entry.writing {
                 Writing::Note(t) | Writing::Name(t) => t.clone(),
+                Writing::Was(_) => String::new(),
             }).collect()).unwrap_or_default();
             out.sort();
             out
