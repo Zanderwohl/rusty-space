@@ -18,6 +18,7 @@
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the tiles' layout |
 //! | `--frames <n>` | frames after the box is up |
+//! | `--burst <n>` / `--sweep <deg>` | photograph `n` frames, numbered, swinging the yaw through `sweep` across them: parallax |
 
 mod bake;
 mod tiles;
@@ -41,8 +42,13 @@ use tiles::{Maze, Rng};
 /// What one tile spans. Two to the box's edge by default.
 const TILE_M: f32 = 24.0;
 
-/// Some 2.3 cm a texel.
-const TILE_TEXELS: u32 = 1024;
+/// Some 4.7 cm a texel, geometry and light alike: sixteen variants of three layers at 1024 would
+/// be a quarter of a gigabyte.
+const TILE_TEXELS: u32 = 512;
+
+/// Two choices a tile edge: a variant is its left + 2 right + 4 bottom + 8 top choice, which
+/// sprue.wgsl picks by hash, and any arrangement meets at every seam.
+const VARIANTS: usize = 16;
 
 /// Meters over the base: layer 1, layer 2, the deep lamps, and the lamps riding layer 1.
 const HEIGHTS: Vec4 = Vec4::new(0.9, 1.9, 0.4, 1.25);
@@ -58,7 +64,7 @@ const CONDUIT: Maze = Maze {
     doubled: 0.3,
     boxed: 0.5,
     collar_m: 1.6,
-    offset: 0.0,
+    crossing: 0.45,
 };
 
 const CAPILLARY: Maze = Maze {
@@ -69,7 +75,7 @@ const CAPILLARY: Maze = Maze {
     doubled: 0.25,
     boxed: 0.35,
     collar_m: 0.7,
-    offset: 0.5,
+    crossing: 0.4,
 };
 
 struct Args {
@@ -90,6 +96,8 @@ struct Args {
     exposure: f32,
     seed: u64,
     frames: u32,
+    burst: u32,
+    sweep: f32,
 }
 
 impl Args {
@@ -129,6 +137,8 @@ impl Args {
             exposure: value("--exposure").unwrap_or(0.0),
             seed: value("--seed").unwrap_or(7.0) as u64,
             frames: value("--frames").unwrap_or(60.0) as u32,
+            burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
+            sweep: value("--sweep").unwrap_or(0.0),
         }
     }
 }
@@ -179,12 +189,6 @@ impl Material for SprueMaterial {
     }
 }
 
-#[derive(Resource)]
-struct Shot {
-    path: String,
-    frames: u32,
-    drawn: u32,
-}
 
 fn main() {
     let args = Args::parse();
@@ -206,10 +210,9 @@ fn main() {
         )
         .add_plugins(MaterialPlugin::<SprueMaterial>::default())
         .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(Shot { path: args.path.clone(), frames: args.frames, drawn: 0 })
         .insert_resource(Setup(args))
         .add_systems(Startup, spawn)
-        .add_systems(Update, photograph)
+        .add_systems(Update, (orbit, photograph).chain())
         .run();
 }
 
@@ -226,11 +229,8 @@ fn spawn(
     let args = &setup.0;
     let texels = TILE_TEXELS as usize;
     let mut rng = Rng::new(args.seed);
-    let layers = [
-        tiles::base(texels, TILE_M, &mut rng).surface(true),
-        tiles::maze(texels, TILE_M, &CONDUIT, &mut rng).surface(false),
-        tiles::maze(texels, TILE_M, &CAPILLARY, &mut rng).surface(false),
-    ];
+    let conduit = tiles::MazeEdges::new(&CONDUIT, &mut rng);
+    let capillary = tiles::MazeEdges::new(&CAPILLARY, &mut rng);
     let lamps_spec = Lamps {
         cell_m: 4.0,
         deep_share: 0.35,
@@ -241,24 +241,32 @@ fn spawn(
         bulb_power: 18.0 * args.bulb,
     };
     let started = std::time::Instant::now();
-    // Light is smooth but for the bulbs, which the bake averages over a texel, so half the
-    // geometry's resolution is enough, and sixteen variants of it a quarter the memory.
-    let coarse: Vec<_> = layers.iter().map(|l| l.halved()).collect();
-    let variants = bake::variants(&lamps_spec, &coarse, args.seed);
-    let light: Vec<Vec<Vec3>> = std::thread::scope(|scope| {
-        let baking: Vec<_> =
-            variants.iter().map(|lamps| scope.spawn(|| bake::bake(&lamps_spec, &coarse, lamps))).collect();
-        baking.into_iter().flat_map(|b| b.join().expect("a bake panicked")).collect()
+    let variant = |v: usize| {
+        let edges = [v & 1, v >> 1 & 1, v >> 2 & 1, v >> 3 & 1];
+        let mut rng = Rng::new(args.seed.wrapping_mul(0x9E37_79B9).wrapping_add(v as u64));
+        let layers = vec![
+            tiles::base(texels, TILE_M, &mut rng).surface(true),
+            tiles::maze(texels, TILE_M, &CONDUIT, &conduit, edges, &mut rng).surface(false),
+            tiles::maze(texels, TILE_M, &CAPILLARY, &capillary, edges, &mut rng).surface(false),
+        ];
+        let lamps = bake::of_variant(&lamps_spec, &layers, args.seed, v);
+        let light = bake::bake(&lamps_spec, &layers, &lamps);
+        (layers, light, lamps.len())
+    };
+    let made: Vec<_> = std::thread::scope(|scope| {
+        let making: Vec<_> = (0..VARIANTS).map(|v| scope.spawn(move || variant(v))).collect();
+        making.into_iter().map(|m| m.join().expect("a variant panicked")).collect()
     });
     info!(
-        "sprue_void: baked {} variants, {} lamps, in {:.2?}",
-        variants.len(),
-        variants.iter().map(Vec::len).sum::<usize>(),
+        "sprue_void: made {VARIANTS} variants, {} lamps, in {:.2?}",
+        made.iter().map(|m| m.2).sum::<usize>(),
         started.elapsed()
     );
+    let layers: Vec<_> = made.iter().flat_map(|m| &m.0).collect();
     let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
     let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
-    let light = images.add(bake::light_array(&light, &coarse));
+    let light: Vec<Vec<Vec3>> = made.iter().flat_map(|m| m.1.iter().cloned()).collect();
+    let light = images.add(bake::light_array(&light, &layers));
 
     let (sun, sun_yaw) = (args.sun.to_radians(), args.sun_yaw.to_radians());
     let to_star = Vec3::new(sun.cos() * sun_yaw.cos(), sun.sin(), sun.cos() * sun_yaw.sin());
@@ -280,8 +288,6 @@ fn spawn(
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(material)));
     }
 
-    let (yaw, pitch) = (args.yaw.to_radians(), args.pitch.to_radians());
-    let eye = args.target + args.dist * Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
@@ -293,17 +299,38 @@ fn spawn(
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
-        Transform::from_translation(eye).looking_at(args.target, Vec3::Y),
     ));
 }
 
-fn photograph(mut commands: Commands, mut shot: ResMut<Shot>, mut exit: MessageWriter<AppExit>) {
-    shot.drawn += 1;
-    if shot.drawn == shot.frames {
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(shot.path.clone()));
+/// Which of the burst's photographs frame `drawn` is, held at either end.
+fn burst_index(args: &Args, drawn: u32) -> u32 {
+    drawn.saturating_sub(args.frames).min(args.burst - 1)
+}
+
+fn orbit(setup: Res<Setup>, mut drawn: Local<u32>, mut cameras: Query<&mut Transform, With<Camera3d>>) {
+    let args = &setup.0;
+    *drawn += 1;
+    let share = if args.burst > 1 { burst_index(args, *drawn) as f32 / (args.burst - 1) as f32 - 0.5 } else { 0.0 };
+    let (yaw, pitch) = ((args.yaw + share * args.sweep).to_radians(), args.pitch.to_radians());
+    let eye = args.target + args.dist * Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
+    for mut transform in &mut cameras {
+        *transform = Transform::from_translation(eye).looking_at(args.target, Vec3::Y);
+    }
+}
+
+fn photograph(mut commands: Commands, setup: Res<Setup>, mut drawn: Local<u32>, mut exit: MessageWriter<AppExit>) {
+    let args = &setup.0;
+    *drawn += 1;
+    if (args.frames..args.frames + args.burst).contains(&*drawn) {
+        let path = match (args.burst > 1, args.path.rsplit_once('.')) {
+            (false, _) => args.path.clone(),
+            (true, Some((stem, extension))) => format!("{stem}.{:03}.{extension}", burst_index(args, *drawn)),
+            (true, None) => format!("{}.{:03}", args.path, burst_index(args, *drawn)),
+        };
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     }
     // The capture is asynchronous; quitting on the same frame loses the file.
-    if shot.drawn > shot.frames + 30 {
+    if *drawn > args.frames + args.burst + 30 {
         exit.write(AppExit::Success);
     }
 }

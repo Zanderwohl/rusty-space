@@ -83,9 +83,9 @@ fn edge(at: vec2<f32>, axis: f32, id: f32) -> u32 {
     return u32(fract((p3.x + p3.y) * p3.z) < 0.5);
 }
 
-/// The light array's layer for layer `k` of the tile `uv` falls in: sixteen variants, as
-/// sprue_void's bake::VARIANTS, of three layers each.
-fn lit_layer(uv: vec2<f32>, k: u32, id: f32) -> u32 {
+/// The arrays' layer for layer `k` of the tile `uv` falls in: sixteen variants, as
+/// sprue_void's VARIANTS, of three layers each.
+fn variant_layer(uv: vec2<f32>, k: u32, id: f32) -> u32 {
     let c = floor(uv);
     let variant = edge(c, 0.0, id)
         + 2u * edge(c + vec2<f32>(1.0, 0.0), 0.0, id)
@@ -101,13 +101,13 @@ fn layer_height(k: u32) -> f32 {
 }
 
 /// What of the star reaches height `z` at `p`, past the cutout layers above.
-fn starlit(p: vec2<f32>, z: f32, toward: vec3<f32>) -> f32 {
+fn starlit(p: vec2<f32>, z: f32, toward: vec3<f32>, id: f32) -> f32 {
     var through = 1.0;
     for (var k = 1u; k <= 2u; k++) {
         let zk = layer_height(k);
         if (zk > z) {
             let at = p + toward.xy * (zk - z) / toward.z;
-            let cover = textureSampleLevel(tiles, tile_sampler, at / m.layer.y, k, 1.0).a;
+            let cover = textureSampleLevel(tiles, tile_sampler, at / m.layer.y, variant_layer(at / m.layer.y, k, id), 1.0).a;
             through *= 1.0 - smoothstep(0.35, 0.65, cover);
         }
     }
@@ -121,8 +121,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Each face starts its tile somewhere else, so neighbors do not repeat edge to edge.
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v)) + hash2(f.id) * m.layer.y;
     let uv = p / m.layer.y;
-    let texel = textureSample(tiles, tile_sampler, uv, k);
-    let baked = textureSample(light, tile_sampler, uv, lit_layer(uv, k, f.id)).rgb;
+    let layer = variant_layer(uv, k, f.id);
+    let texel = textureSample(tiles, tile_sampler, uv, layer);
+    let baked = textureSample(light, tile_sampler, uv, layer).rgb;
     if (k > 0u && texel.a < 0.5) {
         discard;
     }
@@ -139,7 +140,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let half_way = normalize(star + to_eye);
         let spec = m.finish.z * pow(max(dot(n, half_way), 0.0), m.finish.y);
         let ndl = max(dot(n, star), 0.0);
-        radiance += m.star_color.rgb * starlit(p, layer_height(k), toward) * ndl * (albedo + spec);
+        radiance += m.star_color.rgb * starlit(p, layer_height(k), toward, f.id) * ndl * (albedo + spec);
     }
 
     return vec4<f32>(radiance * m.finish.x, 1.0);

@@ -41,47 +41,40 @@ pub struct Lamp {
     carrier: usize,
 }
 
-/// Two choices of lamps a tile edge, so a tile is one of [`VARIANTS`]: left + 2 right + 4 bottom
-/// + 8 top. The shader picks each tile's edges by hash, and the tiles meet whatever it picks.
-pub const VARIANTS: usize = 16;
-
-/// Every tile's lamps, by variant.
+/// Variant `v`'s lamps, its edges' choices as `crate::VARIANTS` numbers them.
 ///
 /// A lamp's light reaches [`Lamps::cell_m`], so the plane is cut into regions no lamp lights
 /// across: a strip that far either side of each tile edge, a square at each corner, and the
 /// interior. A strip's lamps are its edge's choice, and light both tiles it touches the same way;
 /// the corners are one set everywhere; only the interior is the tile's own. A tile is baked from
 /// its interior, its four strips and its four corners, so the light is continuous across a seam.
-pub fn variants(spec: &Lamps, layers: &[Surface], seed: u64) -> Vec<Vec<Lamp>> {
+///
+/// Only the interior has riding lamps, since a strip's lamp may stand on the neighbor's pipes.
+pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<Lamp> {
     let tile_m = layers[0].tile_m;
     let reach = spec.cell_m;
     let inner = ((tile_m - 2.0 * reach) / spec.cell_m).round() as u32;
     assert!(inner >= 1 && (tile_m / spec.cell_m).fract() == 0.0, "a tile is whole cells, wider than two");
-    let region = |tag: u64, lo: Vec2, cells: UVec2| {
+    let region = |tag: u64, lo: Vec2, cells: UVec2, riding: bool| {
         let mut rng = Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
-        lamps_in(spec, layers, &mut rng, lo, cells)
+        lamps_in(spec, layers, &mut rng, lo, cells, riding)
     };
-    let corner = region(1, Vec2::splat(-reach), UVec2::splat(2));
-    let vertical: Vec<_> = (0..2).map(|c| region(2 + c, Vec2::new(-reach, reach), UVec2::new(2, inner))).collect();
-    let horizontal: Vec<_> = (0..2).map(|c| region(4 + c, Vec2::new(reach, -reach), UVec2::new(inner, 2))).collect();
-    let shifted = |lamps: &[Lamp], by: Vec2| lamps.iter().map(|l| Lamp { at: l.at + by, ..*l }).collect::<Vec<_>>();
-    (0..VARIANTS)
-        .map(|v| {
-            let mut lamps = region(16 + v as u64, Vec2::splat(reach), UVec2::splat(inner));
-            lamps.extend(shifted(&vertical[v & 1], Vec2::ZERO));
-            lamps.extend(shifted(&vertical[v >> 1 & 1], Vec2::new(tile_m, 0.0)));
-            lamps.extend(shifted(&horizontal[v >> 2 & 1], Vec2::ZERO));
-            lamps.extend(shifted(&horizontal[v >> 3 & 1], Vec2::new(0.0, tile_m)));
-            for at in [Vec2::ZERO, Vec2::new(tile_m, 0.0), Vec2::new(0.0, tile_m), Vec2::splat(tile_m)] {
-                lamps.extend(shifted(&corner, at));
-            }
-            lamps
-        })
-        .collect()
+    let shifted = |lamps: Vec<Lamp>, by: Vec2| lamps.into_iter().map(move |l| Lamp { at: l.at + by, ..l });
+    let vertical = |c: usize| region(2 + c as u64, Vec2::new(-reach, reach), UVec2::new(2, inner), false);
+    let horizontal = |c: usize| region(4 + c as u64, Vec2::new(reach, -reach), UVec2::new(inner, 2), false);
+    let mut lamps = region(16 + v as u64, Vec2::splat(reach), UVec2::splat(inner), true);
+    lamps.extend(vertical(v & 1));
+    lamps.extend(shifted(vertical(v >> 1 & 1), Vec2::new(tile_m, 0.0)));
+    lamps.extend(horizontal(v >> 2 & 1));
+    lamps.extend(shifted(horizontal(v >> 3 & 1), Vec2::new(0.0, tile_m)));
+    for at in [Vec2::ZERO, Vec2::new(tile_m, 0.0), Vec2::new(0.0, tile_m), Vec2::splat(tile_m)] {
+        lamps.extend(shifted(region(1, Vec2::splat(-reach), UVec2::splat(2), false), at));
+    }
+    lamps
 }
 
 /// Deep lamps over the base, and riding ones on layer 1's pipes, at most one of each a cell.
-fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UVec2) -> Vec<Lamp> {
+fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UVec2, riding_too: bool) -> Vec<Lamp> {
     let mut lamps = Vec::new();
     for y in 0..cells.y {
         for x in 0..cells.x {
@@ -89,7 +82,8 @@ fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UV
                 let on = rng.chance(share);
                 let at = lo + (Vec2::new(x as f32, y as f32) + 0.2 + 0.6 * Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
                 let tint = defect(rng);
-                let carried = !riding || sample(&layers[1].cover, layers[1].texels, layers[1].tile_m, at) >= 0.5;
+                let carried = !riding
+                    || riding_too && sample(&layers[1].cover, layers[1].texels, layers[1].tile_m, at).is_some_and(|c| c >= 0.5);
                 if on && carried && tint != Vec3::ZERO {
                     lamps.push(Lamp { at, z, tint, carrier: riding as usize });
                 }
@@ -127,12 +121,16 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     let z = [0.0, spec.heights.x, spec.heights.y];
     // Some 10 cm of penumbra.
     let soft: Vec<Vec<f32>> = layers.iter().map(|s| blurred(&s.cover, n, 2)).collect();
+    // Past the tile's edge is the neighbor, whichever variant it is: there a layer is taken at its
+    // average, and the seam's light is continuous on average rather than shadow for shadow.
+    let mean: Vec<f32> = layers.iter().map(|s| s.cover.iter().sum::<f32>() / s.cover.len() as f32).collect();
     let passed = |p: Vec2, zp: f32, q: Vec2, zq: f32| {
         let mut through = 1.0;
         for k in 1..=2 {
             if (z[k] - zp) * (z[k] - zq) < 0.0 {
                 let at = p.lerp(q, (z[k] - zp) / (zq - zp));
-                through *= 1.0 - smoothstep(0.35, 0.65, sample(&soft[k], n, tile_m, at));
+                let cover = sample(&soft[k], n, tile_m, at).unwrap_or(mean[k]);
+                through *= 1.0 - smoothstep(0.35, 0.65, cover);
             }
         }
         through
@@ -199,12 +197,13 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     light
 }
 
-/// Every variant's layers' light as one mipmapped array, variant-major, each level weighted by
-/// coverage as the geometry's is.
-pub fn light_array(light: &[Vec<Vec3>], layers: &[Surface]) -> Image {
+/// Every layer's light as one mipmapped array, each level weighted by `layers`' coverage as the
+/// geometry's is.
+pub fn light_array(light: &[Vec<Vec3>], layers: &[&Surface]) -> Image {
+    assert_eq!(light.len(), layers.len());
     let texels = layers[0].texels as u32;
     let mut data = Vec::new();
-    for (rgb, surface) in light.iter().zip(layers.iter().cycle()) {
+    for (rgb, surface) in light.iter().zip(layers) {
         let mut level: Vec<Vec3> = rgb.clone();
         let mut cover = surface.cover.clone();
         let mut side = texels as usize;
@@ -271,21 +270,24 @@ fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Bilinear, wrapping, at `p` meters.
-fn sample(values: &[f32], n: usize, tile_m: f32, p: Vec2) -> f32 {
+/// Bilinear at `p` meters, clamped at the edge; `None` off the tile.
+fn sample(values: &[f32], n: usize, tile_m: f32, p: Vec2) -> Option<f32> {
+    if p.min_element() < 0.0 || p.max_element() >= tile_m {
+        return None;
+    }
     let s = p / tile_m * n as f32 - 0.5;
     let (x0, y0) = (s.x.floor(), s.y.floor());
     let (fx, fy) = (s.x - x0, s.y - y0);
     let at = |dx: i64, dy: i64| {
-        let (x, y) = ((x0 as i64 + dx).rem_euclid(n as i64), (y0 as i64 + dy).rem_euclid(n as i64));
+        let (x, y) = ((x0 as i64 + dx).clamp(0, n as i64 - 1), (y0 as i64 + dy).clamp(0, n as i64 - 1));
         values[y as usize * n + x as usize]
     };
     let top = at(0, 0) * (1.0 - fx) + at(1, 0) * fx;
     let bottom = at(0, 1) * (1.0 - fx) + at(1, 1) * fx;
-    top * (1.0 - fy) + bottom * fy
+    Some(top * (1.0 - fy) + bottom * fy)
 }
 
-/// A wrapping box blur of `radius` texels, separable.
+/// A box blur of `radius` texels, separable, clamped at the edge.
 fn blurred(values: &[f32], n: usize, radius: usize) -> Vec<f32> {
     let width = (2 * radius + 1) as f32;
     let pass = |src: &[f32], horizontal: bool| {
@@ -294,7 +296,7 @@ fn blurred(values: &[f32], n: usize, radius: usize) -> Vec<f32> {
             for b in 0..n {
                 let mut sum = 0.0;
                 for o in 0..=2 * radius {
-                    let c = (b + n + o - radius) % n;
+                    let c = (b + o).saturating_sub(radius).min(n - 1);
                     sum += if horizontal { src[a * n + c] } else { src[c * n + a] };
                 }
                 let i = if horizontal { a * n + b } else { b * n + a };

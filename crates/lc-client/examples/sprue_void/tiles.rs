@@ -66,18 +66,19 @@ impl Field {
         self.tile_m / self.texels as f32
     }
 
-    /// Calls `shape` with the meter position of every texel center within `radius` of the box
-    /// `lo..hi`, unwrapped, and keeps what it returns where it stands taller.
+    /// Calls `shape` with the meter position of every texel center in the box `lo..hi`, and keeps
+    /// what it returns where it stands taller. Clipped to the tile, not wrapped: a variant's
+    /// neighbor is another variant, so what crosses an edge is stamped by both.
     fn stamp(&mut self, lo: Vec2, hi: Vec2, mut shape: impl FnMut(Vec2) -> Option<(f32, f32, f32)>) {
         let t = self.texel_m();
         let n = self.texels as i64;
         let (x0, y0) = ((lo.x / t).floor() as i64 - 1, (lo.y / t).floor() as i64 - 1);
         let (x1, y1) = ((hi.x / t).ceil() as i64 + 1, (hi.y / t).ceil() as i64 + 1);
-        for y in y0..=y1 {
-            for x in x0..=x1 {
+        for y in y0.max(0)..=y1.min(n - 1) {
+            for x in x0.max(0)..=x1.min(n - 1) {
                 let p = Vec2::new((x as f32 + 0.5) * t, (y as f32 + 0.5) * t);
                 let Some((height, albedo, inside)) = shape(p) else { continue };
-                let i = (y.rem_euclid(n) * n + x.rem_euclid(n)) as usize;
+                let i = (y * n + x) as usize;
                 if inside > -t && height >= self.height[i] {
                     self.height[i] = height;
                     self.albedo[i] = albedo;
@@ -147,13 +148,14 @@ impl Field {
     pub fn surface(&self, opaque: bool) -> Surface {
         let n = self.texels;
         let t = self.texel_m();
-        let at = |x: usize, y: usize| self.height[(y % n) * n + x % n];
+        let at = |x: usize, y: usize| self.height[y.min(n - 1) * n + x.min(n - 1)];
         let mut normal = Vec::with_capacity(n * n);
         let mut cover = Vec::with_capacity(n * n);
         for y in 0..n {
             for x in 0..n {
-                let dx = (at(x + 1, y) - at(x + n - 1, y)) / (2.0 * t);
-                let dy = (at(x, y + 1) - at(x, y + n - 1)) / (2.0 * t);
+                let (xl, yl) = (x.saturating_sub(1), y.saturating_sub(1));
+                let dx = (at(x + 1, y) - at(xl, y)) / ((x + 1).min(n - 1) - xl) as f32 / t;
+                let dy = (at(x, y + 1) - at(x, yl)) / ((y + 1).min(n - 1) - yl) as f32 / t;
                 normal.push(Vec3::new(-dx, -dy, 1.0).normalize());
                 let i = y * n + x;
                 cover.push(if opaque { 1.0 } else { (self.inside[i] / t + 0.5).clamp(0.0, 1.0) });
@@ -173,31 +175,6 @@ pub struct Surface {
 }
 
 impl Surface {
-    /// Half the texels, each the coverage-weighted mean of the four above it.
-    pub fn halved(&self) -> Surface {
-        let (n, half) = (self.texels, self.texels / 2);
-        let mut out = Surface {
-            texels: half,
-            tile_m: self.tile_m,
-            normal: Vec::with_capacity(half * half),
-            albedo: Vec::with_capacity(half * half),
-            cover: Vec::with_capacity(half * half),
-        };
-        for y in 0..half {
-            for x in 0..half {
-                let four = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| (2 * y + dy) * n + 2 * x + dx);
-                let weight: f32 = four.iter().map(|&i| self.cover[i]).sum();
-                let mean = |f: &dyn Fn(usize) -> Vec3| {
-                    if weight > 0.0 { four.iter().map(|&i| f(i) * self.cover[i]).sum::<Vec3>() / weight } else { f(four[0]) }
-                };
-                out.normal.push(mean(&|i| self.normal[i]).normalize_or(Vec3::Z));
-                out.albedo.push(mean(&|i| Vec3::splat(self.albedo[i])).x);
-                out.cover.push(weight / 4.0);
-            }
-        }
-        out
-    }
-
     /// Linear RGBA8: normal x and y, albedo, coverage.
     pub fn rgba8(&self) -> Vec<u8> {
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -265,106 +242,180 @@ pub struct Maze {
     /// The share of junctions of three or more that carry a box.
     pub boxed: f32,
     pub collar_m: f32,
-    /// Where the lattice starts, in cells, so two layers do not line up.
-    pub offset: f32,
+    /// The share of lanes a tile edge carries a pipe across.
+    pub crossing: f32,
 }
 
-/// A randomized depth-first maze on a torus, pruned, drawn as pipes along straight lanes.
-pub fn maze(texels: usize, tile_m: f32, spec: &Maze, rng: &mut Rng) -> Field {
+/// One run of pipe.
+#[derive(Clone, Copy)]
+struct Run {
+    r: f32,
+    albedo: f32,
+    doubled: bool,
+}
+
+impl Run {
+    fn new(spec: &Maze, rng: &mut Rng) -> Self {
+        Run { r: spec.radii[rng.below(spec.radii.len())], albedo: rng.range(0.12, 0.3), doubled: rng.chance(spec.doubled) }
+    }
+
+    fn lay(self, field: &mut Field, a: Vec2, b: Vec2, collar_m: f32) {
+        if self.doubled {
+            let side = (b - a).perp().normalize() * self.r * 0.62;
+            field.pipe(a + side, b + side, self.r * 0.5, self.albedo, collar_m);
+            field.pipe(a - side, b - side, self.r * 0.5, self.albedo, collar_m);
+        } else {
+            field.pipe(a, b, self.r, self.albedo, collar_m);
+        }
+    }
+}
+
+/// What every variant of a maze layer shares: where its lanes run, and for each tile edge's two
+/// choices, which lanes it carries a pipe across.
+pub struct MazeEdges {
+    lane_x: Vec<f32>,
+    lane_y: Vec<f32>,
+    /// `[vertical, horizontal][choice][lane]`.
+    crossings: [[Vec<Option<Run>>; 2]; 2],
+}
+
+impl MazeEdges {
+    pub fn new(spec: &Maze, rng: &mut Rng) -> Self {
+        let n = spec.cells;
+        // Each lane is nudged off its cell's middle, keeping runs straight but the grid irregular.
+        let lane_x = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
+        let lane_y = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
+        let mut choice = || (0..n).map(|_| rng.chance(spec.crossing).then(|| Run::new(spec, rng))).collect::<Vec<_>>();
+        let crossings = [[choice(), choice()], [choice(), choice()]];
+        MazeEdges { lane_x, lane_y, crossings }
+    }
+}
+
+/// A randomized depth-first maze inside the tile, pruned, with the pipes its edges' choices
+/// carry across them, drawn along straight lanes. `edges` are the choices of the left, right,
+/// bottom and top edges.
+pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: [usize; 4], rng: &mut Rng) -> Field {
     let n = spec.cells;
     let cell = tile_m / n as f32;
-    // Each lane is nudged off its cell's middle, keeping runs straight but the grid irregular.
-    let lane_x: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
-    let lane_y: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
     let node = |x: usize, y: usize| {
-        Vec2::new(
-            (x as f32 + 0.5 + spec.offset + lane_x[x]) * cell,
-            (y as f32 + 0.5 + spec.offset + lane_y[y]) * cell,
-        )
+        Vec2::new((x as f32 + 0.5 + shared.lane_x[x]) * cell, (y as f32 + 0.5 + shared.lane_y[y]) * cell)
     };
     let index = |x: usize, y: usize| y * n + x;
-    // Edge to the right of and above each node.
+    // Edge to the right of and above each node, inside the tile.
     let mut right = vec![false; n * n];
     let mut up = vec![false; n * n];
     let mut seen = vec![false; n * n];
     let mut stack = vec![(rng.below(n), rng.below(n))];
     seen[index(stack[0].0, stack[0].1)] = true;
     while let Some(&(x, y)) = stack.last() {
-        let neighbors = [
-            ((x + 1) % n, y, 0u8),
-            ((x + n - 1) % n, y, 1),
-            (x, (y + 1) % n, 2),
-            (x, (y + n - 1) % n, 3),
-        ];
-        let open: Vec<_> = neighbors.iter().filter(|(nx, ny, _)| !seen[index(*nx, *ny)]).collect();
+        let mut open = Vec::new();
+        if x + 1 < n && !seen[index(x + 1, y)] {
+            open.push((x + 1, y));
+        }
+        if x > 0 && !seen[index(x - 1, y)] {
+            open.push((x - 1, y));
+        }
+        if y + 1 < n && !seen[index(x, y + 1)] {
+            open.push((x, y + 1));
+        }
+        if y > 0 && !seen[index(x, y - 1)] {
+            open.push((x, y - 1));
+        }
         if open.is_empty() {
             stack.pop();
             continue;
         }
-        let &&(nx, ny, dir) = open.get(rng.below(open.len())).unwrap();
-        match dir {
-            0 => right[index(x, y)] = true,
-            1 => right[index(nx, ny)] = true,
-            2 => up[index(x, y)] = true,
-            _ => up[index(nx, ny)] = true,
+        let (nx, ny) = open[rng.below(open.len())];
+        if ny == y {
+            right[index(x.min(nx), y)] = true;
+        } else {
+            up[index(x, y.min(ny))] = true;
         }
         seen[index(nx, ny)] = true;
         stack.push((nx, ny));
     }
 
-    let degree = |right: &[bool], up: &[bool], x: usize, y: usize| {
-        [right[index(x, y)], right[index((x + n - 1) % n, y)], up[index(x, y)], up[index(x, (y + n - 1) % n)]]
-            .iter()
-            .filter(|&&e| e)
-            .count()
+    let [left, right_edge, bottom, top] =
+        [(0, edges[0]), (0, edges[1]), (1, edges[2]), (1, edges[3])].map(|(axis, c)| &shared.crossings[axis][c]);
+    let crossing_at = |x: usize, y: usize| {
+        (x == 0 && left[y].is_some())
+            || (x == n - 1 && right_edge[y].is_some())
+            || (y == 0 && bottom[x].is_some())
+            || (y == n - 1 && top[x].is_some())
+    };
+    let inner_degree = |right: &[bool], up: &[bool], x: usize, y: usize| {
+        let mut d = 0;
+        d += (x + 1 < n && right[index(x, y)]) as usize;
+        d += (x > 0 && right[index(x - 1, y)]) as usize;
+        d += (y + 1 < n && up[index(x, y)]) as usize;
+        d += (y > 0 && up[index(x, y - 1)]) as usize;
+        d
     };
     for _ in 0..spec.prune_passes {
         let mut cut = Vec::new();
         for y in 0..n {
             for x in 0..n {
-                if degree(&right, &up, x, y) == 1 && rng.chance(spec.prune) {
+                // A pipe across an edge is the edge's, so the node it lands on stays.
+                if !crossing_at(x, y) && inner_degree(&right, &up, x, y) == 1 && rng.chance(spec.prune) {
                     cut.push((x, y));
                 }
             }
         }
         for (x, y) in cut {
             right[index(x, y)] = false;
-            right[index((x + n - 1) % n, y)] = false;
             up[index(x, y)] = false;
-            up[index(x, (y + n - 1) % n)] = false;
+            if x > 0 {
+                right[index(x - 1, y)] = false;
+            }
+            if y > 0 {
+                up[index(x, y - 1)] = false;
+            }
         }
     }
 
     let mut field = Field::new(texels, tile_m, 0.0);
+    let span = Vec2::new(tile_m, 0.0);
+    let rise = Vec2::new(0.0, tile_m);
+    for y in 0..n {
+        if let Some(run) = left[y] {
+            run.lay(&mut field, node(n - 1, y) - span, node(0, y), spec.collar_m);
+        }
+        if let Some(run) = right_edge[y] {
+            run.lay(&mut field, node(n - 1, y), node(0, y) + span, spec.collar_m);
+        }
+    }
+    for x in 0..n {
+        if let Some(run) = bottom[x] {
+            run.lay(&mut field, node(x, n - 1) - rise, node(x, 0), spec.collar_m);
+        }
+        if let Some(run) = top[x] {
+            run.lay(&mut field, node(x, n - 1), node(x, 0) + rise, spec.collar_m);
+        }
+    }
     for y in 0..n {
         for x in 0..n {
             let a = node(x, y);
-            for (on, b) in [
-                (right[index(x, y)], node((x + 1) % n, y) + Vec2::new(if x + 1 == n { tile_m } else { 0.0 }, 0.0)),
-                (up[index(x, y)], node(x, (y + 1) % n) + Vec2::new(0.0, if y + 1 == n { tile_m } else { 0.0 })),
-            ] {
-                if !on {
-                    continue;
-                }
-                let r = spec.radii[rng.below(spec.radii.len())];
-                let albedo = rng.range(0.12, 0.3);
-                if rng.chance(spec.doubled) {
-                    let side = (b - a).perp().normalize() * r * 0.62;
-                    field.pipe(a + side, b + side, r * 0.5, albedo, spec.collar_m);
-                    field.pipe(a - side, b - side, r * 0.5, albedo, spec.collar_m);
-                } else {
-                    field.pipe(a, b, r, albedo, spec.collar_m);
-                }
+            if x + 1 < n && right[index(x, y)] {
+                Run::new(spec, rng).lay(&mut field, a, node(x + 1, y), spec.collar_m);
             }
-            let d = degree(&right, &up, x, y);
+            if y + 1 < n && up[index(x, y)] {
+                Run::new(spec, rng).lay(&mut field, a, node(x, y + 1), spec.collar_m);
+            }
+            let d = inner_degree(&right, &up, x, y)
+                + [x == 0 && left[y].is_some(), x == n - 1 && right_edge[y].is_some(), y == 0 && bottom[x].is_some(), y == n - 1 && top[x].is_some()]
+                    .iter()
+                    .filter(|&&c| c)
+                    .count();
+            // Kept off the tile's edge, where the neighbor would not have it.
+            let room = 2.0 * (a.min(Vec2::splat(tile_m) - a) - 0.1);
             if d >= 3 && rng.chance(spec.boxed) {
                 let r = spec.radii.iter().copied().fold(0.0, f32::max);
-                let size = Vec2::new(rng.range(2.6, 4.0), rng.range(2.6, 4.0)) * r;
+                let size = (Vec2::new(rng.range(2.6, 4.0), rng.range(2.6, 4.0)) * r).min(room);
                 field.block(a, size, r * rng.range(1.2, 1.7), 0.25 * r, rng.range(0.1, 0.22));
             } else if d == 1 {
                 // A dead end is capped, not cut off.
                 let r = spec.radii[0] * 1.5;
-                field.block(a, Vec2::splat(2.0 * r), r * 1.1, 0.3 * r, 0.22);
+                field.block(a, Vec2::splat(2.0 * r).min(room), r * 1.1, 0.3 * r, 0.22);
             }
         }
     }
