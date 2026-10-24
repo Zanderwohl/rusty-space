@@ -19,6 +19,7 @@
 //! | `--seed <n>` | the tiles' layout |
 //! | `--frames <n>` | frames after the box is up |
 
+mod bake;
 mod tiles;
 
 use bevy::camera::Hdr;
@@ -34,6 +35,7 @@ use bevy::shader::ShaderRef;
 use bevy::window::WindowResolution;
 use bevy_mesh::MeshVertexBufferLayoutRef;
 
+use bake::Lamps;
 use tiles::{Maze, Rng};
 
 /// What one tile spans. Two to the box's edge by default.
@@ -135,7 +137,6 @@ impl Args {
 struct SprueUniform {
     layer: Vec4,
     heights: Vec4,
-    lamps: Vec4,
     lamp_color: Vec4,
     to_star: Vec4,
     star_color: Vec4,
@@ -150,6 +151,8 @@ struct SprueMaterial {
     #[texture(1, dimension = "2d_array", visibility(fragment))]
     #[sampler(2, visibility(fragment))]
     tiles: Handle<Image>,
+    #[texture(3, dimension = "2d_array", visibility(fragment))]
+    light: Handle<Image>,
 }
 
 impl Material for SprueMaterial {
@@ -224,20 +227,34 @@ fn spawn(
     let texels = TILE_TEXELS as usize;
     let mut rng = Rng::new(args.seed);
     let layers = [
-        tiles::base(texels, TILE_M, &mut rng).texels(true),
-        tiles::maze(texels, TILE_M, &CONDUIT, &mut rng).texels(false),
-        tiles::maze(texels, TILE_M, &CAPILLARY, &mut rng).texels(false),
+        tiles::base(texels, TILE_M, &mut rng).surface(true),
+        tiles::maze(texels, TILE_M, &CONDUIT, &mut rng).surface(false),
+        tiles::maze(texels, TILE_M, &CAPILLARY, &mut rng).surface(false),
     ];
-    let tiles = images.add(tiles::tile_array(&layers, TILE_TEXELS));
+    let lamps_spec = Lamps {
+        cell_m: 4.0,
+        deep_share: 0.35,
+        riding_share: 0.3,
+        heights: HEIGHTS,
+        scatter: 0.004 * args.scatter,
+        bulb_radius_m: 0.09,
+        bulb_power: 18.0 * args.bulb,
+    };
+    let started = std::time::Instant::now();
+    let lamps = bake::place(&lamps_spec, &layers, &mut Rng::new(args.seed ^ 0x1A4B));
+    let light = bake::bake(&lamps_spec, &layers, &lamps);
+    info!("sprue_void: baked {} lamps in {:.2?}", lamps.len(), started.elapsed());
+    let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
+    let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
+    let light = images.add(bake::light_array(&light, &layers));
 
     let (sun, sun_yaw) = (args.sun.to_radians(), args.sun_yaw.to_radians());
     let to_star = Vec3::new(sun.cos() * sun_yaw.cos(), sun.sin(), sun.cos() * sun_yaw.sin());
     for (k, lift) in [0.0, HEIGHTS.x, HEIGHTS.y].into_iter().enumerate() {
         let material = materials.add(SprueMaterial {
             uniforms: SprueUniform {
-                layer: Vec4::new(k as f32, TILE_M, 0.09, 18.0 * args.bulb),
+                layer: Vec4::new(k as f32, TILE_M, 0.0, 0.0),
                 heights: HEIGHTS,
-                lamps: Vec4::new(4.0, 0.35, 0.3, 0.004 * args.scatter),
                 lamp_color: (args.sodium * 6.0 * args.lamp).extend(0.0),
                 to_star: to_star.extend(0.0),
                 star_color: Vec3::splat(args.star).extend(0.0),
@@ -245,6 +262,7 @@ fn spawn(
                 finish: Vec4::new(2f32.powf(args.exposure), 24.0, 0.35, 0.0),
             },
             tiles: tiles.clone(),
+            light: light.clone(),
         });
         let edge = args.size + 2.0 * lift;
         commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(material)));

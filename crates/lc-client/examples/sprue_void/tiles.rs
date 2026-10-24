@@ -143,29 +143,45 @@ impl Field {
         }
     }
 
-    /// Linear RGBA8: normal x and y, albedo, coverage.
-    pub fn texels(&self, opaque: bool) -> Vec<u8> {
+    /// Normals from the height's slope, and coverage antialiased over a texel.
+    pub fn surface(&self, opaque: bool) -> Surface {
         let n = self.texels;
         let t = self.texel_m();
         let at = |x: usize, y: usize| self.height[(y % n) * n + x % n];
-        let mut out = Vec::with_capacity(n * n * 4);
+        let mut normal = Vec::with_capacity(n * n);
+        let mut cover = Vec::with_capacity(n * n);
         for y in 0..n {
             for x in 0..n {
                 let dx = (at(x + 1, y) - at(x + n - 1, y)) / (2.0 * t);
                 let dy = (at(x, y + 1) - at(x, y + n - 1)) / (2.0 * t);
-                let normal = Vec3::new(-dx, -dy, 1.0).normalize();
+                normal.push(Vec3::new(-dx, -dy, 1.0).normalize());
                 let i = y * n + x;
-                let cover = if opaque { 1.0 } else { (self.inside[i] / t + 0.5).clamp(0.0, 1.0) };
-                let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-                out.extend_from_slice(&[
-                    byte(normal.x * 0.5 + 0.5),
-                    byte(normal.y * 0.5 + 0.5),
-                    byte(self.albedo[i]),
-                    byte(cover),
-                ]);
+                cover.push(if opaque { 1.0 } else { (self.inside[i] / t + 0.5).clamp(0.0, 1.0) });
             }
         }
-        out
+        Surface { texels: n, tile_m: self.tile_m, normal, albedo: self.albedo.clone(), cover }
+    }
+}
+
+/// One layer as the bake and the GPU read it, in the face's frame.
+pub struct Surface {
+    pub texels: usize,
+    pub tile_m: f32,
+    pub normal: Vec<Vec3>,
+    pub albedo: Vec<f32>,
+    pub cover: Vec<f32>,
+}
+
+impl Surface {
+    /// Linear RGBA8: normal x and y, albedo, coverage.
+    pub fn rgba8(&self) -> Vec<u8> {
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        self.normal
+            .iter()
+            .zip(&self.albedo)
+            .zip(&self.cover)
+            .flat_map(|((n, a), c)| [byte(n.x * 0.5 + 0.5), byte(n.y * 0.5 + 0.5), byte(*a), byte(*c)])
+            .collect()
     }
 }
 
