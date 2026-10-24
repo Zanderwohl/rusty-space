@@ -1,4 +1,4 @@
-//! The lamps, placed once a tile and baked into each layer's light when the tile is made.
+//! The lamps, placed in tile variants and baked into each layer's light when the tiles are made.
 //!
 //! A ship hundreds of kilometers long cannot afford to light every texel from every lamp near it
 //! each frame, so what does not depend on the eye is done here: each lamp's diffuse light, its
@@ -10,7 +10,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::math::{Vec2, Vec3, Vec4};
+use bevy::math::{UVec2, Vec2, Vec3, Vec4};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
@@ -32,6 +32,7 @@ pub struct Lamps {
     pub bulb_power: f32,
 }
 
+#[derive(Clone, Copy)]
 pub struct Lamp {
     at: Vec2,
     z: f32,
@@ -40,27 +41,82 @@ pub struct Lamp {
     carrier: usize,
 }
 
-/// Lamps on a tile: deep ones over the base, and riding ones on layer 1's pipes.
-pub fn place(spec: &Lamps, layers: &[Surface], rng: &mut Rng) -> Vec<Lamp> {
+/// Two choices of lamps a tile edge, so a tile is one of [`VARIANTS`]: left + 2 right + 4 bottom
+/// + 8 top. The shader picks each tile's edges by hash, and the tiles meet whatever it picks.
+pub const VARIANTS: usize = 16;
+
+/// Every tile's lamps, by variant.
+///
+/// A lamp's light reaches [`Lamps::cell_m`], so the plane is cut into regions no lamp lights
+/// across: a strip that far either side of each tile edge, a square at each corner, and the
+/// interior. A strip's lamps are its edge's choice, and light both tiles it touches the same way;
+/// the corners are one set everywhere; only the interior is the tile's own. A tile is baked from
+/// its interior, its four strips and its four corners, so the light is continuous across a seam.
+pub fn variants(spec: &Lamps, layers: &[Surface], seed: u64) -> Vec<Vec<Lamp>> {
     let tile_m = layers[0].tile_m;
-    let cells = (tile_m / spec.cell_m).round() as usize;
+    let reach = spec.cell_m;
+    let inner = ((tile_m - 2.0 * reach) / spec.cell_m).round() as u32;
+    assert!(inner >= 1 && (tile_m / spec.cell_m).fract() == 0.0, "a tile is whole cells, wider than two");
+    let region = |tag: u64, lo: Vec2, cells: UVec2| {
+        let mut rng = Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
+        lamps_in(spec, layers, &mut rng, lo, cells)
+    };
+    let corner = region(1, Vec2::splat(-reach), UVec2::splat(2));
+    let vertical: Vec<_> = (0..2).map(|c| region(2 + c, Vec2::new(-reach, reach), UVec2::new(2, inner))).collect();
+    let horizontal: Vec<_> = (0..2).map(|c| region(4 + c, Vec2::new(reach, -reach), UVec2::new(inner, 2))).collect();
+    let shifted = |lamps: &[Lamp], by: Vec2| lamps.iter().map(|l| Lamp { at: l.at + by, ..*l }).collect::<Vec<_>>();
+    (0..VARIANTS)
+        .map(|v| {
+            let mut lamps = region(16 + v as u64, Vec2::splat(reach), UVec2::splat(inner));
+            lamps.extend(shifted(&vertical[v & 1], Vec2::ZERO));
+            lamps.extend(shifted(&vertical[v >> 1 & 1], Vec2::new(tile_m, 0.0)));
+            lamps.extend(shifted(&horizontal[v >> 2 & 1], Vec2::ZERO));
+            lamps.extend(shifted(&horizontal[v >> 3 & 1], Vec2::new(0.0, tile_m)));
+            for at in [Vec2::ZERO, Vec2::new(tile_m, 0.0), Vec2::new(0.0, tile_m), Vec2::splat(tile_m)] {
+                lamps.extend(shifted(&corner, at));
+            }
+            lamps
+        })
+        .collect()
+}
+
+/// Deep lamps over the base, and riding ones on layer 1's pipes, at most one of each a cell.
+fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UVec2) -> Vec<Lamp> {
     let mut lamps = Vec::new();
-    for y in 0..cells {
-        for x in 0..cells {
+    for y in 0..cells.y {
+        for x in 0..cells.x {
             for (riding, share, z) in [(false, spec.deep_share, spec.heights.z), (true, spec.riding_share, spec.heights.w)] {
                 let on = rng.chance(share);
-                let at = (Vec2::new(x as f32, y as f32) + 0.2 + 0.6 * Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
-                // Most are high-pressure sodium; a few run oranger or paler, as a yard's lamps do with age.
-                let age = rng.unit();
-                if !on || (riding && sample(&layers[1].cover, layers[1].texels, tile_m, at) < 0.5) {
-                    continue;
+                let at = lo + (Vec2::new(x as f32, y as f32) + 0.2 + 0.6 * Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
+                let tint = defect(rng);
+                let carried = !riding || sample(&layers[1].cover, layers[1].texels, layers[1].tile_m, at) >= 0.5;
+                if on && carried && tint != Vec3::ZERO {
+                    lamps.push(Lamp { at, z, tint, carrier: riding as usize });
                 }
-                let tint = Vec3::new(1.0, 0.85, 0.6).lerp(Vec3::new(1.0, 1.08, 1.3), age * age);
-                lamps.push(Lamp { at, z, tint, carrier: riding as usize });
             }
         }
     }
     lamps
+}
+
+/// A lamp's color and power against a sound one's, which is 1.
+///
+/// Most are a few percent off in each channel, as a batch is. Some came out of a bad batch,
+/// greener or pinker. Some are failing: an aging sodium arc runs dim and red. A few are dead.
+fn defect(rng: &mut Rng) -> Vec3 {
+    let batch = Vec3::new(rng.range(0.96, 1.04), rng.range(0.95, 1.05), rng.range(0.92, 1.08));
+    let roll = rng.unit();
+    if roll < 0.03 {
+        Vec3::ZERO
+    } else if roll < 0.11 {
+        batch * Vec3::new(1.0, 0.62, 0.42) * rng.range(0.12, 0.5)
+    } else if roll < 0.17 {
+        batch * Vec3::new(0.86, 1.06, 0.78)
+    } else if roll < 0.22 {
+        batch * Vec3::new(1.06, 0.84, 1.02)
+    } else {
+        batch
+    }
 }
 
 /// Each layer's light at every texel it covers.
@@ -69,8 +125,8 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     let tile_m = layers[0].tile_m;
     let t = tile_m / n as f32;
     let z = [0.0, spec.heights.x, spec.heights.y];
-    // Some three texels' penumbra, as the shader's sample a mip and a half down was.
-    let soft: Vec<Vec<f32>> = layers.iter().map(|s| blurred(&s.cover, n, 3)).collect();
+    // Some 10 cm of penumbra.
+    let soft: Vec<Vec<f32>> = layers.iter().map(|s| blurred(&s.cover, n, 2)).collect();
     let passed = |p: Vec2, zp: f32, q: Vec2, zq: f32| {
         let mut through = 1.0;
         for k in 1..=2 {
@@ -81,7 +137,10 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
         }
         through
     };
-    let wrap = |x: i64, y: i64| (y.rem_euclid(n as i64) * n as i64 + x.rem_euclid(n as i64)) as usize;
+    // Lamps outside the tile light into it but are not wrapped around: the neighbor's own bake
+    // has them on its side.
+    let inside = |x: i64, y: i64| (0..n as i64).contains(&x) && (0..n as i64).contains(&y);
+    let index = |x: i64, y: i64| y as usize * n + x as usize;
     let texel = |x: i64, y: i64| Vec2::new((x as f32 + 0.5) * t, (y as f32 + 0.5) * t);
 
     let mut light = vec![vec![Vec3::ZERO; n * n]; layers.len()];
@@ -89,11 +148,14 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     let span = (reach / t).ceil() as i64;
     let bulb_span = (6.5 * spec.bulb_radius_m / t).ceil() as i64;
     for lamp in lamps {
-        let (cx, cy) = ((lamp.at.x / t) as i64, (lamp.at.y / t) as i64);
+        let (cx, cy) = ((lamp.at.x / t).floor() as i64, (lamp.at.y / t).floor() as i64);
         for (k, surface) in layers.iter().enumerate() {
             for y in cy - span..=cy + span {
                 for x in cx - span..=cx + span {
-                    let i = wrap(x, y);
+                    if !inside(x, y) {
+                        continue;
+                    }
+                    let i = index(x, y);
                     if surface.cover[i] <= 0.0 {
                         continue;
                     }
@@ -114,24 +176,35 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
                 }
             }
         }
+        // Averaged over each texel, since a bulb's core is narrower than one.
+        const SUB: i32 = 4;
         let r2 = spec.bulb_radius_m * spec.bulb_radius_m;
         for y in cy - bulb_span..=cy + bulb_span {
             for x in cx - bulb_span..=cx + bulb_span {
-                let q = texel(x, y).distance_squared(lamp.at) / r2;
-                let glow = (-4.0 * q).exp() + 0.04 * (-0.15 * q).exp();
-                light[lamp.carrier][wrap(x, y)] += lamp.tint * spec.bulb_power * glow;
+                if !inside(x, y) {
+                    continue;
+                }
+                let mut glow = 0.0;
+                for sy in 0..SUB {
+                    for sx in 0..SUB {
+                        let at = Vec2::new(x as f32, y as f32) + (Vec2::new(sx as f32, sy as f32) + 0.5) / SUB as f32;
+                        let q = (at * t).distance_squared(lamp.at) / r2;
+                        glow += (-4.0 * q).exp() + 0.04 * (-0.15 * q).exp();
+                    }
+                }
+                light[lamp.carrier][index(x, y)] += lamp.tint * spec.bulb_power * glow / (SUB * SUB) as f32;
             }
         }
     }
     light
 }
 
-/// The layers' light as a repeating mipmapped array, each level weighted by coverage as the
-/// geometry's is.
+/// Every variant's layers' light as one mipmapped array, variant-major, each level weighted by
+/// coverage as the geometry's is.
 pub fn light_array(light: &[Vec<Vec3>], layers: &[Surface]) -> Image {
     let texels = layers[0].texels as u32;
     let mut data = Vec::new();
-    for (rgb, surface) in light.iter().zip(layers) {
+    for (rgb, surface) in light.iter().zip(layers.iter().cycle()) {
         let mut level: Vec<Vec3> = rgb.clone();
         let mut cover = surface.cover.clone();
         let mut side = texels as usize;

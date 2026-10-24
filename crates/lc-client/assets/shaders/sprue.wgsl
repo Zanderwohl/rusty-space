@@ -75,6 +75,25 @@ fn hash2(p: f32) -> vec2<f32> {
     return fract((p3.xx + p3.yz) * p3.zy);
 }
 
+/// Whether the edge of tile cells at `at` on `axis` (0 vertical, 1 horizontal) takes its
+/// second choice of lamps.
+fn edge(at: vec2<f32>, axis: f32, id: f32) -> u32 {
+    var p3 = fract(vec3<f32>(at, id * 7.0 + axis) * vec3<f32>(0.1031, 0.1030, 0.0973));
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return u32(fract((p3.x + p3.y) * p3.z) < 0.5);
+}
+
+/// The light array's layer for layer `k` of the tile `uv` falls in: sixteen variants, as
+/// sprue_void's bake::VARIANTS, of three layers each.
+fn lit_layer(uv: vec2<f32>, k: u32, id: f32) -> u32 {
+    let c = floor(uv);
+    let variant = edge(c, 0.0, id)
+        + 2u * edge(c + vec2<f32>(1.0, 0.0), 0.0, id)
+        + 4u * edge(c, 1.0, id)
+        + 8u * edge(c + vec2<f32>(0.0, 1.0), 1.0, id);
+    return variant * 3u + k;
+}
+
 fn layer_height(k: u32) -> f32 {
     if (k == 1u) { return m.heights.x; }
     if (k == 2u) { return m.heights.y; }
@@ -103,7 +122,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v)) + hash2(f.id) * m.layer.y;
     let uv = p / m.layer.y;
     let texel = textureSample(tiles, tile_sampler, uv, k);
-    let baked = textureSample(light, tile_sampler, uv, k).rgb;
+    let baked = textureSample(light, tile_sampler, uv, lit_layer(uv, k, f.id)).rgb;
     if (k > 0u && texel.a < 0.5) {
         discard;
     }

@@ -173,6 +173,31 @@ pub struct Surface {
 }
 
 impl Surface {
+    /// Half the texels, each the coverage-weighted mean of the four above it.
+    pub fn halved(&self) -> Surface {
+        let (n, half) = (self.texels, self.texels / 2);
+        let mut out = Surface {
+            texels: half,
+            tile_m: self.tile_m,
+            normal: Vec::with_capacity(half * half),
+            albedo: Vec::with_capacity(half * half),
+            cover: Vec::with_capacity(half * half),
+        };
+        for y in 0..half {
+            for x in 0..half {
+                let four = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| (2 * y + dy) * n + 2 * x + dx);
+                let weight: f32 = four.iter().map(|&i| self.cover[i]).sum();
+                let mean = |f: &dyn Fn(usize) -> Vec3| {
+                    if weight > 0.0 { four.iter().map(|&i| f(i) * self.cover[i]).sum::<Vec3>() / weight } else { f(four[0]) }
+                };
+                out.normal.push(mean(&|i| self.normal[i]).normalize_or(Vec3::Z));
+                out.albedo.push(mean(&|i| Vec3::splat(self.albedo[i])).x);
+                out.cover.push(weight / 4.0);
+            }
+        }
+        out
+    }
+
     /// Linear RGBA8: normal x and y, albedo, coverage.
     pub fn rgba8(&self) -> Vec<u8> {
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;

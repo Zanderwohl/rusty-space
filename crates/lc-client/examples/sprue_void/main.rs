@@ -241,12 +241,24 @@ fn spawn(
         bulb_power: 18.0 * args.bulb,
     };
     let started = std::time::Instant::now();
-    let lamps = bake::place(&lamps_spec, &layers, &mut Rng::new(args.seed ^ 0x1A4B));
-    let light = bake::bake(&lamps_spec, &layers, &lamps);
-    info!("sprue_void: baked {} lamps in {:.2?}", lamps.len(), started.elapsed());
+    // Light is smooth but for the bulbs, which the bake averages over a texel, so half the
+    // geometry's resolution is enough, and sixteen variants of it a quarter the memory.
+    let coarse: Vec<_> = layers.iter().map(|l| l.halved()).collect();
+    let variants = bake::variants(&lamps_spec, &coarse, args.seed);
+    let light: Vec<Vec<Vec3>> = std::thread::scope(|scope| {
+        let baking: Vec<_> =
+            variants.iter().map(|lamps| scope.spawn(|| bake::bake(&lamps_spec, &coarse, lamps))).collect();
+        baking.into_iter().flat_map(|b| b.join().expect("a bake panicked")).collect()
+    });
+    info!(
+        "sprue_void: baked {} variants, {} lamps, in {:.2?}",
+        variants.len(),
+        variants.iter().map(Vec::len).sum::<usize>(),
+        started.elapsed()
+    );
     let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
     let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
-    let light = images.add(bake::light_array(&light, &layers));
+    let light = images.add(bake::light_array(&light, &coarse));
 
     let (sun, sun_yaw) = (args.sun.to_radians(), args.sun_yaw.to_radians());
     let to_star = Vec3::new(sun.cos() * sun_yaw.cos(), sun.sin(), sun.cos() * sun_yaw.sin());
