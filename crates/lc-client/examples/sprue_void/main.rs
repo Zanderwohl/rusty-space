@@ -17,7 +17,7 @@
 //! | `--lamp <x>` / `--scatter <x>` / `--bulb <x>` | the lamps' power, the haze they light, and their bulbs' |
 //! | `--deep <share>` / `--riding <share>` | of 4 m cells with a lamp over the base, and riding layer 1; 0.35 and 0.3 |
 //! | `--reach <m>` | how far a lamp's light goes; 2 or 4, since twice it is whole cells. 2 by default |
-//! | `--beam <deg>` | light only this slice of each lamp's circle, aimed at random: floodlights. 360 by default |
+//! | `--beam <deg>` | light only this slice of each lamp's circle, aimed at random: floodlights. 70 by default; 360 is a bare bulb |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the tiles' layout |
 //! | `--frames <n>` | frames after the box is up |
@@ -146,7 +146,7 @@ impl Args {
             deep: value("--deep").unwrap_or(0.35),
             riding: value("--riding").unwrap_or(0.3),
             reach: value("--reach").unwrap_or(2.0),
-            beam: value("--beam").unwrap_or(360.0),
+            beam: value("--beam").unwrap_or(70.0),
             exposure: value("--exposure").unwrap_or(0.0),
             seed: value("--seed").unwrap_or(7.0) as u64,
             frames: value("--frames").unwrap_or(60.0) as u32,
