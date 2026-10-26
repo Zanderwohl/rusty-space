@@ -24,6 +24,10 @@ pub struct Lamps {
     pub deep_share: f32,
     /// Of the cells where layer 1 is there to carry one.
     pub riding_share: f32,
+    /// The share of texels over all variants where layer 1 could carry a riding lamp. Strips and
+    /// corners have none, so they take that many more deep lamps; short of it, every tile edge
+    /// is a dim lane, and a large hull is ruled in a 24 m grid.
+    pub carried: f32,
     /// Meters over the base: layer 1, layer 2, the deep lamps, the lamps riding layer 1.
     pub heights: Vec4,
     /// The share of a lamp's light that lights the haze, whatever the surface faces.
@@ -75,10 +79,11 @@ pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<
 
 /// Deep lamps over the base, and riding ones on layer 1's pipes, at most one of each a cell.
 fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UVec2, riding_too: bool) -> Vec<Lamp> {
+    let deep_share = if riding_too { spec.deep_share } else { spec.deep_share + spec.riding_share * spec.carried };
     let mut lamps = Vec::new();
     for y in 0..cells.y {
         for x in 0..cells.x {
-            for (riding, share, z) in [(false, spec.deep_share, spec.heights.z), (true, spec.riding_share, spec.heights.w)] {
+            for (riding, share, z) in [(false, deep_share, spec.heights.z), (true, spec.riding_share, spec.heights.w)] {
                 let on = rng.chance(share);
                 let at = lo + (Vec2::new(x as f32, y as f32) + 0.2 + 0.6 * Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
                 let tint = defect(rng);
@@ -114,6 +119,14 @@ fn defect(rng: &mut Rng) -> Vec3 {
 }
 
 /// Each layer's light at every texel it covers.
+/// What [`Lamps::carried`] is, over every variant's layer 1.
+pub fn carried(layer_1s: &[&Surface]) -> f32 {
+    let (on, all) = layer_1s
+        .iter()
+        .fold((0, 0), |(on, all), s| (on + s.cover.iter().filter(|&&c| c >= 0.5).count(), all + s.cover.len()));
+    on as f32 / all as f32
+}
+
 pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> {
     let n = layers[0].texels;
     let tile_m = layers[0].tile_m;

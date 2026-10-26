@@ -15,9 +15,11 @@
 //! | `--sun <deg>` / `--sun-yaw <deg>` / `--star <x>` | the star's direction, and its power; 0 is no star |
 //! | `--sodium <r:g:b>` | the lamps' linear color |
 //! | `--lamp <x>` / `--scatter <x>` / `--bulb <x>` | the lamps' power, the haze they light, and their bulbs' |
+//! | `--deep <share>` / `--riding <share>` | of 4 m cells with a lamp over the base, and riding layer 1; 0.35 and 0.3 |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the tiles' layout |
 //! | `--frames <n>` | frames after the box is up |
+//! | `--dump <dir>` | also write each variant's layers there as PNGs: normal x, normal y, albedo, coverage |
 //! | `--burst <n>` / `--sweep <deg>` | photograph `n` frames, numbered, swinging the yaw through `sweep` across them: parallax |
 
 mod bake;
@@ -64,7 +66,7 @@ const CONDUIT: Maze = Maze {
     doubled: 0.3,
     boxed: 0.5,
     collar_m: 1.6,
-    crossing: 0.45,
+    crossing: 0.2,
 };
 
 const CAPILLARY: Maze = Maze {
@@ -75,7 +77,7 @@ const CAPILLARY: Maze = Maze {
     doubled: 0.25,
     boxed: 0.35,
     collar_m: 0.7,
-    crossing: 0.4,
+    crossing: 0.18,
 };
 
 struct Args {
@@ -93,11 +95,14 @@ struct Args {
     lamp: f32,
     scatter: f32,
     bulb: f32,
+    deep: f32,
+    riding: f32,
     exposure: f32,
     seed: u64,
     frames: u32,
     burst: u32,
     sweep: f32,
+    dump: Option<String>,
 }
 
 impl Args {
@@ -134,11 +139,14 @@ impl Args {
             lamp: value("--lamp").unwrap_or(1.0),
             scatter: value("--scatter").unwrap_or(1.0),
             bulb: value("--bulb").unwrap_or(1.0),
+            deep: value("--deep").unwrap_or(0.35),
+            riding: value("--riding").unwrap_or(0.3),
             exposure: value("--exposure").unwrap_or(0.0),
             seed: value("--seed").unwrap_or(7.0) as u64,
             frames: value("--frames").unwrap_or(60.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             sweep: value("--sweep").unwrap_or(0.0),
+            dump: raw("--dump"),
         }
     }
 }
@@ -231,41 +239,95 @@ fn spawn(
     let mut rng = Rng::new(args.seed);
     let conduit = tiles::MazeEdges::new(&CONDUIT, &mut rng);
     let capillary = tiles::MazeEdges::new(&CAPILLARY, &mut rng);
-    let lamps_spec = Lamps {
+    let mut lamps_spec = Lamps {
         cell_m: 4.0,
-        deep_share: 0.35,
-        riding_share: 0.3,
+        deep_share: args.deep,
+        riding_share: args.riding,
+        carried: 0.0,
         heights: HEIGHTS,
         scatter: 0.004 * args.scatter,
         bulb_radius_m: 0.09,
         bulb_power: 18.0 * args.bulb,
     };
     let started = std::time::Instant::now();
-    let variant = |v: usize| {
+    let shape = |v: usize| {
         let edges = [v & 1, v >> 1 & 1, v >> 2 & 1, v >> 3 & 1];
         let mut rng = Rng::new(args.seed.wrapping_mul(0x9E37_79B9).wrapping_add(v as u64));
-        let layers = vec![
+        vec![
             tiles::base(texels, TILE_M, &mut rng).surface(true),
             tiles::maze(texels, TILE_M, &CONDUIT, &conduit, edges, &mut rng).surface(false),
             tiles::maze(texels, TILE_M, &CAPILLARY, &capillary, edges, &mut rng).surface(false),
-        ];
-        let lamps = bake::of_variant(&lamps_spec, &layers, args.seed, v);
-        let light = bake::bake(&lamps_spec, &layers, &lamps);
-        (layers, light, lamps.len())
+        ]
     };
-    let made: Vec<_> = std::thread::scope(|scope| {
-        let making: Vec<_> = (0..VARIANTS).map(|v| scope.spawn(move || variant(v))).collect();
+    let shaped: Vec<Vec<_>> = std::thread::scope(|scope| {
+        let making: Vec<_> = (0..VARIANTS).map(|v| scope.spawn(move || shape(v))).collect();
         making.into_iter().map(|m| m.join().expect("a variant panicked")).collect()
     });
+    // Every variant's, since a strip's lamps are its edge's and must not depend on the tile.
+    lamps_spec.carried = bake::carried(&shaped.iter().map(|layers| &layers[1]).collect::<Vec<_>>());
+    let lamps_spec = &lamps_spec;
+    let lit: Vec<(Vec<Vec3>, usize)> = std::thread::scope(|scope| {
+        let baking: Vec<_> = shaped
+            .iter()
+            .enumerate()
+            .map(|(v, layers)| {
+                scope.spawn(move || {
+                    let lamps = bake::of_variant(lamps_spec, layers, args.seed, v);
+                    (bake::bake(lamps_spec, layers, &lamps), lamps.len())
+                })
+            })
+            .collect();
+        baking
+            .into_iter()
+            .flat_map(|b| {
+                let (light, count) = b.join().expect("a bake panicked");
+                light.into_iter().map(move |l| (l, count))
+            })
+            .collect()
+    });
     info!(
-        "sprue_void: made {VARIANTS} variants, {} lamps, in {:.2?}",
-        made.iter().map(|m| m.2).sum::<usize>(),
+        "sprue_void: made {VARIANTS} variants, {} lamps, layer 1 carries {:.0}%, in {:.2?}",
+        lit.iter().step_by(3).map(|l| l.1).sum::<usize>(),
+        100.0 * lamps_spec.carried,
         started.elapsed()
     );
-    let layers: Vec<_> = made.iter().flat_map(|m| &m.0).collect();
+    let layers: Vec<_> = shaped.iter().flatten().collect();
     let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
+    if let Some(dir) = &args.dump {
+        std::fs::create_dir_all(dir).expect("--dump makes its directory");
+        for (i, texels) in geometry.iter().enumerate() {
+            let path = format!("{dir}/v{:02}-layer{}.png", i / 3, i % 3);
+            let image = image::RgbaImage::from_raw(TILE_TEXELS, TILE_TEXELS, texels.clone()).expect("a whole tile");
+            image.save(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        }
+    }
     let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
-    let light: Vec<Vec<Vec3>> = made.iter().flat_map(|m| m.1.iter().cloned()).collect();
+    let light: Vec<Vec<Vec3>> = lit.into_iter().map(|l| l.0).collect();
+    if args.dump.is_some() {
+        // Light as the camera sees it from far off: each layer's, through the coverage of those
+        // above, averaged over every variant, in 1.5 m bands across the tile.
+        let n = texels;
+        let bands = 16;
+        let mut profile = vec![0.0f64; bands];
+        for (v, layers) in shaped.iter().enumerate() {
+            for y in 0..n {
+                for x in 0..n {
+                    let i = y * n + x;
+                    let mut seen = 0.0;
+                    let mut open = 1.0;
+                    for k in (0..3).rev() {
+                        let cover = layers[k].cover[i];
+                        let lum = light[v * 3 + k][i].dot(Vec3::new(0.2126, 0.7152, 0.0722));
+                        seen += open * cover * lum;
+                        open *= 1.0 - cover;
+                    }
+                    profile[x * bands / n] += seen as f64;
+                }
+            }
+        }
+        let mean = profile.iter().sum::<f64>() / bands as f64;
+        info!("sprue_void: light across the tile, against its mean: {:?}", profile.iter().map(|p| (p / mean * 100.0).round() as i32).collect::<Vec<_>>());
+    }
     let light = images.add(bake::light_array(&light, &layers));
 
     let (sun, sun_yaw) = (args.sun.to_radians(), args.sun_yaw.to_radians());

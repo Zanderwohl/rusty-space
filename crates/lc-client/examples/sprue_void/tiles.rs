@@ -270,24 +270,37 @@ impl Run {
     }
 }
 
-/// What every variant of a maze layer shares: where its lanes run, and for each tile edge's two
-/// choices, which lanes it carries a pipe across.
+/// A pipe across a tile edge: its run, and where along the edge it crosses, in cells.
+#[derive(Clone, Copy)]
+struct Crossing {
+    run: Run,
+    at: f32,
+}
+
+/// What every variant of a maze layer shares: for each tile edge's two choices, which cells
+/// along it carry a pipe across, and where.
+///
+/// Only the crossing is shared. Lanes are each tile's own, and a crossing jogs to its tile's
+/// lane, since lanes shared by every tile rule a large hull in a grid of the tile's size.
 pub struct MazeEdges {
-    lane_x: Vec<f32>,
-    lane_y: Vec<f32>,
-    /// `[vertical, horizontal][choice][lane]`.
-    crossings: [[Vec<Option<Run>>; 2]; 2],
+    /// `[vertical, horizontal][choice][cell along the edge]`.
+    crossings: [[Vec<Option<Crossing>>; 2]; 2],
 }
 
 impl MazeEdges {
     pub fn new(spec: &Maze, rng: &mut Rng) -> Self {
         let n = spec.cells;
-        // Each lane is nudged off its cell's middle, keeping runs straight but the grid irregular.
-        let lane_x = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
-        let lane_y = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
-        let mut choice = || (0..n).map(|_| rng.chance(spec.crossing).then(|| Run::new(spec, rng))).collect::<Vec<_>>();
+        let mut choice = || {
+            (0..n)
+                .map(|i| {
+                    let on = rng.chance(spec.crossing);
+                    let at = i as f32 + 0.5 + rng.range(-0.22, 0.22);
+                    on.then(|| Crossing { run: Run::new(spec, rng), at })
+                })
+                .collect::<Vec<_>>()
+        };
         let crossings = [[choice(), choice()], [choice(), choice()]];
-        MazeEdges { lane_x, lane_y, crossings }
+        MazeEdges { crossings }
     }
 }
 
@@ -297,9 +310,10 @@ impl MazeEdges {
 pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: [usize; 4], rng: &mut Rng) -> Field {
     let n = spec.cells;
     let cell = tile_m / n as f32;
-    let node = |x: usize, y: usize| {
-        Vec2::new((x as f32 + 0.5 + shared.lane_x[x]) * cell, (y as f32 + 0.5 + shared.lane_y[y]) * cell)
-    };
+    // Each lane is nudged off its cell's middle, keeping runs straight but the grid irregular.
+    let lane_x: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
+    let lane_y: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
+    let node = |x: usize, y: usize| Vec2::new((x as f32 + 0.5 + lane_x[x]) * cell, (y as f32 + 0.5 + lane_y[y]) * cell);
     let index = |x: usize, y: usize| y * n + x;
     // Edge to the right of and above each node, inside the tile.
     let mut right = vec![false; n * n];
@@ -374,23 +388,23 @@ pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: 
     }
 
     let mut field = Field::new(texels, tile_m, 0.0);
-    let span = Vec2::new(tile_m, 0.0);
-    let rise = Vec2::new(0.0, tile_m);
+    // Straight in from the seam, so collars count from it on both sides, then an elbow to the
+    // node's own lane.
+    let cross = |field: &mut Field, crossing: &Option<Crossing>, edge: Vec2, inward: Vec2, to: Vec2| {
+        let Some(c) = crossing else { return };
+        let along = inward.perp().abs();
+        let at = edge + along * c.at * cell;
+        let elbow = at + inward * (to - at).dot(inward);
+        c.run.lay(field, at, elbow, spec.collar_m);
+        c.run.lay(field, elbow, to, spec.collar_m);
+    };
     for y in 0..n {
-        if let Some(run) = left[y] {
-            run.lay(&mut field, node(n - 1, y) - span, node(0, y), spec.collar_m);
-        }
-        if let Some(run) = right_edge[y] {
-            run.lay(&mut field, node(n - 1, y), node(0, y) + span, spec.collar_m);
-        }
+        cross(&mut field, &left[y], Vec2::ZERO, Vec2::X, node(0, y));
+        cross(&mut field, &right_edge[y], Vec2::new(tile_m, 0.0), -Vec2::X, node(n - 1, y));
     }
     for x in 0..n {
-        if let Some(run) = bottom[x] {
-            run.lay(&mut field, node(x, n - 1) - rise, node(x, 0), spec.collar_m);
-        }
-        if let Some(run) = top[x] {
-            run.lay(&mut field, node(x, n - 1), node(x, 0) + rise, spec.collar_m);
-        }
+        cross(&mut field, &bottom[x], Vec2::ZERO, Vec2::Y, node(x, 0));
+        cross(&mut field, &top[x], Vec2::new(0.0, tile_m), -Vec2::Y, node(x, n - 1));
     }
     for y in 0..n {
         for x in 0..n {
