@@ -1,11 +1,7 @@
-// A layered sprue: an opaque plated base and two cutout layers of pipe over it, each flat and
-// normal-mapped, standing off one another. Look development only:
-// crates/lc-client/examples/sprue_void.
-//
-// The lamps between the layers are baked into `light` when the tile is made; only the star is
-// lit here, since it moves as the ship turns. Each face is mapped in its own frame (u, v, n),
-// meters, from world position, so the three layers of one face share coordinates. The mesh
-// must be axis-aligned boxes.
+// A layered sprue: an opaque base and two cutout layers of pipe, flat and normal-mapped, standing
+// off one another. Lamps are baked into `light`; only the star is lit here. Each face is mapped in
+// its own frame (u, v, n), meters, so a face's three layers share coordinates: the mesh must be
+// axis-aligned boxes. Look development: crates/lc-client/examples/sprue_void.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -30,7 +26,7 @@ struct SprueUniform {
     layer: vec4<f32>,
     /// Meters over the base: layer 1, layer 2, and two the bake used.
     heights: vec4<f32>,
-    /// What the baked light is in units of: linear color times power at a meter.
+    /// The baked light's unit: linear color times power at a meter.
     lamp_color: vec4<f32>,
     to_star: vec4<f32>,
     star_color: vec4<f32>,
@@ -83,8 +79,7 @@ fn edge(at: vec2<f32>, axis: f32, id: f32) -> u32 {
     return u32(fract((p3.x + p3.y) * p3.z) < 0.5);
 }
 
-/// The arrays' layer for layer `k` of the tile `uv` falls in: sixteen variants, as
-/// sprue_void's VARIANTS, of three layers each.
+/// Sixteen variants, as sprue_void's VARIANTS, of three layers each.
 fn variant_layer(uv: vec2<f32>, k: u32, id: f32) -> u32 {
     let c = floor(uv);
     let variant = edge(c, 0.0, id)
@@ -123,9 +118,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v)) + hash2(f.id) * m.layer.y;
     let uv = p / m.layer.y;
     let layer = variant_layer(uv, k, f.id);
-    // Each tile is sampled within itself, clamped: its neighbor is another variant, so filtering
-    // across the seam into its own far edge would blend in the wrong tile. The mip is taken
-    // from the continuous coordinate, since fract's jump at the seam would read as minification.
+    // Clamped within the tile: its neighbor is another variant, not its own far edge. Gradients
+    // from the continuous uv, since fract's jump at the seam would select the smallest mip.
     let within = fract(uv);
     let ddx = dpdx(uv);
     let ddy = dpdy(uv);

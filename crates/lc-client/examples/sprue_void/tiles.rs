@@ -66,9 +66,8 @@ impl Field {
         self.tile_m / self.texels as f32
     }
 
-    /// Calls `shape` with the meter position of every texel center in the box `lo..hi`, and keeps
-    /// what it returns where it stands taller. Clipped to the tile, not wrapped: a variant's
-    /// neighbor is another variant, so what crosses an edge is stamped by both.
+    /// Keeps the taller of what `shape` returns and what is there. Clipped, not wrapped: what
+    /// crosses a tile edge is stamped by both tiles beside it.
     fn stamp(&mut self, lo: Vec2, hi: Vec2, mut shape: impl FnMut(Vec2) -> Option<(f32, f32, f32)>) {
         let t = self.texel_m();
         let n = self.texels as i64;
@@ -88,7 +87,7 @@ impl Field {
         }
     }
 
-    /// A pipe from `a` to `b` of radius `r`, with a collar every `collar_m` along it.
+    /// Collared every `collar_m`.
     pub fn pipe(&mut self, a: Vec2, b: Vec2, r: f32, albedo: f32, collar_m: f32) {
         let pad = Vec2::splat(r * 1.3);
         let (lo, hi) = (a.min(b) - pad, a.max(b) + pad);
@@ -126,7 +125,6 @@ impl Field {
         });
     }
 
-    /// Grooves cut across a box, `pitch` apart, along x or y.
     fn grille(&mut self, center: Vec2, size: Vec2, pitch: f32, depth: f32, along_x: bool) {
         let half = size / 2.0;
         let t = self.texel_m();
@@ -143,7 +141,6 @@ impl Field {
         }
     }
 
-    /// Normals from the height's slope, and coverage antialiased over a texel.
     pub fn surface(&self, opaque: bool) -> Surface {
         let n = self.texels;
         let t = self.texel_m();
@@ -164,7 +161,7 @@ impl Field {
     }
 }
 
-/// One layer as the bake and the GPU read it, in the face's frame.
+/// In the face's frame.
 pub struct Surface {
     pub texels: usize,
     pub tile_m: f32,
@@ -186,7 +183,6 @@ impl Surface {
     }
 }
 
-/// Plates by recursive subdivision, some with a raised inset or a grille.
 pub fn base(texels: usize, tile_m: f32, rng: &mut Rng) -> Field {
     let mut field = Field::new(texels, tile_m, 0.03);
     let mut stack = vec![(Vec2::ZERO, Vec2::splat(tile_m), 0u32)];
@@ -228,7 +224,6 @@ pub fn base(texels: usize, tile_m: f32, rng: &mut Rng) -> Field {
     field
 }
 
-/// How one maze layer is built.
 pub struct Maze {
     pub cells: usize,
     /// Each run's radius is one of these, meters.
@@ -245,7 +240,6 @@ pub struct Maze {
     pub crossing: f32,
 }
 
-/// One run of pipe.
 #[derive(Clone, Copy)]
 struct Run {
     r: f32,
@@ -269,18 +263,16 @@ impl Run {
     }
 }
 
-/// A pipe across a tile edge: its run, and where along the edge it crosses, in cells.
 #[derive(Clone, Copy)]
 struct Crossing {
     run: Run,
+    /// Along the edge, in cells.
     at: f32,
 }
 
-/// What every variant of a maze layer shares: for each tile edge's two choices, which cells
-/// along it carry a pipe across, and where.
-///
-/// Only the crossing is shared. Lanes are each tile's own, and a crossing jogs to its tile's
-/// lane, since lanes shared by every tile rule a large hull in a grid of the tile's size.
+/// The pipes each tile edge's two choices carry across it. Only the crossing is shared: lanes
+/// shared by every tile rule a large hull in a grid of the tile's size, so each tile has its own
+/// and a crossing jogs to it.
 pub struct MazeEdges {
     /// `[vertical, horizontal][choice][cell along the edge]`.
     crossings: [[Vec<Option<Crossing>>; 2]; 2],
@@ -303,13 +295,11 @@ impl MazeEdges {
     }
 }
 
-/// A randomized depth-first maze inside the tile, pruned, with the pipes its edges' choices
-/// carry across them, drawn along straight lanes. `edges` are the choices of the left, right,
-/// bottom and top edges.
+/// `edges` are the left, right, bottom and top edges' choices.
 pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: [usize; 4], rng: &mut Rng) -> Field {
     let n = spec.cells;
     let cell = tile_m / n as f32;
-    // Each lane is nudged off its cell's middle, keeping runs straight but the grid irregular.
+    // Off each cell's middle: runs stay straight but the grid is irregular.
     let lane_x: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
     let lane_y: Vec<f32> = (0..n).map(|_| rng.range(-0.22, 0.22)).collect();
     let node = |x: usize, y: usize| Vec2::new((x as f32 + 0.5 + lane_x[x]) * cell, (y as f32 + 0.5 + lane_y[y]) * cell);
@@ -387,8 +377,7 @@ pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: 
     }
 
     let mut field = Field::new(texels, tile_m, 0.0);
-    // Straight in from the seam, so collars count from it on both sides, then an elbow to the
-    // node's own lane.
+    // Straight in from the seam, so collars count from it on both sides.
     let cross = |field: &mut Field, crossing: &Option<Crossing>, edge: Vec2, inward: Vec2, to: Vec2| {
         let Some(c) = crossing else { return };
         let along = inward.perp().abs();
@@ -426,7 +415,6 @@ pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: 
                 let size = (Vec2::new(rng.range(2.6, 4.0), rng.range(2.6, 4.0)) * r).min(room);
                 field.block(a, size, r * rng.range(1.2, 1.7), 0.25 * r, rng.range(0.1, 0.22));
             } else if d == 1 {
-                // A dead end is capped, not cut off.
                 let r = spec.radii[0] * 1.5;
                 field.block(a, Vec2::splat(2.0 * r).min(room), r * 1.1, 0.3 * r, 0.22);
             }
@@ -435,11 +423,9 @@ pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: 
     field
 }
 
-/// Every variant's layers as one mipmapped array, each layer sampled clamped within its tile.
-///
-/// A level's normal and albedo are coverage-weighted, so a pipe's edge does not fade toward the
-/// empty texels' flat normal; its coverage is rescaled so the share of texels past the cutout
-/// stays the top level's, or thin pipes would erode away with distance.
+/// A level's normal and albedo are coverage-weighted, or a pipe's edge fades toward the empty
+/// texels' flat normal. Its coverage is rescaled to keep the top level's share past the cutout,
+/// or thin pipes erode away with distance.
 pub fn tile_array(layers: &[Vec<u8>], texels: u32) -> Image {
     let mut data = Vec::new();
     for top in layers {

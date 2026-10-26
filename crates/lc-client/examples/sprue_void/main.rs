@@ -43,21 +43,18 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 use bake::Lamps;
 use tiles::{Maze, Rng};
 
-/// What one tile spans. Two to the box's edge by default.
 const TILE_M: f32 = 24.0;
 
-/// Some 4.7 cm a texel, geometry and light alike: sixteen variants of three layers at 1024 would
-/// be a quarter of a gigabyte.
+/// 4.7 cm a texel. Sixteen variants of three layers at 1024 would take a quarter of a gigabyte.
 const TILE_TEXELS: u32 = 512;
 
-/// Two choices a tile edge: a variant is its left + 2 right + 4 bottom + 8 top choice, which
-/// sprue.wgsl picks by hash, and any arrangement meets at every seam.
+/// Two choices a tile edge: a variant is left + 2 right + 4 bottom + 8 top, as sprue.wgsl reads it.
 pub const VARIANTS: usize = 16;
 
 /// Meters over the base: layer 1, layer 2, the deep lamps, and the lamps riding layer 1.
 const HEIGHTS: Vec4 = Vec4::new(0.9, 1.9, 0.4, 1.25);
 
-/// High-pressure sodium, linear: yellow washed toward white rather than LPS's pure 589 nm.
+/// High-pressure sodium, linear.
 const SODIUM: Vec3 = Vec3::new(1.0, 0.72, 0.2);
 
 const CONDUIT: Maze = Maze {
@@ -354,8 +351,7 @@ fn spawn(
 /// Rec. 709 luma, for a light's brightness.
 const LUMA: Vec3 = Vec3::new(0.2126, 0.7152, 0.0722);
 
-/// Light as the camera sees it from far off: each layer's through the coverage of those above,
-/// averaged over every variant. Logged in 1.5 m bands across the tile, and written as a map.
+/// Each layer's light through the coverage above it, averaged over every variant: a tile from far off.
 fn dump_light(dir: &str, shaped: &[Vec<tiles::Surface>], light: &[Vec<Vec3>]) {
     let n = shaped[0][0].texels;
     let (bands, side) = (16, 64);

@@ -1,12 +1,9 @@
-//! The lamps, placed in tile variants and baked into each layer's light when the tiles are made.
+//! Lamps, placed in tile variants and baked into each layer's light when the tiles are made.
 //!
-//! A ship hundreds of kilometers long cannot afford to light every texel from every lamp near it
-//! each frame, so what does not depend on the eye is done here: each lamp's diffuse light, its
-//! shadows through the layers between, the haze it lights, and its bulb. What is left to the
-//! shader is the star, which moves as the ship turns, and the view. Lamp specular is lost.
-//!
-//! Light is in units of the lamps' color, which the shader supplies, so color and power stay
-//! live. Stored RGB9E5: four bytes a texel, and bulbs need the range.
+//! Lighting every texel from every nearby lamp each frame costs too much on a ship hundreds of
+//! kilometers long, so lamp light, shadows, haze and bulbs are baked and the shader keeps only the
+//! star. Lamp specular is lost. Light is in units of the lamps' color, so color and power stay
+//! live; RGB9E5 because bulbs need the range.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -21,18 +18,16 @@ use crate::tiles::{Rng, Surface};
 pub struct Lamps {
     /// At most one lamp of each kind a cell, in each variant.
     pub cell_m: f32,
-    /// No farther than this does a lamp's light reach. Twice it is whole cells: the strip either
-    /// side of a tile edge that its lamps light across is that wide.
+    /// How far a lamp's light goes. Twice it, the width of the strip along a tile edge, is whole
+    /// cells.
     pub reach_m: f32,
-    /// Each lamp lights only a slice this wide of the circle about it, aimed at random along the
-    /// surface: a floodlight. A full turn or more is a bare bulb.
+    /// The slice of its circle a lamp lights, aimed at random; a full turn is a bare bulb.
     pub beam_rad: f32,
     pub deep_share: f32,
     /// Of the cells where layer 1 is there to carry one.
     pub riding_share: f32,
-    /// The share of texels over all variants where layer 1 could carry a riding lamp. Strips and
-    /// corners have none, so they take that many more deep lamps; short of it, every tile edge
-    /// is a dim lane, and a large hull is ruled in a 24 m grid.
+    /// The share of texels, over all variants, where layer 1 could carry a riding lamp. Strips
+    /// have no riding lamps and take this many more deep ones, or each tile edge is a dim lane.
     pub carried: f32,
     /// Meters over the base: layer 1, layer 2, the deep lamps, the lamps riding layer 1.
     pub heights: Vec4,
@@ -53,27 +48,17 @@ pub struct Lamp {
     aim: Vec2,
 }
 
-/// Variant `v`'s lamps, its edges' choices as `crate::VARIANTS` numbers them.
+/// Variant `v`'s lamps.
 ///
-/// A lamp's light reaches [`Lamps::reach_m`], so the plane is cut into regions no lamp lights
-/// across: a strip that far either side of each tile edge, a square at each corner, and the
-/// interior. A strip's lamps are its edge's choice, and light both tiles it touches the same way;
-/// only the interior is the tile's own. A tile is baked from its interior and its four strips,
-/// so the light is continuous across a seam.
-///
-/// Each region's lamps are laid out for all its choices at once — the interior's for every
-/// variant, a strip's for both of an edge's choices — and spread evenly among them. Tiles are
-/// drawn at random, so from far off a hull is the mean of its variants, and sixteen lamps drawn
-/// independently leave that mean lumpy: a pattern repeating every tile, which no single tile
-/// shows. Corners are the same everywhere, so any lamp there would repeat; they have none.
-///
-/// Only the interior has riding lamps, since a strip's lamp may stand on the neighbor's pipes.
-/// `interior` is this variant's of [`interiors`].
+/// No light goes farther than [`Lamps::reach_m`], so a strip that wide either side of a tile edge
+/// belongs to the edge: both tiles beside it bake the same strip lamps, and light is continuous
+/// across the seam. `interior` is this variant's of [`interiors`]. Corners would be the same on
+/// every tile, and so repeat; they have no lamps. Riding lamps stay in the interior, since a strip
+/// lamp may stand on the neighbor's pipes.
 pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize, interior: &[Lamp]) -> Vec<Lamp> {
     let tile_m = layers[0].tile_m;
     let reach = spec.reach_m;
     let (strip, inner) = cells(spec, tile_m);
-    // Strips have no riding lamps, so they take that many more deep ones.
     let strip_deep = spec.deep_share + spec.riding_share * spec.carried;
     let strip_of = |tag: u64, c: usize, lo: Vec2, cells: UVec2| {
         spread(spec, &mut region_rng(seed, tag), lo, cells, 2, [strip_deep, 0.0]).swap_remove(c)
@@ -122,12 +107,12 @@ fn region_rng(seed: u64, tag: u64) -> Rng {
     Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag))
 }
 
-/// Lamps for each of `choices` over a region of `cells` from `lo`, deep and riding at
-/// `shares` of a cell each.
+/// Lamps for each of `choices`, laid out together and spread evenly among them.
 ///
-/// In each cell, a kind of lamp goes to that share of the choices, rounded at random, and those
-/// lamps split the cell between them, each to its own row and column of a grid as fine as there
-/// are lamps, and their aims split the circle: the choices' mean is even over the cell.
+/// Tiles are drawn at random, so from far off a hull is the mean of its variants, and lamps
+/// placed independently leave that mean lumpy: a pattern repeating every tile. In each cell a kind
+/// of lamp goes to its share of the choices, each to its own row and column of a grid as fine as
+/// there are lamps, with their aims splitting the circle.
 fn spread(spec: &Lamps, rng: &mut Rng, lo: Vec2, cells: UVec2, choices: usize, shares: [f32; 2]) -> Vec<Vec<Lamp>> {
     let mut out = vec![Vec::new(); choices];
     let shuffled = |rng: &mut Rng, n: usize| {
@@ -164,10 +149,8 @@ fn spread(spec: &Lamps, rng: &mut Rng, lo: Vec2, cells: UVec2, choices: usize, s
     out
 }
 
-/// A lamp's color and power against a sound one's, which is 1.
-///
-/// Most are a few percent off in each channel, as a batch is. Some came out of a bad batch,
-/// greener or pinker. Some are failing: an aging sodium arc runs dim and red. A few are dead.
+/// Color and power, 1 for a sound lamp: a few percent off by batch, some greener or pinker, some
+/// failing dim and red, a few dead.
 fn defect(rng: &mut Rng) -> Vec3 {
     let batch = Vec3::new(rng.range(0.96, 1.04), rng.range(0.95, 1.05), rng.range(0.92, 1.08));
     let roll = rng.unit();
@@ -200,8 +183,7 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     let z = [0.0, spec.heights.x, spec.heights.y];
     // Some 10 cm of penumbra.
     let soft: Vec<Vec<f32>> = layers.iter().map(|s| blurred(&s.cover, n, 2)).collect();
-    // Past the tile's edge is the neighbor, whichever variant it is: there a layer is taken at its
-    // average, and the seam's light is continuous on average rather than shadow for shadow.
+    // Past the tile's edge is a neighbor of unknown variant, so a layer there is its average.
     let mean: Vec<f32> = layers.iter().map(|s| s.cover.iter().sum::<f32>() / s.cover.len() as f32).collect();
     let passed = |p: Vec2, zp: f32, q: Vec2, zq: f32| {
         let mut through = 1.0;
@@ -214,15 +196,14 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
         }
         through
     };
-    // Lamps outside the tile light into it but are not wrapped around: the neighbor's own bake
-    // has them on its side.
+    // Not wrapped: the neighbor's own bake has the far side.
     let inside = |x: i64, y: i64| (0..n as i64).contains(&x) && (0..n as i64).contains(&y);
     let index = |x: i64, y: i64| y as usize * n + x as usize;
     let texel = |x: i64, y: i64| Vec2::new((x as f32 + 0.5) * t, (y as f32 + 0.5) * t);
 
     let mut light = vec![vec![Vec3::ZERO; n * n]; layers.len()];
     let reach = spec.reach_m;
-    // A few degrees' soft edge, as a reflector's rim throws.
+    // With a few degrees of soft edge.
     let beam = |lamp: &Lamp, p: Vec2| {
         let half = 0.5 * spec.beam_rad;
         let away = p - lamp.at;
@@ -286,8 +267,7 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     light
 }
 
-/// Every layer's light as one mipmapped array, each level weighted by `layers`' coverage as the
-/// geometry's is.
+/// Each level weighted by `layers`' coverage, as the geometry's is.
 pub fn light_array(light: &[Vec<Vec3>], layers: &[&Surface]) -> Image {
     assert_eq!(light.len(), layers.len());
     let texels = layers[0].texels as u32;
