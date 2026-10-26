@@ -16,6 +16,8 @@
 //! | `--sodium <r:g:b>` | the lamps' linear color |
 //! | `--lamp <x>` / `--scatter <x>` / `--bulb <x>` | the lamps' power, the haze they light, and their bulbs' |
 //! | `--deep <share>` / `--riding <share>` | of 4 m cells with a lamp over the base, and riding layer 1; 0.35 and 0.3 |
+//! | `--reach <m>` | how far a lamp's light goes; 2 or 4, since twice it is whole cells. 2 by default |
+//! | `--beam <deg>` | light only this slice of each lamp's circle, aimed at random: floodlights. 360 by default |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the tiles' layout |
 //! | `--frames <n>` | frames after the box is up |
@@ -97,6 +99,8 @@ struct Args {
     bulb: f32,
     deep: f32,
     riding: f32,
+    reach: f32,
+    beam: f32,
     exposure: f32,
     seed: u64,
     frames: u32,
@@ -141,6 +145,8 @@ impl Args {
             bulb: value("--bulb").unwrap_or(1.0),
             deep: value("--deep").unwrap_or(0.35),
             riding: value("--riding").unwrap_or(0.3),
+            reach: value("--reach").unwrap_or(2.0),
+            beam: value("--beam").unwrap_or(360.0),
             exposure: value("--exposure").unwrap_or(0.0),
             seed: value("--seed").unwrap_or(7.0) as u64,
             frames: value("--frames").unwrap_or(60.0) as u32,
@@ -241,6 +247,8 @@ fn spawn(
     let capillary = tiles::MazeEdges::new(&CAPILLARY, &mut rng);
     let mut lamps_spec = Lamps {
         cell_m: 4.0,
+        reach_m: args.reach,
+        beam_rad: args.beam.to_radians(),
         deep_share: args.deep,
         riding_share: args.riding,
         carried: 0.0,
@@ -325,6 +333,25 @@ fn spawn(
                 }
             }
         }
+        let side = 64;
+        let mut map = vec![0.0f64; side * side];
+        for (v, layers) in shaped.iter().enumerate() {
+            for i in 0..n * n {
+                let (x, y) = (i % n, i / n);
+                let mut seen = 0.0;
+                let mut open = 1.0;
+                for k in (0..3).rev() {
+                    let cover = layers[k].cover[i];
+                    seen += open * cover * light[v * 3 + k][i].dot(Vec3::new(0.2126, 0.7152, 0.0722));
+                    open *= 1.0 - cover;
+                }
+                map[(y * side / n) * side + x * side / n] += seen as f64;
+            }
+        }
+        let peak = map.iter().copied().fold(0.0, f64::max);
+        let bytes: Vec<u8> = map.iter().map(|m| (255.0 * (m / peak).sqrt()) as u8).collect();
+        let dir = args.dump.as_ref().expect("dumping");
+        image::GrayImage::from_raw(side as u32, side as u32, bytes).expect("a map").save(format!("{dir}/light-mean.png")).ok();
         let mean = profile.iter().sum::<f64>() / bands as f64;
         info!("sprue_void: light across the tile, against its mean: {:?}", profile.iter().map(|p| (p / mean * 100.0).round() as i32).collect::<Vec<_>>());
     }

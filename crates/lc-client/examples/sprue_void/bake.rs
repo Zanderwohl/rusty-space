@@ -19,8 +19,14 @@ use bevy::render::render_resource::{
 use crate::tiles::{Rng, Surface};
 
 pub struct Lamps {
-    /// One lamp at most a cell, and no farther than this does its light reach.
+    /// One lamp at most a cell.
     pub cell_m: f32,
+    /// No farther than this does a lamp's light reach. Twice it is whole cells: the strip either
+    /// side of a tile edge that its lamps light across is that wide.
+    pub reach_m: f32,
+    /// Each lamp lights only a slice this wide of the circle about it, aimed at random along the
+    /// surface: a floodlight. A full turn or more is a bare bulb.
+    pub beam_rad: f32,
     pub deep_share: f32,
     /// Of the cells where layer 1 is there to carry one.
     pub riding_share: f32,
@@ -43,11 +49,13 @@ pub struct Lamp {
     tint: Vec3,
     /// The layer its bulb is drawn on.
     carrier: usize,
+    /// Unit, along the surface: where a floodlight points.
+    aim: Vec2,
 }
 
 /// Variant `v`'s lamps, its edges' choices as `crate::VARIANTS` numbers them.
 ///
-/// A lamp's light reaches [`Lamps::cell_m`], so the plane is cut into regions no lamp lights
+/// A lamp's light reaches [`Lamps::reach_m`], so the plane is cut into regions no lamp lights
 /// across: a strip that far either side of each tile edge, a square at each corner, and the
 /// interior. A strip's lamps are its edge's choice, and light both tiles it touches the same way;
 /// the corners are one set everywhere; only the interior is the tile's own. A tile is baked from
@@ -56,23 +64,28 @@ pub struct Lamp {
 /// Only the interior has riding lamps, since a strip's lamp may stand on the neighbor's pipes.
 pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<Lamp> {
     let tile_m = layers[0].tile_m;
-    let reach = spec.cell_m;
-    let inner = ((tile_m - 2.0 * reach) / spec.cell_m).round() as u32;
-    assert!(inner >= 1 && (tile_m / spec.cell_m).fract() == 0.0, "a tile is whole cells, wider than two");
+    let reach = spec.reach_m;
+    let strip = 2.0 * reach / spec.cell_m;
+    let inner = (tile_m - 2.0 * reach) / spec.cell_m;
+    assert!(
+        strip.fract() == 0.0 && inner.fract() == 0.0 && inner >= 1.0,
+        "twice the reach, and the tile less it, are whole cells"
+    );
+    let (strip, inner) = (strip as u32, inner as u32);
     let region = |tag: u64, lo: Vec2, cells: UVec2, riding: bool| {
         let mut rng = Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
         lamps_in(spec, layers, &mut rng, lo, cells, riding)
     };
     let shifted = |lamps: Vec<Lamp>, by: Vec2| lamps.into_iter().map(move |l| Lamp { at: l.at + by, ..l });
-    let vertical = |c: usize| region(2 + c as u64, Vec2::new(-reach, reach), UVec2::new(2, inner), false);
-    let horizontal = |c: usize| region(4 + c as u64, Vec2::new(reach, -reach), UVec2::new(inner, 2), false);
+    let vertical = |c: usize| region(2 + c as u64, Vec2::new(-reach, reach), UVec2::new(strip, inner), false);
+    let horizontal = |c: usize| region(4 + c as u64, Vec2::new(reach, -reach), UVec2::new(inner, strip), false);
     let mut lamps = region(16 + v as u64, Vec2::splat(reach), UVec2::splat(inner), true);
     lamps.extend(vertical(v & 1));
     lamps.extend(shifted(vertical(v >> 1 & 1), Vec2::new(tile_m, 0.0)));
     lamps.extend(horizontal(v >> 2 & 1));
     lamps.extend(shifted(horizontal(v >> 3 & 1), Vec2::new(0.0, tile_m)));
     for at in [Vec2::ZERO, Vec2::new(tile_m, 0.0), Vec2::new(0.0, tile_m), Vec2::splat(tile_m)] {
-        lamps.extend(shifted(region(1, Vec2::splat(-reach), UVec2::splat(2), false), at));
+        lamps.extend(shifted(region(1, Vec2::splat(-reach), UVec2::splat(strip), false), at));
     }
     lamps
 }
@@ -85,12 +98,13 @@ fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UV
         for x in 0..cells.x {
             for (riding, share, z) in [(false, deep_share, spec.heights.z), (true, spec.riding_share, spec.heights.w)] {
                 let on = rng.chance(share);
-                let at = lo + (Vec2::new(x as f32, y as f32) + 0.2 + 0.6 * Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
+                let at = lo + (Vec2::new(x as f32, y as f32) + Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
                 let tint = defect(rng);
+                let aim = Vec2::from_angle(rng.range(0.0, std::f32::consts::TAU));
                 let carried = !riding
                     || riding_too && sample(&layers[1].cover, layers[1].texels, layers[1].tile_m, at).is_some_and(|c| c >= 0.5);
                 if on && carried && tint != Vec3::ZERO {
-                    lamps.push(Lamp { at, z, tint, carrier: riding as usize });
+                    lamps.push(Lamp { at, z, tint, carrier: riding as usize, aim });
                 }
             }
         }
@@ -155,7 +169,17 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
     let texel = |x: i64, y: i64| Vec2::new((x as f32 + 0.5) * t, (y as f32 + 0.5) * t);
 
     let mut light = vec![vec![Vec3::ZERO; n * n]; layers.len()];
-    let reach = spec.cell_m;
+    let reach = spec.reach_m;
+    // A few degrees' soft edge, as a reflector's rim throws.
+    let beam = |lamp: &Lamp, p: Vec2| {
+        let half = 0.5 * spec.beam_rad;
+        let away = p - lamp.at;
+        if half >= std::f32::consts::PI || away.length_squared() < 1.0e-6 {
+            return 1.0;
+        }
+        let soft = 4f32.to_radians();
+        smoothstep((half + soft).min(std::f32::consts::PI).cos(), (half - soft).max(0.0).cos(), away.normalize().dot(lamp.aim))
+    };
     let span = (reach / t).ceil() as i64;
     let bulb_span = (6.5 * spec.bulb_radius_m / t).ceil() as i64;
     for lamp in lamps {
@@ -177,7 +201,7 @@ pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> 
                     if window <= 0.0 {
                         continue;
                     }
-                    let through = passed(p, z[k], lamp.at, lamp.z);
+                    let through = passed(p, z[k], lamp.at, lamp.z) * beam(lamp, p);
                     if through <= 0.0 {
                         continue;
                     }
