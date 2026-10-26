@@ -52,7 +52,7 @@ const TILE_TEXELS: u32 = 512;
 
 /// Two choices a tile edge: a variant is its left + 2 right + 4 bottom + 8 top choice, which
 /// sprue.wgsl picks by hash, and any arrangement meets at every seam.
-const VARIANTS: usize = 16;
+pub const VARIANTS: usize = 16;
 
 /// Meters over the base: layer 1, layer 2, the deep lamps, and the lamps riding layer 1.
 const HEIGHTS: Vec4 = Vec4::new(0.9, 1.9, 0.4, 1.25);

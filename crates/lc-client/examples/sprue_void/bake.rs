@@ -58,8 +58,14 @@ pub struct Lamp {
 /// A lamp's light reaches [`Lamps::reach_m`], so the plane is cut into regions no lamp lights
 /// across: a strip that far either side of each tile edge, a square at each corner, and the
 /// interior. A strip's lamps are its edge's choice, and light both tiles it touches the same way;
-/// the corners are one set everywhere; only the interior is the tile's own. A tile is baked from
-/// its interior, its four strips and its four corners, so the light is continuous across a seam.
+/// only the interior is the tile's own. A tile is baked from its interior and its four strips,
+/// so the light is continuous across a seam.
+///
+/// Each region's lamps are laid out for all its choices at once — the interior's for every
+/// variant, a strip's for both of an edge's choices — and spread evenly among them. Tiles are
+/// drawn at random, so from far off a hull is the mean of its variants, and sixteen lamps drawn
+/// independently leave that mean lumpy: a pattern repeating every tile, which no single tile
+/// shows. Corners are the same everywhere, so any lamp there would repeat; they have none.
 ///
 /// Only the interior has riding lamps, since a strip's lamp may stand on the neighbor's pipes.
 pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<Lamp> {
@@ -72,44 +78,76 @@ pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<
         "twice the reach, and the tile less it, are whole cells"
     );
     let (strip, inner) = (strip as u32, inner as u32);
-    let region = |tag: u64, lo: Vec2, cells: UVec2, riding: bool| {
-        let mut rng = Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
-        lamps_in(spec, layers, &mut rng, lo, cells, riding)
+    let rng = |tag: u64| Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
+    // Strips have no riding lamps, so they take that many more deep ones.
+    let strip_deep = spec.deep_share + spec.riding_share * spec.carried;
+    let strip_of = |tag: u64, c: usize, lo: Vec2, cells: UVec2| {
+        spread(spec, &mut rng(tag), lo, cells, 2, [strip_deep, 0.0]).swap_remove(c)
     };
     let shifted = |lamps: Vec<Lamp>, by: Vec2| lamps.into_iter().map(move |l| Lamp { at: l.at + by, ..l });
-    let vertical = |c: usize| region(2 + c as u64, Vec2::new(-reach, reach), UVec2::new(strip, inner), false);
-    let horizontal = |c: usize| region(4 + c as u64, Vec2::new(reach, -reach), UVec2::new(inner, strip), false);
-    let mut lamps = region(16 + v as u64, Vec2::splat(reach), UVec2::splat(inner), true);
+    let vertical = |c: usize| strip_of(2, c, Vec2::new(-reach, reach), UVec2::new(strip, inner));
+    let horizontal = |c: usize| strip_of(4, c, Vec2::new(reach, -reach), UVec2::new(inner, strip));
+    let interior = spread(spec, &mut rng(16), Vec2::splat(reach), UVec2::splat(inner), crate::VARIANTS, [
+        spec.deep_share,
+        spec.riding_share,
+    ]);
+    let layer_1 = &layers[1];
+    let mut lamps: Vec<Lamp> = interior[v]
+        .iter()
+        .filter(|l| {
+            l.carrier == 0
+                || sample(&layer_1.cover, layer_1.texels, layer_1.tile_m, l.at).is_some_and(|c| c >= 0.5)
+        })
+        .copied()
+        .collect();
     lamps.extend(vertical(v & 1));
     lamps.extend(shifted(vertical(v >> 1 & 1), Vec2::new(tile_m, 0.0)));
     lamps.extend(horizontal(v >> 2 & 1));
     lamps.extend(shifted(horizontal(v >> 3 & 1), Vec2::new(0.0, tile_m)));
-    for at in [Vec2::ZERO, Vec2::new(tile_m, 0.0), Vec2::new(0.0, tile_m), Vec2::splat(tile_m)] {
-        lamps.extend(shifted(region(1, Vec2::splat(-reach), UVec2::splat(strip), false), at));
-    }
+    lamps.retain(|l| l.tint != Vec3::ZERO);
     lamps
 }
 
-/// Deep lamps over the base, and riding ones on layer 1's pipes, at most one of each a cell.
-fn lamps_in(spec: &Lamps, layers: &[Surface], rng: &mut Rng, lo: Vec2, cells: UVec2, riding_too: bool) -> Vec<Lamp> {
-    let deep_share = if riding_too { spec.deep_share } else { spec.deep_share + spec.riding_share * spec.carried };
-    let mut lamps = Vec::new();
+/// Lamps for each of `choices` over a region of `cells` from `lo`, deep and riding at
+/// `shares` of a cell each.
+///
+/// In each cell, a kind of lamp goes to that share of the choices, rounded at random, and those
+/// lamps split the cell between them, each to its own row and column of a grid as fine as there
+/// are lamps, and their aims split the circle: the choices' mean is even over the cell.
+fn spread(spec: &Lamps, rng: &mut Rng, lo: Vec2, cells: UVec2, choices: usize, shares: [f32; 2]) -> Vec<Vec<Lamp>> {
+    let mut out = vec![Vec::new(); choices];
+    let shuffled = |rng: &mut Rng, n: usize| {
+        let mut order: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            order.swap(i, rng.below(i + 1));
+        }
+        order
+    };
     for y in 0..cells.y {
         for x in 0..cells.x {
-            for (riding, share, z) in [(false, deep_share, spec.heights.z), (true, spec.riding_share, spec.heights.w)] {
-                let on = rng.chance(share);
-                let at = lo + (Vec2::new(x as f32, y as f32) + Vec2::new(rng.unit(), rng.unit())) * spec.cell_m;
-                let tint = defect(rng);
-                let aim = Vec2::from_angle(rng.range(0.0, std::f32::consts::TAU));
-                let carried = !riding
-                    || riding_too && sample(&layers[1].cover, layers[1].texels, layers[1].tile_m, at).is_some_and(|c| c >= 0.5);
-                if on && carried && tint != Vec3::ZERO {
-                    lamps.push(Lamp { at, z, tint, carrier: riding as usize, aim });
+            let cell = lo + Vec2::new(x as f32, y as f32) * spec.cell_m;
+            for (riding, share) in shares.into_iter().enumerate() {
+                let count = ((share * choices as f32 + rng.unit()).floor() as usize).min(choices);
+                if count == 0 {
+                    continue;
+                }
+                let who = shuffled(rng, choices);
+                let (column, row) = (shuffled(rng, count), shuffled(rng, count));
+                let turn = rng.unit();
+                for i in 0..count {
+                    let slot = Vec2::new(column[i] as f32 + rng.unit(), row[i] as f32 + rng.unit()) / count as f32;
+                    out[who[i]].push(Lamp {
+                        at: cell + slot * spec.cell_m,
+                        z: if riding == 1 { spec.heights.w } else { spec.heights.z },
+                        tint: defect(rng),
+                        carrier: riding,
+                        aim: Vec2::from_angle((i as f32 + turn) / count as f32 * std::f32::consts::TAU),
+                    });
                 }
             }
         }
     }
-    lamps
+    out
 }
 
 /// A lamp's color and power against a sound one's, which is 1.
