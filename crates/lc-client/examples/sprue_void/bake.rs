@@ -19,7 +19,7 @@ use bevy::render::render_resource::{
 use crate::tiles::{Rng, Surface};
 
 pub struct Lamps {
-    /// One lamp at most a cell.
+    /// At most one lamp of each kind a cell, in each variant.
     pub cell_m: f32,
     /// No farther than this does a lamp's light reach. Twice it is whole cells: the strip either
     /// side of a tile edge that its lamps light across is that wide.
@@ -68,31 +68,21 @@ pub struct Lamp {
 /// shows. Corners are the same everywhere, so any lamp there would repeat; they have none.
 ///
 /// Only the interior has riding lamps, since a strip's lamp may stand on the neighbor's pipes.
-pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<Lamp> {
+/// `interior` is this variant's of [`interiors`].
+pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize, interior: &[Lamp]) -> Vec<Lamp> {
     let tile_m = layers[0].tile_m;
     let reach = spec.reach_m;
-    let strip = 2.0 * reach / spec.cell_m;
-    let inner = (tile_m - 2.0 * reach) / spec.cell_m;
-    assert!(
-        strip.fract() == 0.0 && inner.fract() == 0.0 && inner >= 1.0,
-        "twice the reach, and the tile less it, are whole cells"
-    );
-    let (strip, inner) = (strip as u32, inner as u32);
-    let rng = |tag: u64| Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag));
+    let (strip, inner) = cells(spec, tile_m);
     // Strips have no riding lamps, so they take that many more deep ones.
     let strip_deep = spec.deep_share + spec.riding_share * spec.carried;
     let strip_of = |tag: u64, c: usize, lo: Vec2, cells: UVec2| {
-        spread(spec, &mut rng(tag), lo, cells, 2, [strip_deep, 0.0]).swap_remove(c)
+        spread(spec, &mut region_rng(seed, tag), lo, cells, 2, [strip_deep, 0.0]).swap_remove(c)
     };
     let shifted = |lamps: Vec<Lamp>, by: Vec2| lamps.into_iter().map(move |l| Lamp { at: l.at + by, ..l });
     let vertical = |c: usize| strip_of(2, c, Vec2::new(-reach, reach), UVec2::new(strip, inner));
     let horizontal = |c: usize| strip_of(4, c, Vec2::new(reach, -reach), UVec2::new(inner, strip));
-    let interior = spread(spec, &mut rng(16), Vec2::splat(reach), UVec2::splat(inner), crate::VARIANTS, [
-        spec.deep_share,
-        spec.riding_share,
-    ]);
     let layer_1 = &layers[1];
-    let mut lamps: Vec<Lamp> = interior[v]
+    let mut lamps: Vec<Lamp> = interior
         .iter()
         .filter(|l| {
             l.carrier == 0
@@ -106,6 +96,30 @@ pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize) -> Vec<
     lamps.extend(shifted(horizontal(v >> 3 & 1), Vec2::new(0.0, tile_m)));
     lamps.retain(|l| l.tint != Vec3::ZERO);
     lamps
+}
+
+/// Every variant's interior lamps, spread among them together. Riding ones are candidates: a
+/// variant keeps those its own layer 1 is there to carry.
+pub fn interiors(spec: &Lamps, tile_m: f32, seed: u64) -> Vec<Vec<Lamp>> {
+    let (_, inner) = cells(spec, tile_m);
+    let lo = Vec2::splat(spec.reach_m);
+    spread(spec, &mut region_rng(seed, 16), lo, UVec2::splat(inner), crate::VARIANTS, [spec.deep_share, spec.riding_share])
+}
+
+/// Cells across a strip, and along the interior.
+fn cells(spec: &Lamps, tile_m: f32) -> (u32, u32) {
+    let strip = 2.0 * spec.reach_m / spec.cell_m;
+    let inner = (tile_m - 2.0 * spec.reach_m) / spec.cell_m;
+    assert!(
+        strip.fract() == 0.0 && inner.fract() == 0.0 && inner >= 1.0,
+        "twice the reach, and the tile less it, are whole cells"
+    );
+    (strip as u32, inner as u32)
+}
+
+/// One per region, not per variant, so both tiles beside a strip lay out the same lamps.
+fn region_rng(seed: u64, tag: u64) -> Rng {
+    Rng::new(seed.wrapping_mul(0x2545_F491_4F6C_DD1D).wrapping_add(tag))
 }
 
 /// Lamps for each of `choices` over a region of `cells` from `lo`, deep and riding at
@@ -170,7 +184,6 @@ fn defect(rng: &mut Rng) -> Vec3 {
     }
 }
 
-/// Each layer's light at every texel it covers.
 /// What [`Lamps::carried`] is, over every variant's layer 1.
 pub fn carried(layer_1s: &[&Surface]) -> f32 {
     let (on, all) = layer_1s
@@ -179,6 +192,7 @@ pub fn carried(layer_1s: &[&Surface]) -> f32 {
     on as f32 / all as f32
 }
 
+/// Each layer's light at every texel it covers.
 pub fn bake(spec: &Lamps, layers: &[Surface], lamps: &[Lamp]) -> Vec<Vec<Vec3>> {
     let n = layers[0].texels;
     let tile_m = layers[0].tile_m;
@@ -312,8 +326,8 @@ pub fn light_array(light: &[Vec<Vec3>], layers: &[&Surface]) -> Image {
     image.data = Some(data);
     image.texture_descriptor.mip_level_count = texels.trailing_zeros() + 1;
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,

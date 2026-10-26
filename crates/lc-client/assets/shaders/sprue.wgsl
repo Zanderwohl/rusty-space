@@ -107,7 +107,8 @@ fn starlit(p: vec2<f32>, z: f32, toward: vec3<f32>, id: f32) -> f32 {
         let zk = layer_height(k);
         if (zk > z) {
             let at = p + toward.xy * (zk - z) / toward.z;
-            let cover = textureSampleLevel(tiles, tile_sampler, at / m.layer.y, variant_layer(at / m.layer.y, k, id), 1.0).a;
+            let tile_uv = at / m.layer.y;
+            let cover = textureSampleLevel(tiles, tile_sampler, fract(tile_uv), variant_layer(tile_uv, k, id), 1.0).a;
             through *= 1.0 - smoothstep(0.35, 0.65, cover);
         }
     }
@@ -122,8 +123,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v)) + hash2(f.id) * m.layer.y;
     let uv = p / m.layer.y;
     let layer = variant_layer(uv, k, f.id);
-    let texel = textureSample(tiles, tile_sampler, uv, layer);
-    let baked = textureSample(light, tile_sampler, uv, layer).rgb;
+    // Each tile is sampled within itself, clamped: its neighbor is another variant, so filtering
+    // across the seam into its own far edge would blend in the wrong tile. The mip is taken
+    // from the continuous coordinate, since fract's jump at the seam would read as minification.
+    let within = fract(uv);
+    let ddx = dpdx(uv);
+    let ddy = dpdy(uv);
+    let texel = textureSampleGrad(tiles, tile_sampler, within, layer, ddx, ddy);
+    let baked = textureSampleGrad(light, tile_sampler, within, layer, ddx, ddy).rgb;
     if (k > 0u && texel.a < 0.5) {
         discard;
     }

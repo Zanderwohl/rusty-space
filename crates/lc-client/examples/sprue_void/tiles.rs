@@ -1,9 +1,9 @@
 //! The three layers' tiles, generated on the CPU: a plated base, and two mazes of pipe.
 //!
-//! Each tile repeats, so every shape is stamped with wraparound and every maze is grown on a
-//! torus. A texel is linear RGBA8: the normal's x and y in the face's own frame, albedo, and
-//! coverage, which is 1 everywhere on the base.
-
+//! Each layer comes in edge-matched variants: what crosses a tile edge is that edge's choice and
+//! stamped by both tiles beside it, so every shape is clipped to the tile, never wrapped, and
+//! each maze grows inside its tile. A texel is linear RGBA8: the normal's x and y in the face's
+//! own frame, albedo, and coverage, which is 1 everywhere on the base.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -132,14 +132,13 @@ impl Field {
         let t = self.texel_m();
         let n = self.texels as i64;
         let (lo, hi) = (center - half, center + half);
-        for y in ((lo.y / t).ceil() as i64)..((hi.y / t).floor() as i64) {
-            for x in ((lo.x / t).ceil() as i64)..((hi.x / t).floor() as i64) {
+        for y in ((lo.y / t).ceil() as i64).max(0)..((hi.y / t).floor() as i64).min(n) {
+            for x in ((lo.x / t).ceil() as i64).max(0)..((hi.x / t).floor() as i64).min(n) {
                 let p = Vec2::new((x as f32 + 0.5) * t, (y as f32 + 0.5) * t);
                 let c = if along_x { p.y - lo.y } else { p.x - lo.x };
                 let phase = (c / pitch).fract();
                 let cut = depth * (1.0 - (2.0 * phase - 1.0).abs() * 3.0).clamp(0.0, 1.0);
-                let i = (y.rem_euclid(n) * n + x.rem_euclid(n)) as usize;
-                self.height[i] -= cut;
+                self.height[(y * n + x) as usize] -= cut;
             }
         }
     }
@@ -436,7 +435,7 @@ pub fn maze(texels: usize, tile_m: f32, spec: &Maze, shared: &MazeEdges, edges: 
     field
 }
 
-/// The three layers as a repeating mipmapped array.
+/// Every variant's layers as one mipmapped array, each layer sampled clamped within its tile.
 ///
 /// A level's normal and albedo are coverage-weighted, so a pipe's edge does not fade toward the
 /// empty texels' flat normal; its coverage is rescaled so the share of texels past the cutout
@@ -467,8 +466,8 @@ pub fn tile_array(layers: &[Vec<u8>], texels: u32) -> Image {
     image.data = Some(data);
     image.texture_descriptor.mip_level_count = texels.trailing_zeros() + 1;
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,

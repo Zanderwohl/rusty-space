@@ -16,7 +16,7 @@
 //! | `--sodium <r:g:b>` | the lamps' linear color |
 //! | `--lamp <x>` / `--scatter <x>` / `--bulb <x>` | the lamps' power, the haze they light, and their bulbs' |
 //! | `--deep <share>` / `--riding <share>` | of 4 m cells with a lamp over the base, and riding layer 1; 0.35 and 0.3 |
-//! | `--reach <m>` | how far a lamp's light goes; 2 or 4, since twice it is whole cells. 2 by default |
+//! | `--reach <m>` | how far a lamp's light goes, 2 by default. Twice it, and the tile less twice it, are whole 4 m cells |
 //! | `--beam <deg>` | light only this slice of each lamp's circle, aimed at random: floodlights. 70 by default; 360 is a bare bulb |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the tiles' layout |
@@ -148,7 +148,7 @@ impl Args {
             reach: value("--reach").unwrap_or(2.0),
             beam: value("--beam").unwrap_or(70.0),
             exposure: value("--exposure").unwrap_or(0.0),
-            seed: value("--seed").unwrap_or(7.0) as u64,
+            seed: raw("--seed").map_or(7, |v| v.parse().expect("--seed takes a whole number")),
             frames: value("--frames").unwrap_or(60.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             sweep: value("--sweep").unwrap_or(0.0),
@@ -202,7 +202,6 @@ impl Material for SprueMaterial {
         Ok(())
     }
 }
-
 
 fn main() {
     let args = Args::parse();
@@ -274,13 +273,15 @@ fn spawn(
     // Every variant's, since a strip's lamps are its edge's and must not depend on the tile.
     lamps_spec.carried = bake::carried(&shaped.iter().map(|layers| &layers[1]).collect::<Vec<_>>());
     let lamps_spec = &lamps_spec;
+    let interiors = bake::interiors(lamps_spec, TILE_M, args.seed);
     let lit: Vec<(Vec<Vec3>, usize)> = std::thread::scope(|scope| {
         let baking: Vec<_> = shaped
             .iter()
             .enumerate()
-            .map(|(v, layers)| {
+            .zip(&interiors)
+            .map(|((v, layers), interior)| {
                 scope.spawn(move || {
-                    let lamps = bake::of_variant(lamps_spec, layers, args.seed, v);
+                    let lamps = bake::of_variant(lamps_spec, layers, args.seed, v, interior);
                     (bake::bake(lamps_spec, layers, &lamps), lamps.len())
                 })
             })
@@ -311,49 +312,8 @@ fn spawn(
     }
     let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
     let light: Vec<Vec<Vec3>> = lit.into_iter().map(|l| l.0).collect();
-    if args.dump.is_some() {
-        // Light as the camera sees it from far off: each layer's, through the coverage of those
-        // above, averaged over every variant, in 1.5 m bands across the tile.
-        let n = texels;
-        let bands = 16;
-        let mut profile = vec![0.0f64; bands];
-        for (v, layers) in shaped.iter().enumerate() {
-            for y in 0..n {
-                for x in 0..n {
-                    let i = y * n + x;
-                    let mut seen = 0.0;
-                    let mut open = 1.0;
-                    for k in (0..3).rev() {
-                        let cover = layers[k].cover[i];
-                        let lum = light[v * 3 + k][i].dot(Vec3::new(0.2126, 0.7152, 0.0722));
-                        seen += open * cover * lum;
-                        open *= 1.0 - cover;
-                    }
-                    profile[x * bands / n] += seen as f64;
-                }
-            }
-        }
-        let side = 64;
-        let mut map = vec![0.0f64; side * side];
-        for (v, layers) in shaped.iter().enumerate() {
-            for i in 0..n * n {
-                let (x, y) = (i % n, i / n);
-                let mut seen = 0.0;
-                let mut open = 1.0;
-                for k in (0..3).rev() {
-                    let cover = layers[k].cover[i];
-                    seen += open * cover * light[v * 3 + k][i].dot(Vec3::new(0.2126, 0.7152, 0.0722));
-                    open *= 1.0 - cover;
-                }
-                map[(y * side / n) * side + x * side / n] += seen as f64;
-            }
-        }
-        let peak = map.iter().copied().fold(0.0, f64::max);
-        let bytes: Vec<u8> = map.iter().map(|m| (255.0 * (m / peak).sqrt()) as u8).collect();
-        let dir = args.dump.as_ref().expect("dumping");
-        image::GrayImage::from_raw(side as u32, side as u32, bytes).expect("a map").save(format!("{dir}/light-mean.png")).ok();
-        let mean = profile.iter().sum::<f64>() / bands as f64;
-        info!("sprue_void: light across the tile, against its mean: {:?}", profile.iter().map(|p| (p / mean * 100.0).round() as i32).collect::<Vec<_>>());
+    if let Some(dir) = &args.dump {
+        dump_light(dir, &shaped, &light);
     }
     let light = images.add(bake::light_array(&light, &layers));
 
@@ -389,6 +349,41 @@ fn spawn(
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
     ));
+}
+
+/// Rec. 709 luma, for a light's brightness.
+const LUMA: Vec3 = Vec3::new(0.2126, 0.7152, 0.0722);
+
+/// Light as the camera sees it from far off: each layer's through the coverage of those above,
+/// averaged over every variant. Logged in 1.5 m bands across the tile, and written as a map.
+fn dump_light(dir: &str, shaped: &[Vec<tiles::Surface>], light: &[Vec<Vec3>]) {
+    let n = shaped[0][0].texels;
+    let (bands, side) = (16, 64);
+    let mut profile = vec![0.0f64; bands];
+    let mut map = vec![0.0f64; side * side];
+    for (v, layers) in shaped.iter().enumerate() {
+        for i in 0..n * n {
+            let (x, y) = (i % n, i / n);
+            let (mut seen, mut open) = (0.0, 1.0);
+            for k in (0..3).rev() {
+                let cover = layers[k].cover[i];
+                seen += open * cover * light[v * 3 + k][i].dot(LUMA);
+                open *= 1.0 - cover;
+            }
+            profile[x * bands / n] += seen as f64;
+            map[(y * side / n) * side + x * side / n] += seen as f64;
+        }
+    }
+    let peak = map.iter().copied().fold(0.0, f64::max);
+    let bytes: Vec<u8> = map.iter().map(|m| (255.0 * (m / peak).sqrt()) as u8).collect();
+    let path = format!("{dir}/light-mean.png");
+    image::GrayImage::from_raw(side as u32, side as u32, bytes)
+        .expect("a whole map")
+        .save(&path)
+        .unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mean = profile.iter().sum::<f64>() / bands as f64;
+    let shares: Vec<i32> = profile.iter().map(|p| (p / mean * 100.0).round() as i32).collect();
+    info!("sprue_void: light across the tile, against its mean: {shares:?}");
 }
 
 /// Which of the burst's photographs frame `drawn` is, held at either end.
