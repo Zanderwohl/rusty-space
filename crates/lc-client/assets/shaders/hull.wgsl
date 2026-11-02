@@ -167,6 +167,8 @@ const WALL_STEPS: i32 = 32;
 /// layer's emitted, which is a lit window's face. Floodlights on pipework are far brighter than a
 /// window seen from outside, and must outshine the night fill.
 const PIPE_LAMP: f32 = 40.0;
+/// What of a pipe layer is pipe, on average.
+const PIPE_COVER: f32 = 0.35;
 /// sixteen variants of three layers, once the sprue is baked; the fallback has one.
 const PIPE_LAYERS: u32 = 48u;
 const WALL_ALBEDO: f32 = 0.25;
@@ -578,36 +580,43 @@ fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -
     let star = normalize(in.star_ship);
     let e = normalize(in.eye_ship - in.ship_position);
     let f = panel_face(surface, SHIP_UP);
+    let frame = tangent_frame(f, surface);
     let id = f32(f.id);
     let tile = material.pipes.z;
     let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v)) + tile_start(id) * tile;
     let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
-    var k = 2u;
-    var q = p;
-    var layer = 0u;
-    var texel = vec4<f32>(0.5, 0.5, 0.0, 1.0);
-    for (var i = 0u; i < 3u; i++) {
-        k = 2u - i;
-        q = p + d.xy * (pipe_height(2u) - pipe_height(k)) / d.z;
-        let uv = q / tile;
-        layer = variant_layer(uv, k, id);
-        texel = textureSampleGrad(pipe_tiles, pipe_sampler, fract(uv), layer, ddx, ddy);
-        if (k == 0u || texel.a >= 0.5) {
-            break;
-        }
-    }
-    let baked = textureSampleGrad(pipe_glow, pipe_sampler, fract(q / tile), layer, ddx, ddy).rgb;
-    let tn = texel.rg * 2.0 - 1.0;
-    let n = normalize(tangent_frame(f, surface) * vec3<f32>(tn, sqrt(max(1.0 - dot(tn, tn), 0.0))));
-    let albedo = texel.b;
-    let glow = lamp * PIPE_LAMP * (baked + 0.015 * albedo);
-    var lit = vec3<f32>(albedo * material.to_star.w);
     let toward = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
-    if (toward.z > 0.0) {
-        let spec = 0.35 * pow(max(dot(n, normalize(star + e)), 0.0), 24.0);
-        lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id));
+    // Front to back, each layer over what is under it by its coverage: 0 or 1 where a texel is
+    // resolved, its share where a mip averages pipe and gap, so a distant flank does not flicker
+    // between layers pixel to pixel.
+    // The tiles' mips keep each layer's coverage by keeping alpha near 0 or 1, right for a cutout
+    // and wrong for blending, so where a pixel spans several texels the layer's mean share stands in.
+    let texels = max(length(ddx), length(ddy)) * f32(textureDimensions(pipe_tiles).x);
+    let far = smoothstep(0.75, 3.0, texels);
+    var light = vec3<f32>(0.0);
+    var through = 1.0;
+    for (var i = 0u; i < 3u; i++) {
+        let k = 2u - i;
+        let q = p + d.xy * (pipe_height(2u) - pipe_height(k)) / d.z;
+        let uv = q / tile;
+        let layer = variant_layer(uv, k, id);
+        let texel = textureSampleGrad(pipe_tiles, pipe_sampler, fract(uv), layer, ddx, ddy);
+        let cover = select(mix(texel.a, PIPE_COVER, far), 1.0, k == 0u);
+        if (cover > 0.0) {
+            let baked = textureSampleGrad(pipe_glow, pipe_sampler, fract(uv), layer, ddx, ddy).rgb;
+            let tn = texel.rg * 2.0 - 1.0;
+            let n = normalize(frame * vec3<f32>(tn, sqrt(max(1.0 - dot(tn, tn), 0.0))));
+            let albedo = texel.b;
+            var lit = vec3<f32>(albedo * material.to_star.w);
+            if (toward.z > 0.0) {
+                let spec = 0.35 * pow(max(dot(n, normalize(star + e)), 0.0), 24.0);
+                lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id));
+            }
+            light += through * cover * (material.reflected.rgb * lit + lamp * PIPE_LAMP * (baked + 0.015 * albedo));
+        }
+        through *= 1.0 - cover;
     }
-    return material.reflected.rgb * lit + glow;
+    return light;
 }
 
 fn habitable(region: u32) -> bool {
