@@ -136,6 +136,10 @@ pub struct HullUniform {
     pub bolts: Vec4,
     /// Which regions are bolted, one bit a region.
     pub bolted: u32,
+    /// Which regions are knapped glass, one bit a region: their tile gives way to
+    /// [`Self::glass_finish`]'s color under flake scars, each facet lit at its own lean, with the
+    /// star's highlight and a faint sky mirrored in it.
+    pub glassy: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -145,6 +149,11 @@ pub struct HullUniform {
     pub open: UVec4,
     /// Per open face, what a fully lit texel of it sends, in [`Self::reflected`]'s units.
     pub faces: [Vec4; FACES],
+    /// A glassy region's scars, cut in the ship's frame: `(scar_m, dish, tilt, ripple)`, the last
+    /// three tangents: a dish's lean at its rim, the most a scar tilts, the ripples' lean.
+    pub glass: Vec4,
+    /// A glassy region's color, linear, and its roughness.
+    pub glass_finish: Vec4,
 }
 
 impl Default for HullUniform {
@@ -163,9 +172,12 @@ impl Default for HullUniform {
             girder: Vec4::new(0.55, 0.42, 0.22, 0.0),
             bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
             bolted: 0,
+            glassy: 0,
             emitted: [Vec4::ZERO; REGIONS],
             open: UVec4::ZERO,
             faces: [Vec4::ZERO; FACES],
+            glass: Vec4::new(5.0, 0.0, 0.0, 0.0),
+            glass_finish: Vec4::ZERO,
         }
     }
 }

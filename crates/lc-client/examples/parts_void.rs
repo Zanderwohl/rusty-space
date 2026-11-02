@@ -29,6 +29,7 @@ use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, RE
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use glam::{DMat3, DVec3};
+use lc_client::looks::obsidian::mind_glass;
 use lc_client::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullSource, REGION_GRAPHS, region};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
@@ -298,6 +299,9 @@ fn spawn(
             exposure: Vec4::new(LIT_HULL * 2f32.powf(1.5), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
+            glassy: 1 << region(Kind::Mind),
+            glass: mind_glass().0,
+            glass_finish: mind_glass().1,
             emitted,
             ..default()
         },

@@ -60,6 +60,14 @@ impl Default for Obsidian {
 }
 
 impl Obsidian {
+    /// The hull material's `(glass, glass_finish)` for a region of this glass.
+    pub fn hull_glass(&self) -> (Vec4, Vec4) {
+        (
+            Vec4::new(self.scar_m, self.dish, self.tilt_deg.to_radians().tan(), self.ripple),
+            self.color.extend(self.roughness),
+        )
+    }
+
     pub fn material(&self) -> ObsidianMaterial {
         ObsidianMaterial {
             uniforms: ObsidianUniform {
@@ -74,6 +82,11 @@ impl Obsidian {
             },
         }
     }
+}
+
+/// The Mind's glass, as the hull material's `(glass, glass_finish)`.
+pub fn mind_glass() -> (Vec4, Vec4) {
+    Obsidian::default().hull_glass()
 }
 
 #[derive(Clone, Copy, Debug, Default, ShaderType)]

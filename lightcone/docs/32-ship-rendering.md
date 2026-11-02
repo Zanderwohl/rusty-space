@@ -140,7 +140,7 @@ client warns when it meshes one.
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
 | engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
-| mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
+| mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
 | spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
@@ -199,8 +199,8 @@ and shader rather than a graph in the hull material's palette:
   concave dish with its own tilt and faint ripple rings, so neighbors meet in ridges and three in a
   peak, and a facet flashes whole. The scars are cells of a 3D Voronoi on world position, so any
   shape takes them without a seam, and they give way to a rougher sheen where they shrink under a
-  few pixels. The hull material draws only baked albedo under Lambert, which cannot show glass, so
-  the Mind's graph stays until a look can be given to a kind.
+  few pixels. The Mind wears it, through the hull material's `glassy` regions (§Materials by kind):
+  the first look given to a kind.
 
 They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is

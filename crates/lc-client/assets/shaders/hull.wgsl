@@ -9,8 +9,10 @@
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings::view,
     view_transformations::position_world_to_clip,
 }
+#import "shaders/scars.wgsl"::{glass_specular, knapped}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -47,6 +49,10 @@ struct VertexOutput {
     @location(7) seam: vec2<f32>,
     @location(8) face_share: f32,
     @location(9) @interpolate(flat) face: u32,
+    // The camera, and the direction to the star, in the ship's frame: glass is lit where its
+    // scars are cut.
+    @location(10) eye_ship: vec3<f32>,
+    @location(11) star_ship: vec3<f32>,
 #endif
 }
 
@@ -78,16 +84,27 @@ struct HullUniform {
     bolts: vec4<f32>,
     /// One bit a region.
     bolted: u32,
+    /// One bit a region: knapped glass.
+    glassy: u32,
     emitted: array<vec4<f32>, REGIONS>,
     /// `(region, flank, on, 0)`.
     open: vec4<u32>,
     faces: array<vec4<f32>, FACES>,
+    /// `(scar_m, dish, tilt, ripple)`.
+    glass: vec4<f32>,
+    /// Color, and roughness in `w`.
+    glass_finish: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_tiles: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var tile_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var light_tiles: texture_2d_array<f32>;
+
+/// Obsidian's index is about 1.49.
+const GLASS_F0: f32 = 0.04;
+/// The sky glass mirrors, in reflected's units: dim, but enough that a facet shows off the highlight.
+const GLASS_SKY: f32 = 0.25;
 
 /// em_render::hull_material::ALL_PLATED.
 const ALL_PLATED: f32 = 1.0e30;
@@ -114,6 +131,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.seam = vertex.seam;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
+    // A ship's transform is a rotation and a uniform scale, so its inverse is the transpose over
+    // the scale squared.
+    let axes = mat3x3<f32>(world_from_local[0].xyz, world_from_local[1].xyz, world_from_local[2].xyz);
+    out.eye_ship = transpose(axes) * (view.world_position - world_from_local[3].xyz) / dot(axes[0], axes[0]);
+    out.star_ship = transpose(axes) * material.to_star.xyz;
 #endif
     return out;
 }
@@ -336,6 +358,33 @@ fn light_of(region: u32, layer: u32, in: VertexOutput) -> vec3<f32> {
     return material.faces[in.face].rgb * clamp(in.face_share, 0.0, 1.0);
 }
 
+fn glassy(region: u32) -> bool {
+    return ((material.glassy >> region) & 1u) != 0u;
+}
+
+/// What a glassy region's knapped surface sends toward the eye, in reflected's units: its color
+/// lit by the star at each facet's own lean, the star's highlight, and a faint sky mirrored in
+/// every facet, brighter toward the star, so a facet reads away from the highlight too.
+fn glass_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
+    let surface = normalize(in.ship_normal);
+    let star = normalize(in.star_ship);
+    let k = knapped(in.ship_position, surface, material.glass.x, material.glass.yzw, pixel, 0u);
+    let roughness = mix(0.5, material.glass_finish.w, k.keep_fine);
+    let e = normalize(in.eye_ship - in.ship_position);
+    let lit_side = dot(star, surface) > 0.0;
+    let ne = max(dot(k.normal, e), 0.0);
+    let fresnel = GLASS_F0 + (1.0 - GLASS_F0) * pow(1.0 - ne, 5.0);
+    let r = reflect(-e, k.normal);
+    let facing = select(0.0, max(dot(k.normal, star), 0.0), lit_side);
+    var light = material.glass_finish.rgb * max(facing, material.to_star.w);
+    light += vec3<f32>(GLASS_SKY * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0)));
+    if (lit_side) {
+        // reflected is the star's light over pi, as Lambert's albedo takes it; a BRDF takes it whole.
+        light += vec3<f32>(3.14159265 * glass_specular(k.normal, star, e, roughness, GLASS_F0));
+    }
+    return material.reflected.rgb * light;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pair = heaviest(in);
@@ -360,6 +409,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         far.lit * light_of(pair.second, far_layer, in),
         t,
     );
+    let glass = select(0.0, 1.0 - t, glassy(pair.first)) + select(0.0, t, glassy(pair.second));
+    if (glass > 0.0) {
+        // Glass is lit at its facets' lean in glass_light, not as albedo at the surface's.
+        albedo *= 1.0 - glass;
+        emitted += glass * glass_light(in, pixel);
+    }
     if (material.reveal.w >= ALL_PLATED) {
         return shade(albedo, emitted, in.world_normal);
     }

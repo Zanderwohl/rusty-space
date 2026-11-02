@@ -36,6 +36,7 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
+use lc_client::looks::obsidian::mind_glass;
 use lc_client::hull_mesh::{
     Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
@@ -287,6 +288,9 @@ fn spawn(
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
+            glassy: 1 << region(Kind::Mind),
+            glass: mind_glass().0,
+            glass_finish: mind_glass().1,
             emitted,
             ..default()
         },

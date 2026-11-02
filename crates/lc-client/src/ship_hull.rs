@@ -35,6 +35,7 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, SparMode};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
+use crate::looks::obsidian::mind_glass;
 use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
@@ -177,6 +178,9 @@ pub(crate) fn finished(
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
         bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
+        glassy: 1 << region(Kind::Mind),
+        glass: mind_glass().0,
+        glass_finish: mind_glass().1,
         emitted,
         open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
         faces: lit_faces,
