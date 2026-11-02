@@ -432,11 +432,12 @@ A design choice, free to change, and no test pins it:
   side along the slab's long low faces, sunk part way in: their feet meet amidships and their open
   ends stand just past the slab's, the stern one firing aft and the bow one fore. The stern pair
   alone pulls 1 g with the storage full, 3.1 g empty
-- **drones** and **data**, boxes on the stern and the bow, twice the slab's height and narrow enough
-  to keep out of the engines' cones
+- **drones** and **data**, capsules slung side by side under the keel, lying fore and aft, each
+  254 m long with only its top sunk in: the same length, so the drones, holding twice the volume, are
+  the thicker
 
 It holds 19's starting modules but for the engines, 1.9 slots in all against 19's five. Placed, it is
-about 520 m long.
+about 380 m long, its engines' open ends the farthest fore and aft.
 
 ### The reference form
 

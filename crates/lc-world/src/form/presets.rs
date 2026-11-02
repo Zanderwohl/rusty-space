@@ -59,7 +59,7 @@ fn lying(normal: DVec3, along: DVec3) -> DVec2 {
 
 /// Each of the starting form's four engines, in slots: what has the stern pair alone pull about 1 g
 /// with the storage full.
-const STARTING_ENGINE_SLOTS: f64 = 0.471;
+const STARTING_ENGINE_SLOTS: f64 = 0.472;
 
 /// Of a keel pod's radius, how far its top sinks into the hull above it.
 const KEEL_EMBED: f64 = 0.35;
@@ -75,9 +75,11 @@ const ENGINE_GAP: f64 = 0.02;
 /// Of an engine's radius, how much is sunk into the side it is strapped to.
 const ENGINE_EMBED: f64 = 0.3;
 
-/// Of the slab's width, how wide the boxes on its ends are, and in reaches how far each sinks in.
-const END_WIDTH: f64 = 0.56;
-const END_EMBED: f64 = 0.05;
+/// Of the slab's half length, how far a slung pod reaches either way from amidships; of its half
+/// width, how far each pod's axis is off the keel; of a pod's radius, how much is sunk in.
+const SLUNG_LENGTH: f64 = 0.7;
+const SLUNG_APART: f64 = 0.45;
+const SLUNG_EMBED: f64 = 0.15;
 
 impl Form {
     /// 19's starting ship as 29 first laid it out, holding [`STARTING`]'s modules: an ellipsoid of
@@ -118,8 +120,8 @@ impl Form {
     }
 
     /// The starting form: a 9:4:1 slab of storage about the Mind with a 9:4:1 habitat ovoid on its
-    /// back, two cylinder engines strapped along each side, and the drones and data as boxes on its
-    /// stern and bow. A
+    /// back, two cylinder engines strapped along each side, and the drones and data as capsules slung
+    /// side by side under the keel. A
     /// design choice, not 19's anchor: it holds [`STARTING`]'s modules but for the engines, four
     /// of [`STARTING_ENGINE_SLOTS`] each, the bow pair firing fore. The frame is x the nose, z up.
     pub fn starting() -> Form {
@@ -155,22 +157,32 @@ impl Form {
             part
         };
 
-        // A box on each end, as tall as two of the slab and narrow enough to keep out of the
-        // engines' cones, its inner face just in the hull.
-        let end = |id, kind, volume: f64, out: f64| {
-            let (width, height) = (2.0 * END_WIDTH * half.y, 4.0 * half.z);
-            let depth = volume / (width * height);
-            let prism = Primitive::Slab { edges: DVec3::new(depth, width, height), corner: 0.1 };
-            hang(id, kind, prism, volume, PartId(1), on(DVec3::X * out, -END_EMBED))
+        // Slung under the keel side by side, lying fore and aft, each as long as a share of the slab
+        // and only its top sunk in. Same length, so the drones, with twice the volume, are thicker.
+        let slung = |id, kind, volume: f64, side: f64| {
+            let reach = SLUNG_LENGTH * half.x;
+            // A capsule's reach is its straight length's half plus its radius, and its volume
+            // pi r² (2 reach - 2r) + 4/3 pi r³: solved for r by Newton, from a third of the reach.
+            let mut r = reach / 3.0;
+            for _ in 0..20 {
+                let f = std::f64::consts::PI * r * r * (2.0 * reach - 2.0 * r) + 4.0 / 3.0 * std::f64::consts::PI * r.powi(3) - volume;
+                let df = std::f64::consts::PI * (4.0 * reach * r - 6.0 * r * r) + 4.0 * std::f64::consts::PI * r * r;
+                r -= f / df;
+            }
+            let pod = Primitive::Capsule { length: 2.0 * (reach - r) / r };
+            let under = on(DVec3::new(-reach, side * SLUNG_APART * half.y, -half.z), (1.0 - SLUNG_EMBED) * r / reach);
+            let mut part = hang(id, kind, pod, volume, PartId(1), under);
+            part.placement.as_mut().unwrap().tilt = lying(DVec3::NEG_Z, DVec3::X);
+            part
         };
         Form {
             parts: vec![
                 Part::mind(MIND, b.min_part_m3),
                 hang(1, Kind::Storage, slab, v.storage, MIND, Mount::Enclosing),
                 engine(2, 1.0, -1.0),
-                end(3, Kind::Drone, v.drone, -1.0),
+                slung(3, Kind::Drone, v.drone, 1.0),
                 habitat,
-                end(5, Kind::Data, v.data, 1.0),
+                slung(5, Kind::Data, v.data, -1.0),
                 engine(6, -1.0, -1.0),
                 engine(7, 1.0, 1.0),
                 engine(8, -1.0, 1.0),
