@@ -11,7 +11,7 @@
 //! | `--volume <m3>` | every piece's volume, so they are alike in size; 60 000 by default |
 //! | `--cells <n>` | the mesher's grid across each piece; 128 by default |
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
-//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices` or `sprue` |
+//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat` or `sprue` |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--frames <n>` | frames after every mesh lands |
 
@@ -60,7 +60,7 @@ const KINDS: [Kind; 8] = [
     Kind::Bay,
 ];
 
-const LOOKS: [&str; 3] = ["aztec", "offices", "sprue"];
+const LOOKS: [&str; 4] = ["aztec", "offices", "habitat", "sprue"];
 
 /// Each primitive in a proportion that shows it, its axis standing up.
 const PRIMITIVES: [Primitive; 6] = [
@@ -303,6 +303,7 @@ fn spawn(
     });
     let aztec = aztecs.add(Aztec { to_star, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());
+    let habitat = aztecs.add(Aztec { to_star, ..Aztec::habitat() }.material());
     let sprue_layers = if args.columns.iter().any(|c| matches!(c, Column::Look("sprue"))) {
         let sprue = Sprue { to_star, ..default() };
         Some(sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m)))
@@ -337,7 +338,11 @@ fn spawn(
                     }
                 }
                 Column::Look(look) => {
-                    let material = if look == "offices" { offices.clone() } else { aztec.clone() };
+                    let material = match look {
+                        "offices" => offices.clone(),
+                        "habitat" => habitat.clone(),
+                        _ => aztec.clone(),
+                    };
                     commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform));
                 }
             }

@@ -1,5 +1,6 @@
 //! Azteced sheet metal: rectangular panels, each its own shade and tipped a few degrees, with
-//! chamfered trenches between, and, if asked, office windows on the sides. Fully procedural; see
+//! chamfered trenches between, and, if asked, office windows on the sides and a roof of glass hexes
+//! on top: offices with a roof are the habitat. Fully procedural; see
 //! `assets/shaders/aztec.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -38,6 +39,7 @@ pub struct Aztec {
     /// Below 2^24: it reaches the shader as an f32.
     pub seed: u32,
     pub windows: Option<Windows>,
+    pub roof: Option<Roof>,
     /// The mesh is an axis-aligned unit cube scaled by its transform, unrotated, which is how the
     /// shader knows where a face ends, and so keeps windows [`Windows::face_margin_m`] off it.
     /// Otherwise there is no margin.
@@ -92,6 +94,25 @@ impl Default for Windows {
     }
 }
 
+/// The whole top as clear glass hexes in a metal frame, looking down into air that has no light of
+/// its own: it scatters back what of the star and the planet it is let in.
+pub struct Roof {
+    /// Across a hex's flats.
+    pub hex_m: f32,
+    /// The frame between two hexes.
+    pub seam_m: f32,
+    /// The air's color by day, linear.
+    pub sky: Vec3,
+    /// The share of the star the air scatters back up through the glass.
+    pub scatter: f32,
+}
+
+impl Default for Roof {
+    fn default() -> Self {
+        Self { hex_m: 10.0, seam_m: 0.5, sky: Vec3::new(0.15, 0.42, 1.0), scatter: 0.08 }
+    }
+}
+
 impl Default for Aztec {
     fn default() -> Self {
         Self {
@@ -113,12 +134,18 @@ impl Default for Aztec {
             exposure_stops: 0.0,
             seed: 7,
             windows: None,
+            roof: None,
             unit_box: false,
         }
     }
 }
 
 impl Aztec {
+    /// Offices on the sides under a roof of glass hexes.
+    pub fn habitat() -> Self {
+        Self { windows: Some(Windows::default()), roof: Some(Roof::default()), ..default() }
+    }
+
     pub fn material(&self) -> AztecMaterial {
         let w = self.windows.as_ref();
         AztecMaterial {
@@ -137,6 +164,8 @@ impl Aztec {
                 glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),
                 day: w.map_or(Vec4::ZERO, |w| Vec4::new(w.day_glow, w.day_glass, 0.0, 0.0)),
                 room: w.map_or(Vec4::ZERO, |w| Vec4::new(w.room_m, 0.0, 0.0, 0.0)),
+                roof: self.roof.as_ref().map_or(Vec4::ZERO, |r| Vec4::new(r.hex_m, r.seam_m, 0.0, 0.0)),
+                sky: self.roof.as_ref().map_or(Vec4::ZERO, |r| r.sky.extend(r.scatter)),
             },
         }
     }
@@ -158,6 +187,8 @@ pub struct AztecUniform {
     glow: Vec4,
     day: Vec4,
     room: Vec4,
+    roof: Vec4,
+    sky: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]

@@ -19,6 +19,7 @@
 //! | `--brown <share>` | of panels a little browner; 0.2 by default |
 //! | `--roughness <x>` / `--metallic <x>` | the finish, shared by every panel |
 //! | `--windows` | office windows on the sides, in decks along Y |
+//! | `--habitat` | the windows, and a roof of glass hexes on top |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the layout |
 //! | `--frames <n>` | frames before the photograph |
@@ -30,7 +31,7 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
-use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
+use lc_client::looks::aztec::{Aztec, AztecMaterial, Roof, Windows};
 use lc_client::looks::{LooksPlugin, direction};
 
 struct Args {
@@ -59,6 +60,7 @@ struct Args {
     exposure: f32,
     seed: u32,
     windows: bool,
+    habitat: bool,
     frames: u32,
     burst: u32,
     sweep: f32,
@@ -106,6 +108,7 @@ impl Args {
             metallic: value("--metallic").unwrap_or(d.metallic),
             exposure: value("--exposure").unwrap_or(0.0),
             windows: args.iter().any(|a| a == "--windows"),
+            habitat: args.iter().any(|a| a == "--habitat"),
             seed: raw("--seed").map_or(d.seed, |v| v.parse().expect("--seed takes a whole number")),
             frames: value("--frames").unwrap_or(30.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
@@ -169,7 +172,8 @@ fn spawn(
             planet: args.planet,
             exposure_stops: args.exposure,
             seed: args.seed,
-            windows: args.windows.then(Windows::default),
+            windows: (args.windows || args.habitat).then(Windows::default),
+            roof: args.habitat.then(Roof::default),
             unit_box: true,
         }
         .material(),

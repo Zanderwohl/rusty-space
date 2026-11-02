@@ -9,6 +9,7 @@
 //! | flag | for |
 //! |---|---|
 //! | `--sizes <m:m:...>` | the boxes' edges, each look wearing every one; 50:100:200 by default |
+//! | `--ovoid <m>` | the length of the habitat ovoid visited after the boxes, 10 long to 5 wide to 2 tall; 300 by default |
 //! | `--dwell <s>` / `--glide <s>` | seconds circling a box, and gliding to the next; 40 and 8. The camera turns once a box |
 //! | `--star-period <s>` | seconds for the star to turn once about the vertical; 120 by default, and best a divisor of an hour, when the shader's clock wraps. 0 holds it still |
 //! | `--speed <x>` | the camera's clock against the wall's |
@@ -17,7 +18,7 @@
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
 //!
 //! The right and left arrows cut to the next box or the one before, the next look at the same
-//! size or the next size's first, keeping the camera's angle and the loop's clock. Escape quits.
+//! size, the next size's first, or the ovoid, keeping the camera's angle and the loop's clock. Escape quits.
 
 use std::f32::consts::TAU;
 
@@ -36,6 +37,7 @@ const STANDOFF: f32 = 2.2;
 
 struct Args {
     sizes: Vec<f32>,
+    ovoid: f32,
     dwell: f32,
     glide: f32,
     star_period: f32,
@@ -58,6 +60,7 @@ impl Args {
         });
         Self {
             sizes,
+            ovoid: value("--ovoid").unwrap_or(300.0),
             dwell: value("--dwell").unwrap_or(40.0),
             glide: value("--glide").unwrap_or(8.0),
             star_period: value("--star-period").unwrap_or(120.0),
@@ -126,6 +129,8 @@ fn spawn(
     let sprue_layers = sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m));
     let aztec = aztecs.add(Aztec { to_star, star_spin, unit_box: true, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), unit_box: true, ..default() }.material());
+    let mut habitat = |unit_box| aztecs.add(Aztec { to_star, star_spin, unit_box, ..Aztec::habitat() }.material());
+    let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
@@ -137,7 +142,7 @@ fn spawn(
         }
         columns.push(x);
     }
-    let rows = [0.0, 1.0, 2.0].map(|row| row * 3.0 * STANDOFF * largest);
+    let rows = [0.0, 1.0, 2.0, 3.0].map(|row| row * 3.0 * STANDOFF * largest);
     let mut stations = Vec::new();
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
@@ -154,13 +159,22 @@ fn spawn(
             } else {
                 commands.spawn((
                     Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-                    MeshMaterial3d(if look == 1 { aztec.clone() } else { offices.clone() }),
+                    MeshMaterial3d([&aztec, &offices, &habitat_box][look - 1].clone()),
                     Transform::from_translation(center).with_scale(Vec3::splat(size)),
                 ));
             }
             stations.push((center, size));
         }
     }
+    // Past the last column, in the middle of the rows, its long axis along x.
+    let length = args.ovoid;
+    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[3]);
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
+        MeshMaterial3d(habitat_ovoid),
+        Transform::from_translation(ovoid_at).with_scale(Vec3::new(0.5, 0.1, 0.25) * length),
+    ));
+    stations.push((ovoid_at, 0.6 * length));
     commands.insert_resource(Stations(stations));
 
     commands.spawn((
@@ -168,7 +182,7 @@ fn spawn(
         Projection::Perspective(PerspectiveProjection {
             fov: 40f32.to_radians(),
             near: 0.1,
-            far: 10.0 * (columns.last().copied().unwrap_or(0.0) + rows[2] + largest),
+            far: 10.0 * (ovoid_at.x + rows[3] + length),
             ..default()
         }),
         Hdr,

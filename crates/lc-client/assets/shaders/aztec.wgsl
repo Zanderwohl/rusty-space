@@ -3,7 +3,7 @@
 // procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters, and a
 // curved mesh by the face each point faces most. Decks stack along world Y, so on a side v is up,
 // and windows, when there are any, are only on the sides, in rows level at the same heights all
-// round. Look development: crates/lc-client/src/looks/aztec.rs.
+// round; a roof, when there is one, is the whole top. Look development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -53,6 +53,11 @@ struct AztecUniform {
     day: vec4<f32>,
     /// `(depth_m, 0, 0, 0)`: how deep the room behind each window is.
     room: vec4<f32>,
+    /// `(hex_m, seam_m, 0, 0)`: the top a roof of glass hexes this far across their flats, in a
+    /// frame this wide; no roof where `hex_m` is 0.
+    roof: vec4<f32>,
+    /// The air under the roof's color by day, and the share of the star it scatters back up in `w`.
+    sky: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
@@ -60,6 +65,8 @@ struct AztecUniform {
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
 const DESK_TOP_M: f32 = 0.75;
+const CLOUD_DEPTH_M: f32 = 40.0;
+const CLOUD_SCALE_M: f32 = 30.0;
 const DESK_FROM_M: f32 = 1.2;
 const DESK_DEPTH_M: f32 = 0.8;
 
@@ -352,12 +359,95 @@ fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, inside: vec3<f32>) -> ve
     return radiance;
 }
 
+/// The offset from `p` to the center of its hex, flats `w` apart across x, and meters in from the
+/// hex's edge.
+fn hex(p: vec2<f32>, w: f32) -> vec3<f32> {
+    let r = vec2<f32>(1.0, 1.7320508) * w;
+    let h = 0.5 * r;
+    let a = p - r * floor(p / r) - h;
+    let q = p - h;
+    let b = q - r * floor(q / r) - h;
+    let off = select(b, a, dot(a, a) < dot(b, b));
+    let o = abs(off);
+    return vec3<f32>(off, 0.5 * w - max(o.x, dot(o, vec2<f32>(0.5, 0.8660254))));
+}
+
+fn value_noise(x: vec2<f32>) -> f32 {
+    let i = vec2<i32>(floor(x));
+    let f = fract(x);
+    let u = f * f * (3.0 - 2.0 * f);
+    let h00 = unit(mix_hash(u32(i.x), u32(i.y)));
+    let h10 = unit(mix_hash(u32(i.x + 1), u32(i.y)));
+    let h01 = unit(mix_hash(u32(i.x), u32(i.y + 1)));
+    let h11 = unit(mix_hash(u32(i.x + 1), u32(i.y + 1)));
+    return mix(mix(h00, h10, u.x), mix(h01, h11, u.x), u.y);
+}
+
+/// Cloud cover at `q`, meters on the cloud deck, 0 to 1.
+fn clouds(q: vec2<f32>) -> f32 {
+    let x = q / CLOUD_SCALE_M;
+    let fbm = 0.55 * value_noise(x) + 0.3 * value_noise(2.03 * x + 17.0) + 0.15 * value_noise(4.1 * x + 41.0);
+    return smoothstep(0.48, 0.72, fbm);
+}
+
+/// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
+/// glass and scattered about the air beneath, blue by day, red as the star sets over the roof, and
+/// nothing by night. A cloud deck `CLOUD_DEPTH_M` down is seen through the glass where the eye's ray
+/// meets it, so it moves against the frame as the eye does.
+fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
+    let star = turned(m.to_star);
+    let over = dot(star, surface);
+    let day = smoothstep(-0.08, 0.25, over);
+    let high = smoothstep(0.0, 0.45, over);
+    let tint = mix(vec3<f32>(1.0, 0.42, 0.16), m.sky.rgb, high);
+    // A grazing look is a long path through the air, so it washes toward white.
+    let haze = mix(vec3<f32>(1.0), tint, sqrt(max(dot(surface, e), 0.0)));
+    let rayleigh = 0.75 * (1.0 + pow(dot(-star, e), 2.0));
+    var air = m.star_color.rgb * m.sky.w * day * haze * rayleigh;
+
+    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
+    let cover = clouds(p + d.xy * CLOUD_DEPTH_M / d.z);
+    let cloud_lit = mix(vec3<f32>(1.0, 0.55, 0.3), vec3<f32>(1.0), high);
+    air = mix(air, m.star_color.rgb * m.sky.w * 2.5 * day * cloud_lit, 0.85 * cover);
+
+    // The frame shades the air just inside it.
+    air *= mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
+    let planet = m.planet_color.rgb * m.sky.rgb * max(dot(normalize(m.to_planet.xyz), surface), 0.0) * 0.3;
+    return air + planet;
+}
+
+/// The top's roof: clear glass hexes in a metal frame, the glass over [`sky_below`].
+fn roof(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
+    let cell = hex(p, m.roof.x);
+    let base = vec3<f32>(0.4);
+    let metallic = m.panel.w;
+    let frame = lit(surface, e, surface, base * (1.0 - metallic), mix(vec3<f32>(0.04), base, metallic), m.panel.z);
+
+    let f0 = vec3<f32>(0.04);
+    let roughness = 0.05;
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
+    let half_seam = 0.5 * m.roof.y;
+    var pane = (1.0 - fresnel) * sky_below(p, f, surface, e, cell.z - half_seam);
+    let star = turned(m.to_star);
+    if (dot(star, surface) > 0.0) {
+        pane += m.star_color.rgb * specular(surface, star, e, f0, roughness);
+    }
+    pane += m.planet_color.rgb * fresnel * planet_seen(reflect(-e, surface), roughness);
+
+    let pixel = max(length(fwidth(p)), 1.0e-4);
+    let glass = smoothstep(half_seam - pixel, half_seam + pixel, cell.z);
+    return mix(frame, pane, glass);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
     let f = face(surface);
     let frame = tangent_frame(f, surface);
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
+    if (m.roof.x > 0.0 && f.n.y > 0.5) {
+        return vec4<f32>(roof(p, f, surface, normalize(view.world_position - in.world_position)) * m.finish.x, 1.0);
+    }
     let cell = panel(p, f.id);
 
     let n = normalize(frame * tipped(cell.id));

@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and three looks no kind wears yet are in development (§Looks in development). Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and four looks no kind wears yet are in development (§Looks in development). Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -171,7 +171,7 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 
 ### Looks in development
 
-`lc_client::looks` holds three ship surfaces that no part kind wears yet, each its own material
+`lc_client::looks` holds four ship surfaces that no part kind wears yet, each its own material
 and shader rather than a graph in the hull material's palette:
 
 - **The sprue** (`sprue.wgsl`): an opaque plated base under two cutout layers of mazed pipe, 0.9 m
@@ -182,6 +182,10 @@ and shader rather than a graph in the hull material's palette:
   fits inside its panel, lit mostly in runs, mirror-coated, with a room traced behind each pane.
   By day a lit room is dimmed until it is hard to tell from a dark one, a cheat for daylight
   outshining it.
+- **Habitat**, offices whose whole top is a roof of clear glass hexes, 10 m across in a 0.5 m
+  frame, over air with no light of its own: it scatters back what of the star and the planet it is
+  let in, blue by day, red as the star sets over the roof, black by night, with a cloud deck 40 m
+  down seen where the eye's ray meets it, so it moves against the frame.
 
 They depart from the hull material on two points. They map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is
@@ -189,7 +193,7 @@ where they look as meant. And they map from **world position**, not the ship's f
 stacked along world Y: on a craft that moves or turns, the panels and decks would swim.
 
 Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling boxes of each
-size forever as the star turns, and `parts_void`, which puts every kind and every look on every
+size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
 primitive.
 
 Open: mapping in the ship's frame, deciding which way a ship's decks stack, and giving a look to a
