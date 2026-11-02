@@ -14,8 +14,9 @@ recovery, flying and refitting excluding each other, and data's work factor.
 Since F9 `lc-world` has no `Loadout`, no `Module` and no planner below. The account is kept on
 the ship's form and reads its capacities; a round's steps are 29's; `length_m` is the form's
 extent and the slew rate comes from its moments (29 §What a craft reads). Every per-module figure
-below survives as a density over the slot, and the starting form holds exactly the starting
-ship's slots, so the tables of energies, masses and accelerations still hold. **Refits are refused
+below survives as a density over the slot, and the reference form (29 §The reference form) holds
+exactly the starting ship's slots, so the tables of energies, masses and accelerations still hold for
+it. The starting form itself is a design with twice the engine. **Refits are refused
 until S1**: the wire and saves still carry the loadout, and the shard answers a loadout refit
 `NotBuilt`. What follows is kept as the argument for the numbers, not a description of the code.
 

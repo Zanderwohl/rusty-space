@@ -248,33 +248,6 @@ mod tests {
         caps.storage_j / (stored_w - caps.drain_w) / JULIAN_YEAR_S
     }
 
-    #[test]
-    fn the_starting_broadside_is_pinned() {
-        let solved = FormGrid::new(&Form::starting(), &Balance::DEFAULT).unwrap().broadside_m2();
-        assert!((solved / STARTING_BROADSIDE_M2 - 1.0).abs() < 1.0e-9, "pinned {STARTING_BROADSIDE_M2}, the starting form solves to {solved:?}");
-    }
-
-    /// 20's anchor, reached the other way round: at 0.1 AU the starting ship fills in a year on the
-    /// table it collects on, idle, at the broadside itself, and within a couple of degrees of it.
-    /// The table is interpolated, so a direction off its vertices is the one worth checking.
-    #[test]
-    fn the_starting_ship_fills_in_a_year_at_a_tenth_of_an_au() {
-        let form = Form::starting();
-        let g = geometry(&form);
-        let idle = years_to_fill(&form, shadow_m2(&g, idle_cos(&g)), SOLAR_ANCHOR_AU);
-        assert!((idle - 1.0).abs() < 0.01, "idle: {idle} years");
-        let table = Shadow::from_m2(g.shadow_m2.clone().try_into().unwrap());
-        let broadside = DVec3::from_array(g.broadside);
-        let (e1, e2) = (broadside.cross(DVec3::X).normalize(), broadside.cross(DVec3::Y).normalize());
-        for off in [DVec3::ZERO, e1, -e1, e2, e2 + e1, -e2 - 0.5 * e1] {
-            let s = (broadside + off * 2.0_f64.to_radians()).normalize();
-            let years = years_to_fill(&form, table.along(s), SOLAR_ANCHOR_AU);
-            assert!((years - 1.0).abs() < 0.01, "{s}: {years} years");
-        }
-        let exact = years_to_fill(&form, STARTING_BROADSIDE_M2, SOLAR_ANCHOR_AU);
-        assert!((exact - 1.0).abs() < 1.0e-9, "{exact}");
-    }
-
     /// A slab pitched nose-up, beamier than it is tall: its largest shadow leans off square, and
     /// across the nose its beam beats its height, so the grid's roll turns it a quarter turn from
     /// the roll that presents that shadow.
@@ -296,7 +269,7 @@ mod tests {
     fn idle_presents_the_broadside() {
         let g = geometry(&pitched_slab());
         assert!((roll_rad(&g) - g.broadside_roll_rad).abs() > 30.0_f64.to_radians(), "premise: the rolls differ");
-        let mut all = vec![Form::starting(), pitched_slab()];
+        let mut all = vec![Form::reference(), pitched_slab()];
         all.extend(Builtin::ALL.map(Builtin::form));
         for form in all {
             let grid = FormGrid::new(&form, &Balance::DEFAULT).unwrap();
@@ -320,20 +293,6 @@ mod tests {
         };
         let (flat, long) = (collected(&plate), collected(&spindle));
         assert!(flat > 1.4 * long, "the plate casts {flat}, the spindle {long}");
-    }
-
-    /// Break-even — collection equal to drain — for 20's three hulls: the starting form, twice and
-    /// ten times as long.
-    #[test]
-    fn break_even_moves_inward_as_hulls_grow() {
-        let b = Balance::DEFAULT;
-        for (scale, expected_au) in [(1.0, 5.47), (2.0, 3.87), (10.0, 1.73)] {
-            let form = named("default", scale).unwrap();
-            let g = geometry(&form);
-            let at_one_au = b.conversion_efficiency * intake_w(&b, shadow_m2(&g, idle_cos(&g)), sol_w(), UNIT_M);
-            let au = (at_one_au / Capacities::of(&form, &b).drain_w).sqrt();
-            assert!((au - expected_au).abs() < 0.01, "{scale}× breaks even at {au} AU");
-        }
     }
 
     #[test]

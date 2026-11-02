@@ -137,7 +137,7 @@ async fn debug_acts_on_its_own_ship_and_admins_on_anyone_s() {
 fn emptied(server: &mut Server<Memory>) {
     use lc_world::fitting::Fitting;
     let balance = server.balance();
-    let mut account = Fitting::full(lc_world::form::Form::starting(), balance, 0.0).account();
+    let mut account = Fitting::full(lc_world::form::Form::reference(), balance, 0.0).account();
     account.stored_j = 0.0;
     server.fleet.get_mut(CraftId(2)).unwrap().fit(Some(Fitting::from_account(&account, balance)));
 }

@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     fn starting() -> (Sdf, Extent) {
-        let sdf = Sdf::new(&Form::starting(), &Balance::DEFAULT).unwrap();
+        let sdf = Sdf::new(&Form::reference(), &Balance::DEFAULT).unwrap();
         let (min, max) = sdf.bounds();
         (sdf, Extent { min, max })
     }

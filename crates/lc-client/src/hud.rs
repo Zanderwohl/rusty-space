@@ -762,7 +762,7 @@ mod tests {
         use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
         assert!(lines(&s, &ui, &mut Collapse::default()).energy.is_none(), "an unfitted ship has no energy readout");
-        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::reference(), Balance::DEFAULT, s.coordinate_time_s())));
         let energy = lines(&s, &ui, &mut Collapse::default()).energy.expect("an energy readout");
         assert!((energy.fraction - 1.0).abs() < 1.0e-6, "{}", energy.fraction);
         assert_eq!(energy.amount, "30.0 / 30.0 ME");
@@ -772,7 +772,7 @@ mod tests {
     fn heated(of_max: f64, starlight_w: f64, posture: lc_world::fitting::Posture) -> (UiState, Session) {
         use lc_world::fitting::{Account, Balance};
         let (ui, mut s) = fixture();
-        let full = Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s());
+        let full = Fitting::full(lc_world::form::Form::reference(), Balance::DEFAULT, s.coordinate_time_s());
         let heat_j = of_max * full.field().heat_max_j();
         let account = Account { heat_j, starlight_w, posture, ..full.account() };
         s.ship.fit(Some(Fitting::from_account(&account, Balance::DEFAULT)));
@@ -788,7 +788,7 @@ mod tests {
 
     fn rated_w() -> f64 {
         let b = lc_world::fitting::Balance::DEFAULT;
-        Fitting::full(lc_world::form::Form::starting(), b, 0.0).field().rated_load_w()
+        Fitting::full(lc_world::form::Form::reference(), b, 0.0).field().rated_load_w()
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         assert!(lines(&s, &ui, &mut Collapse::default()).field.is_none(), "an unfitted ship has no field bar");
         let (ui, mut s) = fixture();
         let b = lc_world::fitting::Balance::DEFAULT;
-        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), b, s.coordinate_time_s())));
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::reference(), b, s.coordinate_time_s())));
         let field = field_of(&s, &ui);
         assert_eq!(field.text, "400 K steady", "idle, and storage paying the drain");
         assert_eq!(field.color(BLUE), BLUE);
@@ -1076,7 +1076,7 @@ mod tests {
     fn a_bare_bar_shows_energy_as_the_bar_alone() {
         use lc_world::fitting::{Balance, Fitting};
         let (ui, mut s) = fixture();
-        s.ship.fit(Some(Fitting::full(lc_world::form::Form::starting(), Balance::DEFAULT, s.coordinate_time_s())));
+        s.ship.fit(Some(Fitting::full(lc_world::form::Form::reference(), Balance::DEFAULT, s.coordinate_time_s())));
         let hud = lines(&s, &ui, &mut Collapse::default());
         for fit in [Fit::Words, Fit::Codes, Fit::Keys] {
             assert_eq!(hud.energy_amount(fit), Some("30.0 / 30.0 ME"), "{fit:?}");

@@ -354,7 +354,7 @@ mod tests {
     }
 
     fn ship(b: Balance, stored_j: f64, heat_j: Option<f64>, posture: Posture) -> Fitting {
-        let full = Fitting::full(Form::starting(), b, 0.0);
+        let full = Fitting::full(Form::reference(), b, 0.0);
         let heat_j = heat_j.unwrap_or(full.heat_j);
         Fitting::from_account(&Account { stored_j, heat_j, posture, ..full.account() }, b)
     }
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn a_switch_changes_nothing_until_it_completes() {
         let b = Balance::DEFAULT;
-        let mut black = ship(b, 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j, None, Posture::BLACK);
+        let mut black = ship(b, 0.5 * Fitting::full(Form::reference(), b, 0.0).hull().capacities.storage_j, None, Posture::BLACK);
         black.set_starlight_w(starlight_w(&b, 0.1));
         let mut clear = black.clone();
         clear.set_setting(Setting::Clear).unwrap();
@@ -420,7 +420,7 @@ mod tests {
     fn an_order_against_a_switch_under_way_turns_it_back() {
         let b = Balance::DEFAULT;
         let switch_s = b.field_switch_s;
-        let mut f = Fitting::full(Form::starting(), b, 0.0);
+        let mut f = Fitting::full(Form::reference(), b, 0.0);
         let from = f.shade_at(0.0);
         f.set_setting(Setting::Clear).unwrap();
         assert_eq!(f.posture.switch.map(|s| s.to), Some(from.other()), "premise: a full fitting is not Clear");
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn turned_back_at_once_it_is_no_switch() {
         let b = Balance::DEFAULT;
-        let mut f = Fitting::full(Form::starting(), b, 0.0);
+        let mut f = Fitting::full(Form::reference(), b, 0.0);
         let before = f.posture;
         f.set_setting(Setting::Clear).unwrap();
         f.set_setting(Setting::Black).unwrap();
@@ -455,8 +455,8 @@ mod tests {
     #[test]
     fn auto_outside_its_thresholds_switches_when_ordered() {
         let b = Balance::DEFAULT;
-        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
-        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let max_j = Fitting::full(Form::reference(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::reference(), b, 0.0).hull().capacities.storage_j;
         let (auto, done_s) = (Setting::Auto(Thresholds::of(&b)), b.field_switch_s);
         let hot = |shade| ship(b, half_j, Some(0.9 * max_j), Posture { setting: Setting::Black, shade, switch: None });
         let cold = |shade| ship(b, half_j, Some(0.1 * max_j), Posture { setting: Setting::Clear, shade, switch: None });
@@ -484,7 +484,7 @@ mod tests {
     fn clear_takes_its_fraction_of_starlight_and_a_spike_and_black_all_of_it() {
         let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
         let arriving_w = starlight_w(&b, 1.0);
-        let capacity_j = Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let capacity_j = Fitting::full(Form::reference(), b, 0.0).hull().capacities.storage_j;
         let dt_s = 1.0e4;
         let spike_j = 1.0e24;
         for (shade, fraction) in [(Mode::Clear, b.clear_absorptivity), (Mode::Black, 1.0)] {
@@ -519,8 +519,8 @@ mod tests {
     #[test]
     fn a_burst_past_a_threshold_starts_the_switch_at_once() {
         let b = Balance::DEFAULT;
-        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
-        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let max_j = Fitting::full(Form::reference(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::reference(), b, 0.0).hull().capacities.storage_j;
         let mut f = ship(b, half_j, Some(0.45 * max_j), auto(&b, Mode::Black));
         f.settle(&rest(), 1.0e5);
         assert_eq!(f.auto_s(&rest(), f64::INFINITY), None, "premise: cooling, far from any star");
@@ -534,8 +534,8 @@ mod tests {
     /// the switch's length.
     fn cycle(thresholds: Thresholds) -> (Vec<(f64, Mode, f64)>, f64, f64) {
         let b = Balance { conversion_efficiency: 0.01, living_density_w: 0.0, ..Balance::DEFAULT };
-        let max_j = Fitting::full(Form::starting(), b, 0.0).field().heat_max_j();
-        let half_j = 0.5 * Fitting::full(Form::starting(), b, 0.0).hull().capacities.storage_j;
+        let max_j = Fitting::full(Form::reference(), b, 0.0).field().heat_max_j();
+        let half_j = 0.5 * Fitting::full(Form::reference(), b, 0.0).hull().capacities.storage_j;
         let posture = Posture { setting: Setting::Auto(thresholds), shade: Mode::Black, switch: None };
         let mut f = ship(b, half_j, Some(0.1 * max_j), posture);
         f.set_starlight_w(0.8 * f.field().rated_load_w());

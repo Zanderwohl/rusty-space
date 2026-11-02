@@ -93,7 +93,7 @@ mod tests {
 
     fn fitted() -> Craft {
         let mut craft = Craft::at(CraftId(1), Kind::Ship, glam::DVec3::ZERO);
-        craft.fit(Some(Fitting::full(crate::form::Form::starting(), Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(crate::form::Form::reference(), Balance::DEFAULT, 0.0)));
         craft
     }
 

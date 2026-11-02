@@ -305,7 +305,7 @@ mod tests {
 
     fn editing() -> (UiState, Session) {
         let (mut ui, mut s) = (UiState::default(), Session::new(&lc_world::sky::AuthoredStars::sample(), 3));
-        apply(Action::StartDraft(Form::starting()), &mut ui, &mut s);
+        apply(Action::StartDraft(Form::reference()), &mut ui, &mut s);
         (ui, s)
     }
 
@@ -425,7 +425,7 @@ mod tests {
         twist(&mut ui, &mut s, 0.3);
         apply(Action::ToggleView(ViewMode::Form), &mut ui, &mut s);
         assert_ne!(ui.view, ViewMode::Form);
-        apply(Action::StartDraft(Form::starting()), &mut ui, &mut s);
+        apply(Action::StartDraft(Form::reference()), &mut ui, &mut s);
         apply(Action::ToggleView(ViewMode::Form), &mut ui, &mut s);
         assert_eq!(ui.form.history.entries().len(), 1);
         apply(Action::Undo, &mut ui, &mut s);

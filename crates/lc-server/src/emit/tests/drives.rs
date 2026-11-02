@@ -47,13 +47,13 @@ async fn a_full_ship_behind_a_burn_walks_to_collapse_and_one_beside_does_not() {
     let b = Balance::DEFAULT;
     let cooking_m = cooking_distance_m(&b, anvil_w(), b.drive_spread_rad, 1.0);
     // Nose on to the burn, where it is four times its rated load.
-    let probe = ship(2, -DVec3::X, Form::starting());
+    let probe = ship(2, -DVec3::X, Form::reference());
     let (shadow_m2, rated_w) = (crate::field::shadow_toward_m2(&probe, DVec3::X, 0.0), probe.fitting().unwrap().field().rated_load_w());
     let d_m = (anvil_w() * shadow_m2 / (lc_world::signal::cone_solid_angle_sr(b.drive_spread_rad) * 4.0 * rated_w)).sqrt();
     assert!(d_m < cooking_m, "premise: inside the cooking distance, {d_m} {cooking_m}");
     let d_us = d_m * US_PER_M;
     for (at, behind) in [(-DVec3::X * d_us, true), (DVec3::Y * d_us, false)] {
-        let mut receiver = ship(2, at, Form::starting());
+        let mut receiver = ship(2, at, Form::reference());
         let first_w = anvil_w() * received_fraction(b.drive_spread_rad, shadow_m2, d_m);
         let heat_max_j = receiver.fitting().unwrap().field().heat_max_j();
         account(&mut receiver, |a| a.heat_j = heat_max_j - 5.0 * first_w);
@@ -93,7 +93,7 @@ async fn an_observer_a_light_year_off_is_handed_the_drives_glare() {
     let at = -DVec3::X * year_us;
     let mut server = Server::new(Memory::default(), 0, 1);
     server.fleet.insert(crossing(anvil(1), 1.0, 1.0e12));
-    server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, at, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     server.set_rate(ticking(1.0e6));
     until(&mut server, &mut wire, year_us - 2.0e12).await;
@@ -122,7 +122,7 @@ async fn a_presence_states_what_the_drive_is_lit_at() {
     let mut server = Server::new(Memory::default(), 0, 1);
     server.set_rate(ticking(1.0));
     server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
-    server.admit(ClientId(2), ship(2, DVec3::Y * 1.0e3, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::Y * 1.0e3, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     let mut stated = Vec::new();
     while server.now_t() < 20_000_000 {
@@ -161,7 +161,7 @@ async fn a_craft_flying_across_a_beam_is_fed_only_while_inside_it() {
     server.set_rate(ticking(0.5));
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
     let mut crosser = crate::world::coasting(ShipId(2), start, DVec3::Y * beta, 0);
-    crosser.fit(ship(2, start, Form::starting()).fitting().cloned());
+    crosser.fit(ship(2, start, Form::reference()).fitting().cloned());
     hold_black(&mut crosser);
     let track = crosser.clone();
     server.admit(ClientId(2), crosser, 0.0);
@@ -215,12 +215,12 @@ async fn a_craft_flying_across_a_beam_is_fed_only_while_inside_it() {
 async fn a_receiver_behind_a_burn_is_told_its_power_falling_at_the_retarded_times() {
     let b = Balance::DEFAULT;
     let at = -DVec3::X * LIGHT_HOUR_US;
-    let emitter = crossing(ship(1, DVec3::ZERO, Form::starting()), 1.0, 8.0e12);
+    let emitter = crossing(ship(1, DVec3::ZERO, Form::reference()), 1.0, 8.0e12);
     let first_w = Drive::exhaust_w(emitter.mass_kg_at(1.0), 5.0);
     let mut server = Server::new(Memory::default(), 0, 1);
     server.set_rate(ticking(3_600.0));
     server.fleet.insert(emitter);
-    server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, at, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     let mut told = Vec::new();
     until(&mut server, &mut wire, 4.0 * 86_400.0e6).await;
@@ -281,7 +281,7 @@ async fn a_thruster_leg_is_two_emissions_at_their_two_spreads() {
 #[tokio::test]
 async fn the_thrusters_changing_is_no_drive_event() {
     let b = Balance::DEFAULT;
-    let craft = thruster_leg(ship(1, DVec3::ZERO, Form::starting()));
+    let craft = thruster_leg(ship(1, DVec3::ZERO, Form::reference()));
     let end_s = 3_000.0;
     let found = lc_world::ignition::transitions(&craft, &b, 0.0, end_s);
     assert!(found.iter().any(|t| t.power_w > 0.0 && t.was_w > 0.0 && t.power_w != t.was_w), "premise: {found:?}");
@@ -329,7 +329,7 @@ async fn one_leap_and_every_tick_agree() {
         let mut server = Server::new(Memory::default(), 0, 1);
         server.set_rate(ticking(tick_s));
         server.fleet.insert(crossing(anvil(1), 1.0, 1.0e10));
-        server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+        server.admit(ClientId(2), ship(2, at, Form::reference()), 0.0);
         let mut wire = Loopback::new();
         until(&mut server, &mut wire, 100.0e6).await;
         let told = illuminated(&wire.take(ClientId(2)));
@@ -361,7 +361,7 @@ async fn a_burn_in_flight_across_a_restart_still_lands() {
         let mut server = Server::new(Memory::default(), 0, 1);
         server.set_rate(RATE);
         server.fleet.insert(crossing(anvil(1), 1.0e-4, 1.0e10));
-        server.fleet.insert(ship(2, at, Form::starting()));
+        server.fleet.insert(ship(2, at, Form::reference()));
         let mut wire = Loopback::new();
         while drive_said(&server, ShipId(1)).is_empty() {
             assert!(server.now_t() < 1_000, "premise: the drive lit");
@@ -394,11 +394,11 @@ async fn a_burn_in_flight_across_a_restart_still_lands() {
 #[tokio::test]
 async fn a_drive_stated_after_its_ship_collapsed_is_never_sent() {
     let b = Balance::DEFAULT;
-    let probe = ship(2, -DVec3::X, Form::starting());
+    let probe = ship(2, -DVec3::X, Form::reference());
     let (shadow_m2, rated_w) = (crate::field::shadow_toward_m2(&probe, DVec3::X, 0.0), probe.fitting().unwrap().field().rated_load_w());
     let d_m = (anvil_w() * shadow_m2 / (lc_world::signal::cone_solid_angle_sr(b.drive_spread_rad) * 4.0 * rated_w)).sqrt();
     // Facing away from where it is told to go, so it lights only once it has come about.
-    let mut victim = ship(2, -DVec3::X * d_m * US_PER_M, Form::starting());
+    let mut victim = ship(2, -DVec3::X * d_m * US_PER_M, Form::reference());
     victim.motion.attitude = -DVec3::X;
     let heat_max_j = victim.fitting().unwrap().field().heat_max_j();
     let first_w = anvil_w() * received_fraction(b.drive_spread_rad, shadow_m2, d_m);
@@ -429,7 +429,7 @@ async fn an_emit_flown_as_a_burn_is_said_again_as_the_ship_lightens() {
     let power_w = 3.0e19;
     let mut server = Server::new(Memory::default(), 0, 1);
     server.set_rate(ticking(3_600.0));
-    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::starting()), 0.0);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(-DVec3::X), Apertures::Aft, power_w, 1.0e-6, 0.01, 10.0 * 86_400.0));
     server.tick(&mut wire).await.unwrap();
@@ -467,7 +467,7 @@ async fn a_watcher_that_saw_the_burn_hears_the_cut() {
     server.set_rate(ticking(60.0));
     server.admit(ClientId(1), crossing(anvil(1), 1.0, 1.0e13), 0.0);
     let far = DVec3::Y * LIGHT_HOUR_US;
-    server.admit(ClientId(2), ship(2, far, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, far, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     until(&mut server, &mut wire, 120.0e6).await;
     let burning = server.ship(ShipId(1)).unwrap().clone();

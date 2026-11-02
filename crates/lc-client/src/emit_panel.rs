@@ -1131,13 +1131,13 @@ mod tests {
 
     #[test]
     fn what_the_server_would_refuse_is_said() {
-        let starting = ship(Form::starting(), None);
+        let starting = ship(Form::reference(), None);
         let both = preview(&draft(Apertures::Both, 1.0e15), &starting, 0.0, None);
         assert_eq!(both.refusal, Some(Refusal::NoAperture));
         let aft = preview(&draft(Apertures::Aft, 1.0e15), &starting, 0.0, None);
         assert_eq!(both.floor_rad, aft.floor_rad, "an end with no engines floors nothing");
         assert!(aft.floor_rad < 1.0e-6, "{}", aft.floor_rad);
-        assert_eq!(offered(ends(&Form::starting(), &B)), vec![Apertures::Aft]);
+        assert_eq!(offered(ends(&Form::reference(), &B)), vec![Apertures::Aft]);
         assert_eq!(offered(ends(&two_ended(), &B)), vec![Apertures::Fore, Apertures::Aft, Apertures::Both]);
         let craft = ship(two_ended(), None);
         let (fore, _) = ends(&two_ended(), &B).unwrap();
@@ -1293,7 +1293,7 @@ mod tests {
     #[test]
     fn the_fate_is_31s_attack_table() {
         let field = Field::of(lc_world::fitting::STARTING_ENVELOPE_M2, &B);
-        let rating_w = Capacities::of(&Form::starting(), &B).aperture_w;
+        let rating_w = Capacities::of(&Form::reference(), &B).aperture_w;
         let starting = Receiver {
             rating_w: Some(rating_w),
             field: Some(Heated { field, heat_j: field.heat_j_at(B.field_idle_k) }),

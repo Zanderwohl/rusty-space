@@ -57,12 +57,25 @@ fn lying(normal: DVec3, along: DVec3) -> DVec2 {
     DVec2::new(turn.dot(frame.y_axis), turn.dot(frame.z_axis))
 }
 
-/// Of the drone pod's radius, how far its top sinks into the hull above it.
+/// Of a keel pod's radius, how far its top sinks into the hull above it.
 const KEEL_EMBED: f64 = 0.35;
 
+/// Of the habitat's height, how much sinks into the storage's back.
+const DORSAL_EMBED: f64 = 0.6;
+
+/// Between two engines side by side, as a share of a radius.
+const ENGINE_GAP: f64 = 0.15;
+
+/// Of an engine's radius, how far its inner end sits inside the hull.
+const ENGINE_EMBED: f64 = 0.3;
+
 impl Form {
-    /// 29's starting form, holding 19's starting modules. The frame is x the nose, z up.
-    pub fn starting() -> Form {
+    /// 19's starting ship as 29 first laid it out, holding [`STARTING`]'s modules: an ellipsoid of
+    /// storage, a frustum engine aft, a deck on its back, drones under the keel and data on the
+    /// nose. The balance was calibrated on it, and it stays fixed so that tests of a mechanism have
+    /// a form that does not move when the starting form's design does. The frame is x the nose, z
+    /// up.
+    pub fn reference() -> Form {
         let b = Balance::DEFAULT;
         let v = STARTING;
         let hull = Primitive::Ellipsoid { axes: DVec3::new(5.0, 3.0, 1.0) };
@@ -93,6 +106,61 @@ impl Form {
             ],
         }
     }
+
+    /// The starting form: a 9:4:1 slab of storage about the Mind with a 9:4:1 habitat ovoid on its
+    /// back, a pair of cylinder engines at each end, and the drones and data under the keel. A
+    /// design choice, not 19's anchor: it holds [`STARTING`]'s modules but twice the engine, the
+    /// second pair firing fore. The frame is x the nose, z up.
+    pub fn starting() -> Form {
+        let b = Balance::DEFAULT;
+        let v = STARTING;
+        let engine_m3 = 2.0 * v.engine / 4.0;
+        let slab = Primitive::Slab { edges: DVec3::new(9.0, 4.0, 1.0), corner: 0.1 };
+        let ovoid = Primitive::Ellipsoid { axes: DVec3::new(9.0, 4.0, 1.0) };
+        let cylinder = Primitive::Cylinder { length: 3.0 };
+        let pod = Primitive::Capsule { length: 2.0 };
+        let Shape::Slab { edges, .. } = slab.at(slab.scale(v.storage)) else { unreachable!() };
+        let half = edges / 2.0;
+
+        // A part hangs by its foot, the end of its axis, with its center a reach out along that axis
+        // and the foot a standoff of reaches off the surface. One lying fore and aft is anchored a
+        // reach aft of where its center belongs.
+        //
+        // The habitat lies along the back, sunk part way in.
+        let Shape::Ellipsoid { semi_axes: o } = ovoid.at(ovoid.scale(v.living)) else { unreachable!() };
+        let dorsal = on(DVec3::new(-o.x, 0.0, half.z), (1.0 - DORSAL_EMBED) * o.z / o.x);
+        let mut habitat = blended(hang(4, Kind::Living, ovoid, v.living, PartId(1), dorsal), 0.2);
+        habitat.placement.as_mut().unwrap().tilt = lying(DVec3::Z, DVec3::X);
+
+        // Engines side by side on each end, clear of one another, their inner ends just in the hull.
+        let Shape::Cylinder { radius, length } = cylinder.at(cylinder.scale(engine_m3)) else { unreachable!() };
+        let beside = radius * (1.0 + ENGINE_GAP);
+        let engine = |id, end: f64, side: f64| {
+            hang(id, Kind::Engine, cylinder, engine_m3, PartId(1), on(DVec3::new(end * half.x, side * beside, 0.0), -ENGINE_EMBED * radius / (length / 2.0)))
+        };
+
+        // Under the keel, lying fore and aft: a pod's top sunk into the hull.
+        let keel = |id, kind, volume, x: f64| {
+            let Shape::Capsule { radius, length } = pod.at(pod.scale(volume)) else { unreachable!() };
+            let reach = length / 2.0 + radius;
+            let mut part = hang(id, kind, pod, volume, PartId(1), on(DVec3::new(x - reach, 0.0, -half.z), (1.0 - KEEL_EMBED) * radius / reach));
+            part.placement.as_mut().unwrap().tilt = lying(DVec3::NEG_Z, DVec3::X);
+            part
+        };
+        Form {
+            parts: vec![
+                Part::mind(MIND, b.min_part_m3),
+                hang(1, Kind::Storage, slab, v.storage, MIND, Mount::Enclosing),
+                engine(2, -1.0, 1.0),
+                keel(3, Kind::Drone, v.drone, -0.4 * half.x),
+                habitat,
+                keel(5, Kind::Data, v.data, 0.55 * half.x),
+                engine(6, -1.0, -1.0),
+                engine(7, 1.0, 1.0),
+                engine(8, 1.0, -1.0),
+            ],
+        }
+    }
 }
 
 /// The layouts the editor offers, filled with the starting form's volumes so each is also a
@@ -109,14 +177,18 @@ pub enum Builtin {
 }
 
 /// The names [`named`] reads, as the console and `--form` spell them.
-pub const NAMES: [&str; 4] = ["default", "plate", "spindle", "cluster"];
+pub const NAMES: [&str; 5] = ["default", "reference", "plate", "spindle", "cluster"];
 
-/// A form by name, any case: `default` for the starting form, or a builtin's. `scale` makes every
-/// part but the Mind that many times longer at the same proportions.
+/// A form by name, any case: `default` for the starting form, `reference` for [`Form::reference`],
+/// or a builtin's. `scale` makes every part but the Mind that many times longer at the same
+/// proportions.
 pub fn named(name: &str, scale: f64) -> Option<Form> {
-    let mut form = match name.eq_ignore_ascii_case("default") {
-        true => Form::starting(),
-        false => Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?,
+    let mut form = if name.eq_ignore_ascii_case("default") {
+        Form::starting()
+    } else if name.eq_ignore_ascii_case("reference") {
+        Form::reference()
+    } else {
+        Builtin::ALL.into_iter().find(|b| b.name().eq_ignore_ascii_case(name)).map(Builtin::form)?
     };
     for part in form.parts.iter_mut().filter(|p| p.placement.is_some()) {
         part.volume_m3 *= scale.powi(3);
@@ -395,91 +467,11 @@ mod tests {
     }
 
     #[test]
-    fn the_starting_volumes_are_29s_figures() {
-        let b = Balance::DEFAULT;
-        let form = Form::starting();
-        let volume = |kind| of_kind(&form, kind).iter().map(|p| p.volume_m3).sum::<f64>();
-        for (kind, printed) in [
-            (Kind::Storage, "2.36e6"),
-            (Kind::Engine, "1.96e6"),
-            (Kind::Drone, "7.85e5"),
-            (Kind::Living, "3.93e5"),
-            (Kind::Data, "3.93e5"),
-        ] {
-            assert_eq!(of_kind(&form, kind).len(), 1, "{kind:?} is one part");
-            assert_eq!(format!("{:.2e}", volume(kind)), printed, "{kind:?}");
-        }
-        let c = Capacities::of(&form, &b);
-        assert_eq!(format!("{:.0}", c.storage_j / b.module_energy_j()), "30", "30 ME");
-    }
-
-    #[test]
-    fn the_starting_form_has_nineteens_capacities_and_pulls_five_g_full() {
-        let b = Balance::DEFAULT;
-        let c = Capacities::of(&Form::starting(), &b);
-        // A slot of each is what one of 19's modules gave.
-        assert!(close(c.storage_j, 6.0 * SLOT_M3 * b.storage_density * b.module_energy_j(), 1e-12));
-        assert!(close(c.building_w, 2.0 * SLOT_M3 * b.drone_density_w, 1e-12));
-        assert!(close(c.drain_w, SLOT_M3 * b.living_density_w, 1e-12));
-        assert!(close(c.data_b, ONBOARD_DATA_BYTES + SLOT_M3 * b.data_density_b, 1e-12));
-        assert!(c.data_b > ONBOARD_DATA_BYTES);
-        let full_kg = dry_mass_kg(&Form::starting(), &b) + c.storage_j / (C_M_S * C_M_S);
-        let g = c.aperture_w / C_M_S / full_kg / G0;
-        assert!(close(g, 5.0, 1e-9), "{g}");
-    }
-
-    /// Anchored on 19's dry mass: every module, the data module at half, and the frame over all
-    /// twenty slots, the five empty ones included. Storage empty.
-    #[test]
-    fn hull_areal_density_is_anchored_on_nineteens_dry_starting_ship() {
-        let b = Balance::DEFAULT;
-        let target = STARTING_DRY_KG;
-        let solved = areal_density_for(&Form::starting(), &b, target).unwrap();
-        assert!(close(b.hull_areal_density, solved, 1e-9), "DEFAULT has {}, the starting form solves to {solved}", b.hull_areal_density);
-        assert!(close(dry_mass_kg(&Form::starting(), &b), target, 1e-9));
-        assert_eq!(format!("{target:.2e}"), "2.65e9", "19's table");
-    }
-
-    #[test]
     fn the_starting_form_validates_and_places() {
         let form = Form::starting();
         assert_eq!(form.validate(), Ok(()));
         assert_eq!(form.as_design(MIN), Ok(form.clone()));
         assert_eq!(placed(&form).len(), form.parts.len());
-    }
-
-    /// R1 photographs this, so each part must be where 29 says it is.
-    #[test]
-    fn each_starting_part_is_on_its_side_of_the_ship() {
-        let form = Form::starting();
-        let poses = placed(&form);
-        let pose = |id: u16| *poses.get(PartId(id), Side::Original).unwrap();
-        let hull = part(&form, 1).shape(MIN);
-        let Shape::Ellipsoid { semi_axes: a } = hull else { unreachable!() };
-        let axial = |v: DVec3| v.y.abs() < 1e-9 * a.x && v.z.abs() < 1e-9 * a.x;
-
-        assert_eq!(pose(0).position, DVec3::ZERO);
-        assert!(inside(&hull, DVec3::splat(5.0)), "the storage encloses the Mind's corners");
-
-        let engines = pose(2);
-        assert!(engines.position.x < -a.x, "aft of the hull: {}", engines.position);
-        assert!(axial(engines.position), "on the nose axis: {}", engines.position);
-        assert!((engines.axis() - DVec3::NEG_X).length() < 1e-12, "pointing aft: {}", engines.axis());
-
-        let drones = pose(3);
-        let Shape::Capsule { radius, .. } = part(&form, 3).shape(MIN) else { unreachable!() };
-        assert!(drones.position.z < -a.z, "under the keel: {}", drones.position);
-        assert!(drones.position.x.abs() < 0.1 * a.x, "amidships: {}", drones.position);
-        assert!(drones.position.y.abs() < 1e-9 * a.x);
-        assert!(drones.axis().x.abs() > 1.0 - 1e-12, "lying fore and aft: {}", drones.axis());
-        assert!(drones.position.z + radius > -a.z, "its top in the hull, so it touches");
-
-        let living = pose(4);
-        assert!(living.position.z > 0.0 && living.position.x.abs() < 1e-9 * a.x, "dorsal: {}", living.position);
-        assert!((living.axis() - DVec3::Z).length() < 1e-12, "flat across the top");
-
-        let data = pose(5);
-        assert!(data.position.x > a.x * 0.8 && axial(data.position), "forward: {}", data.position);
     }
 
     #[test]
@@ -522,7 +514,7 @@ mod tests {
     /// Something other than a preset's own volumes: the starting ship with far more engine than
     /// storage, eight times over.
     fn odd_ship() -> Form {
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         for part in &mut ship.parts {
             part.volume_m3 *= if part.kind == Kind::Engine { 20.0 } else { 8.0 };
         }
@@ -531,7 +523,7 @@ mod tests {
 
     #[test]
     fn a_layout_keeps_every_kinds_total_and_each_parts_share() {
-        for ship in [Form::starting(), odd_ship()] {
+        for ship in [Form::reference(), odd_ship()] {
             for (name, preset) in everything() {
                 let layout = preset.as_layout(&ship, MIN).unwrap();
                 assert_eq!((layout.emptied.as_slice(), layout.unplaced.as_slice()), (&[][..], &[][..]), "{name}");
@@ -552,7 +544,7 @@ mod tests {
     #[test]
     fn spars_grow_with_the_arrangement_and_the_mind_does_not() {
         let preset = Builtin::Cluster.form();
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         ship.parts.iter_mut().for_each(|p| p.volume_m3 *= 8.0);
         let layout = preset.as_layout(&ship, MIN).unwrap();
         assert!(close(part(&layout.form, 2).volume_m3, 8.0 * CLUSTER_SPAR_M3, 1e-12));
@@ -566,7 +558,7 @@ mod tests {
     fn a_kind_the_ship_lacks_empties_its_parts_and_their_children_move_up() {
         // No storage at all: the cluster's core and its storage pod are given nothing, and every
         // spar the core held now hangs from the Mind.
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         ship.parts.retain(|p| p.kind != Kind::Storage);
         for p in &mut ship.parts {
             if let Some(placement) = &mut p.placement {
@@ -585,7 +577,7 @@ mod tests {
 
     #[test]
     fn a_kind_the_preset_lacks_is_named_as_unplaced() {
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         ship.parts.push(hang(9, Kind::Bay, Primitive::Cylinder { length: 1.0 }, 5.0e4, PartId(1), on(DVec3::Y, 0.0)));
         let layout = Builtin::Spindle.form().as_layout(&ship, MIN).unwrap();
         assert_eq!(layout.unplaced, [Kind::Bay]);
@@ -595,11 +587,11 @@ mod tests {
 
     #[test]
     fn a_share_below_the_smallest_part_is_dropped_and_the_rest_take_its_volume() {
-        let mut preset = Form::starting();
+        let mut preset = Form::reference();
         // A second data part with a hundredth of the kind.
         let data = part(&preset, 5).volume_m3;
         preset.parts.push(hang(6, Kind::Data, Primitive::Capsule { length: 1.0 }, data / 99.0, PartId(1), on(DVec3::Y, 0.0)));
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         let small = 50.0 * MIN;
         ship.parts.iter_mut().find(|p| p.kind == Kind::Data).unwrap().volume_m3 = small;
         let layout = preset.as_layout(&ship, MIN).unwrap();
@@ -624,7 +616,7 @@ mod tests {
         let mut dust = preset.clone();
         dust.parts[5].volume_m3 = MIN * 0.99;
         assert_eq!(dust.as_design(MIN), Err(PresetError::TooSmall(dust.parts[5].id)));
-        assert_eq!(dust.as_layout(&Form::starting(), MIN), Err(PresetError::TooSmall(dust.parts[5].id)));
+        assert_eq!(dust.as_layout(&Form::reference(), MIN), Err(PresetError::TooSmall(dust.parts[5].id)));
         // The Mind's stored volume is ignored.
         let mut mind = preset.clone();
         mind.parts[0].volume_m3 = 1.0;

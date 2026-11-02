@@ -537,7 +537,7 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         // A small growth: one step, hours long, so the light delay is most of what is measured.
         let mut target = Form::starting();
-        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.01;
+        target.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 1.02;
         wire.client_says(actor, refit_to(&target));
         server.tick(&mut wire).await.unwrap();
         let plan = server.ship(ShipId(1)).unwrap().fitting().unwrap().refit().expect("it began").clone();

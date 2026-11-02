@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn a_part_picked_up_and_put_down_is_one_move() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let data = PartId(5);
         let mut carry = Carry::pick_up(&draft, &sdf, &lens, data).unwrap();
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn a_carried_part_hangs_from_the_part_under_the_pointer_but_not_from_itself() {
-        let draft = Draft::new(Form::starting());
+        let draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
         // It looks through itself to the storage, where it already hangs.
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_part_taken_from_the_list_is_added_where_it_is_put_down() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let mut carry = Carry::new_part(&draft, Kind::Bay, crate::draft::PRIMITIVES[3], &B).unwrap();
         assert_eq!(carry.put_down(), None, "not hung anywhere, so nothing to add");
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn nothing_hangs_from_a_dismantled_part() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (ship, lens) = scene(&draft);
         let nose = ship.pieces().iter().find(|p| p.part == PartId(5)).unwrap().pose.to_outer(DVec3::X * 40.0);
         let at = lens.project(nose).unwrap().0;
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn off_every_part_it_floats_at_the_pointer() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
         let engine = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position).unwrap().0;
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn a_cancel_puts_the_draft_back() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let mut data = Carry::pick_up(&draft, &sdf, &lens, PartId(5)).unwrap();
         assert_eq!(data.cancel(), None, "not moved, nothing to put back");
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn a_part_dropped_on_the_list_is_deleted_as_it_was() {
-        let mut draft = Draft::new(Form::starting());
+        let mut draft = Draft::new(Form::reference());
         let (sdf, lens) = scene(&draft);
         let mut carry = Carry::pick_up(&draft, &sdf, &lens, PartId(5)).unwrap();
         let edit = carry.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).unwrap();

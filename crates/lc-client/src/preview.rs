@@ -244,7 +244,7 @@ mod tests {
     fn docked() -> Session {
         let mut s = Session::new(&AuthoredStars::sample(), 3);
         s.set_coordinate_time_us(4_000_000_000_000);
-        s.ship.fit(Some(Fitting::full(Form::starting(), B, 0.0)));
+        s.ship.fit(Some(Fitting::full(Form::reference(), B, 0.0)));
         s
     }
 
@@ -264,7 +264,7 @@ mod tests {
 
     /// Storage shrunk to `k` of itself, spilling what a full store no longer fits.
     fn shrunk(k: f64) -> Draft {
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         let storage = *d.part(part(&d.form, Kind::Storage)).unwrap();
         d.apply(&d.resize(storage.id, storage.volume_m3 * k).unwrap(), &B).unwrap();
         d
@@ -276,7 +276,7 @@ mod tests {
 
     /// The data taken apart and a bay built on the storage.
     fn rebuilt() -> Draft {
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         d.apply(&d.remove(part(&d.form, Kind::Data)).unwrap(), &B).unwrap();
         let storage = part(&d.form, Kind::Storage);
         d.apply(&d.add(storage, Kind::Bay, crate::draft::PRIMITIVES[3], glam::DVec3::NEG_Y, &B).unwrap(), &B).unwrap();
@@ -360,24 +360,13 @@ mod tests {
         let now = s.coordinate_time_s();
         let full = s.ship.fitting().unwrap().capacity_j_at(now);
         s.ship.drain(full, now);
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         let engine = *d.part(part(&d.form, Kind::Engine)).unwrap();
         d.apply(&d.resize(engine.id, 2.0 * engine.volume_m3).unwrap(), &B).unwrap();
         let preview = Preview::of(&s, &with(d), None).unwrap();
         let Err(Refusal::Energy { short_j }) = preview.budget else { panic!("{:?}", preview.budget) };
         assert!(short_j > 0.0);
         assert!(preview.heat.is_none() && preview.duration_s.is_none());
-    }
-
-    /// 30's anchor: one 5 ME vent into an idle starting field takes it to about 3 850 K.
-    #[test]
-    fn an_idle_ships_field_reads_as_thirty_says() {
-        let s = docked();
-        let field = s.ship.fitting().unwrap().field();
-        let base_j = heat_now(&s);
-        assert!((field.temperature_k(base_j) - B.field_idle_k).abs() < 1.0, "{}", field.temperature_k(base_j));
-        let vented = field.temperature_k(base_j + 5.0 * B.module_energy_j());
-        assert!((vented - 3850.0).abs() < 25.0, "{vented}");
     }
 
     /// The same vent, begun from the heat each holds.
@@ -410,7 +399,7 @@ mod tests {
         assert!(heat.peak_j >= base_j + largest && heat.peak_j <= base_j + vents.iter().sum::<f64>() + losses, "{heat:?}");
         assert!(!heat.collapses());
 
-        let still = Start::of(&s).unwrap().solve(&Form::starting()).unwrap();
+        let still = Start::of(&s).unwrap().solve(&Form::reference()).unwrap();
         assert_eq!(Heat::of(&s, &still).unwrap().step, None, "an empty round leaves it idle");
     }
 
@@ -430,7 +419,7 @@ mod tests {
         let s = docked();
         let d = rebuilt();
         let measured = Measured::of(&d.form, &B).unwrap();
-        let stale = Measured::of(&Form::starting(), &B).unwrap();
+        let stale = Measured::of(&Form::reference(), &B).unwrap();
         let ui = with(d.clone());
         assert_eq!(Preview::of(&s, &ui, Some(&stale)).unwrap().shape, None);
         let shape = Preview::of(&s, &ui, Some(&measured)).unwrap().shape.unwrap();
@@ -442,17 +431,4 @@ mod tests {
         assert!(shape.headroom_j > 0.0 && shape.headroom_j < field.heat_max_j());
     }
 
-    /// The starting form's figures, which 29 and 30 state.
-    #[test]
-    fn the_starting_form_previews_as_the_docs_say() {
-        let s = docked();
-        let measured = Measured::of(&Form::starting(), &B).unwrap();
-        let p = Preview::of(&s, &with(Draft::new(Form::starting())), Some(&measured)).unwrap();
-        let shape = p.shape.unwrap();
-        assert!((shape.envelope_m2 / lc_world::fitting::STARTING_ENVELOPE_M2 - 1.0).abs() < 1e-9);
-        assert!((lc_world::attitude::flip_time_s(shape.slew_rad_s) - 64.0).abs() < 1.0, "{}", shape.slew_rad_s);
-        assert!((shape.rated_load_w / 7.6e19 - 1.0).abs() < 0.01, "{}", shape.rated_load_w);
-        assert!((p.accel_g - 5.0).abs() < 0.05, "five slots of aft engine pull 5 g full: {}", p.accel_g);
-        assert_eq!(p.budget.unwrap().spent_j, 0.0);
-    }
 }

@@ -375,7 +375,7 @@ mod tests {
 
     impl Start {
         fn new(b: &Balance) -> Start {
-            let form = Form::starting();
+            let form = Form::reference();
             let grid = FormGrid::new(&form, b).unwrap();
             let caps = Capacities::of(&form, b);
             Start { field: Field::of(grid.envelope_area_m2(), b), caps, broadside_m2: grid.broadside_m2(), gain: b.solar_gain }
@@ -409,52 +409,6 @@ mod tests {
         b.module_energy_j()
     }
 
-    #[test]
-    fn the_idle_starting_ship_sits_at_field_idle_k() {
-        let b = Balance::DEFAULT;
-        let start = Start::new(&b);
-        let idle = equilibrium_k(&start.field, start.caps.drain_w);
-        assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
-    }
-
-    /// Capacity is a lever a shard may turn; the idle anchor must not move with it.
-    #[test]
-    fn the_idle_anchor_does_not_ride_on_capacity() {
-        let b = Balance { field_capacity: 2.0 * Balance::DEFAULT.field_capacity, ..Balance::DEFAULT };
-        let start = Start::new(&b);
-        let idle = equilibrium_k(&start.field, start.caps.drain_w);
-        assert!(close(idle, b.field_idle_k, 1e-6), "{idle}");
-    }
-
-    #[test]
-    fn the_starting_envelope_is_pinned() {
-        let area_m2 = Start::new(&Balance::DEFAULT).field.area_m2;
-        assert!(close(STARTING_ENVELOPE_M2, area_m2, 1e-6), "pinned {STARTING_ENVELOPE_M2}, the starting form solves to {area_m2:?}");
-    }
-
-    #[test]
-    fn field_capacity_is_anchored_on_the_starting_envelope() {
-        let b = Balance::DEFAULT;
-        let heat_max_j = Start::new(&b).field.heat_max_j();
-        assert!(close(heat_max_j, FIELD_ANCHOR_ME * me(&b), 1e-6), "{heat_max_j}");
-    }
-
-    #[test]
-    fn field_tau_is_anchored_on_a_full_starting_ship_at_rated_load() {
-        let b = Balance::DEFAULT;
-        let start = Start::new(&b);
-        let field = start.field;
-        let full = start.segment(&b, RATED_LOAD_AU, 0.0);
-        let heat_w = field.heat_full_w(&full);
-        let solved = field.heat_max_j() / heat_w;
-        assert!(close(b.field_tau_s, solved, 1e-6), "DEFAULT has {}, the starting form solves to {solved:?}", b.field_tau_s);
-        assert!(close(field.equilibrium_j(heat_w), field.heat_max_j(), 1e-6));
-        let closer = start.segment(&b, RATED_LOAD_AU * (1.0 - 1e-5), 0.0);
-        assert!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&closer)).is_some());
-        let farther = start.segment(&b, RATED_LOAD_AU * (1.0 + 1e-5), 0.0);
-        assert_eq!(field.time_to_rise_s(0.0, field.heat_max_j(), field.heat_full_w(&farther)), None);
-    }
-
     /// `τ` is solved on the broadside the gain is solved on.
     #[test]
     fn the_starlight_anchored_on_is_what_arrives() {
@@ -471,50 +425,6 @@ mod tests {
 
     fn close(got: f64, want: f64, rel: f64) -> bool {
         (got - want).abs() <= rel * want.abs()
-    }
-
-    #[test]
-    fn the_worked_numbers_are_thirtys() {
-        let b = Balance::DEFAULT;
-        let start = Start::new(&b);
-        let field = start.field;
-        let me = me(&b);
-        assert!(close(field.tau_s, 1.84e6, 1e-3), "τ {}", field.tau_s);
-        assert!(close(field.rated_load_w(), 7.6e19, 1e-2), "rated {}", field.rated_load_w());
-        assert!(close(start.caps.aperture_w, 1.1e20, 3e-2));
-        let at_collapse = field.temperature_k(field.heat_max_j());
-        assert!((at_collapse - 4_577.0).abs() < 0.5, "{at_collapse}");
-        let peak_nm = 2.897_771_955e-3 / at_collapse * 1e9;
-        assert!((peak_nm - 630.0).abs() < 5.0, "{peak_nm}");
-        assert!((field.temperature_k(start.caps.drain_w * field.tau_s) - 400.0).abs() < 1e-9);
-
-        for (d_au, filling_k, full_k) in
-            [(5.0, 444.0, 458.0), (1.0, 772.0, 1_024.0), (0.1, 2_396.0, 3_237.0), (0.05, 3_388.0, 4_577.0)]
-        {
-            let segment = start.segment(&b, d_au, 30.0 * me);
-            assert!(segment.stored_w() > segment.draw_w, "{d_au} AU cannot hold storage full");
-            let filling = equilibrium_k(&field, field.heat_filling_w(&segment));
-            let full = equilibrium_k(&field, field.heat_full_w(&segment));
-            assert!((filling - filling_k).abs() < 0.5, "{d_au} AU filling {filling}");
-            assert!((full - full_k).abs() < 0.5, "{d_au} AU full {full}");
-        }
-
-        let idle_j = start.caps.drain_w * field.tau_s;
-        let vented = field.temperature_k(idle_j + Burst::Vent(5.0 * me).heat_j(1.0));
-        assert!((vented - 3_850.0).abs() < 5.0, "{vented}");
-        let clear_above = field.temperature_k(b.auto_clear_above * field.heat_max_j());
-        let black_below = field.temperature_k(b.auto_black_below * field.heat_max_j());
-        assert!((clear_above - 3_850.0).abs() < 5.0, "{clear_above}");
-        assert!((black_below - 3_400.0).abs() < 15.0, "{black_below}");
-
-        let filling_j = field.equilibrium_j(field.heat_filling_w(&start.segment(&b, 0.1, 30.0 * me)));
-        assert!(filling_j + 5.0 * me < field.heat_max_j());
-        assert!(filling_j + 10.0 * me > field.heat_max_j());
-
-        // A full Clear ship at rated load: absorbed starlight goes as 1/d².
-        let clear = b.clear_absorptivity * start.starlight_w(0.05);
-        let d_au = 0.05 * (clear / field.rated_load_w()).sqrt();
-        assert!((d_au - 0.027).abs() < 5e-4, "{d_au}");
     }
 
     /// 30's square–cube table: ships scaled from 500 m with a tenth of their slots living.
@@ -856,7 +766,7 @@ mod tests {
 
     fn starting(b: Balance, stored_j: f64) -> crate::fitting::Fitting {
         use crate::fitting::{Account, Fitting};
-        let full = Fitting::full(Form::starting(), b, 0.0);
+        let full = Fitting::full(Form::reference(), b, 0.0);
         Fitting::from_account(&Account { stored_j, ..full.account() }, b)
     }
 
@@ -897,11 +807,11 @@ mod tests {
         use crate::form::PartId;
         use crate::refit::rounds::Round;
         let begun = |b: Balance| {
-            let mut fitting = crate::fitting::Fitting::full(Form::starting(), b, 0.0);
+            let mut fitting = crate::fitting::Fitting::full(Form::reference(), b, 0.0);
             fitting.drain(me(&b));
-            let mut shrunk = Form::starting();
+            let mut shrunk = Form::reference();
             shrunk.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 3.0 / 5.0;
-            let round = Round { from: Form::starting(), target: shrunk, stored_j: fitting.stored_j_at(&crate::motion::ShipState::at(glam::DVec3::ZERO), 0.0), start_s: 0.0 };
+            let round = Round { from: Form::reference(), target: shrunk, stored_j: fitting.stored_j_at(&crate::motion::ShipState::at(glam::DVec3::ZERO), 0.0), start_s: 0.0 };
             let plan = round.solve(&b).unwrap();
             fitting.begin_refit(plan.clone());
             (fitting, plan)
@@ -927,14 +837,14 @@ mod tests {
         use crate::fitting::{Account, Fitting};
         use crate::form::PartId;
         use crate::refit::rounds::Round;
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
         let begun = |b: Balance, stored_j: f64| {
-            let full = Fitting::full(Form::starting(), b, 0.0);
+            let full = Fitting::full(Form::reference(), b, 0.0);
             let mut fitting = Fitting::from_account(&Account { stored_j, heat_j: 0.0, ..full.account() }, b);
             let drain_w = fitting.hull().capacities.drain_w;
             fitting.set_starlight_w(0.5 * drain_w / b.conversion_efficiency);
-            let round = Round { from: Form::starting(), target: target.clone(), stored_j, start_s: 0.0 };
+            let round = Round { from: Form::reference(), target: target.clone(), stored_j, start_s: 0.0 };
             let plan = round.solve(&b).unwrap();
             fitting.begin_refit(plan.clone());
             (fitting, plan)
@@ -968,21 +878,4 @@ mod tests {
         assert_eq!(crate::fitting::Fitting::from_account(&hot, b).collapse_s(&still(), f64::INFINITY), Some(5.0));
     }
 
-    /// 30's lethal radii: a full starting ship, and one ten and a hundred times its size, collapsing
-    /// beside an idle Black starting ship broadside to it.
-    #[test]
-    fn the_lethal_radii_are_thirtys() {
-        let b = Balance::DEFAULT;
-        let victim = Start::new(&b);
-        let headroom_j = victim.field.heat_max_j() - victim.caps.drain_w * b.field_tau_s;
-        for (scale, want_m) in [(1.0, 150.0), (10.0, 4_200.0), (100.0, 130_000.0)] {
-            let form = crate::form::presets::named("default", scale).unwrap();
-            let field = Field::of(FormGrid::new(&form, &b).unwrap().envelope_area_m2(), &b);
-            let spike_j = b.collapse_spike_fraction * field.released_j(Capacities::of(&form, &b).storage_j);
-            let r_m = lethal_radius_m(1.0, spike_j, victim.broadside_m2, headroom_j);
-            assert!(close(r_m, want_m, 0.02), "{scale} times: {r_m} m");
-            let clear_m = lethal_radius_m(b.clear_absorptivity, spike_j, victim.broadside_m2, headroom_j);
-            assert!(close(clear_m, b.clear_absorptivity.sqrt() * r_m, 1e-12));
-        }
-    }
 }

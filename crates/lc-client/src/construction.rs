@@ -513,17 +513,18 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
         .collect()
 }
 
-/// What `--demo refit` builds on the starting form, and the pace its clock runs at.
+/// What `--demo refit` builds on the reference form, and the pace its clock runs at. The reference
+/// rather than the starting form, which is free to change: the round is staged by its part ids.
 ///
-/// Not the Cluster preset, which the planner refuses from the starting form: its ids put an engine
+/// Not the Cluster preset, which the planner refuses from the reference form: its ids put an engine
 /// where the only drone was, which leaves nothing to build with. This stages one of each step instead: the data core taken apart, the deck moved aft,
 /// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods
 /// on spars built together.
 ///
-/// `scale` makes every part but the Mind that many times larger, as `--form default*k` does, so a
+/// `scale` makes every part but the Mind that many times larger, as `--form reference*k` does, so a
 /// GSV can be photographed mid-refit.
 pub fn demo_round(balance: &Balance, scale: f64) -> Round {
-    let mut from = Form::starting();
+    let mut from = Form::reference();
     let k3 = scale.powi(3);
     for p in from.parts.iter_mut().filter(|p| p.placement.is_some()) {
         p.volume_m3 *= k3;
@@ -1118,7 +1119,7 @@ mod tests {
         {
             let session = game(&mut app);
             session.set_coordinate_time_us((t0 * 1.0e6) as i64);
-            session.ship.fit(Some(lc_world::fitting::Fitting::full(Form::starting(), B, t0)));
+            session.ship.fit(Some(lc_world::fitting::Fitting::full(Form::reference(), B, t0)));
             session.ship.begin_refit(target, t0).expect("the demo's target plans");
         }
         app.update();

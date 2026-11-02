@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn the_current_toggle_flips() {
-        let d = Draft::new(Form::starting());
+        let d = Draft::new(Form::reference());
         assert_eq!(action_of(Tap::ShowCurrent, &d, &view(None, 0)), Some(Action::ShowCurrent(true)));
         let on = FormView { show_current: true, ..view(None, 0) };
         assert_eq!(action_of(Tap::ShowCurrent, &d, &on), Some(Action::ShowCurrent(false)));
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn a_heading_folds_its_panel_and_opens_it_again() {
-        let d = Draft::new(Form::starting());
+        let d = Draft::new(Form::reference());
         let (mut ui, mut s) = (crate::ui::UiState::default(), crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3));
         let tap = Tap::Fold(Fold::Preview);
         let fold = action_of(tap, &d, &ui.form).unwrap();
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn the_history_is_hidden_until_its_button_shows_it() {
-        let d = Draft::new(Form::starting());
+        let d = Draft::new(Form::reference());
         let (mut ui, mut s) = (crate::ui::UiState::default(), crate::session::Session::new(&lc_world::sky::AuthoredStars::sample(), 3));
         assert!(!ui.form.show_history);
         for shown in [true, false] {
@@ -445,14 +445,14 @@ mod tests {
 
     #[test]
     fn a_tap_on_the_selected_row_lets_it_go() {
-        let d = Draft::new(Form::starting());
+        let d = Draft::new(Form::reference());
         assert_eq!(action_of(Tap::Select(PartId(2)), &d, &view(None, 0)), Some(Action::SelectPart(Some(PartId(2)))));
         assert_eq!(action_of(Tap::Select(PartId(2)), &d, &view(Some(PartId(2)), 0)), Some(Action::SelectPart(None)));
     }
 
     #[test]
     fn a_part_button_needs_a_part_and_the_shape_button_cycles() {
-        let d = Draft::new(Form::starting());
+        let d = Draft::new(Form::reference());
         assert_eq!(action_of(Tap::Delete, &d, &view(None, 0)), None);
         assert_eq!(action_of(Tap::NextShape, &d, &view(None, 5)), Some(Action::SetNewShape(6)));
         assert_eq!(action_of(Tap::Take(Kind::Bay), &d, &view(None, 0)), None, "it goes on the pointer, not into an action");
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn the_tree_names_each_part_and_its_mark_in_words() {
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         d.apply(&d.twist(PartId(4), 0.3).unwrap(), &Balance::DEFAULT).unwrap();
         let lines = tree_lines(&d, &d.marks(&Balance::DEFAULT));
         assert_eq!(lines[0].2, "0 Mind, slab");

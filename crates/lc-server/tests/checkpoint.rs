@@ -98,7 +98,7 @@ async fn a_fitted_ships_account_comes_back_through_the_store() {
     clear(&client, band).await;
 
     let mut craft = Craft::at(CraftId(band), Kind::Ship, DVec3::ZERO);
-    craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+    craft.fit(Some(Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)));
     craft.drain(4.0e25, 30.0);
     let row = save(&craft, Some("acct-fitted"), Default::default(), None, Default::default(), Default::default(), None, 60_000_000);
     save_ships(&client, &[row]).await.unwrap();
@@ -106,7 +106,7 @@ async fn a_fitted_ships_account_comes_back_through_the_store() {
     let read = load_ships(&client).await.unwrap().into_iter().find(|s| s.ship_id == band).unwrap();
     let back = load(&read, None).expect("it reads");
     assert_eq!(back.fitting(), craft.fitting());
-    assert_eq!(back.fitting().unwrap().form(), &Form::starting());
+    assert_eq!(back.fitting().unwrap().form(), &Form::reference());
     assert_eq!(back.length_m, craft.length_m);
 }
 
@@ -129,9 +129,9 @@ async fn a_refit_round_survives_the_store_and_a_restart() {
     // Hours a tick, where a step takes days.
     old.set_rate(60.0);
     let mut craft = lc_server::world::still(ship, DVec3::ZERO);
-    craft.fit(Some(Fitting::full(Form::starting(), old.balance(), 0.0)));
+    craft.fit(Some(Fitting::full(Form::reference(), old.balance(), 0.0)));
     old.admit(ClientId(1), craft, 0.0);
-    let mut target = Form::starting();
+    let mut target = Form::reference();
     target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 1.4;
     target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
     let mut wire = Loopback::new();
@@ -146,7 +146,7 @@ async fn a_refit_round_survives_the_store_and_a_restart() {
     }
     let now_s = old.now_t() as f64 * 1.0e-6;
     assert!(old.ship(ship).unwrap().is_refitting(now_s), "premise: it is partway");
-    assert_ne!(old.ship(ship).unwrap().fitting().unwrap().form(), &Form::starting(), "premise: a step is done");
+    assert_ne!(old.ship(ship).unwrap().fitting().unwrap().form(), &Form::reference(), "premise: a step is done");
 
     let checkpoint = old.checkpoint();
     lc_store::store::ensure_partitions(&client, 0, checkpoint.now_t + 1).await.unwrap();

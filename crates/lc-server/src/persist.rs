@@ -610,7 +610,7 @@ mod tests {
             }
         }
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)));
         let row = save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0);
         let mut state = crate::cbor::decode::<Value>(&row.state).unwrap();
         assert!(strip(&mut state) > 0, "premise: the balance is saved");
@@ -626,13 +626,13 @@ mod tests {
         use lc_world::fitting::Balance;
         use lc_world::form::{Form, PartId};
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)));
         craft.drain(3.0e25, 5.0);
         let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert_eq!(back.length_m, craft.length_m);
 
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 1.4;
         target.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 1.1;
         craft.begin_refit(target.clone(), 10.0).unwrap();
@@ -643,7 +643,7 @@ mod tests {
         let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, saved_t), None).expect("it reads");
         assert!(back.is_refitting(mid_s));
         assert_eq!(back.fitting(), craft.fitting());
-        assert_ne!(back.fitting().unwrap().form(), &Form::starting(), "premise: a step had finished");
+        assert_ne!(back.fitting().unwrap().form(), &Form::reference(), "premise: a step had finished");
 
         let end_s = 10.0 + plan.duration_s();
         let (mut ran, mut resumed) = (craft, back);
@@ -658,7 +658,7 @@ mod tests {
     fn a_ships_heat_survives_the_round_trip() {
         use lc_world::fitting::{Account, Balance};
         let b = Balance::DEFAULT;
-        let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
+        let full = Fitting::full(lc_world::form::Form::reference(), b, 0.0);
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), waste_j: b.module_energy_j(), ..full.account() }, b)));
         let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");

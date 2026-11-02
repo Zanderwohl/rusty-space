@@ -1148,7 +1148,7 @@ mod tests {
     fn fitted() -> Craft {
         use crate::fitting::Balance;
         let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
-        craft.fit(Some(Fitting::full(crate::form::Form::starting(), Balance::DEFAULT, 0.0)));
+        craft.fit(Some(Fitting::full(crate::form::Form::reference(), Balance::DEFAULT, 0.0)));
         craft
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         let star = system.star_position_at(0.0).expect("a star");
         let at = star + DVec3::X * au * crate::system::UNIT_M / crate::system::M_PER_LY;
         let mut craft = Craft::at(CraftId(9), Kind::Ship, at);
-        let full = Fitting::full(crate::form::Form::starting(), Balance::DEFAULT, 0.0);
+        let full = Fitting::full(crate::form::Form::reference(), Balance::DEFAULT, 0.0);
         let empty = Account { stored_j: 0.0, ..full.account() };
         craft.fit(Some(Fitting::from_account(&empty, Balance::DEFAULT)));
         craft.enter(Some(system.clone()), 0.0);
@@ -1422,7 +1422,7 @@ mod tests {
         let b = crate::fitting::Balance::DEFAULT;
         let mut craft = fitted();
         let extent = |form: &Form| FormGrid::new(form, &b).unwrap().extent_m();
-        let start = Form::starting();
+        let start = Form::reference();
         assert_eq!(craft.length_m, extent(&start));
         assert!((craft.length_m - 730.7).abs() < 0.1, "{}", craft.length_m);
 
@@ -1445,7 +1445,7 @@ mod tests {
     fn it_is_seen_in_the_form_it_had_then() {
         use crate::form::{Form, Kind as Part};
         let mut craft = fitted();
-        let start = Form::starting();
+        let start = Form::reference();
         let mut target = start.clone();
         for part in target.parts.iter_mut().filter(|p| matches!(p.kind, Part::Engine | Part::Storage)) {
             part.volume_m3 *= 1.2;

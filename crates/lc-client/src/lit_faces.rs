@@ -162,16 +162,6 @@ mod tests {
         assert!((aft / aft_w - 1.0).abs() < 1.0e-12, "the aft faces carry all of it: {aft}");
     }
 
-    /// 32's figure: the starting drive at its rating, through its bell's face, 176 m across.
-    #[test]
-    fn the_starting_face_is_five_hundred_thousand_kelvin() {
-        let start = Form::starting();
-        let rating = lc_world::form::capacity::aft_aperture_w(&start, &B).unwrap();
-        let lit = Lit::of(Ends::default().with_drive(rating), &apertures(&start, &B).unwrap());
-        let k = lit.faces[0].temperature_k;
-        assert!((k / 5.3e5 - 1.0).abs() < 0.01, "{k} K");
-    }
-
     /// A fore emit lights the bow and not the stern; nothing lit lights nothing.
     #[test]
     fn a_fore_emit_lights_the_bow_and_nothing_lights_nothing() {

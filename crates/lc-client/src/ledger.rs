@@ -255,7 +255,7 @@ mod tests {
 
     /// The data taken apart and a bay built, from full storage.
     fn plan() -> Plan {
-        let from = Form::starting();
+        let from = Form::reference();
         let mut d = Draft::new(from.clone());
         let data = d.form.parts.iter().find(|p| p.kind == Kind::Data).unwrap().id;
         d.apply(&d.remove(data).unwrap(), &B).unwrap();
@@ -300,7 +300,7 @@ mod tests {
     }
 
     fn before_data() -> u16 {
-        Form::starting().parts.iter().find(|p| p.kind == Kind::Data).unwrap().id.0
+        Form::reference().parts.iter().find(|p| p.kind == Kind::Data).unwrap().id.0
     }
 
     #[test]
@@ -316,7 +316,7 @@ mod tests {
     }
 
     fn edited() -> Draft {
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         d.apply(&d.twist(PartId(4), 0.3).unwrap(), &B).unwrap();
         d
     }
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn apply_is_open_only_for_a_change_on_a_docked_idle_ship() {
         assert_eq!(gate(&edited(), &Applying::Idle, DOCKED), Ok(()));
-        assert_eq!(gate(&Draft::new(Form::starting()), &Applying::Idle, DOCKED), Err(Blocked::NoChange));
+        assert_eq!(gate(&Draft::new(Form::reference()), &Applying::Idle, DOCKED), Err(Blocked::NoChange));
         assert_eq!(gate(&edited(), &Applying::Idle, Situation { under_way: true, ..DOCKED }), Err(Blocked::UnderWay));
         assert_eq!(gate(&edited(), &Applying::Idle, Situation { refitting: true, ..DOCKED }), Err(Blocked::Refitting));
         assert_eq!(gate(&edited(), &Applying::Idle, Situation { remote: false, ..DOCKED }), Err(Blocked::Offline));
@@ -348,8 +348,8 @@ mod tests {
     #[test]
     fn the_draft_is_edited_against_the_target_of_a_running_round() {
         let p = plan();
-        let mut fitting = lc_world::fitting::Fitting::full(Form::starting(), B, 1000.0);
-        assert_eq!(base(&fitting), &Form::starting());
+        let mut fitting = lc_world::fitting::Fitting::full(Form::reference(), B, 1000.0);
+        assert_eq!(base(&fitting), &Form::reference());
         fitting.begin_refit(p.clone());
         assert_eq!(base(&fitting), p.target());
     }
@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn a_draft_is_based_on_its_ship_in_any_order() {
         let d = edited();
-        let mut shuffled = Form::starting();
+        let mut shuffled = Form::reference();
         shuffled.parts.reverse();
         assert!(d.is_based_on(&shuffled));
         assert!(!d.is_based_on(&d.form), "the draft's own edit is not the ship");

@@ -618,7 +618,7 @@ mod tests {
     }
 
     fn starting() -> Vec<Piece> {
-        crate::parts::OwnForm::new(&Form::starting(), &B).unwrap().sdf().unwrap().pieces().to_vec()
+        crate::parts::OwnForm::new(&Form::reference(), &B).unwrap().sdf().unwrap().pieces().to_vec()
     }
 
     #[test]
@@ -834,7 +834,7 @@ mod tests {
             .insert_resource(crate::app::Game(session))
             .insert_resource(crate::app::Ui(crate::ui::UiState::default()))
             .init_resource::<crate::hull::Eye>()
-            .insert_resource(crate::parts::OwnForm::new(&Form::starting(), &B).unwrap())
+            .insert_resource(crate::parts::OwnForm::new(&Form::reference(), &B).unwrap())
             .insert_resource(uplink)
             .init_resource::<Assets<DroneMaterial>>()
             .init_resource::<Assets<Mesh>>()

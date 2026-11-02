@@ -365,7 +365,7 @@ mod tests {
         use crate::ledger::Applying;
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let target = lc_world::form::Form::starting();
+        let target = lc_world::form::Form::reference();
         ui.0.form.applying = Applying::Sent(target.clone());
         let fault = lc_proto::FormFault::EngineOffAxis(lc_proto::form::PartId(2));
         fold(&mut uplink, &mut game, &mut ui, Outbound::Refused { ship_id: ShipId(7), reason: Refusal::Form(fault) });

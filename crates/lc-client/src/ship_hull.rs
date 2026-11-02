@@ -659,7 +659,7 @@ mod tests {
     /// matches on the hash rather than waiting out its timeout.
     #[test]
     fn a_form_hashes_alike_after_the_wire() {
-        for form in [Form::starting(), Builtin::Cluster.form(), Builtin::Plate.form(), Builtin::Spindle.form()] {
+        for form in [Form::reference(), Builtin::Cluster.form(), Builtin::Plate.form(), Builtin::Spindle.form()] {
             let across = Form::from(&lc_proto::Form::from(&form));
             assert_eq!(form_hash(&form, &B), form_hash(&across, &B));
         }
@@ -670,9 +670,9 @@ mod tests {
     #[test]
     fn each_formed_craft_is_wanted_and_decoded_once() {
         let (session, eye, ui) = (session(), Eye::default(), crate::app::Ui(Default::default()));
-        let own = crate::parts::OwnForm::new(&Form::starting(), &B).unwrap();
+        let own = crate::parts::OwnForm::new(&Form::reference(), &B).unwrap();
         let mut uplink = crate::uplink::Uplink::default();
-        uplink.contacts = vec![contact(1, &Builtin::Cluster.form()), contact(2, &Form { parts: vec![] }), contact(3, &Form::starting())];
+        uplink.contacts = vec![contact(1, &Builtin::Cluster.form()), contact(2, &Form { parts: vec![] }), contact(3, &Form::reference())];
         let mut stated = Stated::default();
 
         let first = wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, true), B);

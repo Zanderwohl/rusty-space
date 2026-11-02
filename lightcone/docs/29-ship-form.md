@@ -422,28 +422,30 @@ Flying and refitting still exclude each other, as in 19.
 
 ## The starting form
 
+A design choice, free to change, and no test pins it:
+
 - the Mind
-- **storage**, an ellipsoid at 5 : 3 : 1, enclosing the Mind: 2.36 × 10⁶ m³, 30 ME
-- **engines**, one frustum aft: 1.96 × 10⁶ m³, 5 g full
-- **drones**, a capsule under the keel: 7.85 × 10⁵ m³
-- **living**, a slab across the dorsal face, and **data**, a small capsule forward: 3.93 × 10⁵ m³ each
+- **storage**, a slab at 9 : 4 : 1 enclosing the Mind: 2.36 × 10⁶ m³, 363 × 161 × 40 m
+- **living**, an ovoid at 9 : 4 : 1 lying fore and aft along the back, sunk part way in, which the
+  hull draws as a habitat: 3.93 × 10⁵ m³, 248 × 110 × 28 m
+- **engines**, four cylinders of 9.8 × 10⁵ m³ each, 94 m across and 141 m long: a pair side by side on
+  the stern firing aft, which together pull what the old single bell did, and a pair on the bow
+  firing fore
+- **drones** and **data**, capsules lying fore and aft under the keel, drones aft of amidships and
+  data forward
 
-Each volume is 19's module count of its kind times the 392 699 m³ slot, so the form holds exactly
-what 19's starting ship does. Placed, it is about 545 m long, 200 m across and 190 m deep:
+It holds 19's starting modules but twice the engine, ten slots, so the frame's twenty slots are full.
+Its extent is 962 m.
 
-- the storage is 335 × 201 × 67 m;
-- the engine flares aft, 116 m wide where it meets the hull and 175 m at its open face, which is the
-  aperture ([31](31-directed-energy.md));
-- the drone capsule, 169 m long, lies fore and aft under the keel with its top sunk into the hull, so
-  it is tilted off the normal it is attached along;
-- the living slab is 145 m across the beam, 96 m fore and aft and 29 m deep;
-- the data capsule, 124 m long, is sunk into the nose.
+### The reference form
 
-`hull_areal_density` is 1 215 kg/m², so this form weighs 19's dry starting ship, 2.65 × 10⁹ kg: every
-module, the data module at half, and 19's frame over all twenty slots, the five empty ones included.
-Its one bell fires aft, so it pulls 5 g full and 13.8 g empty, as 19's ship did.
-
-The anchors of 20 and 30 are derived from this form.
+`Form::reference` is the starting form as first laid out, kept fixed: storage an ellipsoid at
+5 : 3 : 1, one frustum engine aft, a living slab across the back, drones under the keel and data on
+the nose, holding exactly 19's starting ship, 2.65 × 10⁹ kg dry with `hull_areal_density` at
+1 215 kg/m². The balance was calibrated on it — the anchors of 19, 20 and 30 — and those constants
+stay where they were when the starting form changes. Tests of a mechanism use it, so they do not
+move with the design, and so do the demo scenes' formed ships, whose spacing and heat are tuned on its
+size and field. `--form reference` shows it.
 
 The editor also offers **built-in presets**, each rearranging the ship's current volumes:
 

@@ -729,7 +729,7 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn scene() -> (Draft, Sdf, Lens) {
-        let draft = Draft::new(Form::starting());
+        let draft = Draft::new(Form::reference());
         let sdf = Sdf::new(&draft.form, &B).unwrap();
         let (min, max) = sdf.bounds();
         let extent = Extent { min, max };

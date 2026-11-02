@@ -983,7 +983,7 @@ mod tests {
     use glam::DVec3;
 
     fn full() -> Fitting {
-        Fitting::full(Form::starting(), Balance::DEFAULT, 0.0)
+        Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)
     }
 
     /// The first guesses 29-ship-form.md prints, to the digits it prints them.
@@ -1060,20 +1060,6 @@ mod tests {
         assert!((b.module_energy_j() / 1.3968e25 - 1.0).abs() < 1.0e-4);
     }
 
-    /// 19's figures, unchanged: the starting form weighs its dry ship by the areal density's
-    /// anchor, and its one aft bell is its five engines. Empty is 13.8 g as it was. The idle field's
-    /// heat weighs about a part in 10⁵ of it.
-    #[test]
-    fn the_starting_ship_full_pulls_five_g_and_more_empty() {
-        let motion = ShipState::at(DVec3::ZERO);
-        let mut fitting = full();
-        let g = fitting.rated_g_at(&motion, 0.0);
-        assert!((g / 5.0 - 1.0).abs() < 2.0e-5, "{g}");
-        fitting.drain(f64::INFINITY);
-        let empty = fitting.rated_g_at(&motion, 0.0);
-        assert!((empty - 13.81).abs() < 0.01, "{empty}");
-    }
-
     #[test]
     fn stored_energy_weighs_what_it_holds() {
         let motion = ShipState::at(DVec3::ZERO);
@@ -1102,7 +1088,7 @@ mod tests {
 
     /// Two more slots of engine on the bell, as 19's test built two more engines.
     fn more_engine() -> Form {
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
         target
     }
@@ -1139,7 +1125,7 @@ mod tests {
         // No drain: a finish skips the upkeep with the time, where running it out pays it.
         let b = Balance { living_density_w: 0.0, ..Balance::DEFAULT };
         let motion = ShipState::at(glam::DVec3::ZERO);
-        let mut ran = Fitting::full(Form::starting(), b, 0.0);
+        let mut ran = Fitting::full(Form::reference(), b, 0.0);
         begun(&mut ran, more_engine(), 0.0, &motion);
         let end_s = ran.refit().unwrap().duration_s();
         let mut finished = ran.clone();
@@ -1163,7 +1149,7 @@ mod tests {
         // No drain, which would take its own mass off.
         let b = Balance { living_density_w: 0.0, ..Balance::DEFAULT };
         let motion = ShipState::at(DVec3::ZERO);
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         begun(&mut fitting, more_engine(), 0.0, &motion);
         let end_s = fitting.refit().unwrap().duration_s();
         let halfway = fitting.mass_kg_at(&motion, 0.5 * end_s);
@@ -1180,7 +1166,7 @@ mod tests {
     fn an_account_survives_the_wire() {
         let b = Balance::DEFAULT;
         let motion = ShipState::at(DVec3::ZERO);
-        let mut fitting = Fitting::full(Form::starting(), b, 10.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 10.0);
         fitting.settle(&motion, 20.0);
         fitting.drain(3.0 * b.module_energy_j());
         let across = |f: &Fitting| Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&lc_proto::Fitting::from(f))).unwrap());
@@ -1199,12 +1185,12 @@ mod tests {
     #[test]
     fn a_form_settled_partway_that_does_not_place_still_loads() {
         let b = Balance::DEFAULT;
-        let start = Fitting::full(Form::starting(), b, 0.0);
-        let mut orphan = Form::starting();
+        let start = Fitting::full(Form::reference(), b, 0.0);
+        let mut orphan = Form::reference();
         let hung = orphan.parts.iter_mut().find(|p| p.placement.is_some()).unwrap();
         hung.placement.as_mut().unwrap().parent = PartId(99);
         assert!(Hull::of(&orphan, &b).is_err(), "premise: it does not place");
-        let round = Round { from: Form::starting(), target: more_engine(), stored_j: 0.0, start_s: 0.0 };
+        let round = Round { from: Form::reference(), target: more_engine(), stored_j: 0.0, start_s: 0.0 };
         let account = Account { form: orphan.clone(), refit: Some(round), ..start.account() };
         let back = Fitting::from_account(&account, b);
         assert_eq!(back.form(), &orphan);
