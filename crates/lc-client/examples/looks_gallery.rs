@@ -16,7 +16,7 @@
 //! | `--fullscreen` | borderless, on the current monitor |
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
 //!
-//! The right and left arrows cut to the next box or the one before, the other look at the same
+//! The right and left arrows cut to the next box or the one before, the next look at the same
 //! size or the next size's first, keeping the camera's angle and the loop's clock. Escape quits.
 
 use std::f32::consts::TAU;
@@ -27,7 +27,7 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
-use lc_client::looks::aztec::{Aztec, AztecMaterial};
+use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
 
@@ -125,6 +125,7 @@ fn spawn(
     let sprue = Sprue { to_star, star_spin, ..default() };
     let sprue_layers = sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m));
     let aztec = aztecs.add(Aztec { to_star, star_spin, ..default() }.material());
+    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
@@ -136,7 +137,7 @@ fn spawn(
         }
         columns.push(x);
     }
-    let rows = [0.0, 3.0 * STANDOFF * largest];
+    let rows = [0.0, 1.0, 2.0].map(|row| row * 3.0 * STANDOFF * largest);
     let mut stations = Vec::new();
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
@@ -153,7 +154,7 @@ fn spawn(
             } else {
                 commands.spawn((
                     Mesh3d(meshes.add(Cuboid::new(size, size, size))),
-                    MeshMaterial3d(aztec.clone()),
+                    MeshMaterial3d(if look == 1 { aztec.clone() } else { offices.clone() }),
                     Transform::from_translation(center),
                 ));
             }
@@ -167,7 +168,7 @@ fn spawn(
         Projection::Perspective(PerspectiveProjection {
             fov: 40f32.to_radians(),
             near: 0.1,
-            far: 10.0 * (columns.last().copied().unwrap_or(0.0) + rows[1] + largest),
+            far: 10.0 * (columns.last().copied().unwrap_or(0.0) + rows[2] + largest),
             ..default()
         }),
         Hdr,

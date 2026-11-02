@@ -1,5 +1,6 @@
 //! Azteced sheet metal: rectangular panels, each its own shade and tipped a few degrees, with
-//! chamfered trenches between. Fully procedural; see `assets/shaders/aztec.wgsl`.
+//! chamfered trenches between, and, if asked, office windows on the sides. Fully procedural; see
+//! `assets/shaders/aztec.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -33,6 +34,42 @@ pub struct Aztec {
     pub planet: f32,
     pub exposure_stops: f32,
     pub seed: u32,
+    pub windows: Option<Windows>,
+}
+
+/// Office windows, on the sides only: decks stack along world Y. A window is placed only where it
+/// fits wholly inside a panel, clear of the chamfers.
+pub struct Windows {
+    pub deck_m: f32,
+    /// Window centers along a row.
+    pub pitch_m: f32,
+    /// From the deck to the window's bottom.
+    pub sill_m: f32,
+    pub width_m: f32,
+    pub height_m: f32,
+    /// Of a row's runs of windows, the share lit.
+    pub lit: f32,
+    /// A lit window's radiance, linear.
+    pub glow: Vec3,
+    /// The coated glass's reflectance face-on, and its roughness.
+    pub f0: f32,
+    pub roughness: f32,
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        Self {
+            deck_m: 3.6,
+            pitch_m: 1.6,
+            sill_m: 0.9,
+            width_m: 1.2,
+            height_m: 1.6,
+            lit: 0.35,
+            glow: Vec3::new(1.0, 0.82, 0.58) * 0.6,
+            f0: 0.5,
+            roughness: 0.12,
+        }
+    }
 }
 
 impl Default for Aztec {
@@ -55,12 +92,14 @@ impl Default for Aztec {
             planet: 0.12,
             exposure_stops: 0.0,
             seed: 7,
+            windows: None,
         }
     }
 }
 
 impl Aztec {
     pub fn material(&self) -> AztecMaterial {
+        let w = self.windows.as_ref();
         AztecMaterial {
             uniforms: AztecUniform {
                 grid: Vec4::new(self.cell_m, self.min_panel_m, self.snap_m, 0.0),
@@ -72,6 +111,9 @@ impl Aztec {
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
                 finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
+                deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, 0.0)),
+                pane: w.map_or(Vec4::ZERO, |w| Vec4::new(w.width_m, w.height_m, w.f0, w.roughness)),
+                glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),
             },
         }
     }
@@ -88,6 +130,9 @@ pub struct AztecUniform {
     planet_color: Vec4,
     ambient: Vec4,
     finish: Vec4,
+    deck: Vec4,
+    pane: Vec4,
+    glow: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]

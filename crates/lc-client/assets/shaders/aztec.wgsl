@@ -1,7 +1,8 @@
 // Azteced sheet metal: rectangles cut from a staggered grid by random splits, each panel one
 // color and one flat normal tipped a few degrees, so panels catch the light one by one. Fully
 // procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters: the
-// mesh must be axis-aligned boxes. Look development: crates/lc-client/src/looks/aztec.rs.
+// mesh must be axis-aligned boxes. Decks stack along world Y, so on a side v is up, and windows,
+// when there are any, are only on the sides, in rows level at the same heights all round. Look development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -37,6 +38,12 @@ struct AztecUniform {
     ambient: vec4<f32>,
     /// `(exposure, seed, 0, 0)`.
     finish: vec4<f32>,
+    /// `(deck_m, pitch_m, sill_m, 0)`: no windows where `deck_m` is 0.
+    deck: vec4<f32>,
+    /// `(width_m, height_m, f0, roughness)`.
+    pane: vec4<f32>,
+    /// A lit window's radiance, and the share of its row's runs lit in `w`.
+    glow: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
@@ -71,7 +78,7 @@ struct Face {
 
 fn face(normal: vec3<f32>) -> Face {
     let n = normalize(normal);
-    let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.z) > 0.9);
+    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.9);
     let u = normalize(cross(up, n));
     return Face(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
 }
@@ -200,6 +207,58 @@ fn lit(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, albedo: vec3<f32>, f0: vec
     return radiance;
 }
 
+struct Window {
+    cover: f32,
+    lit: bool,
+}
+
+/// Whether the window at `deck`, `col` is lit: mostly in runs along its row, at two lengths so
+/// runs vary, with a few dark gaps in them and a few lone windows lit outside.
+fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
+    let row = mix_hash(mix_hash(face_id, u32(m.finish.y)), u32(deck));
+    let share = m.glow.w;
+    let short = i32(floor((f32(col) + 97.0 * unit(pcg(row + 1u))) / 5.0));
+    let long = i32(floor((f32(col) + 97.0 * unit(pcg(row + 2u))) / 11.0));
+    let run = unit(mix_hash(row + 3u, u32(short))) < 0.6 * share
+        || unit(mix_hash(row + 4u, u32(long))) < 0.4 * share;
+    let own = unit(mix_hash(row + 5u, u32(col)));
+    return select((own < 0.06), (own > 0.12), run);
+}
+
+/// The window over `p`, if one fits wholly inside its panel clear of the chamfers; its cover is
+/// what of the pixel it fills.
+fn window(p: vec2<f32>, cell: Panel, f: Face, pixel: vec2<f32>) -> Window {
+    if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9) {
+        return Window(0.0, false);
+    }
+    let deck = floor(p.y / m.deck.x);
+    let col = floor(p.x / m.deck.y);
+    let half = 0.5 * m.pane.xy;
+    let center = vec2<f32>((col + 0.5) * m.deck.y, deck * m.deck.x + m.deck.z + half.y);
+    let clear = m.chamfer.x + 0.1;
+    if (any(center - half < cell.lo + clear) || any(center + half > cell.hi - clear)) {
+        return Window(0.0, false);
+    }
+    let inside = half - abs(p - center);
+    let cover = clamp(inside / pixel + 0.5, vec2<f32>(0.0), min(vec2<f32>(1.0), 2.0 * half / pixel));
+    return Window(cover.x * cover.y, window_lit(f.id, i32(deck), i32(col)));
+}
+
+/// Coated glass in the panel's own tilt: a mirror over a dark room, or over a lit one.
+fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, lit: bool) -> vec3<f32> {
+    let f0 = vec3<f32>(m.pane.z);
+    let roughness = m.pane.w;
+    let ne = max(dot(n, e), 0.0);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
+    var radiance = (1.0 - fresnel) * select(m.ambient.rgb * 0.2, m.glow.rgb, lit);
+    let star = turned(m.to_star);
+    if (dot(star, face_n) > 0.0) {
+        radiance += m.star_color.rgb * specular(n, star, e, f0, roughness);
+    }
+    radiance += m.planet_color.rgb * fresnel * planet_seen(reflect(-e, n), roughness);
+    return radiance;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let f = face(in.world_normal);
@@ -233,5 +292,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let flat_light = lit(n, e, f.n, albedo, f0, roughness);
     let wall_light = lit(wall, e, f.n, albedo, f0, roughness);
-    return vec4<f32>(mix(flat_light, wall_light, share) * m.finish.x, 1.0);
+    let plate = mix(flat_light, wall_light, share);
+    let pane = window(p, cell, f, max(fwidth(p), vec2<f32>(1.0e-4)));
+    var radiance = plate;
+    if (pane.cover > 0.0) {
+        radiance = mix(plate, glass(n, e, f.n, pane.lit), pane.cover);
+    }
+    return vec4<f32>(radiance * m.finish.x, 1.0);
 }
