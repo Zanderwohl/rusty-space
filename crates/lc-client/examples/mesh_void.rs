@@ -21,6 +21,7 @@
 //! | `--aim <part>` | look at this part's center instead; with one form only. With `--zoom 0.3` it frames a spar's seams closely enough to see the bolts |
 //! | `--exposure <stops>` | open the exposure, in stops from `hull_void`'s, which is placed for a lit albedo of 0.3 and so clips anything lighter; `-1.5` by default |
 //! | `--sun <deg>` | the star's elevation; negative is night, where the living lights show |
+//! | `--cold` | engines not firing, so their open faces do not glow |
 //! | `--frames <n>` / `--burst <n>` | frames after every mesh lands, and consecutive shots from there |
 //! | `--remesh <cells>` | on the first shot, ask every hull for this resolution. Each frame's wall time is logged until every new mesh has landed and been drawn, and a burst photographs the old meshes staying up until the new ones swap in |
 
@@ -33,7 +34,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
-use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
+use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
@@ -72,6 +73,7 @@ struct Args {
     burst: u32,
     remesh: Option<u32>,
     aim: Option<u16>,
+    cold: bool,
 }
 
 impl Args {
@@ -109,6 +111,7 @@ impl Args {
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             remesh: value("--remesh").map(|c| c as u32),
             aim: value("--aim").map(|id| id as u16),
+            cold: args.iter().any(|a| a == "--cold"),
         }
     }
 }
@@ -292,6 +295,7 @@ fn spawn(
             emitted,
             // As the game draws an engine: its grid on its open faces, its flank everywhere else.
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
+            faces: [if args.cold { Vec4::ZERO } else { (8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0)).extend(0.0) }; FACES],
             ..default()
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),

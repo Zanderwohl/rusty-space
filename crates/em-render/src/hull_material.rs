@@ -190,6 +190,12 @@ pub struct HullUniform {
     /// `(layer_1_m, layer_2_m, tile_m, 0)`: the pipe layers' heights over the base, and what a tile
     /// spans.
     pub pipes: Vec4,
+    /// An open face drawn as an ion thruster's, where `grid_m` is over 0: `(grid_m, bar_m, cell_m,
+    /// depth_m)`, a uniform grid of bars this pitch and width over glowing hex cells this far across
+    /// their flats, this far behind it. The tile is not read there.
+    pub thruster: Vec4,
+    /// The cells' color, linear: what leaves the face is drawn at its luminance in this hue.
+    pub thruster_glow: Vec4,
 }
 
 impl Default for HullUniform {
@@ -226,6 +232,8 @@ impl Default for HullUniform {
             roof_sky: Vec4::ZERO,
             roof_shape: Vec4::ZERO,
             pipes: Vec4::new(0.9, 1.9, 24.0, 0.0),
+            thruster: Vec4::ZERO,
+            thruster_glow: Vec4::ZERO,
         }
     }
 }

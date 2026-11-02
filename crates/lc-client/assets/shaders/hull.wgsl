@@ -15,6 +15,7 @@
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
 #import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate, tangent_frame}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
+#import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
 #import "shaders/pipes.wgsl"::{tile_start, variant_layer}
 
 struct Vertex {
@@ -121,6 +122,10 @@ struct HullUniform {
     roof_shape: vec4<f32>,
     /// `(layer_1_m, layer_2_m, tile_m, 0)`.
     pipes: vec4<f32>,
+    /// `(grid_m, bar_m, cell_m, depth_m)`; no thruster where `grid_m` is 0.
+    thruster: vec4<f32>,
+    /// The cells' hue, linear.
+    thruster_glow: vec4<f32>,
 }
 
 struct RoofOutline {
@@ -491,6 +496,58 @@ fn metal_lit(n: vec3<f32>, star: vec3<f32>, e: vec3<f32>, lit_side: bool, albedo
     return here;
 }
 
+/// Whether `layer` drawn for `region` is an open face drawn as a thruster.
+fn thrusting(region: u32, layer: u32) -> bool {
+    let open = material.open;
+    return material.thruster.x > 0.0 && open.z != 0u && region == open.x && layer == region;
+}
+
+/// An engine's open face as an ion thruster's, in reflected's units: a uniform grid of dark bars
+/// over hex cells a little way behind it, seen through its gaps at their depth, so they move
+/// against it as the eye does. Each cell glows at what leaves the face, `face`, in the thruster's
+/// hue, brightest and palest in its middle, between dark walls. Bars and cells smaller than a pixel are drawn
+/// as their averages.
+fn thruster_light(in: VertexOutput, pixel: f32, face: vec3<f32>) -> vec3<f32> {
+    let surface = normalize(in.ship_normal);
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    // The face is flat, so its own normal names a frame on it.
+    let across = select(SHIP_UP, vec3<f32>(1.0, 0.0, 0.0), abs(surface.z) > 0.9);
+    let u = normalize(cross(across, surface));
+    let v = cross(surface, u);
+    let p = vec2<f32>(dot(in.ship_position, u), dot(in.ship_position, v));
+    let grid = material.thruster.x;
+    let bar = material.thruster.y;
+    let cell = material.thruster.z;
+
+    let to_bar = abs(fract(p / grid + 0.5) - 0.5) * grid;
+    let near_bar = 1.0 - smoothstep(0.5 * bar - pixel, 0.5 * bar + pixel, min(to_bar.x, to_bar.y));
+    let open_share = 1.0 - bar / grid;
+    let bars = mix(near_bar, 1.0 - open_share * open_share, smoothstep(0.25, 1.0, pixel / grid));
+
+    let d = vec3<f32>(-dot(e, u), -dot(e, v), max(dot(e, surface), 0.05));
+    let q = p + d.xy * material.thruster.w / d.z;
+    let h = hex(q, cell);
+    let wall = 0.08 * cell;
+    let middle = clamp((h.z - wall) / (0.5 * cell - wall), 0.0, 1.0);
+    let lit_cell = smoothstep(wall - pixel, wall + pixel, h.z) * (0.25 + 0.75 * sqrt(middle));
+    let cell_id = mix_hash(u32(i32(round(4.0 * (q.x - h.x)))), u32(i32(round(4.0 * (q.y - h.y)))));
+    let flicker = mix(0.85, 1.15, unit(pcg(cell_id)));
+    let profile = mix(lit_cell * flicker, 0.55, smoothstep(0.25, 1.0, pixel / cell));
+    // Deep at a cell's walls, paling toward its core, as a plasma's glow does.
+    let deep = material.thruster_glow.rgb / max(dot(material.thruster_glow.rgb, LUMA), 1.0e-3);
+    let core = mix(material.thruster_glow.rgb, vec3<f32>(1.0), 0.55);
+    let hue = mix(deep, core / dot(core, LUMA), middle * middle);
+    let glow = hue * dot(face, LUMA) * profile;
+
+    let lit_side = dot(star, surface) > 0.0;
+    let back = material.reflected.rgb * metal_lit(surface, star, e, lit_side, vec3<f32>(0.03), 0.04, vec3<f32>(1.0), 0.6);
+    let metal = material.reflected.rgb * metal_lit(surface, star, e, lit_side, vec3<f32>(0.06), 0.25, vec3<f32>(1.0), 0.4);
+    // The bars are lit from behind too, by the cells around them.
+    let bar_light = metal + 0.08 * deep * dot(face, LUMA);
+    return mix(glow + back, bar_light, bars);
+}
+
 fn piped(layer: u32) -> bool {
     return ((material.piped >> layer) & 1u) != 0u;
 }
@@ -734,6 +791,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let living = select(pair.second, pair.first, habitable(pair.first));
         albedo *= 1.0 - home;
         emitted = emitted * (1.0 - home) + home * habitat_light(in, pixel, roof_lead, roof_lead_rate, material.emitted[living].rgb);
+    }
+    let thrust_share = select(0.0, 1.0 - t, thrusting(pair.first, near_layer)) + select(0.0, t, thrusting(pair.second, far_layer));
+    if (thrust_share > 0.0) {
+        let face = select(vec3<f32>(0.0), material.faces[min(in.face, FACES - 1u)].rgb, in.face < FACES);
+        albedo *= 1.0 - thrust_share;
+        emitted = emitted * (1.0 - thrust_share) + thrust_share * thruster_light(in, pixel, face * clamp(in.face_share, 0.0, 1.0));
     }
     let pipe_share = select(0.0, 1.0 - t, piped(near_layer)) + select(0.0, t, piped(far_layer));
     if (pipe_share > 0.0 && textureNumLayers(pipe_tiles) >= PIPE_LAYERS) {

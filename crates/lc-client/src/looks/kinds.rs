@@ -12,6 +12,13 @@ use super::outline::{LivingRoof, outline_hull_roofs};
 use super::sprue::{HEIGHTS, Sprue, TILE_M};
 use crate::hull_mesh::{ENGINE_FLANK, region};
 
+const THRUSTER_GRID_M: f32 = 4.0;
+const THRUSTER_BAR_M: f32 = 0.5;
+const THRUSTER_CELL_M: f32 = 2.5;
+const THRUSTER_DEPTH_M: f32 = 2.0;
+/// Ionized xenon's blue, linear: a cell's color at its walls.
+const XENON: Vec3 = Vec3::new(0.08, 0.3, 1.0);
+
 /// Outlines a hull's habitat roof once its mesh lands, which a hull asks for with [`living_roof`],
 /// and bakes the engine flanks' sprue once, handing it to every hull material.
 pub struct HullLooksPlugin;
@@ -59,8 +66,8 @@ pub fn living_roof() -> LivingRoof {
     LivingRoof(region(Kind::Living))
 }
 
-/// `uniform` with the Mind knapped in obsidian, Storage in azteced plate, Living a habitat, and an
-/// engine's flanks a layered sprue.
+/// `uniform` with the Mind knapped in obsidian, Storage in azteced plate, Living a habitat, an
+/// engine's flanks a layered sprue and its open faces an ion thruster's grid over glowing cells.
 pub fn wear(uniform: HullUniform) -> HullUniform {
     let (glass, glass_finish) = Obsidian::default().hull_glass();
     let (plates, plate_finish, plate_metal) = Aztec::default().hull_plates();
@@ -81,6 +88,8 @@ pub fn wear(uniform: HullUniform) -> HullUniform {
         roof_shape: Vec4::new(roof.depth_share, windows.lit, 0.0, 0.0),
         piped: 1 << ENGINE_FLANK,
         pipes: Vec4::new(HEIGHTS.x, HEIGHTS.y, TILE_M, 0.0),
+        thruster: Vec4::new(THRUSTER_GRID_M, THRUSTER_BAR_M, THRUSTER_CELL_M, THRUSTER_DEPTH_M),
+        thruster_glow: XENON.extend(0.0),
         ..uniform
     }
 }
