@@ -61,6 +61,9 @@ pub struct Windows {
     /// every pane shows, so lit and dark rooms are hard to tell apart by day.
     pub day_glow: f32,
     pub day_glass: f32,
+    /// How deep the room the shader draws behind each window is; it is the window's column wide
+    /// and its deck high.
+    pub room_m: f32,
 }
 
 impl Default for Windows {
@@ -78,6 +81,7 @@ impl Default for Windows {
             roughness: 0.12,
             day_glow: 0.05,
             day_glass: 0.02,
+            room_m: 4.0,
         }
     }
 }
@@ -125,6 +129,7 @@ impl Aztec {
                 pane: w.map_or(Vec4::ZERO, |w| Vec4::new(w.width_m, w.height_m, w.f0, w.roughness)),
                 glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),
                 day: w.map_or(Vec4::ZERO, |w| Vec4::new(w.day_glow, w.day_glass, 0.0, 0.0)),
+                room: w.map_or(Vec4::ZERO, |w| Vec4::new(w.room_m, 0.0, 0.0, 0.0)),
             },
         }
     }
@@ -145,6 +150,7 @@ pub struct AztecUniform {
     pane: Vec4,
     glow: Vec4,
     day: Vec4,
+    room: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]

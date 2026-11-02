@@ -49,12 +49,17 @@ struct AztecUniform {
     /// `(glow_share, glass, 0, 0)`: on a face the star lights, what of a lit window's glow is
     /// left, and the star's share every pane shows. A cheat: daylight outshines the rooms behind.
     day: vec4<f32>,
+    /// `(depth_m, 0, 0, 0)`: how deep the room behind each window is.
+    room: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
 
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
+const DESK_TOP_M: f32 = 0.75;
+const DESK_FROM_M: f32 = 1.2;
+const DESK_DEPTH_M: f32 = 0.8;
 
 /// The star, turned about world Y at `to_star.w` rad/s.
 fn turned(to_star: vec4<f32>) -> vec3<f32> {
@@ -218,6 +223,9 @@ fn lit(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, albedo: vec3<f32>, f0: vec
 struct Window {
     cover: f32,
     lit: bool,
+    /// Which column and deck, which are its room's.
+    col: f32,
+    deck: f32,
 }
 
 /// Whether the window at `deck`, `col` is lit: mostly in runs along its row, at two lengths so
@@ -237,7 +245,7 @@ fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
 /// face clear of the margin; its cover is what of the pixel it fills.
 fn window(p: vec2<f32>, cell: Panel, f: Face, face_lo: vec2<f32>, face_hi: vec2<f32>, pixel: vec2<f32>) -> Window {
     if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9) {
-        return Window(0.0, false);
+        return Window(0.0, false, 0.0, 0.0);
     }
     let deck = floor(p.y / m.deck.x);
     let col = floor(p.x / m.deck.y);
@@ -247,23 +255,71 @@ fn window(p: vec2<f32>, cell: Panel, f: Face, face_lo: vec2<f32>, face_hi: vec2<
     let lo = max(cell.lo + clear, face_lo + m.deck.w);
     let hi = min(cell.hi - clear, face_hi - m.deck.w);
     if (any(center - half < lo) || any(center + half > hi)) {
-        return Window(0.0, false);
+        return Window(0.0, false, 0.0, 0.0);
     }
     let inside = half - abs(p - center);
     let cover = clamp(inside / pixel + 0.5, vec2<f32>(0.0), min(vec2<f32>(1.0), 2.0 * half / pixel));
-    return Window(cover.x * cover.y, window_lit(f.id, i32(deck), i32(col)));
+    return Window(cover.x * cover.y, window_lit(f.id, i32(deck), i32(col)), col, deck);
 }
 
-/// Coated glass in the panel's own tilt: a mirror over a dark room, or over a lit one.
-fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, lit: bool) -> vec3<f32> {
+/// What the eye sees through the glass at `p`, as a share of a lit window's glow: a room the
+/// window's column wide, its deck high and `room_m` deep, traced from the glass, with no geometry
+/// behind the face at all. Interior mapping.
+fn room(p: vec2<f32>, e: vec3<f32>, f: Face, pane: Window) -> vec3<f32> {
+    // x and y along the face, z into it.
+    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 1.0e-3));
+    let lo = vec2<f32>(pane.col * m.deck.y, pane.deck * m.deck.x);
+    let hi = lo + m.deck.yx;
+    let toward = select(lo, hi, d.xy > vec2<f32>(0.0));
+    let safe = select(d.xy, vec2<f32>(1.0e-6), abs(d.xy) < vec2<f32>(1.0e-6));
+    let t_side = (toward - p) / safe;
+    let t_back = m.room.x / d.z;
+    let t = min(min(t_side.x, t_side.y), t_back);
+    let hit = vec3<f32>(p + d.xy * t, d.z * t);
+
+    let h = mix_hash(mix_hash(f.id, u32(i32(pane.deck))), u32(i32(pane.col)));
+    let tint = mix(vec3<f32>(0.82, 0.88, 1.0), vec3<f32>(1.0, 0.9, 0.76), unit(pcg(h)));
+
+    // A desk the room's width, its front `DESK_FROM_M` back from the glass: the ray meets its front
+    // if it is below the top there, or its top if it comes down onto it.
+    let desk_y = lo.y + DESK_TOP_M;
+    let t_front = DESK_FROM_M / d.z;
+    if (t_front < t && p.y + d.y * t_front < desk_y) {
+        return tint * 0.08;
+    }
+    if (d.y < 0.0) {
+        let t_top = (desk_y - p.y) / d.y;
+        let z_top = d.z * t_top;
+        if (t_top < t && z_top < DESK_FROM_M + DESK_DEPTH_M) {
+            return vec3<f32>(0.6);
+        }
+    }
+
+    if (t == t_back) {
+        return tint * 0.5;
+    }
+    if (t == t_side.x) {
+        return tint * mix(0.22, 0.32, unit(pcg(h + 1u)));
+    }
+    if (d.y > 0.0) {
+        // A light panel down the middle of the ceiling.
+        let across = abs(hit.x - 0.5 * (lo.x + hi.x));
+        let lamp = across < 0.35 && abs(hit.z - 0.5 * m.room.x) < 0.6;
+        return select(vec3<f32>(0.8), vec3<f32>(3.0), lamp);
+    }
+    // The floor, darker away from the light.
+    return tint * 0.15 * (1.0 - 0.5 * clamp(abs(hit.z - 0.5 * m.room.x) / m.room.x, 0.0, 1.0));
+}
+
+/// Coated glass in the panel's own tilt, over `inside`, the radiance of the room behind it.
+fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, inside: vec3<f32>) -> vec3<f32> {
     let f0 = vec3<f32>(m.pane.z);
     let roughness = m.pane.w;
     let ne = max(dot(n, e), 0.0);
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
     let star = turned(m.to_star);
     let daylight = smoothstep(-0.05, 0.25, dot(star, face_n));
-    let glow = m.glow.rgb * mix(1.0, m.day.x, daylight);
-    var radiance = (1.0 - fresnel) * select(m.ambient.rgb * 0.2, glow, lit) + m.star_color.rgb * m.day.y * daylight;
+    var radiance = (1.0 - fresnel) * inside * mix(1.0, m.day.x, daylight) + m.star_color.rgb * m.day.y * daylight;
     if (dot(star, face_n) > 0.0) {
         radiance += m.star_color.rgb * specular(n, star, e, f0, roughness);
     }
@@ -310,7 +366,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pane = window(p, cell, f, box_at - box_half, box_at + box_half, max(fwidth(p), vec2<f32>(1.0e-4)));
     var radiance = plate;
     if (pane.cover > 0.0) {
-        radiance = mix(plate, glass(n, e, f.n, pane.lit), pane.cover);
+        let lights = select(m.ambient.rgb * 0.2, m.glow.rgb, pane.lit);
+        radiance = mix(plate, glass(n, e, f.n, lights * room(p, e, f, pane)), pane.cover);
     }
     return vec4<f32>(radiance * m.finish.x, 1.0);
 }
