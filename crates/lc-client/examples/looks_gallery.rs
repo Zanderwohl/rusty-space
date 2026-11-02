@@ -17,7 +17,7 @@
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
 //!
 //! The right and left arrows cut to the next box or the one before, the other look at the same
-//! size or the next size's first, keeping the camera's angle and the loop's clock.
+//! size or the next size's first, keeping the camera's angle and the loop's clock. Escape quits.
 
 use std::f32::consts::TAU;
 
@@ -176,7 +176,10 @@ fn spawn(
     ));
 }
 
-fn skip(keys: Res<ButtonInput<KeyCode>>, mut skipped: ResMut<Skipped>) {
+fn skip(keys: Res<ButtonInput<KeyCode>>, mut skipped: ResMut<Skipped>, mut exit: MessageWriter<AppExit>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        exit.write(AppExit::Success);
+    }
     if keys.just_pressed(KeyCode::ArrowRight) {
         skipped.0 += 1;
     }
