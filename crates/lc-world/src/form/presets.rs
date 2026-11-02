@@ -57,6 +57,10 @@ fn lying(normal: DVec3, along: DVec3) -> DVec2 {
     DVec2::new(turn.dot(frame.y_axis), turn.dot(frame.z_axis))
 }
 
+/// Each of the starting form's four engines, in slots: what has the stern pair alone pull about 1 g
+/// with the storage full.
+const STARTING_ENGINE_SLOTS: f64 = 0.469;
+
 /// Of a keel pod's radius, how far its top sinks into the hull above it.
 const KEEL_EMBED: f64 = 0.35;
 
@@ -109,12 +113,12 @@ impl Form {
 
     /// The starting form: a 9:4:1 slab of storage about the Mind with a 9:4:1 habitat ovoid on its
     /// back, a pair of cylinder engines at each end, and the drones and data under the keel. A
-    /// design choice, not 19's anchor: it holds [`STARTING`]'s modules but twice the engine, the
-    /// second pair firing fore. The frame is x the nose, z up.
+    /// design choice, not 19's anchor: it holds [`STARTING`]'s modules but for the engines, four
+    /// of [`STARTING_ENGINE_SLOTS`] each, the bow pair firing fore. The frame is x the nose, z up.
     pub fn starting() -> Form {
         let b = Balance::DEFAULT;
         let v = STARTING;
-        let engine_m3 = 2.0 * v.engine / 4.0;
+        let engine_m3 = STARTING_ENGINE_SLOTS * SLOT_M3;
         let slab = Primitive::Slab { edges: DVec3::new(9.0, 4.0, 1.0), corner: 0.1 };
         let ovoid = Primitive::Ellipsoid { axes: DVec3::new(9.0, 4.0, 1.0) };
         let cylinder = Primitive::Cylinder { length: 3.0 };
