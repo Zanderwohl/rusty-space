@@ -183,9 +183,11 @@ and shader rather than a graph in the hull material's palette:
   By day a lit room is dimmed until it is hard to tell from a dark one, a cheat for daylight
   outshining it.
 - **Habitat**, offices whose whole top is a roof of clear glass hexes, 10 m across in a 0.5 m
-  frame, over air with no light of its own: it scatters back what of the star and the planet it is
-  let in, blue by day, red as the star sets over the roof, black by night, with a cloud deck 40 m
-  down seen where the eye's ray meets it, so it moves against the frame.
+  frame and chamfered 0.5 m where it meets the sides: a dome over a forest 25 m down, seen where
+  the eye's ray meets it, so it moves against the frame. Nothing in it glows; it shows only what of
+  the star and the planet is let in, through air that scatters it back blue by day and red as the
+  star sets over the roof, and that hides the forest the longer the ray's path, so a glancing look
+  sees sky only. Black by night.
 
 They depart from the hull material on two points. They map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is

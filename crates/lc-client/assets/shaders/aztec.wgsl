@@ -53,8 +53,8 @@ struct AztecUniform {
     day: vec4<f32>,
     /// `(depth_m, 0, 0, 0)`: how deep the room behind each window is.
     room: vec4<f32>,
-    /// `(hex_m, seam_m, 0, 0)`: the top a roof of glass hexes this far across their flats, in a
-    /// frame this wide; no roof where `hex_m` is 0.
+    /// `(hex_m, seam_m, rim_m, 0)`: the top a roof of glass hexes this far across their flats, in a
+    /// frame this wide, chamfered this wide where it meets the sides; no roof where `hex_m` is 0.
     roof: vec4<f32>,
     /// The air under the roof's color by day, and the share of the star it scatters back up in `w`.
     sky: vec4<f32>,
@@ -65,8 +65,11 @@ struct AztecUniform {
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
 const DESK_TOP_M: f32 = 0.75;
-const CLOUD_DEPTH_M: f32 = 40.0;
-const CLOUD_SCALE_M: f32 = 30.0;
+const FOREST_DEPTH_M: f32 = 25.0;
+const CROWN_M: f32 = 5.0;
+const GROVE_M: f32 = 40.0;
+/// How far through the dome's air the forest fades to 1/e.
+const AIR_M: f32 = 160.0;
 const DESK_FROM_M: f32 = 1.2;
 const DESK_DEPTH_M: f32 = 0.8;
 
@@ -383,45 +386,133 @@ fn value_noise(x: vec2<f32>) -> f32 {
     return mix(mix(h00, h10, u.x), mix(h01, h11, u.x), u.y);
 }
 
-/// Cloud cover at `q`, meters on the cloud deck, 0 to 1.
-fn clouds(q: vec2<f32>) -> f32 {
-    let x = q / CLOUD_SCALE_M;
-    let fbm = 0.55 * value_noise(x) + 0.3 * value_noise(2.03 * x + 17.0) + 0.15 * value_noise(4.1 * x + 41.0);
-    return smoothstep(0.48, 0.72, fbm);
+/// The forest at `q`, meters on its floor, as albedo times how its crowns face `star` (in the
+/// face's frame): crowns `CROWN_M` apart, each a rounded dome of its own height and green drawn from
+/// its grove's, the tallest at a point hiding the rest, and shadow on the floor between them.
+fn canopy(q: vec2<f32>, star: vec3<f32>) -> vec3<f32> {
+    let c = q / CROWN_M;
+    let i = floor(c);
+    let fr = c - i;
+    var top = 0.0;
+    var best = 9.0;
+    var off = vec2<f32>(0.0);
+    var tree = 0u;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let h = mix_hash(u32(i32(i.x) + x), u32(i32(i.y) + y) ^ 0x7f4a7c15u);
+            let at = vec2<f32>(f32(x), f32(y)) + vec2<f32>(unit(pcg(h)), unit(pcg(h + 1u)));
+            let radius = mix(0.55, 0.85, unit(pcg(h + 2u)));
+            let o = (fr - at) / radius;
+            let d = length(o);
+            let height = mix(0.6, 1.0, unit(pcg(h + 5u))) + radius * sqrt(max(1.0 - d * d, 0.0));
+            if (d < 1.0 && height > top) {
+                top = height;
+                best = d;
+                off = o;
+                tree = h;
+            }
+        }
+    }
+    var greens = array<vec3<f32>, 6>(
+        vec3<f32>(0.03, 0.15, 0.02),
+        vec3<f32>(0.08, 0.30, 0.03),
+        vec3<f32>(0.20, 0.42, 0.03),
+        vec3<f32>(0.03, 0.22, 0.10),
+        vec3<f32>(0.15, 0.27, 0.05),
+        vec3<f32>(0.32, 0.50, 0.06),
+    );
+    // A grove leans toward a couple of neighboring greens, and each tree picks among them.
+    let grove = value_noise(q / GROVE_M) * 4.0;
+    let pick = u32(clamp(grove + 2.0 * unit(pcg(tree + 3u)), 0.0, 5.0));
+    let leaves = mix(0.75, 1.2, value_noise(q * 1.7));
+    let green = greens[pick] * leaves * mix(0.85, 1.15, unit(pcg(tree + 4u)));
+    if (best >= 1.0) {
+        return green * 0.12;
+    }
+    let dome = normalize(vec3<f32>(off, sqrt(1.0 - best * best)));
+    return green * (0.2 + max(dot(dome, star), 0.0));
 }
 
 /// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
-/// glass and scattered about the air beneath, blue by day, red as the star sets over the roof, and
-/// nothing by night. A cloud deck `CLOUD_DEPTH_M` down is seen through the glass where the eye's ray
-/// meets it, so it moves against the frame as the eye does.
+/// glass. A forest `FOREST_DEPTH_M` down is seen where the eye's ray meets it, so it moves against
+/// the frame as the eye does, through air that scatters the light back blue by day and red as the
+/// star sets over the roof; the longer the ray's path, the more air hides the forest, so a glancing
+/// look sees sky only. Nothing by night.
 fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
     let star = turned(m.to_star);
     let over = dot(star, surface);
     let day = smoothstep(-0.08, 0.25, over);
     let high = smoothstep(0.0, 0.45, over);
     let tint = mix(vec3<f32>(1.0, 0.42, 0.16), m.sky.rgb, high);
-    // A grazing look is a long path through the air, so it washes toward white.
-    let haze = mix(vec3<f32>(1.0), tint, sqrt(max(dot(surface, e), 0.0)));
     let rayleigh = 0.75 * (1.0 + pow(dot(-star, e), 2.0));
-    var air = m.star_color.rgb * m.sky.w * day * haze * rayleigh;
+    let air = m.star_color.rgb * m.sky.w * day * mix(vec3<f32>(1.0), tint, 0.7) * rayleigh;
 
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
-    let cover = clouds(p + d.xy * CLOUD_DEPTH_M / d.z);
-    let cloud_lit = mix(vec3<f32>(1.0, 0.55, 0.3), vec3<f32>(1.0), high);
-    air = mix(air, m.star_color.rgb * m.sky.w * 2.5 * day * cloud_lit, 0.85 * cover);
+    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.02));
+    let path = FOREST_DEPTH_M / d.z;
+    let through = exp(-path / AIR_M);
+    let sunlight = m.star_color.rgb * day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
+    let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
+    let forest = canopy(p + d.xy * path, star_face) * sunlight / PI;
 
-    // The frame shades the air just inside it.
-    air *= mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
+    var below = forest * through + air * (1.0 - through);
+    // The frame shades what is just inside it.
+    below *= mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
     let planet = m.planet_color.rgb * m.sky.rgb * max(dot(normalize(m.to_planet.xyz), surface), 0.0) * 0.3;
-    return air + planet;
+    return below + planet;
+}
+
+struct Rim {
+    share: f32,
+    normal: vec3<f32>,
+}
+
+/// The chamfer where the roof meets the sides, `roof.z` across: each side of the line leans 45°
+/// toward it, so at a box's edge the two strips are one bevel, and on a curved hull a groove.
+fn rim(in: VertexOutput, f: Face, surface: vec3<f32>, p: vec2<f32>) -> Rim {
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    var dist = 1.0e6;
+    var toward = up;
+    if (m.finish.z > 0.5) {
+        if (f.n.y > 0.5) {
+            let at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
+            let half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
+            let to_edge = vec4<f32>(p - (at - half), (at + half) - p);
+            dist = min(min(to_edge.x, to_edge.y), min(to_edge.z, to_edge.w));
+            var out = vec2<f32>(0.0, 1.0);
+            if (dist == to_edge.x) { out = vec2<f32>(-1.0, 0.0); }
+            else if (dist == to_edge.y) { out = vec2<f32>(0.0, -1.0); }
+            else if (dist == to_edge.z) { out = vec2<f32>(1.0, 0.0); }
+            toward = f.u * out.x + f.v * out.y;
+        } else if (abs(f.n.y) < 0.5) {
+            dist = in.box_center.y + in.box_half.y - in.world_position.y;
+        }
+    } else {
+        // How far the roof's face is from winning, over how fast that changes a meter.
+        let lead = surface.y - max(abs(surface.x), abs(surface.z));
+        let per_pixel = length(vec2<f32>(dpdx(lead), dpdy(lead)));
+        let pixel_m = max(length(fwidth(in.world_position)) * 0.7071, 1.0e-4);
+        dist = abs(lead) * pixel_m / max(per_pixel, 1.0e-6);
+        let side = vec3<f32>(surface.x, 0.0, surface.z) + vec3<f32>(1.0e-6, 0.0, 0.0);
+        let along = select(up, normalize(side), lead > 0.0);
+        toward = normalize(along - surface * dot(along, surface));
+    }
+    let half_width = 0.5 * m.roof.z;
+    let pixel = max(length(fwidth(p)), 1.0e-4);
+    let share = (1.0 - smoothstep(half_width - pixel, half_width + pixel, dist)) * clamp(half_width / pixel, 0.0, 1.0);
+    return Rim(share, normalize(surface * 0.7071 + toward * 0.7071));
+}
+
+/// The roof's metal, as its frame and its rim are.
+fn roof_metal(n: vec3<f32>, e: vec3<f32>, surface: vec3<f32>) -> vec3<f32> {
+    let base = vec3<f32>(0.4);
+    let metallic = m.panel.w;
+    return lit(n, e, surface, base * (1.0 - metallic), mix(vec3<f32>(0.04), base, metallic), m.panel.z);
 }
 
 /// The top's roof: clear glass hexes in a metal frame, the glass over [`sky_below`].
 fn roof(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
     let cell = hex(p, m.roof.x);
-    let base = vec3<f32>(0.4);
-    let metallic = m.panel.w;
-    let frame = lit(surface, e, surface, base * (1.0 - metallic), mix(vec3<f32>(0.04), base, metallic), m.panel.z);
+    let frame = roof_metal(surface, e, surface);
 
     let f0 = vec3<f32>(0.04);
     let roughness = 0.05;
@@ -445,8 +536,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let f = face(surface);
     let frame = tangent_frame(f, surface);
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
+    let e = normalize(view.world_position - in.world_position);
+    var edged = Rim(0.0, surface);
+    if (m.roof.x > 0.0) {
+        edged = rim(in, f, surface, p);
+    }
+    let bevel = roof_metal(edged.normal, e, surface);
     if (m.roof.x > 0.0 && f.n.y > 0.5) {
-        return vec4<f32>(roof(p, f, surface, normalize(view.world_position - in.world_position)) * m.finish.x, 1.0);
+        return vec4<f32>(mix(roof(p, f, surface, e), bevel, edged.share) * m.finish.x, 1.0);
     }
     let cell = panel(p, f.id);
 
@@ -456,7 +553,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let metallic = m.panel.w;
     let albedo = base * (1.0 - metallic);
     let f0 = mix(vec3<f32>(0.04), base, metallic);
-    let e = normalize(view.world_position - in.world_position);
 
     // A chamfer slopes down into the seam from each side, so the two walls of the trench face
     // each other. Its normal leans toward the nearest edge, which miters the corners.
@@ -485,5 +581,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let lights = select(m.ambient.rgb * 0.2, m.glow.rgb, pane.lit);
         radiance = mix(plate, glass(n, e, surface, lights * room(p, e, f, pane)), pane.cover);
     }
-    return vec4<f32>(radiance * m.finish.x, 1.0);
+    return vec4<f32>(mix(radiance, bevel, edged.share) * m.finish.x, 1.0);
 }
