@@ -292,6 +292,8 @@ fn spawn_hull(
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
         roof_map: None,
         roof_outline: default(),
+        pipe_tiles: None,
+        pipe_light: None,
     });
     let hull = sphere(args.radius, args.center);
     commands.spawn((Mesh3d(meshes.add(hull)), MeshMaterial3d(material), Spun));

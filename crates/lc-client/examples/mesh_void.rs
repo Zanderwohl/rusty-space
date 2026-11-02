@@ -38,7 +38,7 @@ use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
 use lc_client::hull_mesh::{
-    Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
+    ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -277,6 +277,7 @@ fn spawn(
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
             "bay" => LIT_WINDOW * Vec3::new(1.0, 0.92, 0.8),
+            "engine_flank" => LIT_WINDOW * Vec3::new(1.0, 0.72, 0.2),
             _ => Vec3::ZERO,
         }
         .extend(0.0);
@@ -289,12 +290,16 @@ fn spawn(
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
+            // As the game draws an engine: its grid on its open faces, its flank everywhere else.
+            open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
             ..default()
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
         roof_map: None,
         roof_outline: default(),
+        pipe_tiles: None,
+        pipe_light: None,
     });
 
     // Side by side in slots as wide as the largest, three to a row.

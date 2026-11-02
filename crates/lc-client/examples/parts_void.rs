@@ -289,6 +289,7 @@ fn spawn(
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
             "bay" => LIT_WINDOW * Vec3::new(1.0, 0.92, 0.8),
+            "engine_flank" => LIT_WINDOW * Vec3::new(1.0, 0.72, 0.2),
             _ => Vec3::ZERO,
         }
         .extend(0.0);
@@ -306,6 +307,8 @@ fn spawn(
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
         roof_map: None,
         roof_outline: default(),
+        pipe_tiles: None,
+        pipe_light: None,
     });
     let aztec = aztecs.add(Aztec { to_star, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());

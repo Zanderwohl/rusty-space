@@ -166,12 +166,17 @@ impl Sprue {
         Baked { shaped, light, lamps, carried: spec.carried }
     }
 
-    /// One material a layer, sharing the tile and light arrays.
-    pub fn materials(&self, baked: &Baked, images: &mut Assets<Image>) -> [SprueMaterial; 3] {
+    /// The tile array and the baked light array, every variant's three layers in order.
+    pub fn arrays(baked: &Baked) -> (Image, Image) {
         let layers: Vec<&Surface> = baked.shaped.iter().flatten().collect();
         let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
-        let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
-        let light = images.add(bake::light_array(&baked.light, &layers));
+        (tiles::tile_array(&geometry, TILE_TEXELS), bake::light_array(&baked.light, &layers))
+    }
+
+    /// One material a layer, sharing the tile and light arrays.
+    pub fn materials(&self, baked: &Baked, images: &mut Assets<Image>) -> [SprueMaterial; 3] {
+        let (tiles, light) = Self::arrays(baked);
+        let (tiles, light) = (images.add(tiles), images.add(light));
         std::array::from_fn(|k| SprueMaterial {
             uniforms: SprueUniform {
                 layer: Vec4::new(k as f32, TILE_M, 0.0, 0.0),

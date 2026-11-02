@@ -13,8 +13,9 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
-#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate}
+#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate, tangent_frame}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
+#import "shaders/pipes.wgsl"::{tile_start, variant_layer}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -92,6 +93,8 @@ struct HullUniform {
     plated: u32,
     /// One bit a region: habitat.
     habitat: u32,
+    /// One bit a layer: layered sprue.
+    piped: u32,
     emitted: array<vec4<f32>, REGIONS>,
     /// `(region, flank, on, 0)`.
     open: vec4<u32>,
@@ -116,6 +119,8 @@ struct HullUniform {
     roof_sky: vec4<f32>,
     /// `(depth_share, lit_share, 0, 0)`.
     roof_shape: vec4<f32>,
+    /// `(layer_1_m, layer_2_m, tile_m, 0)`.
+    pipes: vec4<f32>,
 }
 
 struct RoofOutline {
@@ -132,6 +137,9 @@ struct RoofOutline {
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var roof_map: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var roof_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var<uniform> roof_outline: RoofOutline;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var pipe_tiles: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var pipe_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var pipe_glow: texture_2d_array<f32>;
 
 /// Obsidian's index is about 1.49.
 const GLASS_F0: f32 = 0.04;
@@ -150,6 +158,12 @@ const STRATUS_ALPHA: f32 = 0.6;
 /// How far through the dome's air the forest fades to 1/e.
 const AIR_M: f32 = 160.0;
 const WALL_STEPS: i32 = 32;
+/// The sprue's baked light is in units of its lamps' color at a meter; this is that color over the
+/// layer's emitted, which is a lit window's face. Floodlights on pipework are far brighter than a
+/// window seen from outside, and must outshine the night fill.
+const PIPE_LAMP: f32 = 40.0;
+/// sixteen variants of three layers, once the sprue is baked; the fallback has one.
+const PIPE_LAYERS: u32 = 48u;
 const WALL_ALBEDO: f32 = 0.25;
 
 /// em_render::hull_material::ALL_PLATED.
@@ -477,6 +491,68 @@ fn metal_lit(n: vec3<f32>, star: vec3<f32>, e: vec3<f32>, lit_side: bool, albedo
     return here;
 }
 
+fn piped(layer: u32) -> bool {
+    return ((material.piped >> layer) & 1u) != 0u;
+}
+
+fn pipe_height(k: u32) -> f32 {
+    return select(select(0.0, material.pipes.x, k == 1u), material.pipes.y, k == 2u);
+}
+
+/// What of the star reaches layer `k` at tile-plane point `q`, past the cutout layers above it.
+fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32) -> f32 {
+    var through = 1.0;
+    for (var above = k + 1u; above <= 2u; above++) {
+        let at = q + toward.xy * (pipe_height(above) - pipe_height(k)) / toward.z;
+        let uv = at / material.pipes.z;
+        let cover = textureSampleLevel(pipe_tiles, pipe_sampler, fract(uv), variant_layer(uv, above, id), 1.0).a;
+        through *= 1.0 - smoothstep(0.35, 0.65, cover);
+    }
+    return through;
+}
+
+/// What a layered sprue sends toward the eye, in reflected's units. The surface is the top layer
+/// of pipe; through its gaps the layer under it and the plated base are seen at their depths, so
+/// they move against it as the eye does. Each is lit by its baked lamps in `lamp`'s color, and by
+/// the star past the layers above. `ddx` and `ddy` are the tile coordinates' derivatives, taken
+/// outside any branch.
+fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -> vec3<f32> {
+    let surface = normalize(in.ship_normal);
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    let f = panel_face(surface, SHIP_UP);
+    let id = f32(f.id);
+    let tile = material.pipes.z;
+    let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v)) + tile_start(id) * tile;
+    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
+    var k = 2u;
+    var q = p;
+    var layer = 0u;
+    var texel = vec4<f32>(0.5, 0.5, 0.0, 1.0);
+    for (var i = 0u; i < 3u; i++) {
+        k = 2u - i;
+        q = p + d.xy * (pipe_height(2u) - pipe_height(k)) / d.z;
+        let uv = q / tile;
+        layer = variant_layer(uv, k, id);
+        texel = textureSampleGrad(pipe_tiles, pipe_sampler, fract(uv), layer, ddx, ddy);
+        if (k == 0u || texel.a >= 0.5) {
+            break;
+        }
+    }
+    let baked = textureSampleGrad(pipe_glow, pipe_sampler, fract(q / tile), layer, ddx, ddy).rgb;
+    let tn = texel.rg * 2.0 - 1.0;
+    let n = normalize(tangent_frame(f, surface) * vec3<f32>(tn, sqrt(max(1.0 - dot(tn, tn), 0.0))));
+    let albedo = texel.b;
+    let glow = lamp * PIPE_LAMP * (baked + 0.015 * albedo);
+    var lit = vec3<f32>(albedo * material.to_star.w);
+    let toward = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
+    if (toward.z > 0.0) {
+        let spec = 0.35 * pow(max(dot(n, normalize(star + e)), 0.0), 24.0);
+        lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id));
+    }
+    return material.reflected.rgb * lit + glow;
+}
+
 fn habitable(region: u32) -> bool {
     return ((material.habitat >> region) & 1u) != 0u;
 }
@@ -630,6 +706,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let up_normal = normalize(in.ship_normal);
     let roof_lead = up_normal.z - max(abs(up_normal.x), abs(up_normal.y));
     let roof_lead_rate = length(vec2<f32>(dpdx(roof_lead), dpdy(roof_lead)));
+    let pipe_face = panel_face(up_normal, SHIP_UP);
+    let pipe_uv = vec2<f32>(dot(in.ship_position, pipe_face.u), dot(in.ship_position, pipe_face.v)) / material.pipes.z;
+    let pipe_dx = dpdx(pipe_uv);
+    let pipe_dy = dpdy(pipe_uv);
     let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
     let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
@@ -654,6 +734,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let living = select(pair.second, pair.first, habitable(pair.first));
         albedo *= 1.0 - home;
         emitted = emitted * (1.0 - home) + home * habitat_light(in, pixel, roof_lead, roof_lead_rate, material.emitted[living].rgb);
+    }
+    let pipe_share = select(0.0, 1.0 - t, piped(near_layer)) + select(0.0, t, piped(far_layer));
+    if (pipe_share > 0.0 && textureNumLayers(pipe_tiles) >= PIPE_LAYERS) {
+        let flank = select(far_layer, near_layer, piped(near_layer));
+        albedo *= 1.0 - pipe_share;
+        emitted = emitted * (1.0 - pipe_share) + pipe_share * pipe_lit(in, pipe_dx, pipe_dy, material.emitted[flank].rgb);
     }
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {

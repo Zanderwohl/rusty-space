@@ -147,6 +147,11 @@ pub struct HullUniform {
     /// traced behind them, and over the top a roof of glass hexes on a forest. Decks stack along
     /// the ship's z. A lit window is the region's [`Self::emitted`].
     pub habitat: u32,
+    /// Which *layers* are a layered sprue, one bit a layer: an engine's flank, say, not its open
+    /// face. The surface is the top layer of pipe, and the layer under it and the plated base are
+    /// seen through its gaps at their depths, lit by baked sodium lamps whose color is the layer's
+    /// [`Self::emitted`].
+    pub piped: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -182,6 +187,9 @@ pub struct HullUniform {
     /// `(depth_share, lit_share, 0, 0)`: the forest lies this share of the roof's width down, and
     /// this share of a row's runs of windows is lit.
     pub roof_shape: Vec4,
+    /// `(layer_1_m, layer_2_m, tile_m, 0)`: the pipe layers' heights over the base, and what a tile
+    /// spans.
+    pub pipes: Vec4,
 }
 
 impl Default for HullUniform {
@@ -203,6 +211,7 @@ impl Default for HullUniform {
             glassy: 0,
             plated: 0,
             habitat: 0,
+            piped: 0,
             emitted: [Vec4::ZERO; REGIONS],
             open: UVec4::ZERO,
             faces: [Vec4::ZERO; FACES],
@@ -216,6 +225,7 @@ impl Default for HullUniform {
             roof: Vec4::ZERO,
             roof_sky: Vec4::ZERO,
             roof_shape: Vec4::ZERO,
+            pipes: Vec4::new(0.9, 1.9, 24.0, 0.0),
         }
     }
 }
@@ -239,6 +249,13 @@ pub struct HullMaterial {
     pub roof_map: Option<Handle<Image>>,
     #[uniform(6, visibility(fragment))]
     pub roof_outline: RoofOutline,
+    /// A layered sprue's tiles, three layers to a variant, and its baked lamp light, both as its
+    /// look makes them. Baked once and late, so a hull drawn before then draws its flanks as tiles.
+    #[texture(7, dimension = "2d_array", visibility(fragment))]
+    #[sampler(8, visibility(fragment))]
+    pub pipe_tiles: Option<Handle<Image>>,
+    #[texture(9, dimension = "2d_array", visibility(fragment))]
+    pub pipe_light: Option<Handle<Image>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]

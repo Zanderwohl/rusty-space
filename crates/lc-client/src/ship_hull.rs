@@ -56,6 +56,8 @@ pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
         "living" => Some((300.0, 3000.0)),
         "mind" => Some((90.0, 9000.0)),
         "bay" => Some((300.0, 4000.0)),
+        // The flank's sprue lamps: high-pressure sodium.
+        "engine_flank" => Some((300.0, 2100.0)),
         _ => None,
     }
 }
@@ -404,7 +406,7 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default() });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None });
                         commands
                             .entity(hull.mesh)
                             .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
