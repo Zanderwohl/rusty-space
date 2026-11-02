@@ -1,11 +1,11 @@
 // Azteced sheet metal: rectangles cut from a staggered grid by random splits, each panel one
 // color and one flat normal tipped a few degrees, so panels catch the light one by one. Fully
 // procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters: the
-// mesh must be axis-aligned boxes. Look development: crates/lc-client/examples/aztec_void.rs.
+// mesh must be axis-aligned boxes. Look development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
     mesh_functions,
-    mesh_view_bindings::view,
+    mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 }
 
@@ -28,6 +28,7 @@ struct AztecUniform {
     chamfer: vec4<f32>,
     /// `(tilt_rad, brown_share, roughness, metallic)`.
     panel: vec4<f32>,
+    /// Toward the star, and its turn in `w`.
     to_star: vec4<f32>,
     star_color: vec4<f32>,
     /// Direction to the planet's center, and its angular radius in `w`, radians.
@@ -42,6 +43,13 @@ struct AztecUniform {
 
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
+
+/// The star, turned about world Y at `to_star.w` rad/s.
+fn turned(to_star: vec4<f32>) -> vec3<f32> {
+    let a = to_star.w * globals.time;
+    let d = normalize(to_star.xyz);
+    return vec3<f32>(cos(a) * d.x - sin(a) * d.z, d.y, sin(a) * d.x + cos(a) * d.z);
+}
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -176,7 +184,7 @@ fn planet_seen(r: vec3<f32>, roughness: f32) -> f32 {
 fn lit(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, albedo: vec3<f32>, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
     var radiance = m.ambient.rgb * albedo;
 
-    let star = normalize(m.to_star.xyz);
+    let star = turned(m.to_star);
     if (dot(star, face_n) > 0.0) {
         let ndl = max(dot(n, star), 0.0);
         radiance += m.star_color.rgb * (albedo * ndl / PI + specular(n, star, e, f0, roughness));

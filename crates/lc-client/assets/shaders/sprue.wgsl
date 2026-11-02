@@ -1,11 +1,11 @@
 // A layered sprue: an opaque base and two cutout layers of pipe, flat and normal-mapped, standing
 // off one another. Lamps are baked into `light`; only the star is lit here. Each face is mapped in
 // its own frame (u, v, n), meters, so a face's three layers share coordinates: the mesh must be
-// axis-aligned boxes. Look development: crates/lc-client/examples/sprue_void.
+// axis-aligned boxes. Look development: crates/lc-client/src/looks/sprue.
 
 #import bevy_pbr::{
     mesh_functions,
-    mesh_view_bindings::view,
+    mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 }
 
@@ -28,6 +28,7 @@ struct SprueUniform {
     heights: vec4<f32>,
     /// The baked light's unit: linear color times power at a meter.
     lamp_color: vec4<f32>,
+    /// Toward the star, and its turn in `w`.
     to_star: vec4<f32>,
     star_color: vec4<f32>,
     ambient: vec4<f32>,
@@ -39,6 +40,13 @@ struct SprueUniform {
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var tiles: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var tile_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var light: texture_2d_array<f32>;
+
+/// The star, turned about world Y at `to_star.w` rad/s.
+fn turned(to_star: vec4<f32>) -> vec3<f32> {
+    let a = to_star.w * globals.time;
+    let d = normalize(to_star.xyz);
+    return vec3<f32>(cos(a) * d.x - sin(a) * d.z, d.y, sin(a) * d.x + cos(a) * d.z);
+}
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
@@ -79,7 +87,7 @@ fn edge(at: vec2<f32>, axis: f32, id: f32) -> u32 {
     return u32(fract((p3.x + p3.y) * p3.z) < 0.5);
 }
 
-/// Sixteen variants, as sprue_void's VARIANTS, of three layers each.
+/// Sixteen variants, as looks::sprue::VARIANTS, of three layers each.
 fn variant_layer(uv: vec2<f32>, k: u32, id: f32) -> u32 {
     let c = floor(uv);
     let variant = edge(c, 0.0, id)
@@ -134,7 +142,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var radiance = m.ambient.rgb * albedo + baked * m.lamp_color.rgb;
 
-    let star = normalize(m.to_star.xyz);
+    let star = turned(m.to_star);
     let toward = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
     if (toward.z > 0.0) {
         let to_eye = normalize(view.world_position - in.world_position);

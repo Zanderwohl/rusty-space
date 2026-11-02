@@ -1,5 +1,5 @@
-//! Photograph azteced sheet metal on a box in a void, lit by a star and a planet. A look to try,
-//! not yet any part's.
+//! Photograph azteced sheet metal on a box in a void, lit by a star and a planet: one of
+//! [`lc_client::looks`].
 //!
 //! ```text
 //! cargo run -p lc-client --example aztec_void -- /tmp/aztec.png --yaw 35 --pitch 20 --dist 110
@@ -25,16 +25,12 @@
 
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
-};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use bevy::shader::ShaderRef;
 use bevy::window::WindowResolution;
-use bevy_mesh::MeshVertexBufferLayoutRef;
+use lc_client::looks::aztec::{Aztec, AztecMaterial};
+use lc_client::looks::{LooksPlugin, direction};
 
 struct Args {
     path: String,
@@ -82,6 +78,7 @@ impl Args {
         };
         let target = triple("--target").map_or(Vec3::ZERO, |v| Vec3::new(v[0], v[1], v[2]));
         let planet_at = triple("--planet-at").map_or(Vec2::new(-15.0, 150.0), |v| Vec2::new(v[0], v[1]));
+        let d = Aztec::default();
         Self {
             path,
             size: value("--size").unwrap_or(48.0),
@@ -92,68 +89,25 @@ impl Args {
             fov: value("--fov").unwrap_or(40.0),
             sun: value("--sun").unwrap_or(30.0),
             sun_yaw: value("--sun-yaw").unwrap_or(-50.0),
-            star: value("--star").unwrap_or(3.0),
+            star: value("--star").unwrap_or(d.star),
             planet_at,
-            planet_deg: value("--planet-deg").unwrap_or(20.0),
-            planet: value("--planet").unwrap_or(0.12),
-            cell: value("--cell").unwrap_or(24.0),
-            min_panel: value("--min-panel").unwrap_or(3.0),
-            snap: value("--snap").unwrap_or(0.25),
-            chamfer: value("--chamfer").unwrap_or(0.15),
-            lean: value("--lean").unwrap_or(30.0),
-            tilt: value("--tilt").unwrap_or(5.0),
-            brown: value("--brown").unwrap_or(0.2),
-            roughness: value("--roughness").unwrap_or(0.35),
-            metallic: value("--metallic").unwrap_or(0.6),
+            planet_deg: value("--planet-deg").unwrap_or(d.planet_deg),
+            planet: value("--planet").unwrap_or(d.planet),
+            cell: value("--cell").unwrap_or(d.cell_m),
+            min_panel: value("--min-panel").unwrap_or(d.min_panel_m),
+            snap: value("--snap").unwrap_or(d.snap_m),
+            chamfer: value("--chamfer").unwrap_or(d.chamfer_m),
+            lean: value("--lean").unwrap_or(d.lean_deg),
+            tilt: value("--tilt").unwrap_or(d.tilt_deg),
+            brown: value("--brown").unwrap_or(d.brown),
+            roughness: value("--roughness").unwrap_or(d.roughness),
+            metallic: value("--metallic").unwrap_or(d.metallic),
             exposure: value("--exposure").unwrap_or(0.0),
-            seed: raw("--seed").map_or(7, |v| v.parse().expect("--seed takes a whole number")),
+            seed: raw("--seed").map_or(d.seed, |v| v.parse().expect("--seed takes a whole number")),
             frames: value("--frames").unwrap_or(30.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             sweep: value("--sweep").unwrap_or(0.0),
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-struct AztecUniform {
-    grid: Vec4,
-    chamfer: Vec4,
-    panel: Vec4,
-    to_star: Vec4,
-    star_color: Vec4,
-    to_planet: Vec4,
-    planet_color: Vec4,
-    ambient: Vec4,
-    finish: Vec4,
-}
-
-#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
-struct AztecMaterial {
-    #[uniform(0, visibility(vertex, fragment))]
-    uniforms: AztecUniform,
-}
-
-impl Material for AztecMaterial {
-    fn vertex_shader() -> ShaderRef {
-        "shaders/aztec.wgsl".into()
-    }
-
-    fn fragment_shader() -> ShaderRef {
-        "shaders/aztec.wgsl".into()
-    }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        let vertex_layout = layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        Ok(())
     }
 }
 
@@ -175,7 +129,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(MaterialPlugin::<AztecMaterial>::default())
+        .add_plugins(LooksPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Setup(args))
         .add_systems(Startup, spawn)
@@ -186,12 +140,6 @@ fn main() {
 #[derive(Resource)]
 struct Setup(Args);
 
-/// Y-up, from elevation and yaw in degrees.
-fn direction(elevation: f32, yaw: f32) -> Vec3 {
-    let (e, y) = (elevation.to_radians(), yaw.to_radians());
-    Vec3::new(e.cos() * y.cos(), e.sin(), e.cos() * y.sin())
-}
-
 fn spawn(
     mut commands: Commands,
     setup: Res<Setup>,
@@ -199,19 +147,28 @@ fn spawn(
     mut materials: ResMut<Assets<AztecMaterial>>,
 ) {
     let args = &setup.0;
-    let material = materials.add(AztecMaterial {
-        uniforms: AztecUniform {
-            grid: Vec4::new(args.cell, args.min_panel, args.snap, 0.0),
-            chamfer: Vec4::new(args.chamfer, args.lean.to_radians(), 0.0, 0.0),
-            panel: Vec4::new(args.tilt.to_radians(), args.brown, args.roughness, args.metallic),
-            to_star: direction(args.sun, args.sun_yaw).extend(0.0),
-            star_color: Vec3::splat(args.star).extend(0.0),
-            to_planet: direction(args.planet_at.x, args.planet_at.y).extend(args.planet_deg.to_radians()),
-            planet_color: (Vec3::new(0.55, 0.7, 1.0) * args.planet).extend(0.0),
-            ambient: Vec3::splat(0.004).extend(0.0),
-            finish: Vec4::new(2f32.powf(args.exposure), args.seed as f32, 0.0, 0.0),
-        },
-    });
+    let material = materials.add(
+        Aztec {
+            cell_m: args.cell,
+            min_panel_m: args.min_panel,
+            snap_m: args.snap,
+            chamfer_m: args.chamfer,
+            lean_deg: args.lean,
+            tilt_deg: args.tilt,
+            brown: args.brown,
+            roughness: args.roughness,
+            metallic: args.metallic,
+            to_star: direction(args.sun, args.sun_yaw),
+            star: args.star,
+            star_spin: 0.0,
+            to_planet: direction(args.planet_at.x, args.planet_at.y),
+            planet_deg: args.planet_deg,
+            planet: args.planet,
+            exposure_stops: args.exposure,
+            seed: args.seed,
+        }
+        .material(),
+    );
     let edge = args.size;
     commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(material)));
 
