@@ -68,6 +68,10 @@ const DESK_TOP_M: f32 = 0.75;
 const FOREST_DEPTH_M: f32 = 25.0;
 const CROWN_M: f32 = 5.0;
 const GROVE_M: f32 = 40.0;
+const STRATUS_DEPTH_M: f32 = 10.0;
+const STRATUS_SCALE_M: vec2<f32> = vec2<f32>(35.0, 12.0);
+/// What of the forest the thickest stratus hides.
+const STRATUS_ALPHA: f32 = 0.6;
 /// How far through the dome's air the forest fades to 1/e.
 const AIR_M: f32 = 160.0;
 const DESK_FROM_M: f32 = 1.2;
@@ -433,11 +437,19 @@ fn canopy(q: vec2<f32>, star: vec3<f32>) -> vec3<f32> {
     return green * (0.2 + max(dot(dome, star), 0.0));
 }
 
+/// Stratus cover at `q`, meters on its deck, 0 to 1: soft sheets drawn out along the face's u.
+fn stratus(q: vec2<f32>) -> f32 {
+    let x = q / STRATUS_SCALE_M;
+    let fbm = 0.55 * value_noise(x + 91.0) + 0.3 * value_noise(2.1 * x + 7.0) + 0.15 * value_noise(4.3 * x + 29.0);
+    return smoothstep(0.5, 0.72, fbm);
+}
+
 /// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
 /// glass. A forest `FOREST_DEPTH_M` down is seen where the eye's ray meets it, so it moves against
 /// the frame as the eye does, through air that scatters the light back blue by day and red as the
 /// star sets over the roof; the longer the ray's path, the more air hides the forest, so a glancing
-/// look sees sky only. Nothing by night.
+/// look sees sky only. A stratus deck `STRATUS_DEPTH_M` down lies over the forest, and shades it
+/// where the star's light passes through it on the way down. Nothing by night.
 fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
     let star = turned(m.to_star);
     let over = dot(star, surface);
@@ -452,9 +464,17 @@ fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32)
     let through = exp(-path / AIR_M);
     let sunlight = m.star_color.rgb * day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
     let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
-    let forest = canopy(p + d.xy * path, star_face) * sunlight / PI;
-
+    let ground = p + d.xy * path;
+    let up_to_deck = (FOREST_DEPTH_M - STRATUS_DEPTH_M) / max(star_face.z, 0.1);
+    let shade = 1.0 - 0.6 * stratus(ground + star_face.xy * up_to_deck);
+    let forest = canopy(ground, star_face) * sunlight * shade / PI;
     var below = forest * through + air * (1.0 - through);
+
+    let deck_path = STRATUS_DEPTH_M / d.z;
+    let cover = STRATUS_ALPHA * stratus(p + d.xy * deck_path);
+    let deck_through = exp(-deck_path / AIR_M);
+    let cloud = sunlight * (0.2 + 0.3 * max(over, 0.0)) * mix(0.8, 1.0, high);
+    below = mix(below, cloud * deck_through + air * (1.0 - deck_through), cover);
     // The frame shades what is just inside it.
     below *= mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
     let planet = m.planet_color.rgb * m.sky.rgb * max(dot(normalize(m.to_planet.xyz), surface), 0.0) * 0.3;

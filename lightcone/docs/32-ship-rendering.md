@@ -187,7 +187,8 @@ and shader rather than a graph in the hull material's palette:
   the eye's ray meets it, so it moves against the frame. Nothing in it glows; it shows only what of
   the star and the planet is let in, through air that scatters it back blue by day and red as the
   star sets over the roof, and that hides the forest the longer the ray's path, so a glancing look
-  sees sky only. Black by night.
+  sees sky only. Sheets of stratus 10 m down lie over the forest at their own parallax and shade
+  it where the star's light passes through them. Black by night.
 
 They depart from the hull material on two points. They map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is
