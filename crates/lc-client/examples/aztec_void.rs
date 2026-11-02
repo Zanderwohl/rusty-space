@@ -13,7 +13,8 @@
 //! | `--fov <deg>` | vertical field of view; 40 by default |
 //! | `--sun <deg>` / `--sun-yaw <deg>` / `--star <x>` | the star's direction, and its power |
 //! | `--planet-at <deg:deg>` / `--planet-deg <deg>` / `--planet <x>` | the planet's elevation and yaw, its angular radius, and its radiance; 0 is no planet |
-//! | `--cell <m>` / `--min-panel <m>` / `--snap <m>` / `--seam <m>` | the staggered grid before splitting, the smallest panel side, the grid panel edges snap to, and the seam's half-width |
+//! | `--cell <m>` / `--min-panel <m>` / `--snap <m>` | the staggered grid before splitting, the smallest panel side, and the grid panel edges snap to |
+//! | `--chamfer <m>` / `--lean <deg>` | each wall of a seam's trench: its width across the face, and how far its normal leans toward the seam; 0.15 and 30 |
 //! | `--tilt <deg>` | how far a panel's normal may tip off the face's; 5 by default |
 //! | `--brown <share>` | of panels a little browner; 0.2 by default |
 //! | `--roughness <x>` / `--metallic <x>` | the finish, shared by every panel |
@@ -52,7 +53,8 @@ struct Args {
     cell: f32,
     min_panel: f32,
     snap: f32,
-    seam: f32,
+    chamfer: f32,
+    lean: f32,
     tilt: f32,
     brown: f32,
     roughness: f32,
@@ -97,7 +99,8 @@ impl Args {
             cell: value("--cell").unwrap_or(24.0),
             min_panel: value("--min-panel").unwrap_or(3.0),
             snap: value("--snap").unwrap_or(0.25),
-            seam: value("--seam").unwrap_or(0.025),
+            chamfer: value("--chamfer").unwrap_or(0.15),
+            lean: value("--lean").unwrap_or(30.0),
             tilt: value("--tilt").unwrap_or(5.0),
             brown: value("--brown").unwrap_or(0.2),
             roughness: value("--roughness").unwrap_or(0.35),
@@ -114,6 +117,7 @@ impl Args {
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 struct AztecUniform {
     grid: Vec4,
+    chamfer: Vec4,
     panel: Vec4,
     to_star: Vec4,
     star_color: Vec4,
@@ -197,7 +201,8 @@ fn spawn(
     let args = &setup.0;
     let material = materials.add(AztecMaterial {
         uniforms: AztecUniform {
-            grid: Vec4::new(args.cell, args.min_panel, args.snap, args.seam),
+            grid: Vec4::new(args.cell, args.min_panel, args.snap, 0.0),
+            chamfer: Vec4::new(args.chamfer, args.lean.to_radians(), 0.0, 0.0),
             panel: Vec4::new(args.tilt.to_radians(), args.brown, args.roughness, args.metallic),
             to_star: direction(args.sun, args.sun_yaw).extend(0.0),
             star_color: Vec3::splat(args.star).extend(0.0),

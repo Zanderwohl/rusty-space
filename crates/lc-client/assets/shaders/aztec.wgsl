@@ -22,8 +22,10 @@ struct VertexOutput {
 }
 
 struct AztecUniform {
-    /// `(cell_m, min_panel_m, snap_m, seam_m)`.
+    /// `(cell_m, min_panel_m, snap_m, 0)`.
     grid: vec4<f32>,
+    /// `(width_m, lean_rad, 0, 0)`: each wall of a seam's trench.
+    chamfer: vec4<f32>,
     /// `(tilt_rad, brown_share, roughness, metallic)`.
     panel: vec4<f32>,
     to_star: vec4<f32>,
@@ -170,6 +172,26 @@ fn planet_seen(r: vec3<f32>, roughness: f32) -> f32 {
     return 1.0 - smoothstep(m.to_planet.w - blur, m.to_planet.w + blur, off);
 }
 
+/// What a surface of normal `n` sends toward the eye `e`.
+fn lit(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, albedo: vec3<f32>, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
+    var radiance = m.ambient.rgb * albedo;
+
+    let star = normalize(m.to_star.xyz);
+    if (dot(star, face_n) > 0.0) {
+        let ndl = max(dot(n, star), 0.0);
+        radiance += m.star_color.rgb * (albedo * ndl / PI + specular(n, star, e, f0, roughness));
+    }
+
+    // A disc of uniform radiance: diffuse by its solid angle, specular by what the mirror sees.
+    let to_planet = normalize(m.to_planet.xyz);
+    let solid = 2.0 * PI * (1.0 - cos(m.to_planet.w));
+    radiance += m.planet_color.rgb * albedo * max(dot(n, to_planet), 0.0) * solid / PI;
+    let ne = max(dot(n, e), 0.0);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
+    radiance += m.planet_color.rgb * fresnel * planet_seen(reflect(-e, n), roughness);
+    return radiance;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let f = face(in.world_normal);
@@ -183,31 +205,25 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let metallic = m.panel.w;
     let albedo = base * (1.0 - metallic);
     let f0 = mix(vec3<f32>(0.04), base, metallic);
-
-    // Seams darken a few centimeters either side of a panel's edge, faded where a pixel spans them.
-    let edge = min(min(p.x - cell.lo.x, cell.hi.x - p.x), min(p.y - cell.lo.y, cell.hi.y - p.y));
-    let pixel = max(length(fwidth(p)), 1.0e-4);
-    let seam_m = m.grid.w;
-    let seam = (1.0 - smoothstep(seam_m - pixel, seam_m + pixel, edge)) * clamp(seam_m / pixel, 0.0, 1.0);
-    let open = 1.0 - 0.7 * seam;
-
     let e = normalize(view.world_position - in.world_position);
-    var radiance = m.ambient.rgb * albedo;
 
-    let star = normalize(m.to_star.xyz);
-    if (dot(star, f.n) > 0.0) {
-        let ndl = max(dot(n, star), 0.0);
-        radiance += m.star_color.rgb * (albedo * ndl / PI + specular(n, star, e, f0, roughness));
-    }
+    // A chamfer slopes down into the seam from each side, so the two walls of the trench face
+    // each other. Its normal leans toward the nearest edge, which miters the corners.
+    let to_edge = vec4<f32>(p.x - cell.lo.x, cell.hi.x - p.x, p.y - cell.lo.y, cell.hi.y - p.y);
+    let edge = min(min(to_edge.x, to_edge.y), min(to_edge.z, to_edge.w));
+    var outward = vec2<f32>(0.0, 1.0);
+    if (edge == to_edge.x) { outward = vec2<f32>(-1.0, 0.0); }
+    else if (edge == to_edge.y) { outward = vec2<f32>(1.0, 0.0); }
+    else if (edge == to_edge.z) { outward = vec2<f32>(0.0, -1.0); }
+    let lean = m.chamfer.y;
+    let wall = normalize(n * cos(lean) + (f.u * outward.x + f.v * outward.y) * sin(lean));
 
-    // A disc of uniform radiance: diffuse by its solid angle, specular by what the mirror sees.
-    let to_planet = normalize(m.to_planet.xyz);
-    let solid = 2.0 * PI * (1.0 - cos(m.to_planet.w));
-    radiance += m.planet_color.rgb * albedo * max(dot(n, to_planet), 0.0) * solid / PI;
-    let r = reflect(-e, n);
-    let ne = max(dot(n, e), 0.0);
-    let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
-    radiance += m.planet_color.rgb * fresnel * planet_seen(r, roughness);
+    // Where a pixel spans the wall, its share of the pixel stands in for it.
+    let pixel = max(length(fwidth(p)), 1.0e-4);
+    let width = m.chamfer.x;
+    let share = (1.0 - smoothstep(width - pixel, width + pixel, edge)) * clamp(width / pixel, 0.0, 1.0);
 
-    return vec4<f32>(radiance * open * m.finish.x, 1.0);
+    let flat_light = lit(n, e, f.n, albedo, f0, roughness);
+    let wall_light = lit(wall, e, f.n, albedo, f0, roughness);
+    return vec4<f32>(mix(flat_light, wall_light, share) * m.finish.x, 1.0);
 }
