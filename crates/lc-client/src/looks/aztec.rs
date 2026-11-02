@@ -1,7 +1,6 @@
 //! Azteced sheet metal: rectangular panels, each its own shade and tipped a few degrees, with
 //! chamfered trenches between, and, if asked, office windows on the sides. Fully procedural; see
-//! `assets/shaders/aztec.wgsl`. A box is a unit cube scaled by its transform, which is how the
-//! shader knows where a face ends.
+//! `assets/shaders/aztec.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -36,6 +35,9 @@ pub struct Aztec {
     pub exposure_stops: f32,
     pub seed: u32,
     pub windows: Option<Windows>,
+    /// The mesh is a unit cube scaled by its transform, which is how the shader knows where a face
+    /// ends, and so keeps windows [`Windows::face_margin_m`] off it. Otherwise there is no margin.
+    pub unit_box: bool,
 }
 
 /// Office windows, on the sides only: decks stack along world Y. A window is placed only where it
@@ -107,6 +109,7 @@ impl Default for Aztec {
             exposure_stops: 0.0,
             seed: 7,
             windows: None,
+            unit_box: false,
         }
     }
 }
@@ -124,7 +127,7 @@ impl Aztec {
                 to_planet: self.to_planet.extend(self.planet_deg.to_radians()),
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
-                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
+                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, if self.unit_box { 1.0 } else { 0.0 }, 0.0),
                 deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, w.face_margin_m)),
                 pane: w.map_or(Vec4::ZERO, |w| Vec4::new(w.width_m, w.height_m, w.f0, w.roughness)),
                 glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),

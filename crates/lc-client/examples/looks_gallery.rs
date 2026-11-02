@@ -124,8 +124,8 @@ fn spawn(
 
     let sprue = Sprue { to_star, star_spin, ..default() };
     let sprue_layers = sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m));
-    let aztec = aztecs.add(Aztec { to_star, star_spin, ..default() }.material());
-    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), ..default() }.material());
+    let aztec = aztecs.add(Aztec { to_star, star_spin, unit_box: true, ..default() }.material());
+    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), unit_box: true, ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);

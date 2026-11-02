@@ -1,9 +1,9 @@
 //! Ship surfaces in look development: no part kind draws one yet.
 //!
-//! Each maps a face in its own frame from the world normal, so a mesh must be an axis-aligned
-//! box. Each turns its star about world Y at its own rate from `globals.time`, never from a
-//! uniform written each frame; a rate whose period divides an hour turns seamlessly through
-//! the hourly wrap of that clock.
+//! Each maps a box face in its own frame, and a curved mesh by the face each point faces most, as
+//! a cube map would; a box is where they look as meant. Each turns its star about world Y at its
+//! own rate from `globals.time`, never from a uniform written each frame; a rate whose period
+//! divides an hour turns seamlessly through the hourly wrap of that clock.
 
 pub mod aztec;
 pub mod sprue;

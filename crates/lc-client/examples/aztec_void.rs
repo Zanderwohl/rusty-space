@@ -170,6 +170,7 @@ fn spawn(
             exposure_stops: args.exposure,
             seed: args.seed,
             windows: args.windows.then(Windows::default),
+            unit_box: true,
         }
         .material(),
     );

@@ -1,7 +1,7 @@
 // Azteced sheet metal: rectangles cut from a staggered grid by random splits, each panel one
 // color and one flat normal tipped a few degrees, so panels catch the light one by one. Fully
-// procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters: the
-// mesh must be axis-aligned boxes. Decks stack along world Y, so on a side v is up, and windows,
+// procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters, and a
+// curved mesh by the face each point faces most. Decks stack along world Y, so on a side v is up, and windows,
 // when there are any, are only on the sides, in rows level at the same heights all round. Look development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
@@ -38,7 +38,8 @@ struct AztecUniform {
     to_planet: vec4<f32>,
     planet_color: vec4<f32>,
     ambient: vec4<f32>,
-    /// `(exposure, seed, 0, 0)`.
+    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is a unit cube scaled by
+    /// its transform, which is how a face's edges are known.
     finish: vec4<f32>,
     /// `(deck_m, pitch_m, sill_m, face_margin_m)`: no windows where `deck_m` is 0.
     deck: vec4<f32>,
@@ -89,8 +90,24 @@ struct Face {
     id: u32,
 }
 
+/// The axis `normal` is nearest, signed: a curved surface is mapped by the box face it faces most,
+/// as a cube map would.
+fn dominant(normal: vec3<f32>) -> vec3<f32> {
+    let a = abs(normal);
+    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
+    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
+    return vec3<f32>(0.0, 0.0, sign(normal.z));
+}
+
+/// The face's u and v laid into the surface's tangent plane, and the surface's own normal: what a
+/// normal in the face's frame is turned by. The face's own frame on a flat face.
+fn tangent_frame(f: Face, surface: vec3<f32>) -> mat3x3<f32> {
+    let t = normalize(f.u - surface * dot(f.u, surface));
+    return mat3x3<f32>(t, cross(surface, t), surface);
+}
+
 fn face(normal: vec3<f32>) -> Face {
-    let n = normalize(normal);
+    let n = dominant(normal);
     let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.9);
     let u = normalize(cross(up, n));
     return Face(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
@@ -243,8 +260,9 @@ fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
 
 /// The window over `p`, if one fits wholly inside its panel clear of the chamfers and inside its
 /// face clear of the margin; its cover is what of the pixel it fills.
-fn window(p: vec2<f32>, cell: Panel, f: Face, face_lo: vec2<f32>, face_hi: vec2<f32>, pixel: vec2<f32>) -> Window {
-    if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9) {
+fn window(p: vec2<f32>, cell: Panel, f: Face, surface: vec3<f32>, face_lo: vec2<f32>, face_hi: vec2<f32>, pixel: vec2<f32>) -> Window {
+    // Glazing leans no more than 30 degrees off the vertical.
+    if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9 || abs(surface.y) > 0.5) {
         return Window(0.0, false, 0.0, 0.0);
     }
     let deck = floor(p.y / m.deck.x);
@@ -252,8 +270,12 @@ fn window(p: vec2<f32>, cell: Panel, f: Face, face_lo: vec2<f32>, face_hi: vec2<
     let half = 0.5 * m.pane.xy;
     let center = vec2<f32>((col + 0.5) * m.deck.y, deck * m.deck.x + m.deck.z + half.y);
     let clear = m.chamfer.x + 0.1;
-    let lo = max(cell.lo + clear, face_lo + m.deck.w);
-    let hi = min(cell.hi - clear, face_hi - m.deck.w);
+    var lo = cell.lo + clear;
+    var hi = cell.hi - clear;
+    if (m.finish.z > 0.5) {
+        lo = max(lo, face_lo + m.deck.w);
+        hi = min(hi, face_hi - m.deck.w);
+    }
     if (any(center - half < lo) || any(center + half > hi)) {
         return Window(0.0, false, 0.0, 0.0);
     }
@@ -329,12 +351,13 @@ fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, inside: vec3<f32>) -> ve
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let f = face(in.world_normal);
+    let surface = normalize(in.world_normal);
+    let f = face(surface);
+    let frame = tangent_frame(f, surface);
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
     let cell = panel(p, f.id);
 
-    let local = tipped(cell.id);
-    let n = normalize(f.u * local.x + f.v * local.y + f.n * local.z);
+    let n = normalize(frame * tipped(cell.id));
     let base = paint(cell.id);
     let roughness = m.panel.z;
     let metallic = m.panel.w;
@@ -351,23 +374,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     else if (edge == to_edge.y) { outward = vec2<f32>(1.0, 0.0); }
     else if (edge == to_edge.z) { outward = vec2<f32>(0.0, -1.0); }
     let lean = m.chamfer.y;
-    let wall = normalize(n * cos(lean) + (f.u * outward.x + f.v * outward.y) * sin(lean));
+    let wall = normalize(n * cos(lean) + (frame[0] * outward.x + frame[1] * outward.y) * sin(lean));
 
     // Where a pixel spans the wall, its share of the pixel stands in for it.
     let pixel = max(length(fwidth(p)), 1.0e-4);
     let width = m.chamfer.x;
     let share = (1.0 - smoothstep(width - pixel, width + pixel, edge)) * clamp(width / pixel, 0.0, 1.0);
 
-    let flat_light = lit(n, e, f.n, albedo, f0, roughness);
-    let wall_light = lit(wall, e, f.n, albedo, f0, roughness);
+    let flat_light = lit(n, e, surface, albedo, f0, roughness);
+    let wall_light = lit(wall, e, surface, albedo, f0, roughness);
     let plate = mix(flat_light, wall_light, share);
     let box_at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
     let box_half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
-    let pane = window(p, cell, f, box_at - box_half, box_at + box_half, max(fwidth(p), vec2<f32>(1.0e-4)));
+    let pane = window(p, cell, f, surface, box_at - box_half, box_at + box_half, max(fwidth(p), vec2<f32>(1.0e-4)));
     var radiance = plate;
     if (pane.cover > 0.0) {
         let lights = select(m.ambient.rgb * 0.2, m.glow.rgb, pane.lit);
-        radiance = mix(plate, glass(n, e, f.n, lights * room(p, e, f, pane)), pane.cover);
+        radiance = mix(plate, glass(n, e, surface, lights * room(p, e, f, pane)), pane.cover);
     }
     return vec4<f32>(radiance * m.finish.x, 1.0);
 }

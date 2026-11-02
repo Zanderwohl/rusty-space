@@ -1,7 +1,8 @@
 // A layered sprue: an opaque base and two cutout layers of pipe, flat and normal-mapped, standing
 // off one another. Lamps are baked into `light`; only the star is lit here. Each face is mapped in
-// its own frame (u, v, n), meters, so a face's three layers share coordinates: the mesh must be
-// axis-aligned boxes. Look development: crates/lc-client/src/looks/sprue.
+// its own frame (u, v, n), meters, so a face's three layers share coordinates; a curved mesh is
+// mapped by the face each point faces most, and its layers are the shape grown by each height.
+// Look development: crates/lc-client/src/looks/sprue.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -66,8 +67,24 @@ struct Face {
     id: f32,
 }
 
+/// The axis `normal` is nearest, signed: a curved surface is mapped by the box face it faces most,
+/// as a cube map would.
+fn dominant(normal: vec3<f32>) -> vec3<f32> {
+    let a = abs(normal);
+    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
+    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
+    return vec3<f32>(0.0, 0.0, sign(normal.z));
+}
+
+/// The face's u and v laid into the surface's tangent plane, and the surface's own normal: what a
+/// normal in the face's frame is turned by. The face's own frame on a flat face.
+fn tangent_frame(f: Face, surface: vec3<f32>) -> mat3x3<f32> {
+    let t = normalize(f.u - surface * dot(f.u, surface));
+    return mat3x3<f32>(t, cross(surface, t), surface);
+}
+
 fn face(normal: vec3<f32>) -> Face {
-    let n = normalize(normal);
+    let n = dominant(normal);
     let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.z) > 0.9);
     let u = normalize(cross(up, n));
     return Face(u, cross(n, u), n, dot(round(n), vec3<f32>(1.0, 3.0, 9.0)));
@@ -120,7 +137,8 @@ fn starlit(p: vec2<f32>, z: f32, toward: vec3<f32>, id: f32) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let f = face(in.world_normal);
+    let surface = normalize(in.world_normal);
+    let f = face(surface);
     let k = u32(m.layer.x + 0.5);
     // Each face starts its tile somewhere else, so neighbors do not repeat edge to edge.
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v)) + hash2(f.id) * m.layer.y;
@@ -137,7 +155,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let tn = vec2<f32>(texel.r, texel.g) * 2.0 - 1.0;
-    let n = normalize(f.u * tn.x + f.v * tn.y + f.n * sqrt(max(1.0 - dot(tn, tn), 0.0)));
+    let n = normalize(tangent_frame(f, surface) * vec3<f32>(tn, sqrt(max(1.0 - dot(tn, tn), 0.0))));
     let albedo = texel.b;
 
     var radiance = m.ambient.rgb * albedo + baked * m.lamp_color.rgb;
