@@ -173,8 +173,11 @@ fn spawn(
         }
         .material(),
     );
-    let edge = args.size;
-    commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(material)));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(material),
+        Transform::from_scale(Vec3::splat(args.size)),
+    ));
 
     commands.spawn((
         Camera3d::default(),

@@ -20,6 +20,8 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
+    @location(2) box_center: vec3<f32>,
+    @location(3) box_half: vec3<f32>,
 }
 
 struct AztecUniform {
@@ -38,12 +40,15 @@ struct AztecUniform {
     ambient: vec4<f32>,
     /// `(exposure, seed, 0, 0)`.
     finish: vec4<f32>,
-    /// `(deck_m, pitch_m, sill_m, 0)`: no windows where `deck_m` is 0.
+    /// `(deck_m, pitch_m, sill_m, face_margin_m)`: no windows where `deck_m` is 0.
     deck: vec4<f32>,
     /// `(width_m, height_m, f0, roughness)`.
     pane: vec4<f32>,
     /// A lit window's radiance, and the share of its row's runs lit in `w`.
     glow: vec4<f32>,
+    /// `(glow_share, glass, 0, 0)`: on a face the star lights, what of a lit window's glow is
+    /// left, and the star's share every pane shows. A cheat: daylight outshines the rooms behind.
+    day: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
@@ -66,6 +71,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
+    // The mesh is a unit cube, so the transform carries the box.
+    out.box_center = world_from_local[3].xyz;
+    out.box_half = 0.5 * vec3<f32>(length(world_from_local[0].xyz), length(world_from_local[1].xyz), length(world_from_local[2].xyz));
     return out;
 }
 
@@ -225,9 +233,9 @@ fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
     return select((own < 0.06), (own > 0.12), run);
 }
 
-/// The window over `p`, if one fits wholly inside its panel clear of the chamfers; its cover is
-/// what of the pixel it fills.
-fn window(p: vec2<f32>, cell: Panel, f: Face, pixel: vec2<f32>) -> Window {
+/// The window over `p`, if one fits wholly inside its panel clear of the chamfers and inside its
+/// face clear of the margin; its cover is what of the pixel it fills.
+fn window(p: vec2<f32>, cell: Panel, f: Face, face_lo: vec2<f32>, face_hi: vec2<f32>, pixel: vec2<f32>) -> Window {
     if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9) {
         return Window(0.0, false);
     }
@@ -236,7 +244,9 @@ fn window(p: vec2<f32>, cell: Panel, f: Face, pixel: vec2<f32>) -> Window {
     let half = 0.5 * m.pane.xy;
     let center = vec2<f32>((col + 0.5) * m.deck.y, deck * m.deck.x + m.deck.z + half.y);
     let clear = m.chamfer.x + 0.1;
-    if (any(center - half < cell.lo + clear) || any(center + half > cell.hi - clear)) {
+    let lo = max(cell.lo + clear, face_lo + m.deck.w);
+    let hi = min(cell.hi - clear, face_hi - m.deck.w);
+    if (any(center - half < lo) || any(center + half > hi)) {
         return Window(0.0, false);
     }
     let inside = half - abs(p - center);
@@ -250,8 +260,10 @@ fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, lit: bool) -> vec3<f32> 
     let roughness = m.pane.w;
     let ne = max(dot(n, e), 0.0);
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
-    var radiance = (1.0 - fresnel) * select(m.ambient.rgb * 0.2, m.glow.rgb, lit);
     let star = turned(m.to_star);
+    let daylight = smoothstep(-0.05, 0.25, dot(star, face_n));
+    let glow = m.glow.rgb * mix(1.0, m.day.x, daylight);
+    var radiance = (1.0 - fresnel) * select(m.ambient.rgb * 0.2, glow, lit) + m.star_color.rgb * m.day.y * daylight;
     if (dot(star, face_n) > 0.0) {
         radiance += m.star_color.rgb * specular(n, star, e, f0, roughness);
     }
@@ -293,7 +305,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let flat_light = lit(n, e, f.n, albedo, f0, roughness);
     let wall_light = lit(wall, e, f.n, albedo, f0, roughness);
     let plate = mix(flat_light, wall_light, share);
-    let pane = window(p, cell, f, max(fwidth(p), vec2<f32>(1.0e-4)));
+    let box_at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
+    let box_half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
+    let pane = window(p, cell, f, box_at - box_half, box_at + box_half, max(fwidth(p), vec2<f32>(1.0e-4)));
     var radiance = plate;
     if (pane.cover > 0.0) {
         radiance = mix(plate, glass(n, e, f.n, pane.lit), pane.cover);

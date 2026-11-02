@@ -153,9 +153,9 @@ fn spawn(
                 }
             } else {
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(size, size, size))),
+                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
                     MeshMaterial3d(if look == 1 { aztec.clone() } else { offices.clone() }),
-                    Transform::from_translation(center),
+                    Transform::from_translation(center).with_scale(Vec3::splat(size)),
                 ));
             }
             stations.push((center, size));

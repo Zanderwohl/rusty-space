@@ -1,6 +1,7 @@
 //! Azteced sheet metal: rectangular panels, each its own shade and tipped a few degrees, with
 //! chamfered trenches between, and, if asked, office windows on the sides. Fully procedural; see
-//! `assets/shaders/aztec.wgsl`.
+//! `assets/shaders/aztec.wgsl`. A box is a unit cube scaled by its transform, which is how the
+//! shader knows where a face ends.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -47,6 +48,8 @@ pub struct Windows {
     pub sill_m: f32,
     pub width_m: f32,
     pub height_m: f32,
+    /// No window nearer a face's edge than this.
+    pub face_margin_m: f32,
     /// Of a row's runs of windows, the share lit.
     pub lit: f32,
     /// A lit window's radiance, linear.
@@ -54,20 +57,27 @@ pub struct Windows {
     /// The coated glass's reflectance face-on, and its roughness.
     pub f0: f32,
     pub roughness: f32,
+    /// On a face the star lights, what of a lit window's glow is left, and the star's share
+    /// every pane shows, so lit and dark rooms are hard to tell apart by day.
+    pub day_glow: f32,
+    pub day_glass: f32,
 }
 
 impl Default for Windows {
     fn default() -> Self {
         Self {
-            deck_m: 3.6,
-            pitch_m: 1.6,
+            deck_m: 3.0,
+            pitch_m: 2.0,
             sill_m: 0.9,
-            width_m: 1.2,
-            height_m: 1.6,
+            width_m: 1.6,
+            height_m: 1.0,
+            face_margin_m: 1.0,
             lit: 0.35,
             glow: Vec3::new(1.0, 0.82, 0.58) * 0.6,
             f0: 0.5,
             roughness: 0.12,
+            day_glow: 0.05,
+            day_glass: 0.02,
         }
     }
 }
@@ -111,9 +121,10 @@ impl Aztec {
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
                 finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
-                deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, 0.0)),
+                deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, w.face_margin_m)),
                 pane: w.map_or(Vec4::ZERO, |w| Vec4::new(w.width_m, w.height_m, w.f0, w.roughness)),
                 glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),
+                day: w.map_or(Vec4::ZERO, |w| Vec4::new(w.day_glow, w.day_glass, 0.0, 0.0)),
             },
         }
     }
@@ -133,6 +144,7 @@ pub struct AztecUniform {
     deck: Vec4,
     pane: Vec4,
     glow: Vec4,
+    day: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
