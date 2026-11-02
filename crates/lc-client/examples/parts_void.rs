@@ -11,7 +11,7 @@
 //! | `--volume <m3>` | every piece's volume, so they are alike in size; 60 000 by default |
 //! | `--cells <n>` | the mesher's grid across each piece; 128 by default |
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
-//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat` or `sprue` |
+//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian` or `sprue` |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--frames <n>` | frames after every mesh lands |
 
@@ -33,6 +33,7 @@ use lc_client::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, Hull
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::LooksPlugin;
+use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::outline::RoofOutline;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape as Target2d, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -61,7 +62,7 @@ const KINDS: [Kind; 8] = [
     Kind::Bay,
 ];
 
-const LOOKS: [&str; 4] = ["aztec", "offices", "habitat", "sprue"];
+const LOOKS: [&str; 5] = ["aztec", "offices", "habitat", "obsidian", "sprue"];
 
 /// Each primitive in a proportion that shows it, its axis standing up.
 const PRIMITIVES: [Primitive; 6] = [
@@ -253,6 +254,7 @@ fn spawn(
     mut images: ResMut<Assets<Image>>,
     mut hulls: ResMut<Assets<HullMaterial>>,
     mut aztecs: ResMut<Assets<AztecMaterial>>,
+    mut obsidians: ResMut<Assets<ObsidianMaterial>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
     mut exit: MessageWriter<AppExit>,
     mut waited: Local<u32>,
@@ -305,6 +307,7 @@ fn spawn(
     let aztec = aztecs.add(Aztec { to_star, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());
     let habitat = aztecs.add(Aztec { to_star, ..Aztec::habitat() }.material());
+    let obsidian = obsidians.add(Obsidian { to_star, ..default() }.material());
     let sprue_layers = if args.columns.iter().any(|c| matches!(c, Column::Look("sprue"))) {
         let sprue = Sprue { to_star, ..default() };
         Some(sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m)))
@@ -337,6 +340,9 @@ fn spawn(
                         let lifted = grown(shape, Sprue::lift(k) as f64);
                         commands.spawn((form(Kind::Storage, lifted), MeshMaterial3d(layer.clone()), transform));
                     }
+                }
+                Column::Look("obsidian") => {
+                    commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(obsidian.clone()), transform));
                 }
                 Column::Look(look) => {
                     let material = match look {

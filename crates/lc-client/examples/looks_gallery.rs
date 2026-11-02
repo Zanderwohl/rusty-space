@@ -29,6 +29,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
+use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::outline::RoofOutline;
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
@@ -121,6 +122,7 @@ fn spawn(
     mut meshes: ResMut<Assets<Mesh>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
     mut aztecs: ResMut<Assets<AztecMaterial>>,
+    mut obsidians: ResMut<Assets<ObsidianMaterial>>,
 ) {
     let args = &setup.0;
     let to_star = direction(25.0, -60.0);
@@ -132,6 +134,7 @@ fn spawn(
     let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), unit_box: true, ..default() }.material());
     let mut habitat = |unit_box| aztecs.add(Aztec { to_star, star_spin, unit_box, ..Aztec::habitat() }.material());
     let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
+    let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
@@ -143,7 +146,7 @@ fn spawn(
         }
         columns.push(x);
     }
-    let rows = [0.0, 1.0, 2.0, 3.0].map(|row| row * 3.0 * STANDOFF * largest);
+    let rows = [0.0, 1.0, 2.0, 3.0, 4.0].map(|row| row * 3.0 * STANDOFF * largest);
     let mut stations = Vec::new();
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
@@ -157,6 +160,12 @@ fn spawn(
                         Transform::from_translation(center),
                     ));
                 }
+            } else if look == 4 {
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(size, size, size))),
+                    MeshMaterial3d(obsidian.clone()),
+                    Transform::from_translation(center),
+                ));
             } else {
                 commands.spawn((
                     Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
@@ -169,7 +178,7 @@ fn spawn(
     }
     // Past the last column, in the middle of the rows, its long axis along x.
     let length = args.ovoid;
-    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[3]);
+    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[4]);
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
         MeshMaterial3d(habitat_ovoid),
@@ -184,7 +193,7 @@ fn spawn(
         Projection::Perspective(PerspectiveProjection {
             fov: 40f32.to_radians(),
             near: 0.1,
-            far: 10.0 * (ovoid_at.x + rows[3] + length),
+            far: 10.0 * (ovoid_at.x + rows[4] + length),
             ..default()
         }),
         Hdr,

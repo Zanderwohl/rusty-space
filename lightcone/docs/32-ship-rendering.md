@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and four looks no kind wears yet are in development (§Looks in development). Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and five looks no kind wears yet are in development (§Looks in development). Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -171,7 +171,7 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 
 ### Looks in development
 
-`lc_client::looks` holds four ship surfaces that no part kind wears yet, each its own material
+`lc_client::looks` holds five ship surfaces that no part kind wears yet, each its own material
 and shader rather than a graph in the hull material's palette:
 
 - **The sprue** (`sprue.wgsl`): an opaque plated base under two cutout layers of mazed pipe, 0.9 m
@@ -194,7 +194,15 @@ and shader rather than a graph in the hull material's palette:
   path, so a glancing look sees sky only. Sheets of stratus part way down lie over the forest at
   their own parallax and shade it where the star's light passes through them. Black by night.
 
-They depart from the hull material on two points. They map by the **box face a point faces most**,
+- **Obsidian** (`obsidian.wgsl`), meant for the Mind: knapped volcanic glass, blue-gray-black and
+  almost all reflection, cut by flake scars 5 m and a third of that across. Each scar is a shallow
+  concave dish with its own tilt and faint ripple rings, so neighbors meet in ridges and three in a
+  peak, and a facet flashes whole. The scars are cells of a 3D Voronoi on world position, so any
+  shape takes them without a seam, and they give way to a rougher sheen where they shrink under a
+  few pixels. The hull material draws only baked albedo under Lambert, which cannot show glass, so
+  the Mind's graph stays until a look can be given to a kind.
+
+They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is
 where they look as meant. And they map from **world position**, not the ship's frame, with decks
 stacked along world Y: on a craft that moves or turns, the panels and decks would swim.
