@@ -140,6 +140,9 @@ pub struct HullUniform {
     /// [`Self::glass_finish`]'s color under flake scars, each facet lit at its own lean, with the
     /// star's highlight and a faint sky mirrored in it.
     pub glassy: u32,
+    /// Which regions are azteced plate, one bit a region: their tile gives way to panels cut by
+    /// chamfered seams, each its own shade and lit at its own tilt.
+    pub plated: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -154,6 +157,14 @@ pub struct HullUniform {
     pub glass: Vec4,
     /// A glassy region's color, linear, and its roughness.
     pub glass_finish: Vec4,
+    /// A plated region's panels, in the ship's frame with its z up: `(cell_m, min_panel_m,
+    /// snap_m, 0)`, the grid before splitting, the smallest side, and the grid edges snap to.
+    pub plates: Vec4,
+    /// `(tilt_rad, brown, chamfer_m, lean_rad)`: how far a panel tips, the share a little browner,
+    /// and each seam wall's width and lean.
+    pub plate_finish: Vec4,
+    /// `(roughness, metallic, paint, 0)`, the last scaling every panel's shade.
+    pub plate_metal: Vec4,
 }
 
 impl Default for HullUniform {
@@ -173,11 +184,15 @@ impl Default for HullUniform {
             bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
             bolted: 0,
             glassy: 0,
+            plated: 0,
             emitted: [Vec4::ZERO; REGIONS],
             open: UVec4::ZERO,
             faces: [Vec4::ZERO; FACES],
             glass: Vec4::new(5.0, 0.0, 0.0, 0.0),
             glass_finish: Vec4::ZERO,
+            plates: Vec4::new(24.0, 3.0, 0.25, 0.0),
+            plate_finish: Vec4::ZERO,
+            plate_metal: Vec4::ZERO,
         }
     }
 }

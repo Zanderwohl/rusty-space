@@ -11,6 +11,10 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy_mesh::MeshVertexBufferLayoutRef;
 
+const HULL_PAINT: f32 = 0.55;
+const HULL_METALLIC: f32 = 0.3;
+const HULL_ROUGHNESS: f32 = 0.45;
+
 pub struct Aztec {
     /// The staggered grid before splitting, the smallest panel side, and the grid panel edges
     /// snap to, meters.
@@ -147,6 +151,18 @@ impl Default for Aztec {
 }
 
 impl Aztec {
+    /// The hull material's `(plates, plate_finish, plate_metal)` for a region of this plate. The
+    /// hull's exposure is a log curve placed for its own textures, darker than this look's paint and
+    /// clipping sooner than its tone map, so the paint is scaled and the metal dulled to sit among
+    /// them.
+    pub fn hull_plates(&self) -> (Vec4, Vec4, Vec4) {
+        (
+            Vec4::new(self.cell_m, self.min_panel_m, self.snap_m, 0.0),
+            Vec4::new(self.tilt_deg.to_radians(), self.brown, self.chamfer_m, self.lean_deg.to_radians()),
+            Vec4::new(HULL_ROUGHNESS, HULL_METALLIC, HULL_PAINT, 0.0),
+        )
+    }
+
     /// Offices on the sides under a roof of glass hexes.
     pub fn habitat() -> Self {
         Self { windows: Some(Windows::default()), roof: Some(Roof::default()), ..default() }

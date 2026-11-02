@@ -84,11 +84,6 @@ impl Obsidian {
     }
 }
 
-/// The Mind's glass, as the hull material's `(glass, glass_finish)`.
-pub fn mind_glass() -> (Vec4, Vec4) {
-    Obsidian::default().hull_glass()
-}
-
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct ObsidianUniform {
     scar: Vec4,

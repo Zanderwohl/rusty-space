@@ -7,7 +7,8 @@
     mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 }
-#import "shaders/scars.wgsl"::{glass_specular, knapped, pcg, unit}
+#import "shaders/hash.wgsl"::{pcg, unit}
+#import "shaders/scars.wgsl"::{glass_specular, knapped}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

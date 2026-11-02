@@ -35,7 +35,6 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, SparMode};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
-use crate::looks::obsidian::mind_glass;
 use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
@@ -171,21 +170,18 @@ pub(crate) fn finished(
     for (slot, face) in lit_faces.iter_mut().zip(faces.map_or(&[][..], |lit| &lit.faces)) {
         *slot = crate::lit_faces::radiance(session, face.temperature_k).as_vec3().extend(0.0);
     }
-    HullUniform {
+    crate::looks::kinds::wear(HullUniform {
         to_star: base.to_star.truncate().extend(crate::hull::HULL_NIGHT),
         reflected: base.reflected / PAINT as f32,
         glow: base.emitted,
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
         bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
-        glassy: 1 << region(Kind::Mind),
-        glass: mind_glass().0,
-        glass_finish: mind_glass().1,
         emitted,
         open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
         faces: lit_faces,
         ..default()
-    }
+    })
 }
 
 /// The roll each form presents its broadside at, from the same grid the server measures, worked

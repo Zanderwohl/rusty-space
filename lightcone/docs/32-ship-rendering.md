@@ -135,7 +135,7 @@ client warns when it meshes one.
 
 | kind | look |
 |---|---|
-| storage | dark and smooth, faint seams. The mass of the ship |
+| storage | azteced plate: panels cut from a staggered grid by snapped splits, each its own gray or a little browner and tipped a few degrees, with chamfered seams. The mass of the ship. As built, a `plated` region of the hull material, cut in the ship's frame with its z up by `panels.wgsl`, which the aztec look's settings feed through `looks::kinds::wear`, its paint darkened and its metal dulled to sit among the hull's own textures under the hull's exposure |
 | drone | hangar doors in rows, docks lit when drones are home |
 | living | window bands. Lit on the night side, where they are the brightest thing on the hull |
 | engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
@@ -200,7 +200,8 @@ and shader rather than a graph in the hull material's palette:
   peak, and a facet flashes whole. The scars are cells of a 3D Voronoi on world position, so any
   shape takes them without a seam, and they give way to a rougher sheen where they shrink under a
   few pixels. The Mind wears it, through the hull material's `glassy` regions (§Materials by kind):
-  the first look given to a kind.
+  the first look given to a kind. Storage wears the aztec plate the same way, and
+  `looks::kinds::wear` is where each kind's look is decided.
 
 They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is

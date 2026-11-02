@@ -6,6 +6,7 @@
 //! divides an hour turns seamlessly through the hourly wrap of that clock.
 
 pub mod aztec;
+pub mod kinds;
 pub mod obsidian;
 pub mod outline;
 pub mod sprue;

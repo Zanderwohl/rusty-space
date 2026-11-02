@@ -2,15 +2,7 @@
 // shallow concave dish with faint ripple rings and a tilt of its own, so two meet in a ridge and
 // three in a peak. Shared by obsidian.wgsl and hull.wgsl, which take positions in their own frames.
 
-fn pcg(x: u32) -> u32 {
-    let state = x * 747796405u + 2891336453u;
-    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-fn unit(h: u32) -> f32 {
-    return f32(h >> 8u) / 16777216.0;
-}
+#import "shaders/hash.wgsl"::{pcg, unit}
 
 struct Scar {
     /// From the point to the scar's middle, meters.

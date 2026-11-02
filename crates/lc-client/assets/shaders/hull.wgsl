@@ -13,6 +13,7 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
+#import "shaders/panels.wgsl"::{plate}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -86,6 +87,8 @@ struct HullUniform {
     bolted: u32,
     /// One bit a region: knapped glass.
     glassy: u32,
+    /// One bit a region: azteced plate.
+    plated: u32,
     emitted: array<vec4<f32>, REGIONS>,
     /// `(region, flank, on, 0)`.
     open: vec4<u32>,
@@ -94,6 +97,12 @@ struct HullUniform {
     glass: vec4<f32>,
     /// Color, and roughness in `w`.
     glass_finish: vec4<f32>,
+    /// `(cell_m, min_panel_m, snap_m, 0)`.
+    plates: vec4<f32>,
+    /// `(tilt_rad, brown, chamfer_m, lean_rad)`.
+    plate_finish: vec4<f32>,
+    /// `(roughness, metallic, paint, 0)`.
+    plate_metal: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
@@ -105,6 +114,8 @@ struct HullUniform {
 const GLASS_F0: f32 = 0.04;
 /// The sky glass mirrors, in reflected's units: dim, but enough that a facet shows off the highlight.
 const GLASS_SKY: f32 = 0.25;
+/// The same for plate metal.
+const PLATE_SKY: f32 = 0.1;
 
 /// em_render::hull_material::ALL_PLATED.
 const ALL_PLATED: f32 = 1.0e30;
@@ -385,6 +396,45 @@ fn glass_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
     return material.reflected.rgb * light;
 }
 
+fn panelled(region: u32) -> bool {
+    return ((material.plated >> region) & 1u) != 0u;
+}
+
+/// The ship's up, along which a side's panels stand and, where there are any, decks stack.
+const SHIP_UP: vec3<f32> = vec3<f32>(0.0, 0.0, 1.0);
+
+/// What a plated region sends toward the eye, in reflected's units: each panel's own shade lit at
+/// its own tilt, a seam's walls at theirs, the star's highlight off the metal, and a faint sky.
+fn plate_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
+    let surface = normalize(in.ship_normal);
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    let k = plate(in.ship_position, surface, SHIP_UP, material.plates, material.plate_finish, pixel, 0u);
+    let lit_side = dot(star, surface) > 0.0;
+    let roughness = material.plate_metal.x;
+    let metallic = material.plate_metal.y;
+    let color = k.color * material.plate_metal.z;
+    let albedo = color * (1.0 - metallic);
+    let luma = max(dot(color, LUMA), 1.0e-3);
+    let f0 = mix(0.04, luma, metallic);
+    let tint = mix(vec3<f32>(1.0), color / luma, metallic);
+    var light = vec3<f32>(0.0);
+    for (var i = 0; i < 2; i++) {
+        let n = select(k.normal, k.wall, i == 1);
+        let facing = select(0.0, max(dot(n, star), 0.0), lit_side);
+        let ne = max(dot(n, e), 0.0);
+        let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
+        let r = reflect(-e, n);
+        var here = albedo * max(facing, material.to_star.w);
+        here += tint * PLATE_SKY * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0));
+        if (lit_side) {
+            here += tint * 3.14159265 * glass_specular(n, star, e, roughness, f0);
+        }
+        light += here * select(1.0 - k.wall_share, k.wall_share, i == 1);
+    }
+    return material.reflected.rgb * light;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pair = heaviest(in);
@@ -414,6 +464,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // Glass is lit at its facets' lean in glass_light, not as albedo at the surface's.
         albedo *= 1.0 - glass;
         emitted += glass * glass_light(in, pixel);
+    }
+    let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
+    if (plate_share > 0.0) {
+        albedo *= 1.0 - plate_share;
+        emitted += plate_share * plate_light(in, pixel);
     }
     if (material.reveal.w >= ALL_PLATED) {
         return shade(albedo, emitted, in.world_normal);
