@@ -8,13 +8,16 @@
 //!
 //! | flag | for |
 //! |---|---|
-//! | `--sizes <m:m:...>` | the boxes' edges, each look wearing every one; 24:72:216 by default |
+//! | `--sizes <m:m:...>` | the boxes' edges, each look wearing every one; 50:100:200 by default |
 //! | `--dwell <s>` / `--glide <s>` | seconds circling a box, and gliding to the next; 40 and 8. The camera turns once a box |
 //! | `--star-period <s>` | seconds for the star to turn once about the vertical; 120 by default, and best a divisor of an hour, when the shader's clock wraps. 0 holds it still |
 //! | `--speed <x>` | the camera's clock against the wall's |
 //! | `--time <s>` | where on the camera's clock to start. The star keeps its own |
 //! | `--fullscreen` | borderless, on the current monitor |
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
+//!
+//! The right and left arrows cut to the next box or the one before, the other look at the same
+//! size or the next size's first, keeping the camera's angle and the loop's clock.
 
 use std::f32::consts::TAU;
 
@@ -50,7 +53,7 @@ impl Args {
         let value = |flag: &str| {
             raw(flag).map(|v| v.parse::<f32>().unwrap_or_else(|_| panic!("{flag} takes a number")))
         };
-        let sizes = raw("--sizes").map_or(vec![24.0, 72.0, 216.0], |t| {
+        let sizes = raw("--sizes").map_or(vec![50.0, 100.0, 200.0], |t| {
             t.split(':').map(|c| c.parse().expect("--sizes is meters joined by :")).collect()
         });
         Self {
@@ -73,6 +76,10 @@ struct Setup(Args);
 /// The boxes the camera visits, in order.
 #[derive(Resource)]
 struct Stations(Vec<(Vec3, f32)>);
+
+/// Boxes the arrows have moved the loop on by.
+#[derive(Resource, Default)]
+struct Skipped(i64);
 
 fn main() {
     let args = Args::parse();
@@ -97,8 +104,9 @@ fn main() {
         .add_plugins(LooksPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Setup(args))
+        .init_resource::<Skipped>()
         .add_systems(Startup, spawn)
-        .add_systems(Update, (orbit, photograph).chain())
+        .add_systems(Update, (skip, orbit, photograph).chain())
         .run();
 }
 
@@ -168,9 +176,19 @@ fn spawn(
     ));
 }
 
+fn skip(keys: Res<ButtonInput<KeyCode>>, mut skipped: ResMut<Skipped>) {
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        skipped.0 += 1;
+    }
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        skipped.0 -= 1;
+    }
+}
+
 fn orbit(
     setup: Res<Setup>,
     stations: Res<Stations>,
+    skipped: Res<Skipped>,
     time: Res<Time>,
     mut cameras: Query<&mut Transform, With<Camera3d>>,
 ) {
@@ -179,7 +197,7 @@ fn orbit(
     let t = args.time + time.elapsed_secs() * args.speed;
     let segment = args.dwell + args.glide;
     let visit = (t / segment).floor();
-    let i = visit as usize % stations.len();
+    let i = (visit as i64 + skipped.0).rem_euclid(stations.len() as i64) as usize;
     let next = (i + 1) % stations.len();
     let into_glide = ((t - visit * segment - args.dwell) / args.glide.max(1.0e-3)).clamp(0.0, 1.0);
     let blend = into_glide * into_glide * (3.0 - 2.0 * into_glide);
