@@ -428,14 +428,15 @@ A design choice, free to change, and no test pins it:
 - **storage**, a slab at 9 : 4 : 1 enclosing the Mind: 2.36 × 10⁶ m³, 363 × 161 × 40 m
 - **living**, an ovoid at 9 : 4 : 1 lying fore and aft along the back, sunk part way in, which the
   hull draws as a habitat: 3.93 × 10⁵ m³, 248 × 110 × 28 m
-- **engines**, four cylinders of 1.84 × 10⁵ m³ each, 54 m across and 81 m long: a pair side by side on
-  the stern firing aft, which alone pull 1 g with the storage full, and a matching pair on the bow
-  firing fore
-- **drones** and **data**, capsules lying fore and aft under the keel, drones aft of amidships and
-  data forward
+- **engines**, four cylinders of 1.85 × 10⁵ m³ each, 35 m across and 189 m long, strapped two to a
+  side along the slab's long low faces, sunk part way in: their feet meet amidships and their open
+  ends stand just past the slab's, the stern one firing aft and the bow one fore. The stern pair
+  alone pulls 1 g with the storage full, 3.1 g empty
+- **drones** and **data**, boxes on the stern and the bow, twice the slab's height and narrow enough
+  to keep out of the engines' cones
 
 It holds 19's starting modules but for the engines, 1.9 slots in all against 19's five. Placed, it is
-about 509 m across.
+about 520 m long.
 
 ### The reference form
 

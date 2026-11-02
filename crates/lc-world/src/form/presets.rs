@@ -59,7 +59,7 @@ fn lying(normal: DVec3, along: DVec3) -> DVec2 {
 
 /// Each of the starting form's four engines, in slots: what has the stern pair alone pull about 1 g
 /// with the storage full.
-const STARTING_ENGINE_SLOTS: f64 = 0.469;
+const STARTING_ENGINE_SLOTS: f64 = 0.471;
 
 /// Of a keel pod's radius, how far its top sinks into the hull above it.
 const KEEL_EMBED: f64 = 0.35;
@@ -67,11 +67,17 @@ const KEEL_EMBED: f64 = 0.35;
 /// Of the habitat's height, how much sinks into the storage's back.
 const DORSAL_EMBED: f64 = 0.6;
 
-/// Between two engines side by side, as a share of a radius.
-const ENGINE_GAP: f64 = 0.15;
+/// Of the slab's half length, how far an engine's open end stands past the slab's end, and the gap
+/// between the feet of the two on a side.
+const ENGINE_OVERHANG: f64 = 0.05;
+const ENGINE_GAP: f64 = 0.02;
 
-/// Of an engine's radius, how far its inner end sits inside the hull.
+/// Of an engine's radius, how much is sunk into the side it is strapped to.
 const ENGINE_EMBED: f64 = 0.3;
+
+/// Of the slab's width, how wide the boxes on its ends are, and in reaches how far each sinks in.
+const END_WIDTH: f64 = 0.56;
+const END_EMBED: f64 = 0.05;
 
 impl Form {
     /// 19's starting ship as 29 first laid it out, holding [`STARTING`]'s modules: an ellipsoid of
@@ -112,7 +118,8 @@ impl Form {
     }
 
     /// The starting form: a 9:4:1 slab of storage about the Mind with a 9:4:1 habitat ovoid on its
-    /// back, a pair of cylinder engines at each end, and the drones and data under the keel. A
+    /// back, two cylinder engines strapped along each side, and the drones and data as boxes on its
+    /// stern and bow. A
     /// design choice, not 19's anchor: it holds [`STARTING`]'s modules but for the engines, four
     /// of [`STARTING_ENGINE_SLOTS`] each, the bow pair firing fore. The frame is x the nose, z up.
     pub fn starting() -> Form {
@@ -121,8 +128,6 @@ impl Form {
         let engine_m3 = STARTING_ENGINE_SLOTS * SLOT_M3;
         let slab = Primitive::Slab { edges: DVec3::new(9.0, 4.0, 1.0), corner: 0.1 };
         let ovoid = Primitive::Ellipsoid { axes: DVec3::new(9.0, 4.0, 1.0) };
-        let cylinder = Primitive::Cylinder { length: 3.0 };
-        let pod = Primitive::Capsule { length: 2.0 };
         let Shape::Slab { edges, .. } = slab.at(slab.scale(v.storage)) else { unreachable!() };
         let half = edges / 2.0;
 
@@ -136,32 +141,39 @@ impl Form {
         let mut habitat = blended(hang(4, Kind::Living, ovoid, v.living, PartId(1), dorsal), 0.2);
         habitat.placement.as_mut().unwrap().tilt = lying(DVec3::Z, DVec3::X);
 
-        // Engines side by side on each end, clear of one another, their inner ends just in the hull.
-        let Shape::Cylinder { radius, length } = cylinder.at(cylinder.scale(engine_m3)) else { unreachable!() };
-        let beside = radius * (1.0 + ENGINE_GAP);
-        let engine = |id, end: f64, side: f64| {
-            hang(id, Kind::Engine, cylinder, engine_m3, PartId(1), on(DVec3::new(end * half.x, side * beside, 0.0), -ENGINE_EMBED * radius / (length / 2.0)))
+        // Strapped along each long, low side: two engines end to end, their feet meeting amidships and
+        // their open ends standing just past the slab's, one firing aft and one fore. Their length is
+        // set by the slab and their radius by their volume.
+        let length = half.x * (1.0 + ENGINE_OVERHANG - ENGINE_GAP);
+        let radius = (engine_m3 / (std::f64::consts::PI * length)).sqrt();
+        let cylinder = Primitive::Cylinder { length: length / radius };
+        let engine = |id, side: f64, fires: f64| {
+            let normal = DVec3::Y * side;
+            let foot = DVec3::new(fires * ENGINE_GAP * half.x, side * half.y, 0.0);
+            let mut part = hang(id, Kind::Engine, cylinder, engine_m3, PartId(1), on(foot, (1.0 - ENGINE_EMBED) * radius / (length / 2.0)));
+            part.placement.as_mut().unwrap().tilt = lying(normal, DVec3::X * fires);
+            part
         };
 
-        // Under the keel, lying fore and aft: a pod's top sunk into the hull.
-        let keel = |id, kind, volume, x: f64| {
-            let Shape::Capsule { radius, length } = pod.at(pod.scale(volume)) else { unreachable!() };
-            let reach = length / 2.0 + radius;
-            let mut part = hang(id, kind, pod, volume, PartId(1), on(DVec3::new(x - reach, 0.0, -half.z), (1.0 - KEEL_EMBED) * radius / reach));
-            part.placement.as_mut().unwrap().tilt = lying(DVec3::NEG_Z, DVec3::X);
-            part
+        // A box on each end, as tall as two of the slab and narrow enough to keep out of the
+        // engines' cones, its inner face just in the hull.
+        let end = |id, kind, volume: f64, out: f64| {
+            let (width, height) = (2.0 * END_WIDTH * half.y, 4.0 * half.z);
+            let depth = volume / (width * height);
+            let prism = Primitive::Slab { edges: DVec3::new(depth, width, height), corner: 0.1 };
+            hang(id, kind, prism, volume, PartId(1), on(DVec3::X * out, -END_EMBED))
         };
         Form {
             parts: vec![
                 Part::mind(MIND, b.min_part_m3),
                 hang(1, Kind::Storage, slab, v.storage, MIND, Mount::Enclosing),
-                engine(2, -1.0, 1.0),
-                keel(3, Kind::Drone, v.drone, -0.4 * half.x),
+                engine(2, 1.0, -1.0),
+                end(3, Kind::Drone, v.drone, -1.0),
                 habitat,
-                keel(5, Kind::Data, v.data, 0.55 * half.x),
+                end(5, Kind::Data, v.data, 1.0),
                 engine(6, -1.0, -1.0),
                 engine(7, 1.0, 1.0),
-                engine(8, 1.0, -1.0),
+                engine(8, -1.0, 1.0),
             ],
         }
     }
