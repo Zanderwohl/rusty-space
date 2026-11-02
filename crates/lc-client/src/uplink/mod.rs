@@ -443,7 +443,7 @@ mod tests {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
         let b = Balance::DEFAULT;
-        let full = Fitting::full(lc_world::form::Form::starting(), b, 0.0);
+        let full = Fitting::full(lc_world::form::Form::reference(), b, 0.0);
         let hot = Fitting::from_account(&Account { heat_j: 5.0 * b.module_energy_j(), ..full.account() }, b);
         let fitted = Outbound::Fitted {
             ship_id: ShipId(7),
@@ -520,7 +520,7 @@ mod tests {
     fn the_shards_list_of_presets_is_the_sessions() {
         let (mut uplink, mut game, mut ui) = app();
         fold(&mut uplink, &mut game, &mut ui, welcome(0));
-        let preset = lc_proto::Preset { name: "Long".into(), form: (&lc_world::form::Form::starting()).into() };
+        let preset = lc_proto::Preset { name: "Long".into(), form: (&lc_world::form::Form::reference()).into() };
         fold(&mut uplink, &mut game, &mut ui, Outbound::Presets(vec![preset.clone()]));
         assert_eq!(game.0.presets, vec![preset]);
         fold(&mut uplink, &mut game, &mut ui, Outbound::Presets(Vec::new()));

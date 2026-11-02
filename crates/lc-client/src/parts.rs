@@ -388,7 +388,7 @@ mod tests {
             let fitting = lc_world::fitting::Fitting::full(form.clone(), Balance::DEFAULT, 0.0);
             (lc_proto::Fitting::from(&fitting), lc_proto::Hull::from(&fitting))
         };
-        for form in [Form::starting(), lc_world::form::presets::Builtin::Cluster.form()] {
+        for form in [Form::reference(), lc_world::form::presets::Builtin::Cluster.form()] {
             let (fitting, hull) = fitted(&form);
             let mut uplink = app.world_mut().resource_mut::<crate::uplink::Uplink>();
             (uplink.fitting, uplink.hull) = (Some(fitting), Some(hull));
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn a_ship_joined_partway_through_a_round_is_still_formed() {
         use lc_world::refit::rounds::Round;
-        let from = Form::starting();
+        let from = Form::reference();
         let mut target = from.clone();
         target.parts.iter_mut().find(|p| p.id == PartId(5)).unwrap().placement.as_mut().unwrap().twist = 0.5;
         let fitting = lc_world::fitting::Fitting::full(from.clone(), Balance::DEFAULT, 0.0);

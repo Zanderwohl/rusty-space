@@ -90,10 +90,12 @@ pub struct Member {
     pub form: Option<Formed>,
 }
 
-/// A cast member built as the starting form scaled, with its field already holding heat.
+/// A cast member built as [`crate::form::Form::reference`] scaled, with its field already holding
+/// heat. The reference rather than the starting form, which is free to change: the scenes' spacing
+/// and heat are tuned on this hull's size and field.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Formed {
-    /// Every part but the Mind this many times longer, as `--form default*k` sizes it. The member's
+    /// Every part but the Mind this many times longer, as `--form reference*k` sizes it. The member's
     /// `length_m` is the extent that comes out.
     pub scale: f64,
     /// Of `Q_max`, the heat its field holds as the scene opens.
@@ -854,7 +856,7 @@ mod tests {
         for scene in Scenario::ALL {
             for member in scene.cast {
                 let Some(formed) = member.form else { continue };
-                let form = crate::form::presets::named("default", formed.scale).expect("the starting form");
+                let form = crate::form::presets::named("reference", formed.scale).expect("the reference form");
                 let extent_m = Fitting::full(form, Balance::DEFAULT, 0.0).hull().extent_m;
                 assert!((extent_m - member.length_m).abs() < 0.01, "{}: {} is {extent_m} m", scene.name, member.name);
                 assert!((0.0..1.0).contains(&formed.heat), "{}: {} starts collapsed", scene.name, member.name);

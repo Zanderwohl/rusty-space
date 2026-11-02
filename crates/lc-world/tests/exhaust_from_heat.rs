@@ -14,14 +14,14 @@ fn quiet() -> Balance {
 
 fn ship(stored_j: f64, heat_j: f64) -> Craft {
     let b = quiet();
-    let full = Fitting::full(Form::starting(), b, 0.0);
+    let full = Fitting::full(Form::reference(), b, 0.0);
     let mut craft = Craft::at(CraftId(9), Kind::Ship, DVec3::ZERO);
     craft.fit(Some(Fitting::from_account(&Account { stored_j, heat_j, ..full.account() }, b)));
     craft
 }
 
 fn capacity_j() -> f64 {
-    Fitting::full(Form::starting(), quiet(), 0.0).hull().capacities.storage_j
+    Fitting::full(Form::reference(), quiet(), 0.0).hull().capacities.storage_j
 }
 
 fn cross(craft: &mut Craft) -> f64 {

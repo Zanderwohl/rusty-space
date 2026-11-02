@@ -725,7 +725,7 @@ mod tests {
     const B: Balance = Balance::DEFAULT;
 
     fn draft() -> Draft {
-        Draft::new(Form::starting())
+        Draft::new(Form::reference())
     }
 
     fn ids(parts: &[Part]) -> Vec<u16> {

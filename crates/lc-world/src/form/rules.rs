@@ -246,14 +246,14 @@ mod tests {
 
     #[test]
     fn an_engine_off_the_nose_axis_is_named() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 2).placement.as_mut().unwrap().tilt = DVec2::new(0.0, 0.1);
         assert_eq!(refused(&form), [FormError::EngineOffAxis(PartId(2))]);
     }
 
     #[test]
     fn twist_about_the_nose_keeps_an_engine_on_it() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 2).placement.as_mut().unwrap().twist = 0.7;
         assert!(check(&form, &B).is_ok());
     }
@@ -261,7 +261,7 @@ mod tests {
     /// A pod hung on the bell's open face, where the exhaust leaves.
     #[test]
     fn a_part_in_an_engines_cone_blocks_it() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         form.parts.push(hang(6, Kind::Living, Primitive::Capsule { length: 1.0 }, 5.0e4, 2, on(DVec3::X, 0.0)));
         assert_eq!(refused(&form), [FormError::EngineBlocked(PartId(2))]);
     }
@@ -270,7 +270,7 @@ mod tests {
     /// cone from the face's center, is still in the exhaust.
     #[test]
     fn the_cone_is_as_wide_as_the_face() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         let Shape::Frustum { length, end, .. } = form.parts[2].shape(B.min_part_m3) else { unreachable!() };
         let r: f64 = 20.0;
         let ball = Primitive::Ellipsoid { axes: DVec3::ONE };
@@ -315,7 +315,7 @@ mod tests {
     }
 
     fn with_bay(anchor: DVec3) -> Form {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         form.parts.push(hang(6, Kind::Bay, Primitive::Cylinder { length: 1.0 }, 2.0e5, 1, on(anchor, -0.3)));
         form
     }
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn a_part_floating_off_its_parent_is_named() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         // Two data reaches clear of the nose.
         part_mut(&mut form, 5).placement.as_mut().unwrap().mount = on(DVec3::X, 2.0);
         assert_eq!(refused(&form), [FormError::Detached(PartId(5))]);
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn a_gap_below_the_grids_resolution_is_not_a_detachment() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         let reach = part_mut(&mut form, 5).shape(B.min_part_m3).reach();
         let cell = check(&form, &B).unwrap().cell_m();
         part_mut(&mut form, 5).placement.as_mut().unwrap().mount = on(DVec3::X, 0.25 * cell / reach);
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn an_encloser_smaller_than_its_parent_is_named() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         // A 50 m sphere around the 335 m hull.
         form.parts.push(hang(6, Kind::Living, Primitive::Ellipsoid { axes: DVec3::ONE }, 5.0e5, 1, Mount::Enclosing));
         assert_eq!(refused(&form), [FormError::Uncontained(PartId(6))]);
@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn a_ship_too_short_or_too_long_is_refused() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         form.parts.iter_mut().for_each(|p| p.volume_m3 *= 1.0e6);
         assert_eq!(refused(&form), [FormError::Extent]);
 
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn dust_is_named() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 5).volume_m3 = 0.999 * B.min_part_m3;
         assert_eq!(sizes(&form, &B), [FormError::TooSmall(PartId(5))]);
         assert_eq!(refused(&form), [FormError::TooSmall(PartId(5))]);
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn too_few_drones_is_refused_and_a_mirror_counts_both_copies() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 3).volume_m3 = 0.6 * B.min_drone_m3;
         assert_eq!(sizes(&form, &B), [FormError::TooFewDrones]);
         assert_eq!(refused(&form), [FormError::TooFewDrones]);
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn every_fault_is_returned_in_rule_order() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 2).placement.as_mut().unwrap().tilt = DVec2::new(0.0, 0.1);
         part_mut(&mut form, 5).placement.as_mut().unwrap().mount = on(DVec3::X, 2.0);
         part_mut(&mut form, 4).volume_m3 = 0.5 * B.min_part_m3;
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn a_structural_fault_is_the_only_one() {
-        let mut form = Form::starting();
+        let mut form = Form::reference();
         part_mut(&mut form, 5).placement.as_mut().unwrap().parent = PartId(40);
         part_mut(&mut form, 4).volume_m3 = 1.0;
         assert_eq!(refused(&form), [FormError::MissingParent { part: PartId(5), parent: PartId(40) }]);

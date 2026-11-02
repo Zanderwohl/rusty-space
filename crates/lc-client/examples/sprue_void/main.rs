@@ -1,6 +1,6 @@
 //! Photograph a layered sprue on a box in a void: an opaque plated base under two cutout layers
 //! of mazed pipe, each flat and normal-mapped, standing off one another and lit from the gaps by
-//! sodium lamps. A look to try, not yet any part's.
+//! sodium lamps: one of [`lc_client::looks`].
 //!
 //! ```text
 //! cargo run -p lc-client --example sprue_void -- /tmp/sprue.png --yaw 35 --pitch 20 --dist 110
@@ -24,60 +24,14 @@
 //! | `--dump <dir>` | also write each variant's layers there as PNGs: normal x, normal y, albedo, coverage |
 //! | `--burst <n>` / `--sweep <deg>` | photograph `n` frames, numbered, swinging the yaw through `sweep` across them: parallax |
 
-mod bake;
-mod tiles;
-
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
-};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use bevy::shader::ShaderRef;
 use bevy::window::WindowResolution;
-use bevy_mesh::MeshVertexBufferLayoutRef;
-
-use bake::Lamps;
-use tiles::{Maze, Rng};
-
-const TILE_M: f32 = 24.0;
-
-/// 4.7 cm a texel. Sixteen variants of three layers at 1024 would take a quarter of a gigabyte.
-const TILE_TEXELS: u32 = 512;
-
-/// Two choices a tile edge: a variant is left + 2 right + 4 bottom + 8 top, as sprue.wgsl reads it.
-pub const VARIANTS: usize = 16;
-
-/// Meters over the base: layer 1, layer 2, the deep lamps, and the lamps riding layer 1.
-const HEIGHTS: Vec4 = Vec4::new(0.9, 1.9, 0.4, 1.25);
-
-/// High-pressure sodium, linear.
-const SODIUM: Vec3 = Vec3::new(1.0, 0.72, 0.2);
-
-const CONDUIT: Maze = Maze {
-    cells: 8,
-    radii: &[0.3, 0.4, 0.5],
-    prune: 0.5,
-    prune_passes: 2,
-    doubled: 0.3,
-    boxed: 0.5,
-    collar_m: 1.6,
-    crossing: 0.2,
-};
-
-const CAPILLARY: Maze = Maze {
-    cells: 16,
-    radii: &[0.1, 0.14, 0.18],
-    prune: 0.6,
-    prune_passes: 3,
-    doubled: 0.25,
-    boxed: 0.35,
-    collar_m: 0.7,
-    crossing: 0.18,
-};
+use lc_client::looks::sprue::{Sprue, SprueMaterial, TILE_TEXELS, VARIANTS, tiles};
+use lc_client::looks::{LooksPlugin, direction};
 
 struct Args {
     path: String,
@@ -117,7 +71,8 @@ impl Args {
             eprintln!("sprue_void: give a PNG path to write");
             std::process::exit(2);
         });
-        let sodium = raw("--sodium").map_or(SODIUM, |t| {
+        let d = Sprue::default();
+        let sodium = raw("--sodium").map_or(d.sodium, |t| {
             let v: Vec<f32> = t.split(':').map(|c| c.parse().expect("--sodium is r:g:b")).collect();
             Vec3::new(v[0], v[1], v[2])
         });
@@ -136,67 +91,21 @@ impl Args {
             fov: value("--fov").unwrap_or(40.0),
             sun: value("--sun").unwrap_or(25.0),
             sun_yaw: value("--sun-yaw").unwrap_or(-60.0),
-            star: value("--star").unwrap_or(0.2),
-            lamp: value("--lamp").unwrap_or(1.0),
-            scatter: value("--scatter").unwrap_or(1.0),
-            bulb: value("--bulb").unwrap_or(1.0),
-            deep: value("--deep").unwrap_or(0.35),
-            riding: value("--riding").unwrap_or(0.3),
-            reach: value("--reach").unwrap_or(2.0),
-            beam: value("--beam").unwrap_or(70.0),
+            star: value("--star").unwrap_or(d.star),
+            lamp: value("--lamp").unwrap_or(d.lamp),
+            scatter: value("--scatter").unwrap_or(d.scatter),
+            bulb: value("--bulb").unwrap_or(d.bulb),
+            deep: value("--deep").unwrap_or(d.deep),
+            riding: value("--riding").unwrap_or(d.riding),
+            reach: value("--reach").unwrap_or(d.reach_m),
+            beam: value("--beam").unwrap_or(d.beam_deg),
             exposure: value("--exposure").unwrap_or(0.0),
-            seed: raw("--seed").map_or(7, |v| v.parse().expect("--seed takes a whole number")),
+            seed: raw("--seed").map_or(d.seed, |v| v.parse().expect("--seed takes a whole number")),
             frames: value("--frames").unwrap_or(60.0) as u32,
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             sweep: value("--sweep").unwrap_or(0.0),
             dump: raw("--dump"),
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-struct SprueUniform {
-    layer: Vec4,
-    heights: Vec4,
-    lamp_color: Vec4,
-    to_star: Vec4,
-    star_color: Vec4,
-    ambient: Vec4,
-    finish: Vec4,
-}
-
-#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
-struct SprueMaterial {
-    #[uniform(0, visibility(vertex, fragment))]
-    uniforms: SprueUniform,
-    #[texture(1, dimension = "2d_array", visibility(fragment))]
-    #[sampler(2, visibility(fragment))]
-    tiles: Handle<Image>,
-    #[texture(3, dimension = "2d_array", visibility(fragment))]
-    light: Handle<Image>,
-}
-
-impl Material for SprueMaterial {
-    fn vertex_shader() -> ShaderRef {
-        "shaders/sprue.wgsl".into()
-    }
-
-    fn fragment_shader() -> ShaderRef {
-        "shaders/sprue.wgsl".into()
-    }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        let vertex_layout = layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        Ok(())
     }
 }
 
@@ -218,7 +127,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(MaterialPlugin::<SprueMaterial>::default())
+        .add_plugins(LooksPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Setup(args))
         .add_systems(Startup, spawn)
@@ -237,101 +146,41 @@ fn spawn(
     mut materials: ResMut<Assets<SprueMaterial>>,
 ) {
     let args = &setup.0;
-    let texels = TILE_TEXELS as usize;
-    let mut rng = Rng::new(args.seed);
-    let conduit = tiles::MazeEdges::new(&CONDUIT, &mut rng);
-    let capillary = tiles::MazeEdges::new(&CAPILLARY, &mut rng);
-    let mut lamps_spec = Lamps {
-        cell_m: 4.0,
+    let sprue = Sprue {
+        sodium: args.sodium,
+        to_star: direction(args.sun, args.sun_yaw),
+        star: args.star,
+        star_spin: 0.0,
+        lamp: args.lamp,
+        scatter: args.scatter,
+        bulb: args.bulb,
+        deep: args.deep,
+        riding: args.riding,
         reach_m: args.reach,
-        beam_rad: args.beam.to_radians(),
-        deep_share: args.deep,
-        riding_share: args.riding,
-        carried: 0.0,
-        heights: HEIGHTS,
-        scatter: 0.004 * args.scatter,
-        bulb_radius_m: 0.09,
-        bulb_power: 18.0 * args.bulb,
+        beam_deg: args.beam,
+        exposure_stops: args.exposure,
+        seed: args.seed,
     };
     let started = std::time::Instant::now();
-    let shape = |v: usize| {
-        let edges = [v & 1, v >> 1 & 1, v >> 2 & 1, v >> 3 & 1];
-        let mut rng = Rng::new(args.seed.wrapping_mul(0x9E37_79B9).wrapping_add(v as u64));
-        vec![
-            tiles::base(texels, TILE_M, &mut rng).surface(true),
-            tiles::maze(texels, TILE_M, &CONDUIT, &conduit, edges, &mut rng).surface(false),
-            tiles::maze(texels, TILE_M, &CAPILLARY, &capillary, edges, &mut rng).surface(false),
-        ]
-    };
-    let shaped: Vec<Vec<_>> = std::thread::scope(|scope| {
-        let making: Vec<_> = (0..VARIANTS).map(|v| scope.spawn(move || shape(v))).collect();
-        making.into_iter().map(|m| m.join().expect("a variant panicked")).collect()
-    });
-    // Every variant's, since a strip's lamps are its edge's and must not depend on the tile.
-    lamps_spec.carried = bake::carried(&shaped.iter().map(|layers| &layers[1]).collect::<Vec<_>>());
-    let lamps_spec = &lamps_spec;
-    let interiors = bake::interiors(lamps_spec, TILE_M, args.seed);
-    let lit: Vec<(Vec<Vec3>, usize)> = std::thread::scope(|scope| {
-        let baking: Vec<_> = shaped
-            .iter()
-            .enumerate()
-            .zip(&interiors)
-            .map(|((v, layers), interior)| {
-                scope.spawn(move || {
-                    let lamps = bake::of_variant(lamps_spec, layers, args.seed, v, interior);
-                    (bake::bake(lamps_spec, layers, &lamps), lamps.len())
-                })
-            })
-            .collect();
-        baking
-            .into_iter()
-            .flat_map(|b| {
-                let (light, count) = b.join().expect("a bake panicked");
-                light.into_iter().map(move |l| (l, count))
-            })
-            .collect()
-    });
+    let baked = sprue.bake();
     info!(
         "sprue_void: made {VARIANTS} variants, {} lamps, layer 1 carries {:.0}%, in {:.2?}",
-        lit.iter().step_by(3).map(|l| l.1).sum::<usize>(),
-        100.0 * lamps_spec.carried,
+        baked.lamps,
+        100.0 * baked.carried,
         started.elapsed()
     );
-    let layers: Vec<_> = shaped.iter().flatten().collect();
-    let geometry: Vec<Vec<u8>> = layers.iter().map(|l| l.rgba8()).collect();
     if let Some(dir) = &args.dump {
         std::fs::create_dir_all(dir).expect("--dump makes its directory");
-        for (i, texels) in geometry.iter().enumerate() {
+        for (i, layer) in baked.shaped.iter().flatten().enumerate() {
             let path = format!("{dir}/v{:02}-layer{}.png", i / 3, i % 3);
-            let image = image::RgbaImage::from_raw(TILE_TEXELS, TILE_TEXELS, texels.clone()).expect("a whole tile");
+            let image = image::RgbaImage::from_raw(TILE_TEXELS, TILE_TEXELS, layer.rgba8()).expect("a whole tile");
             image.save(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         }
+        dump_light(dir, &baked.shaped, &baked.light);
     }
-    let tiles = images.add(tiles::tile_array(&geometry, TILE_TEXELS));
-    let light: Vec<Vec<Vec3>> = lit.into_iter().map(|l| l.0).collect();
-    if let Some(dir) = &args.dump {
-        dump_light(dir, &shaped, &light);
-    }
-    let light = images.add(bake::light_array(&light, &layers));
-
-    let (sun, sun_yaw) = (args.sun.to_radians(), args.sun_yaw.to_radians());
-    let to_star = Vec3::new(sun.cos() * sun_yaw.cos(), sun.sin(), sun.cos() * sun_yaw.sin());
-    for (k, lift) in [0.0, HEIGHTS.x, HEIGHTS.y].into_iter().enumerate() {
-        let material = materials.add(SprueMaterial {
-            uniforms: SprueUniform {
-                layer: Vec4::new(k as f32, TILE_M, 0.0, 0.0),
-                heights: HEIGHTS,
-                lamp_color: (args.sodium * 6.0 * args.lamp).extend(0.0),
-                to_star: to_star.extend(0.0),
-                star_color: Vec3::splat(args.star).extend(0.0),
-                ambient: (args.sodium * 0.015).extend(0.0),
-                finish: Vec4::new(2f32.powf(args.exposure), 24.0, 0.35, 0.0),
-            },
-            tiles: tiles.clone(),
-            light: light.clone(),
-        });
-        let edge = args.size + 2.0 * lift;
-        commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(material)));
+    for (k, material) in sprue.materials(&baked, &mut images).into_iter().enumerate() {
+        let edge = args.size + 2.0 * Sprue::lift(k);
+        commands.spawn((Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))), MeshMaterial3d(materials.add(material))));
     }
 
     commands.spawn((

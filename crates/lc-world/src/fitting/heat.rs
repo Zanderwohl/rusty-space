@@ -388,29 +388,8 @@ mod tests {
     }
 
     fn starting(b: Balance, stored_j: f64) -> Fitting {
-        let full = Fitting::full(Form::starting(), b, 0.0);
+        let full = Fitting::full(Form::reference(), b, 0.0);
         Fitting::from_account(&Account { stored_j, ..full.account() }, b)
-    }
-
-    /// 30's table: full at 0.1 AU, and filling there half a year in.
-    #[test]
-    fn the_starting_ship_at_a_tenth_of_an_au_settles_at_thirtys_temperatures() {
-        let b = Balance::DEFAULT;
-        let mut full = Fitting::full(Form::starting(), b, 0.0);
-        full.set_starlight_w(starlight_w(&b, 0.1));
-        let later_s = 40.0 * b.field_tau_s;
-        full.settle(&rest(), later_s);
-        let full_k = full.temperature_k_at(&rest(), later_s);
-        assert!((full_k - 3_237.0).abs() < 0.5, "full {full_k}");
-        assert_eq!(full.stored_j_at(&rest(), later_s), full.hull().capacities.storage_j, "held full");
-
-        let mut filling = starting(b, 0.0);
-        filling.set_starlight_w(starlight_w(&b, 0.1));
-        let half_year_s = 0.5 * crate::flight::JULIAN_YEAR_S;
-        let filling_k = filling.temperature_k_at(&rest(), half_year_s);
-        assert!((filling_k - 2_396.0).abs() < 0.5, "filling {filling_k}");
-        let stored = filling.stored_j_at(&rest(), half_year_s) / filling.hull().capacities.storage_j;
-        assert!((stored - 0.5).abs() < 0.01, "{stored} full");
     }
 
     /// Beyond the rating, what arrives is heat.
@@ -486,7 +465,7 @@ mod tests {
     }
 
     fn shrunk_engine() -> Form {
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 3.0 / 5.0;
         target
     }
@@ -501,7 +480,7 @@ mod tests {
     #[test]
     fn a_vent_raises_heat_by_exactly_what_storage_could_not_hold() {
         let b = Balance::DEFAULT;
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         let room_j = me(&b);
         fitting.drain(room_j);
         let plan = begin(&mut fitting, shrunk_engine());
@@ -523,7 +502,7 @@ mod tests {
     #[test]
     fn a_dismantling_into_full_storage_ends_as_heat() {
         let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         assert_eq!(fitting.heat_j, 0.0, "premise: nothing holds any heat");
         let plan = begin(&mut fitting, shrunk_engine());
         let step = plan.steps()[0];
@@ -540,7 +519,7 @@ mod tests {
         assert!(close(fitting.heat_j, step.gross_j, 1e-9), "{}", fitting.heat_j);
         assert!(close(finished.heat_j, step.gross_j, 1e-9), "{}", finished.heat_j);
 
-        let mut canceled = Fitting::full(Form::starting(), b, 0.0);
+        let mut canceled = Fitting::full(Form::reference(), b, 0.0);
         begin(&mut canceled, shrunk_engine());
         canceled.settle(&rest(), 0.5 * end_s);
         canceled.cancel_refit(0.5 * end_s);
@@ -553,7 +532,7 @@ mod tests {
     #[test]
     fn a_return_into_room_starlight_has_filled_is_heat() {
         let b = Balance { living_density_w: 0.0, field_tau_s: 1.0e40, ..Balance::DEFAULT };
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         let capacity_j = fitting.hull().capacities.storage_j;
         let room_j = 0.5 * me(&b);
         fitting.drain(room_j);
@@ -594,7 +573,7 @@ mod tests {
     #[test]
     fn a_round_settled_at_every_tick_agrees_with_one_leap() {
         let b = Balance::DEFAULT;
-        let mut leap = Fitting::full(Form::starting(), b, 0.0);
+        let mut leap = Fitting::full(Form::reference(), b, 0.0);
         leap.set_starlight_w(starlight_w(&b, 0.05));
         let mut target = shrunk_engine();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 3.0;
@@ -634,12 +613,12 @@ mod tests {
     #[test]
     fn the_drain_cannot_eat_what_a_build_will_take() {
         let b = Balance::DEFAULT;
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
         let trial = begin(&mut starting(b, 30.0 * me(&b)), target.clone());
         let cost_j = -trial.steps().iter().map(|s| s.stored_j).sum::<f64>();
         let duration_s = trial.duration_s();
-        let drain_w = Capacities::of(&Form::starting(), &b).drain_w;
+        let drain_w = Capacities::of(&Form::reference(), &b).drain_w;
         let spare_j = 0.1 * drain_w * duration_s;
         let mut leap = starting(b, cost_j + spare_j);
         leap.set_starlight_w(0.5 * drain_w / b.conversion_efficiency);
@@ -667,7 +646,7 @@ mod tests {
     fn the_drain_and_rating_change_at_the_step_end() {
         let b = Balance::DEFAULT;
         let mut fitting = starting(b, 20.0 * me(&b));
-        let mut target = Form::starting();
+        let mut target = Form::reference();
         target.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 7.0 / 5.0;
         target.parts.iter_mut().find(|p| p.kind == crate::form::Kind::Living).unwrap().volume_m3 *= 1.5;
         let plan = begin(&mut fitting, target.clone());
@@ -692,7 +671,7 @@ mod tests {
     fn a_burn_is_paid_from_heat_then_storage_as_it_goes() {
         use crate::flight::{Cruise, Drive};
         let b = Balance::DEFAULT;
-        let mut leap = Fitting::full(Form::starting(), b, 0.0);
+        let mut leap = Fitting::full(Form::reference(), b, 0.0);
         leap.set_starlight_w(starlight_w(&b, 1.0));
         let drive = Drive { accel_g: 1.0, ..Drive::DEFAULT };
         let cruise = Cruise::plan(DVec3::ZERO, DVec3::X * 1.0e-3, 0.0, drive);
@@ -743,7 +722,7 @@ mod tests {
 
     /// Returns the commitment.
     fn hot(b: Balance, stored_j: f64, heat_j: f64, motion: &ShipState) -> (Fitting, f64) {
-        let full = Fitting::full(Form::starting(), b, 0.0);
+        let full = Fitting::full(Form::reference(), b, 0.0);
         let mut fitting = Fitting::from_account(&Account { stored_j, heat_j, ..full.account() }, b);
         let committed_j = fitting.commit(motion, 0.0);
         (fitting, committed_j)
@@ -981,7 +960,7 @@ mod tests {
         motion.begin_crossing(cruise, None);
         let ship = |efficiency: f64| {
             let b = Balance { drive_efficiency: efficiency, ..Balance::DEFAULT };
-            let full = Fitting::full(Form::starting(), b, 0.0);
+            let full = Fitting::full(Form::reference(), b, 0.0);
             let max_j = full.field().heat_max_j();
             let account = Account { heat_j: 0.9 * max_j, waste_j: 0.9 * max_j, ..full.account() };
             let mut fitting = Fitting::from_account(&account, b);
@@ -1009,7 +988,7 @@ mod tests {
     #[test]
     fn heat_weighs_what_it_holds() {
         let b = Balance::DEFAULT;
-        let cold = Fitting::from_account(&Account { heat_j: 0.0, ..Fitting::full(Form::starting(), b, 0.0).account() }, b);
+        let cold = Fitting::from_account(&Account { heat_j: 0.0, ..Fitting::full(Form::reference(), b, 0.0).account() }, b);
         let hot = Fitting::from_account(&Account { heat_j: 5.0 * me(&b), ..cold.account() }, b);
         let difference_kg = hot.mass_kg_at(&rest(), 0.0) - cold.mass_kg_at(&rest(), 0.0);
         assert!(close(difference_kg, 5.0 * me(&b) / crate::fitting::C2, 1e-6), "{difference_kg}");
@@ -1019,7 +998,7 @@ mod tests {
     #[test]
     fn heat_crosses_the_wire() {
         let b = Balance::DEFAULT;
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         fitting.set_starlight_w(starlight_w(&b, 0.1));
         fitting.settle(&rest(), 1.0e6);
         let field = lc_proto::Field::from(&fitting);

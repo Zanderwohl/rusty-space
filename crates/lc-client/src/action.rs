@@ -1135,7 +1135,7 @@ mod tests {
     fn editing() -> (UiState, Session) {
         let (mut ui, mut s) = fixture();
         apply(H, &mut ui, &mut s);
-        apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        apply(Action::StartDraft(lc_world::form::Form::reference()), &mut ui, &mut s);
         (ui, s)
     }
 
@@ -1217,7 +1217,7 @@ mod tests {
     /// Docked at a shard with a full starting ship.
     fn fitted() -> (UiState, Session) {
         let (ui, mut s) = editing();
-        let form = lc_world::form::Form::starting();
+        let form = lc_world::form::Form::reference();
         s.ship.fit(Some(lc_world::fitting::Fitting::full(form, lc_world::fitting::Balance::DEFAULT, s.coordinate_time_s())));
         s.remote = true;
         (ui, s)
@@ -1281,7 +1281,7 @@ mod tests {
         let target = draft(&ui).form.clone();
         apply(Action::RebaseDraft(target.clone()), &mut ui, &mut s);
         assert_eq!((&draft(&ui).form, &draft(&ui).ship), (&target, &target), "accepted, the draft is the ship's target");
-        apply(Action::RebaseDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        apply(Action::RebaseDraft(lc_world::form::Form::reference()), &mut ui, &mut s);
         assert_eq!(draft(&ui).form, target, "canceled, the target is still there to apply again");
         assert_ne!(draft(&ui).form, draft(&ui).ship);
     }
@@ -1295,7 +1295,7 @@ mod tests {
         apply(Action::SelectPart(Some(PartId(5))), &mut ui, &mut s);
         apply(H, &mut ui, &mut s);
         apply(H, &mut ui, &mut s);
-        apply(Action::StartDraft(lc_world::form::Form::starting()), &mut ui, &mut s);
+        apply(Action::StartDraft(lc_world::form::Form::reference()), &mut ui, &mut s);
         assert_ne!(draft(&ui).form, draft(&ui).ship, "the edit survives");
         assert_eq!(ui.form.selected, Some(PartId(5)));
         let remove = draft(&ui).remove(PartId(5));

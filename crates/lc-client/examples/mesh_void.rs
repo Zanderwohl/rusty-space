@@ -21,6 +21,7 @@
 //! | `--aim <part>` | look at this part's center instead; with one form only. With `--zoom 0.3` it frames a spar's seams closely enough to see the bolts |
 //! | `--exposure <stops>` | open the exposure, in stops from `hull_void`'s, which is placed for a lit albedo of 0.3 and so clips anything lighter; `-1.5` by default |
 //! | `--sun <deg>` | the star's elevation; negative is night, where the living lights show |
+//! | `--cold` | engines not firing, so their open faces do not glow |
 //! | `--frames <n>` / `--burst <n>` | frames after every mesh lands, and consecutive shots from there |
 //! | `--remesh <cells>` | on the first shot, ask every hull for this resolution. Each frame's wall time is logged until every new mesh has landed and been drawn, and a burst photographs the old meshes staying up until the new ones swap in |
 
@@ -33,11 +34,12 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
-use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
+use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
+use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
 use lc_client::hull_mesh::{
-    Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
+    ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -71,6 +73,7 @@ struct Args {
     burst: u32,
     remesh: Option<u32>,
     aim: Option<u16>,
+    cold: bool,
 }
 
 impl Args {
@@ -108,6 +111,7 @@ impl Args {
             burst: value("--burst").unwrap_or(1.0).max(1.0) as u32,
             remesh: value("--remesh").map(|c| c as u32),
             aim: value("--aim").map(|id| id as u16),
+            cold: args.iter().any(|a| a == "--cold"),
         }
     }
 }
@@ -181,7 +185,7 @@ fn main() {
         .init_asset::<PopulationMaterial>()
         .init_asset::<BodySurfaceMaterial>()
         .init_asset::<RelativisticStarfieldMaterial>()
-        .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin))
+        .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin, HullLooksPlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Scene {
             args,
@@ -276,22 +280,30 @@ fn spawn(
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
             "bay" => LIT_WINDOW * Vec3::new(1.0, 0.92, 0.8),
+            "engine_flank" => LIT_WINDOW * Vec3::new(1.0, 0.72, 0.2),
             _ => Vec3::ZERO,
         }
         .extend(0.0);
     }
     let material = materials.add(HullMaterial {
-        uniforms: HullUniform {
+        uniforms: wear(HullUniform {
             // Enough fill to see an unlit side against the black.
             to_star: to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
+            // As the game draws an engine: its grid on its open faces, its flank everywhere else.
+            open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
+            faces: [if args.cold { Vec4::ZERO } else { (8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0)).extend(0.0) }; FACES],
             ..default()
-        },
+        }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
+        roof_map: None,
+        roof_outline: default(),
+        pipe_tiles: None,
+        pipe_light: None,
     });
 
     // Side by side in slots as wide as the largest, three to a row.
@@ -326,6 +338,7 @@ fn spawn(
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
+            living_roof(),
             HullForm { cells: args.cells, ..HullForm::form(form, balance, args.finish) },
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world() * center).with_rotation(ship_to_world()),

@@ -417,8 +417,9 @@ mod tests {
         server.admit(OWNER, craft, 0.0);
         server.next_ship = 2;
         let mut wire = Loopback::new();
+        // Less storage than it holds, so the step that takes it apart vents the rest.
         let mut shrunk = Form::starting();
-        shrunk.parts.iter_mut().find(|p| p.id == PartId(2)).unwrap().volume_m3 *= 3.0 / 5.0;
+        shrunk.parts.iter_mut().find(|p| p.id == PartId(1)).unwrap().volume_m3 *= 2.0 / 3.0;
         wire.client_says(OWNER, act(DYING, Order::Refit { target: (&shrunk).into() }));
         server.tick(&mut wire).await.unwrap();
 

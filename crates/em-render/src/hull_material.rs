@@ -136,6 +136,22 @@ pub struct HullUniform {
     pub bolts: Vec4,
     /// Which regions are bolted, one bit a region.
     pub bolted: u32,
+    /// Which regions are knapped glass, one bit a region: their tile gives way to
+    /// [`Self::glass_finish`]'s color under flake scars, each facet lit at its own lean, with the
+    /// star's highlight and a faint sky mirrored in it.
+    pub glassy: u32,
+    /// Which regions are azteced plate, one bit a region: their tile gives way to panels cut by
+    /// chamfered seams, each its own shade and lit at its own tilt.
+    pub plated: u32,
+    /// Which regions are habitat, one bit a region: plate with office windows on the sides, rooms
+    /// traced behind them, and over the top a roof of glass hexes on a forest. Decks stack along
+    /// the ship's z. A lit window is the region's [`Self::emitted`].
+    pub habitat: u32,
+    /// Which *layers* are a layered sprue, one bit a layer: an engine's flank, say, not its open
+    /// face. The surface is the top layer of pipe, and the layer under it and the plated base are
+    /// seen through its gaps at their depths, lit by baked sodium lamps whose color is the layer's
+    /// [`Self::emitted`].
+    pub piped: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -145,6 +161,41 @@ pub struct HullUniform {
     pub open: UVec4,
     /// Per open face, what a fully lit texel of it sends, in [`Self::reflected`]'s units.
     pub faces: [Vec4; FACES],
+    /// A glassy region's scars, cut in the ship's frame: `(scar_m, dish, tilt, ripple)`, the last
+    /// three tangents: a dish's lean at its rim, the most a scar tilts, the ripples' lean.
+    pub glass: Vec4,
+    /// A glassy region's color, linear, and its roughness.
+    pub glass_finish: Vec4,
+    /// A plated region's panels, in the ship's frame with its z up: `(cell_m, min_panel_m,
+    /// snap_m, 0)`, the grid before splitting, the smallest side, and the grid edges snap to.
+    pub plates: Vec4,
+    /// `(tilt_rad, brown, chamfer_m, lean_rad)`: how far a panel tips, the share a little browner,
+    /// and each seam wall's width and lean.
+    pub plate_finish: Vec4,
+    /// `(roughness, metallic, paint, 0)`, the last scaling every panel's shade.
+    pub plate_metal: Vec4,
+    /// A habitat's decks: `(deck_m, pitch_m, sill_m, room_m)`, the deck height, window centers
+    /// along a row, from the deck to a window's bottom, and how deep the room behind it is.
+    pub deck: Vec4,
+    /// A window: `(width_m, height_m, f0, roughness)`.
+    pub pane: Vec4,
+    /// A habitat's roof: `(hex_m, seam_m, rim_m, forest_m)`, across a hex's flats, the frame
+    /// between, the chamfer where it meets the sides, and the deepest the forest lies.
+    pub roof: Vec4,
+    /// The air under the roof's color by day, and the share of the star it scatters back up.
+    pub roof_sky: Vec4,
+    /// `(depth_share, lit_share, 0, 0)`: the forest lies this share of the roof's width down, and
+    /// this share of a row's runs of windows is lit.
+    pub roof_shape: Vec4,
+    /// `(layer_1_m, layer_2_m, tile_m, 0)`: the pipe layers' heights over the base, and what a tile
+    /// spans.
+    pub pipes: Vec4,
+    /// An open face drawn as an ion thruster's, where `grid_m` is over 0: `(grid_m, bar_m, cell_m,
+    /// depth_m)`, a uniform grid of bars this pitch and width over glowing hex cells this far across
+    /// their flats, this far behind it. The tile is not read there.
+    pub thruster: Vec4,
+    /// The cells' color, linear: what leaves the face is drawn at its luminance in this hue.
+    pub thruster_glow: Vec4,
 }
 
 impl Default for HullUniform {
@@ -163,9 +214,26 @@ impl Default for HullUniform {
             girder: Vec4::new(0.55, 0.42, 0.22, 0.0),
             bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
             bolted: 0,
+            glassy: 0,
+            plated: 0,
+            habitat: 0,
+            piped: 0,
             emitted: [Vec4::ZERO; REGIONS],
             open: UVec4::ZERO,
             faces: [Vec4::ZERO; FACES],
+            glass: Vec4::new(5.0, 0.0, 0.0, 0.0),
+            glass_finish: Vec4::ZERO,
+            plates: Vec4::new(24.0, 3.0, 0.25, 0.0),
+            plate_finish: Vec4::ZERO,
+            plate_metal: Vec4::ZERO,
+            deck: Vec4::new(3.0, 2.0, 0.9, 4.0),
+            pane: Vec4::ZERO,
+            roof: Vec4::ZERO,
+            roof_sky: Vec4::ZERO,
+            roof_shape: Vec4::ZERO,
+            pipes: Vec4::new(0.9, 1.9, 24.0, 0.0),
+            thruster: Vec4::ZERO,
+            thruster_glow: Vec4::ZERO,
         }
     }
 }
@@ -181,6 +249,29 @@ pub struct HullMaterial {
     /// The same with [`Tile::Lights`]: the share of each texel that is lit.
     #[texture(3, dimension = "2d_array", visibility(fragment))]
     pub lights: Handle<Image>,
+    /// A habitat roof's outline seen from above, in the ship's frame: signed meters to its edge,
+    /// positive inside, so a ray through the glass meets a wall dropping from the rim. Taken from
+    /// the mesh, so kept apart from [`Self::uniforms`], which follow the ship's light.
+    #[texture(4, visibility(fragment))]
+    #[sampler(5, visibility(fragment))]
+    pub roof_map: Option<Handle<Image>>,
+    #[uniform(6, visibility(fragment))]
+    pub roof_outline: RoofOutline,
+    /// A layered sprue's tiles, three layers to a variant, and its baked lamp light, both as its
+    /// look makes them. Baked once and late, so a hull drawn before then draws its flanks as tiles.
+    #[texture(7, dimension = "2d_array", visibility(fragment))]
+    #[sampler(8, visibility(fragment))]
+    pub pipe_tiles: Option<Handle<Image>>,
+    #[texture(9, dimension = "2d_array", visibility(fragment))]
+    pub pipe_light: Option<Handle<Image>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub struct RoofOutline {
+    /// The ship-frame XY the map spans, `(x0, y0, x1, y1)`; empty where there is no map.
+    pub bounds: Vec4,
+    /// `(width_m, 0, 0, 0)`: the widest circle the outline holds.
+    pub width: Vec4,
 }
 
 impl Material for HullMaterial {

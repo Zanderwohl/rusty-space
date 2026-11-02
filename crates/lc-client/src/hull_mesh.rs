@@ -1009,7 +1009,7 @@ mod tests {
     /// another part.
     #[test]
     fn the_open_face_is_the_engines_wide_end_and_nothing_else() {
-        for form in [Form::starting(), Builtin::Plate.form()] {
+        for form in [Form::reference(), Builtin::Plate.form()] {
             let b = mesh_form(&form, &B, 96, Finish::Smooth).unwrap();
             let faces = apertures(&form, &B).unwrap();
             let (mut on, mut away) = (0, 0);
@@ -1033,7 +1033,7 @@ mod tests {
 
     #[test]
     fn the_presets_are_closed() {
-        let forms = [Form::starting()].into_iter().chain(Builtin::ALL.map(Builtin::form));
+        let forms = [Form::reference()].into_iter().chain(Builtin::ALL.map(Builtin::form));
         for (k, form) in forms.enumerate() {
             for finish in [Finish::Smooth, Finish::Blocky] {
                 let (s, ..) = surface(&form, 64, finish);
@@ -1257,7 +1257,7 @@ mod tests {
 
     #[test]
     fn a_hash_names_the_shape() {
-        let a = Form::starting();
+        let a = Form::reference();
         let mut b = a.clone();
         b.parts.reverse();
         assert_eq!(form_hash(&a, &B), form_hash(&b, &B), "the order parts are listed in");

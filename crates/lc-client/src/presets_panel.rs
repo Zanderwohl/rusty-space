@@ -424,7 +424,7 @@ mod tests {
     /// The starting ship with more engine than storage, so a layout of it is not any preset's
     /// own volumes.
     fn odd_ship() -> Form {
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         for part in ship.parts.iter_mut().filter(|p| p.placement.is_some()) {
             part.volume_m3 *= if part.kind == Kind::Engine { 3.0 } else { 2.0 };
         }
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn an_exported_preset_imported_on_another_account_applies_to_the_same_draft() {
         let mut shard = Presets::default();
-        let mut alice = Player::new("acct-a", Form::starting());
+        let mut alice = Player::new("acct-a", Form::reference());
         designed(&mut alice);
         let saved = alice.draft().form.clone();
         alice.does(Action::SavePreset("Long".into()), &mut shard);
@@ -512,7 +512,7 @@ mod tests {
     /// No storage, and a bay the spindle has no part for.
     #[test]
     fn a_layout_names_the_parts_it_gave_nothing_and_the_kinds_it_had_no_part_for() {
-        let mut ship = Form::starting();
+        let mut ship = Form::reference();
         ship.parts.retain(|p| p.kind != Kind::Storage);
         for placement in ship.parts.iter_mut().filter_map(|p| p.placement.as_mut()) {
             placement.parent = PartId(0);
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn saving_under_a_kept_name_replaces_it() {
         let mut shard = Presets::default();
-        let mut player = Player::new("acct-a", Form::starting());
+        let mut player = Player::new("acct-a", Form::reference());
         player.does(Action::SavePreset("Mine".into()), &mut shard);
         designed(&mut player);
         player.does(Action::SavePreset("Mine".into()), &mut shard);
@@ -546,16 +546,16 @@ mod tests {
     }
 
     fn full(player: &mut Player) {
-        let form = lc_proto::Form::from(&Form::starting());
+        let form = lc_proto::Form::from(&Form::reference());
         player.session.presets = (0..MAX_PRESETS).map(|k| lc_proto::Preset { name: format!("p{k}"), form: form.clone() }).collect();
     }
 
     #[test]
     fn each_limit_is_refused_by_name_on_save_and_on_import() {
         let mut shard = Presets::default();
-        let mut player = Player::new("acct-a", Form::starting());
+        let mut player = Player::new("acct-a", Form::reference());
         let export = |name: &str, form: &Form| ron::to_string(&lc_proto::Preset { name: name.into(), form: form.into() }).unwrap();
-        let starting = Form::starting();
+        let starting = Form::reference();
         let mut huge = starting.clone();
         let spare = *huge.parts.last().unwrap();
         huge.parts.extend((0..MAX_PARTS as u16).map(|k| Part { id: PartId(1000 + k), ..spare }));
@@ -589,7 +589,7 @@ mod tests {
     #[test]
     fn a_built_in_cannot_be_deleted_and_an_own_one_can() {
         let mut shard = Presets::default();
-        let mut player = Player::new("acct-a", Form::starting());
+        let mut player = Player::new("acct-a", Form::reference());
         let effects = player.does(Action::DeletePreset(Chosen::Builtin(Builtin::Plate)), &mut shard);
         assert_eq!(said(&effects), ["Plate is built in"]);
         player.does(Action::SavePreset("Plate".into()), &mut shard);
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn with_no_server_there_is_nowhere_to_keep_one() {
         let mut shard = Presets::default();
-        let mut player = Player::new("acct-a", Form::starting());
+        let mut player = Player::new("acct-a", Form::reference());
         player.session.remote = false;
         let effects = player.does(Action::SavePreset("Mine".into()), &mut shard);
         assert_eq!(said(&effects), ["no server, so nowhere to keep presets"]);

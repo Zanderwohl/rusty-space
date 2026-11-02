@@ -99,25 +99,10 @@ mod tests {
 
     fn starting(clear_above: f64) -> Fitting {
         let b = Balance::DEFAULT;
-        let mut fitting = Fitting::full(Form::starting(), b, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), b, 0.0);
         let thresholds = Thresholds { clear_above, ..Thresholds::of(&b) };
         fitting.set_posture(Posture { setting: Setting::Auto(thresholds), ..Posture::new_ship(&b) });
         fitting
-    }
-
-    /// At the default ceiling the starting ship is rating-bound, inside the rated-load anchor, and
-    /// settles below Auto's switch.
-    #[test]
-    fn the_starting_ship_parks_where_starlight_meets_its_rating() {
-        let fitting = starting(Balance::DEFAULT.auto_clear_above);
-        let parking = of(&fitting, 0.0, sol_w()).expect("a parking orbit");
-        let rating_w = fitting.capacities_at(0.0).aperture_w;
-        assert!((parking.arriving_w / rating_w - 1.0).abs() < 1e-12, "{parking:?}");
-        let au = parking.distance_m / AU_M;
-        assert!((0.03..crate::fitting::RATED_LOAD_AU).contains(&au), "{au} AU");
-        let ceiling_j = Balance::DEFAULT.auto_clear_above * fitting.field().heat_max_j();
-        assert!(parking.heat_j < ceiling_j, "{} of {ceiling_j}", parking.heat_j);
-        assert!(parking.filling_w > 0.0);
     }
 
     /// A lower ceiling moves the orbit out until the filling heat settles on it.

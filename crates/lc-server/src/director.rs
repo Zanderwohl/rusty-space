@@ -375,7 +375,7 @@ impl<J: Journal> Server<J> {
 
 /// The starting form at `formed`'s scale, full, its field holding `formed`'s heat.
 fn formed_fitting(formed: Formed, balance: &Balance, now_s: f64) -> Option<Fitting> {
-    let form = lc_world::form::presets::named("default", formed.scale)?;
+    let form = lc_world::form::presets::named("reference", formed.scale)?;
     let full = Fitting::full(form, *balance, now_s);
     let heat_j = formed.heat * full.field().heat_max_j();
     let mut account = Account { heat_j, ..full.account() };

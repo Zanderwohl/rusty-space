@@ -56,6 +56,8 @@ pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
         "living" => Some((300.0, 3000.0)),
         "mind" => Some((90.0, 9000.0)),
         "bay" => Some((300.0, 4000.0)),
+        // The flank's sprue lamps: high-pressure sodium.
+        "engine_flank" => Some((300.0, 2100.0)),
         _ => None,
     }
 }
@@ -64,7 +66,7 @@ pub struct ShipHullPlugin;
 
 impl Plugin for ShipHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin))
+        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin))
             .init_resource::<Palette>()
             .init_resource::<Rolls>()
             .init_resource::<RealHulls>()
@@ -170,7 +172,7 @@ pub(crate) fn finished(
     for (slot, face) in lit_faces.iter_mut().zip(faces.map_or(&[][..], |lit| &lit.faces)) {
         *slot = crate::lit_faces::radiance(session, face.temperature_k).as_vec3().extend(0.0);
     }
-    HullUniform {
+    crate::looks::kinds::wear(HullUniform {
         to_star: base.to_star.truncate().extend(crate::hull::HULL_NIGHT),
         reflected: base.reflected / PAINT as f32,
         glow: base.emitted,
@@ -181,7 +183,7 @@ pub(crate) fn finished(
         open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
         faces: lit_faces,
         ..default()
-    }
+    })
 }
 
 /// The roll each form presents its broadside at, from the same grid the server measures, worked
@@ -404,10 +406,10 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone() });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None });
                         commands
                             .entity(hull.mesh)
-                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material)));
+                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
                     }
                 }
             }
@@ -657,7 +659,7 @@ mod tests {
     /// matches on the hash rather than waiting out its timeout.
     #[test]
     fn a_form_hashes_alike_after_the_wire() {
-        for form in [Form::starting(), Builtin::Cluster.form(), Builtin::Plate.form(), Builtin::Spindle.form()] {
+        for form in [Form::reference(), Builtin::Cluster.form(), Builtin::Plate.form(), Builtin::Spindle.form()] {
             let across = Form::from(&lc_proto::Form::from(&form));
             assert_eq!(form_hash(&form, &B), form_hash(&across, &B));
         }
@@ -668,9 +670,9 @@ mod tests {
     #[test]
     fn each_formed_craft_is_wanted_and_decoded_once() {
         let (session, eye, ui) = (session(), Eye::default(), crate::app::Ui(Default::default()));
-        let own = crate::parts::OwnForm::new(&Form::starting(), &B).unwrap();
+        let own = crate::parts::OwnForm::new(&Form::reference(), &B).unwrap();
         let mut uplink = crate::uplink::Uplink::default();
-        uplink.contacts = vec![contact(1, &Builtin::Cluster.form()), contact(2, &Form { parts: vec![] }), contact(3, &Form::starting())];
+        uplink.contacts = vec![contact(1, &Builtin::Cluster.form()), contact(2, &Form { parts: vec![] }), contact(3, &Form::reference())];
         let mut stated = Stated::default();
 
         let first = wanted(&mut stated, &session, &uplink, &eye, &ui, (&own, true), B);

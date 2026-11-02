@@ -13,7 +13,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::tiles::{Rng, Surface};
+use super::tiles::{Rng, Surface};
 
 pub struct Lamps {
     /// At most one lamp of each kind a cell, in each variant.
@@ -88,7 +88,7 @@ pub fn of_variant(spec: &Lamps, layers: &[Surface], seed: u64, v: usize, interio
 pub fn interiors(spec: &Lamps, tile_m: f32, seed: u64) -> Vec<Vec<Lamp>> {
     let (_, inner) = cells(spec, tile_m);
     let lo = Vec2::splat(spec.reach_m);
-    spread(spec, &mut region_rng(seed, 16), lo, UVec2::splat(inner), crate::VARIANTS, [spec.deep_share, spec.riding_share])
+    spread(spec, &mut region_rng(seed, 16), lo, UVec2::splat(inner), super::VARIANTS, [spec.deep_share, spec.riding_share])
 }
 
 /// Cells across a strip, and along the interior.

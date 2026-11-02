@@ -268,7 +268,7 @@ mod tests {
     fn previewed(draft: Draft, stored_me: f64) -> (Preview, f64) {
         let b = Balance::DEFAULT;
         let mut s = crate::session::Session::new(&AuthoredStars::sample(), 3);
-        s.ship.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+        s.ship.fit(Some(Fitting::full(Form::reference(), b, 0.0)));
         let full = s.ship.fitting().unwrap().capacity_j_at(0.0);
         s.ship.drain(full - stored_me * b.module_energy_j(), 0.0);
         let mut ui = crate::ui::UiState::default();
@@ -277,7 +277,7 @@ mod tests {
     }
 
     fn resized(kind: Kind, by: f64) -> Draft {
-        let mut d = Draft::new(Form::starting());
+        let mut d = Draft::new(Form::reference());
         let part = *d.form.parts.iter().find(|p| p.kind == kind).unwrap();
         d.apply(&d.resize(part.id, part.volume_m3 * by).unwrap(), &Balance::DEFAULT).unwrap();
         d
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn the_budget_says_what_is_vented_and_a_shortfall() {
-        let (unchanged, me) = previewed(Draft::new(Form::starting()), 30.0);
+        let (unchanged, me) = previewed(Draft::new(Form::reference()), 30.0);
         assert_eq!(budget_figures(&unchanged, me)[1], "spent 0 ME");
         assert_eq!(budget_figures(&unchanged, me)[3], "", "nothing vented, nothing said");
         let (vent, me) = previewed(resized(Kind::Storage, 1.0 / 3.0), 30.0);

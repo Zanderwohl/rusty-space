@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn the_table_is_its_directions_and_symmetric() {
-        let grid = FormGrid::new(&Form::starting(), &B).unwrap();
+        let grid = FormGrid::new(&Form::reference(), &B).unwrap();
         let ico = icosphere();
         assert_eq!(ico.vertices.len(), SHADOW_DIRECTIONS);
         assert_eq!(ico.faces.len(), 320);
@@ -831,7 +831,7 @@ mod tests {
     /// smaller would: shrunk along any one of them, some part pokes through.
     #[test]
     fn the_envelope_holds_every_part_and_meets_it_on_each_axis() {
-        let mut all = vec![("starting", Form::starting())];
+        let mut all = vec![("starting", Form::reference())];
         all.extend(Builtin::ALL.map(|b| (b.name(), b.form())));
         let directions = spiral(40_000);
         for (name, form) in all {
@@ -898,7 +898,7 @@ mod tests {
     /// Nothing is symmetric top to bottom, so the xz product is not zero; port to starboard is.
     #[test]
     fn the_starting_form_has_an_xz_product() {
-        let grid = FormGrid::new(&Form::starting(), &B).unwrap();
+        let grid = FormGrid::new(&Form::reference(), &B).unwrap();
         let t = grid.inertia().tensor_kg_m2(1.0e9);
         assert!(t.z_axis.x.abs() > 1e-3 * t.x_axis.x, "{t}");
         assert!(t.y_axis.x.abs() < 1e-9 * t.x_axis.x && t.z_axis.y.abs() < 1e-9 * t.x_axis.x, "{t}");
@@ -919,7 +919,7 @@ mod tests {
 
     #[test]
     fn every_preset_fills_its_grid() {
-        let mut all = vec![("starting", Form::starting())];
+        let mut all = vec![("starting", Form::reference())];
         all.extend(Builtin::ALL.map(|b| (b.name(), b.form())));
         for (name, form) in all {
             let grid = FormGrid::new(&form, &B).unwrap();

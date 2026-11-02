@@ -3,7 +3,7 @@
 How a form becomes a picture: the hull, a refit being built, the drones doing it, and the field
 around all of it.
 
-**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void. Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
+**Status: partly built.** The hull material, the mesher, the drones and the field shader are in, each in a void, and five looks no kind wears yet are in development (§Looks in development). Construction is drawn on the placeholders in the game, and truss and plating on the meshed hull under `--demo refit`; see the "As built" notes. [29-ship-form.md](29-ship-form.md) is what is drawn,
 [30-the-field.md](30-the-field.md) is the field's physics, and [31-directed-energy.md](31-directed-energy.md)
 is what beams do.
 
@@ -135,12 +135,12 @@ client warns when it meshes one.
 
 | kind | look |
 |---|---|
-| storage | dark and smooth, faint seams. The mass of the ship |
+| storage | azteced plate: panels cut from a staggered grid by snapped splits, each its own gray or a little browner and tipped a few degrees, with chamfered seams. The mass of the ship. As built, a `plated` region of the hull material, cut in the ship's frame with its z up by `panels.wgsl`, which the aztec look's settings feed through `looks::kinds::wear`, its paint darkened and its metal dulled to sit among the hull's own textures under the hull's exposure |
 | drone | hangar doors in rows, docks lit when drones are home |
-| living | window bands. Lit on the night side, where they are the brightest thing on the hull |
-| engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
+| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Decks stack along the ship's z. Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the roof's outline is a map taken from each hull mesh by `looks::outline::hull_roof`, held in the material beside its uniforms so the ship's light can be rewritten without touching it. A refit's pieces carry no map, so their forest runs on past the rim until the refit is done |
+| engine | an ion thruster's face on the open face: a uniform grid of dark bars over blue hex cells 2 m behind it, seen through its gaps at their depth, each cell glowing at the luminance of whatever leaves through the face, deep blue at its walls and paling toward its core, and dark grid over black when nothing leaves; as built, `thruster` in the hull material, which draws it in place of the engine graph's grid. A layered sprue on its flanks: two cutout layers of mazed pipe over a plated base, lit by sodium floodlights. As built, the flank layer is `piped` in the hull material: the surface is the top layer of pipe, and the layer under it and the base are seen through its gaps at their depths by parallax, the sprue's baked tiles and lamp light sampled in the ship's frame and the star shadowed by the layers above; the tiles bake once on the async pool, and until then the flank draws its old graph, greebled machinery. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
-| mind | a small dark cube with one faint light. Drawn only when nothing encloses it, and always in the editor |
+| mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
 | spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
@@ -168,6 +168,53 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 ![Every kind by day and by night](../images/hull-kinds.png)
 
 ![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
+
+### Looks in development
+
+`lc_client::looks` holds five ship surfaces that no part kind wears yet, each its own material
+and shader rather than a graph in the hull material's palette:
+
+- **The sprue** (`sprue.wgsl`): an opaque plated base under two cutout layers of mazed pipe, 0.9 m
+  and 1.9 m off it, lit from the gaps by sodium lamps baked into edge-matched tiles.
+- **Aztec plate** (`aztec.wgsl`): rectangular panels, each one shade and one flat normal tipped up
+  to 5°, with chamfered trenches between, fully procedural.
+- **Offices**, the aztec plate with windows: rows level on decks 3 m apart, only where a window
+  fits inside its panel, lit mostly in runs, mirror-coated, with a room traced behind each pane.
+  By day a lit room is dimmed until it is hard to tell from a dark one, a cheat for daylight
+  outshining it.
+- **Habitat**, offices whose whole top is a roof of clear glass hexes, 10 m across in a 0.5 m
+  frame and chamfered 0.5 m where it meets the sides: a dome over a forest an eighth of the roof's
+  width down, at most 25 m, seen where the eye's ray meets it, so it moves against the frame.
+  Walls drop from the rim to the forest, so no ray runs on past the hull's edge: a unit box knows
+  its rectangle, and any other mesh is given a map of signed meters to its roof's outline seen from
+  above (`lc_client::looks::outline`, asked for with `RoofOutline`), taken once from the mesh by
+  clipping each triangle where its normal stops facing more up than sideways. Nothing in it glows;
+  it shows only what of the star and the planet is let in, through air that scatters it back blue
+  by day and red as the star sets over the roof, and that hides the forest the longer the ray's
+  path, so a glancing look sees sky only. Sheets of stratus part way down lie over the forest at
+  their own parallax and shade it where the star's light passes through them. Black by night.
+
+- **Obsidian** (`obsidian.wgsl`), meant for the Mind: knapped volcanic glass, blue-gray-black and
+  almost all reflection, cut by flake scars 5 m and a third of that across. Each scar is a shallow
+  concave dish with its own tilt and faint ripple rings, so neighbors meet in ridges and three in a
+  peak, and a facet flashes whole. The scars are cells of a 3D Voronoi on world position, so any
+  shape takes them without a seam, and they give way to a rougher sheen where they shrink under a
+  few pixels. The Mind wears it, through the hull material's `glassy` regions (§Materials by kind):
+  the first look given to a kind. Storage wears the aztec plate, Living the habitat and an engine's
+  flanks the sprue the same way, and
+  `looks::kinds::wear` is where each kind's look is decided.
+
+They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,
+as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is
+where they look as meant. And they map from **world position**, not the ship's frame, with decks
+stacked along world Y: on a craft that moves or turns, the panels and decks would swim.
+
+Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling boxes of each
+size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
+primitive.
+
+Open: mapping in the ship's frame, deciding which way a ship's decks stack, and giving a look to a
+kind.
 
 ## Building, as a function of time
 

@@ -269,7 +269,7 @@ mod tests {
     fn nineteens_volumes_have_nineteens_capacities() {
         let b = Balance::DEFAULT;
         let me = b.module_energy_j();
-        let c = Capacities::of(&Form::starting(), &b);
+        let c = Capacities::of(&Form::reference(), &b);
         let (week_s, century_s) = (7.0 * 86_400.0, 100.0 * crate::flight::JULIAN_YEAR_S);
         assert!(close(c.storage_j, 30.0 * me), "{} ME", c.storage_j / me);
         assert!(close(c.building_w, 2.0 * me / week_s));
@@ -316,21 +316,10 @@ mod tests {
         assert_eq!(Capacities::of(&form, &b), Capacities { data_b: ONBOARD_DATA_BYTES, ..Default::default() });
     }
 
-    /// With no structure, contents weigh what 19's modules do, plus the Mind, which 19 has no
-    /// counterpart for. The anchor below is where it is absorbed.
-    #[test]
-    fn contents_weigh_what_nineteens_modules_do() {
-        let b = Balance { hull_areal_density: 0.0, ..Balance::DEFAULT };
-        let frame_kg = 20.0 * SLOT_M3 * 50.0;
-        let modules_kg = STARTING_DRY_KG - frame_kg;
-        let mind_kg = b.min_part_m3 * b.module_density_kg_m3;
-        assert!(close(dry_mass_kg(&Form::starting(), &b), modules_kg + mind_kg));
-    }
-
     #[test]
     fn structure_is_each_parts_own_area() {
         let b = Balance { hull_areal_density: 120.0, ..Balance::DEFAULT };
-        let form = Form::starting();
+        let form = Form::reference();
         let area: f64 = form.parts.iter().map(|p| p.shape(b.min_part_m3).area()).sum();
         let bare = Balance { hull_areal_density: 0.0, ..b };
         assert!(close(dry_mass_kg(&form, &b) - dry_mass_kg(&form, &bare), 120.0 * area));
@@ -514,7 +503,7 @@ mod tests {
         assert!(close(aft_aperture_w(&turned, &b).unwrap(), both / 2.0));
         assert!(close(Capacities::of(&turned, &b).aperture_w, both));
         // The starting form's one bell flares aft.
-        let start = Form::starting();
+        let start = Form::reference();
         assert!(close(aft_aperture_w(&start, &b).unwrap(), Capacities::of(&start, &b).aperture_w));
     }
 
@@ -531,9 +520,9 @@ mod tests {
         let (fore, aft) = ends(&turned, &b).unwrap();
         assert!(close(fore.rating_w, aft.rating_w) && close(aft.rating_w, aft_aperture_w(&turned, &b).unwrap()));
         assert!(fore.diameter_m > 0.0 && close(fore.diameter_m, aft.diameter_m), "{fore:?} {aft:?}");
-        let (fore, aft) = ends(&Form::starting(), &b).unwrap();
+        let (fore, aft) = ends(&Form::reference(), &b).unwrap();
         assert_eq!(fore, End::default());
-        let face = aft_apertures(&Form::starting(), &b).unwrap()[0];
+        let face = aft_apertures(&Form::reference(), &b).unwrap()[0];
         assert!(close(aft.diameter_m, 2.0 * face.radius_m));
     }
 
@@ -541,7 +530,7 @@ mod tests {
     #[test]
     fn the_apertures_are_the_faces_that_fire_aft() {
         let b = Balance::DEFAULT;
-        let start = aft_apertures(&Form::starting(), &b).unwrap();
+        let start = aft_apertures(&Form::reference(), &b).unwrap();
         assert_eq!(start.len(), 1);
         let face = start[0];
         assert!(close(face.share, 1.0) && (face.out + DVec3::X).length() < 1.0e-9, "{face:?}");

@@ -104,8 +104,8 @@ async fn a_craft_in_the_cone_is_fed_at_its_light_delay_and_one_just_outside_is_n
     // About light delay, not seeing: these craft are too dark or too far to detect.
     server.see_everything(true);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, inside, Form::starting()), 0.0);
-    server.admit(ClientId(3), ship(3, outside, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, inside, Form::reference()), 0.0);
+    server.admit(ClientId(3), ship(3, outside, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, power_w, 1.0e-6, half, duration_s));
     server.tick(&mut wire).await.unwrap();
@@ -166,7 +166,7 @@ async fn an_aimed_beam_misses_a_target_that_maneuvered_after_it_left() {
         // About light delay, not seeing: these craft are too dark or too far to detect.
         server.see_everything(true);
         server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-        server.admit(ClientId(2), ship(2, target, Form::starting()), 0.0);
+        server.admit(ClientId(2), ship(2, target, Form::reference()), 0.0);
         let mut wire = Loopback::new();
         until(&mut server, &mut wire, 1.5 * LIGHT_HOUR_US).await;
         wire.client_says(EMITTING, emit(Aim::Ship(ShipId(2)), Apertures::Both, 1.0e17, 1.0e-9, 1.0e-7, 3.0 * HOUR_S));
@@ -200,7 +200,7 @@ async fn a_beam_led_along_a_steady_burn_lands_and_one_led_coasting_misses() {
         // About light delay, not seeing: these craft are too dark or too far to detect.
         server.see_everything(true);
         server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-        let mut burning = ship(2, target, Form::starting());
+        let mut burning = ship(2, target, Form::reference());
         let from_ly = target / LIGHT_US_PER_LY;
         let boost = lc_world::emit::Boost::plan(from_ly, DVec3::ZERO, 0.0, DVec3::Y, DVec3::Y, 5.0, 1.0e6, 0.01, DVec3::Y, 0.05);
         assert_eq!(boost.turn_s(), 0.0, "premise: lit from the start");
@@ -243,7 +243,7 @@ async fn a_balanced_emit_leaves_the_worldline_alone() {
 async fn recoil_points_away_from_the_beam() {
     let (power_w, duration_s) = (1.0e19, 600.0);
     let mut server = Server::new(Memory::default(), 0, 1);
-    let emitter = ship(1, DVec3::ZERO, Form::starting());
+    let emitter = ship(1, DVec3::ZERO, Form::reference());
     let twin = emitter.clone();
     server.admit(EMITTING, emitter, 0.0);
     let mut wire = Loopback::new();
@@ -275,9 +275,9 @@ async fn recoil_points_away_from_the_beam() {
 #[tokio::test]
 async fn an_emit_during_a_refit_is_refused() {
     let mut server = Server::new(Memory::default(), 0, 1);
-    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::starting()), 0.0);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::reference()), 0.0);
     let mut wire = Loopback::new();
-    let mut shrunk = Form::starting();
+    let mut shrunk = Form::reference();
     shrunk.parts.iter_mut().find(|p| p.id == lc_world::form::PartId(2)).unwrap().volume_m3 *= 3.0 / 5.0;
     wire.client_says(EMITTING, Inbound::Act(Intent { ship_id: EMITTER, order: Order::Refit { target: (&shrunk).into() }, issued_at_client_t: i64::MAX }));
     server.tick(&mut wire).await.unwrap();
@@ -293,11 +293,11 @@ async fn an_emit_during_a_refit_is_refused() {
 #[tokio::test]
 async fn a_spread_under_the_diffraction_floor_is_widened_to_it() {
     let mut server = Server::new(Memory::default(), 0, 1);
-    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::starting()), 0.0);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(-DVec3::X), Apertures::Aft, 1.0e15, 1.0e-6, 0.0, 60.0));
     server.tick(&mut wire).await.unwrap();
-    let face = lc_world::form::capacity::ends(&Form::starting(), &Balance::DEFAULT).unwrap().1;
+    let face = lc_world::form::capacity::ends(&Form::reference(), &Balance::DEFAULT).unwrap().1;
     let floor = 1.0e-6 / face.diameter_m / 2.0;
     let said = wire.take(EMITTING);
     let spread = said.iter().find_map(|m| match m {
@@ -318,9 +318,9 @@ async fn a_spread_under_the_diffraction_floor_is_widened_to_it() {
 #[tokio::test]
 async fn an_emit_past_the_apertures_is_refused() {
     let mut server = Server::new(Memory::default(), 0, 1);
-    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::starting()), 0.0);
+    server.admit(EMITTING, ship(1, DVec3::ZERO, Form::reference()), 0.0);
     let mut wire = Loopback::new();
-    let rating_w = lc_world::form::capacity::ends(&Form::starting(), &Balance::DEFAULT).unwrap().1.rating_w;
+    let rating_w = lc_world::form::capacity::ends(&Form::reference(), &Balance::DEFAULT).unwrap().1.rating_w;
     for (apertures, power_w, reason) in [
         (Apertures::Both, 1.0e15, Refusal::NoAperture),
         (Apertures::Fore, 1.0e15, Refusal::NoAperture),
@@ -374,7 +374,7 @@ async fn a_clear_receiver_takes_thirty_percent() {
         let at = DVec3::X * LIGHT_SECOND_US;
         let mut server = Server::new(Memory::default(), 0, 1);
         server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-        let mut receiver = ship(2, at, Form::starting());
+        let mut receiver = ship(2, at, Form::reference());
         let mut fitting = receiver.fitting().unwrap().clone();
         let shade = if setting == Setting::Clear { lc_world::field::Mode::Clear } else { lc_world::field::Mode::Black };
         fitting.set_posture(Posture { setting, shade, switch: None });
@@ -404,11 +404,11 @@ async fn a_beam_into_room_adds_only_the_conversion_loss_and_a_burst_adds_all_of_
     let at = DVec3::X * LIGHT_SECOND_US;
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    let mut receiver = ship(2, at, Form::starting());
+    let mut receiver = ship(2, at, Form::reference());
     let capacity_j = receiver.fitting().unwrap().hull().capacities.storage_j;
     account(&mut receiver, |a| a.stored_j = 0.1 * capacity_j);
     assert!(power_w < receiver.fitting().unwrap().hull().capacities.aperture_w, "premise: under its rating");
-    let mut burst_to = ship(3, DVec3::Y * LIGHT_SECOND_US, Form::starting());
+    let mut burst_to = ship(3, DVec3::Y * LIGHT_SECOND_US, Form::reference());
     account(&mut burst_to, |a| a.stored_j = 0.1 * capacity_j);
     let twin = receiver.clone();
     server.fleet.insert(receiver);
@@ -441,7 +441,7 @@ async fn a_beam_into_room_adds_only_the_conversion_loss_and_a_burst_adds_all_of_
 #[tokio::test]
 async fn radio_is_charged_from_storage() {
     let mut server = Server::new(Memory::default(), 0, 1);
-    let emitter = ship(1, DVec3::ZERO, Form::starting());
+    let emitter = ship(1, DVec3::ZERO, Form::reference());
     let twin = emitter.clone();
     server.admit(EMITTING, emitter, 0.0);
     let mut wire = Loopback::new();
@@ -483,17 +483,17 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
     // Ticks of 44 µs, so both lights are still on their way when the first tick ends.
     const RATE: f64 = 1.0e-7;
     let hot = 1.0 - 1.0e-6;
-    let mut dying = ship(10, DVec3::ZERO, Form::starting());
+    let mut dying = ship(10, DVec3::ZERO, Form::reference());
     let heat_max_j = dying.fitting().unwrap().field().heat_max_j();
     account(&mut dying, |a| a.heat_j = heat_max_j);
     let fitting = dying.fitting().unwrap();
     let spike_j = Balance::DEFAULT.collapse_spike_fraction * fitting.field().released_j(fitting.hull().capacities.storage_j);
-    let probe = ship(11, DVec3::Y, Form::starting());
+    let probe = ship(11, DVec3::Y, Form::reference());
     let headroom_j = (1.0 - hot) * heat_max_j;
     let shadow_m2 = crate::field::shadow_toward_m2(&probe, -DVec3::Y, 0.0);
     let lethal_us = lc_world::field::lethal_radius_m(1.0, spike_j, shadow_m2, headroom_j) * US_PER_M;
     let victim_at = DVec3::Y * 0.5 * lethal_us;
-    let mut victim = ship(11, victim_at, Form::starting());
+    let mut victim = ship(11, victim_at, Form::reference());
     account(&mut victim, |a| a.heat_j = hot * heat_max_j);
     let (emitter_at, target_at) = (DVec3::new(0.0, -3.0e4, 0.0), DVec3::new(300.0, -3.0e4, 0.0));
 
@@ -503,7 +503,7 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
         server.fleet.insert(dying.clone());
         server.fleet.insert(victim.clone());
         server.admit(EMITTING, ship(1, emitter_at, two_ended()), 0.0);
-        server.fleet.insert(ship(2, target_at, Form::starting()));
+        server.fleet.insert(ship(2, target_at, Form::reference()));
         let mut wire = Loopback::new();
         wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-9, 0.0, 1.0));
         server.tick(&mut wire).await.unwrap();
@@ -542,7 +542,7 @@ async fn a_beam_landing_across_a_restart_stays_on_until_its_end_arrives() {
     let at = DVec3::X * LIGHT_SECOND_US;
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, at, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-9, 0.0, 3.0 * HOUR_S));
     server.tick(&mut wire).await.unwrap();
@@ -572,7 +572,7 @@ async fn cutting_the_drive_puts_a_beam_out_early() {
     let at = DVec3::X * LIGHT_SECOND_US;
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, at, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, at, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-9, 0.0, 10.0 * HOUR_S));
     server.tick(&mut wire).await.unwrap();
@@ -606,7 +606,7 @@ async fn a_beam_in_flight_comes_back_through_the_store() {
     let target_at = DVec3::new(LIGHT_HOUR_US, 0.3, 0.7);
     let mut server = Server::new(journal, 0, 11);
     server.admit(EMITTING, ship(EMITTER_ID, DVec3::new(0.4, 0.0, 0.0), two_ended()), 0.0);
-    server.fleet.insert(ship(TARGET_ID, target_at, Form::starting()));
+    server.fleet.insert(ship(TARGET_ID, target_at, Form::reference()));
     let mut wire = Loopback::new();
     let order = Order::Emit { aim: along(DVec3::X), apertures: Apertures::Both, power_w: 1.0e17, wavelength_m: 1.0e-9, spread_rad: 1.0e-3, duration_s: 3.0 * HOUR_S, lead: Lead::Coasting };
     wire.client_says(EMITTING, Inbound::Act(Intent { ship_id: ShipId(EMITTER_ID), order, issued_at_client_t: i64::MAX }));
@@ -635,7 +635,7 @@ async fn nothing_lights_the_drive_while_a_balanced_emit_runs() {
     use lc_proto::{Approach, Closeness};
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.fleet.insert(ship(2, DVec3::Y * LIGHT_SECOND_US, Form::starting()));
+    server.fleet.insert(ship(2, DVec3::Y * LIGHT_SECOND_US, Form::reference()));
     server.pursuits.insert(CraftId(1), crate::chase::Pursuit {
         quarry: ShipId(2),
         closeness: lc_world::pursuit::Closeness::Company,
@@ -686,7 +686,7 @@ async fn a_balanced_emit_is_stated_at_both_ends_as_its_light_left() {
     // About light delay, not seeing: these craft are too dark or too far to detect.
     server.see_everything(true);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_HOUR_US, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_HOUR_US, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, power_w, 1.0e-6, 0.01, duration_s));
     server.tick(&mut wire).await.unwrap();
@@ -711,7 +711,7 @@ async fn a_burn_emit_is_stated_at_the_end_it_leaves() {
     let (power_w, duration_s) = (1.0e17, 3.0 * HOUR_S);
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_SECOND_US, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::Y * LIGHT_SECOND_US, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Fore, power_w, 1.0e-6, 0.01, duration_s));
     server.tick(&mut wire).await.unwrap();
@@ -740,7 +740,7 @@ async fn a_diffraction_limited_beam_at_a_craft_lands_on_it_until_it_goes_out() {
     // Both on one orbit's velocity, so the aim is led.
     let moving = |id: i64, at: DVec3| {
         let mut craft = crate::world::coasting(ShipId(id), at, DVec3::new(-0.6, 0.8, 0.0) * 1.0e-4, 0);
-        craft.fit(ship(id, at, Form::starting()).fitting().cloned());
+        craft.fit(ship(id, at, Form::reference()).fitting().cloned());
         hold_black(&mut craft);
         craft
     };
@@ -776,8 +776,8 @@ struct Stated {
 async fn stated_emit(apertures: Apertures, power_w: f64, spread_rad: f64) -> Stated {
     let mut server = Server::new(Memory::default(), 0, 1);
     server.admit(EMITTING, ship(1, DVec3::ZERO, two_ended()), 0.0);
-    server.admit(ClientId(2), ship(2, DVec3::X * LIGHT_SECOND_US, Form::starting()), 0.0);
-    server.admit(ClientId(3), ship(3, DVec3::Y * LIGHT_SECOND_US, Form::starting()), 0.0);
+    server.admit(ClientId(2), ship(2, DVec3::X * LIGHT_SECOND_US, Form::reference()), 0.0);
+    server.admit(ClientId(3), ship(3, DVec3::Y * LIGHT_SECOND_US, Form::reference()), 0.0);
     let mut wire = Loopback::new();
     wire.client_says(EMITTING, emit(along(DVec3::X), apertures, power_w, 1.0e-6, spread_rad, 3.0 * HOUR_S));
     let (mut along, mut beside) = (Vec::new(), Vec::new());

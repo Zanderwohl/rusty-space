@@ -899,7 +899,7 @@ mod tests {
     /// The starting ship at `of_max` of `Q_max`, in `posture`.
     fn heated(of_max: f64, posture: Posture) -> Session {
         let mut s = Session::new(&AuthoredStars::sample(), 3);
-        let full = Fitting::full(Form::starting(), B, s.coordinate_time_s());
+        let full = Fitting::full(Form::reference(), B, s.coordinate_time_s());
         let account = Account { heat_j: of_max * full.field().heat_max_j(), starlight_w: 0.0, posture, ..full.account() };
         s.ship.fit(Some(Fitting::from_account(&account, B)));
         s
@@ -1056,17 +1056,17 @@ mod tests {
             asked += 1;
             (form, B)
         };
-        assert!(shells.request(1, || source(Form::starting())));
-        assert!(!shells.request(1, || source(Form::starting())), "meshed again for the same form");
+        assert!(shells.request(1, || source(Form::reference())));
+        assert!(!shells.request(1, || source(Form::reference())), "meshed again for the same form");
         assert!(shells.request(2, || source(lc_world::form::presets::Builtin::Plate.form())));
-        assert!(!shells.request(1, || source(Form::starting())));
+        assert!(!shells.request(1, || source(Form::reference())));
         assert_eq!(asked, 2, "a form asked for when nothing new was wanted");
     }
 
     /// The envelope is closed round the hull with its margin, and its area is the shard's.
     #[test]
     fn the_envelope_is_the_shards() {
-        let form = Form::starting();
+        let form = Form::reference();
         let meshed = mesh_envelope(&form, &B).unwrap();
         let grid = lc_world::form::grid::FormGrid::new(&form, &B).unwrap();
         assert_eq!(meshed.area_m2, grid.envelope_area_m2());

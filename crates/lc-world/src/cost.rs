@@ -107,7 +107,7 @@ mod tests {
     use crate::flight::{C_M_S, Cruise, Drive, G0, JULIAN_YEAR_S};
 
     fn mass() -> f64 {
-        let hull = *Fitting::full(Form::starting(), Balance::DEFAULT, 0.0).hull();
+        let hull = *Fitting::full(Form::reference(), Balance::DEFAULT, 0.0).hull();
         hull.dry_kg + hull.capacities.storage_j / C2
     }
 
@@ -209,14 +209,6 @@ mod tests {
             assert!((energy_j(m, eta, 0.99) / free - 1.0).abs() < 1.0e-9);
         }
         assert_eq!(affordable_rapidity(m, m * C2, 1.0), f64::INFINITY);
-    }
-
-    #[test]
-    fn a_full_starting_ship_crosses_at_about_half_c() {
-        let hull = *Fitting::full(Form::starting(), Balance::DEFAULT, 0.0).hull();
-        let eta = affordable_rapidity(mass(), hull.capacities.storage_j, 1.0);
-        assert!((eta - (mass() / hull.dry_kg).ln()).abs() < 1.0e-12);
-        assert!(((eta / 2.0).tanh() - 0.468).abs() < 1.0e-3);
     }
 
     /// Checked against the rest profile's own closed forms rather than against itself.

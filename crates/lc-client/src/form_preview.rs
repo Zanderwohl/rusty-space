@@ -161,15 +161,15 @@ mod tests {
     fn the_rows_keep_their_places_while_the_grid_is_measured() {
         let b = Balance::DEFAULT;
         let mut s = crate::session::Session::new(&AuthoredStars::sample(), 3);
-        s.ship.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+        s.ship.fit(Some(Fitting::full(Form::reference(), b, 0.0)));
         let mut ui = crate::ui::UiState::default();
-        ui.form.draft = Some(Draft::new(Form::starting()));
+        ui.form.draft = Some(Draft::new(Form::reference()));
         let waiting = rows(&Preview::of(&s, &ui, None).unwrap(), b.module_energy_j());
-        let measured = Measured::of(&Form::starting(), &b).unwrap();
+        let measured = Measured::of(&Form::reference(), &b).unwrap();
         let done = rows(&Preview::of(&s, &ui, Some(&measured)).unwrap(), b.module_energy_j());
         assert!(waiting.iter().zip(&done).all(|((a, _), (b, _))| a == b) && waiting.len() == done.len());
         assert!(waiting.iter().any(|(_, v)| v.is_none()) && done.iter().all(|(_, v)| v.is_some()));
-        let storage = lc_world::form::capacity::Capacities::of(&Form::starting(), &b).storage_j;
+        let storage = lc_world::form::capacity::Capacities::of(&Form::reference(), &b).storage_j;
         assert_eq!(done[0].1, Some(format!("{} ME", figure(storage / b.module_energy_j()))));
     }
 }

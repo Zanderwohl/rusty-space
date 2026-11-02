@@ -478,20 +478,6 @@ mod tests {
         assert!((burning.arrive_s - 100.0 - flight_s).abs() < 1.0e-6);
     }
 
-    #[test]
-    fn the_starting_drive_section_is_rated_at_its_five_g() {
-        let b = Balance::DEFAULT;
-        let drive_m3 = 5.0 * SLOT_M3;
-        assert_eq!(format!("{:.2e}", drive_m3), "1.96e6");
-        let rated = rating_w(&b, drive_m3);
-        assert_eq!(format!("{rated:.1e}"), "1.1e20");
-        // The anchor is dry mass and 30 ME, to 1e-9. The field's heat is not in it.
-        let fitting = Fitting::full(Form::starting(), b, 0.0);
-        let full_kg = fitting.hull().dry_kg + fitting.hull().capacities.storage_j / crate::fitting::C2;
-        let five_g = Drive::exhaust_w(full_kg, 5.0);
-        assert!((rated - five_g).abs() / rated < 1.0e-9, "{rated} against {five_g}");
-    }
-
     /// 32 §The exhaust cone: the starting drive, all of it through a 100 m face, is white-hot.
     #[test]
     fn the_starting_drive_s_face_is_white_hot() {
@@ -617,7 +603,7 @@ mod tests {
     fn a_lit_emission_is_committed_and_released_when_put_out() {
         use crate::fitting::Lit;
         let motion = crate::motion::ShipState::at(DVec3::ZERO);
-        let mut fitting = Fitting::full(Form::starting(), Balance::DEFAULT, 0.0);
+        let mut fitting = Fitting::full(Form::reference(), Balance::DEFAULT, 0.0);
         fitting.light(Lit { from_s: 0.0, until_s: 100.0, power_w: 1.0e19, half_angle_rad: 0.01, axis: DVec3::X });
         assert_eq!(fitting.committed_j_at(&motion, 0.0), 1.0e21);
         assert!((fitting.committed_j_at(&motion, 40.0) - 6.0e20).abs() < 1.0e6);
@@ -649,7 +635,7 @@ mod tests {
         let b = Balance::DEFAULT;
         for (accel_g, jet, spread) in [(5.0, Jet::Drive, b.drive_spread_rad), (b.rcs_accel_g, Jet::Thrusters, b.rcs_spread_rad)] {
             let mut craft = Craft::at(CraftId(1), Kind::Ship, DVec3::ZERO);
-            craft.fit(Some(Fitting::full(Form::starting(), b, 0.0)));
+            craft.fit(Some(Fitting::full(Form::reference(), b, 0.0)));
             let drive = Drive { accel_g, ..craft.turning(craft.kind.drive()) };
             let to_ly = DVec3::X * (STANDOFF_LY + 1.0e-6);
             craft.apply(&Event { ship: ShipId(1), at_t: 0.0, change: Change::Cross { to_ly, drive } }).unwrap();
