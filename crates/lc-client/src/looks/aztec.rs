@@ -107,11 +107,15 @@ pub struct Roof {
     pub sky: Vec3,
     /// The share of the star the air scatters back up through the glass.
     pub scatter: f32,
+    /// The forest lies this share of the roof's width under the glass, and no deeper than
+    /// `forest_m`; the stratus is part way down.
+    pub depth_share: f32,
+    pub forest_m: f32,
 }
 
 impl Default for Roof {
     fn default() -> Self {
-        Self { hex_m: 10.0, seam_m: 0.5, rim_m: 0.5, sky: Vec3::new(0.15, 0.42, 1.0), scatter: 0.08 }
+        Self { hex_m: 10.0, seam_m: 0.5, rim_m: 0.5, sky: Vec3::new(0.15, 0.42, 1.0), scatter: 0.08, depth_share: 0.125, forest_m: 25.0 }
     }
 }
 
@@ -168,7 +172,10 @@ impl Aztec {
                 room: w.map_or(Vec4::ZERO, |w| Vec4::new(w.room_m, 0.0, 0.0, 0.0)),
                 roof: self.roof.as_ref().map_or(Vec4::ZERO, |r| Vec4::new(r.hex_m, r.seam_m, r.rim_m, 0.0)),
                 sky: self.roof.as_ref().map_or(Vec4::ZERO, |r| r.sky.extend(r.scatter)),
+                outline: Vec4::ZERO,
+                forest: self.roof.as_ref().map_or(Vec4::ZERO, |r| Vec4::new(r.forest_m, r.depth_share, 0.0, 0.0)),
             },
+            outline: None,
         }
     }
 }
@@ -191,12 +198,30 @@ pub struct AztecUniform {
     room: Vec4,
     roof: Vec4,
     sky: Vec4,
+    outline: Vec4,
+    forest: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct AztecMaterial {
     #[uniform(0, visibility(vertex, fragment))]
     uniforms: AztecUniform,
+    /// The roof's outline from above, as [`super::outline`] makes it: where a ray through the
+    /// glass meets the wall under the rim. A unit box knows its own, and without either the
+    /// ground under the glass runs on forever.
+    #[texture(1, visibility(fragment))]
+    #[sampler(2, visibility(fragment))]
+    outline: Option<Handle<Image>>,
+}
+
+impl AztecMaterial {
+    /// `bounds` is the world XZ the map spans, `(x0, z0, x1, z1)`, and `width_m` the widest
+    /// circle the outline holds, which sets how deep the forest lies.
+    pub fn set_outline(&mut self, map: Handle<Image>, bounds: Vec4, width_m: f32) {
+        self.outline = Some(map);
+        self.uniforms.outline = bounds;
+        self.uniforms.forest.z = width_m;
+    }
 }
 
 impl Material for AztecMaterial {

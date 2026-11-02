@@ -183,12 +183,16 @@ and shader rather than a graph in the hull material's palette:
   By day a lit room is dimmed until it is hard to tell from a dark one, a cheat for daylight
   outshining it.
 - **Habitat**, offices whose whole top is a roof of clear glass hexes, 10 m across in a 0.5 m
-  frame and chamfered 0.5 m where it meets the sides: a dome over a forest 25 m down, seen where
-  the eye's ray meets it, so it moves against the frame. Nothing in it glows; it shows only what of
-  the star and the planet is let in, through air that scatters it back blue by day and red as the
-  star sets over the roof, and that hides the forest the longer the ray's path, so a glancing look
-  sees sky only. Sheets of stratus 10 m down lie over the forest at their own parallax and shade
-  it where the star's light passes through them. Black by night.
+  frame and chamfered 0.5 m where it meets the sides: a dome over a forest an eighth of the roof's
+  width down, at most 25 m, seen where the eye's ray meets it, so it moves against the frame.
+  Walls drop from the rim to the forest, so no ray runs on past the hull's edge: a unit box knows
+  its rectangle, and any other mesh is given a map of signed meters to its roof's outline seen from
+  above (`lc_client::looks::outline`, asked for with `RoofOutline`), taken once from the mesh by
+  clipping each triangle where its normal stops facing more up than sideways. Nothing in it glows;
+  it shows only what of the star and the planet is let in, through air that scatters it back blue
+  by day and red as the star sets over the roof, and that hides the forest the longer the ray's
+  path, so a glancing look sees sky only. Sheets of stratus part way down lie over the forest at
+  their own parallax and shade it where the star's light passes through them. Black by night.
 
 They depart from the hull material on two points. They map by the **box face a point faces most**,
 as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is

@@ -58,17 +58,26 @@ struct AztecUniform {
     roof: vec4<f32>,
     /// The air under the roof's color by day, and the share of the star it scatters back up in `w`.
     sky: vec4<f32>,
+    /// The world XZ `outline_map` spans, `(x0, z0, x1, z1)`; empty where there is none.
+    outline: vec4<f32>,
+    /// `(most_m, share, width_m, 0)`: the forest lies `share` of the roof's width down, and no
+    /// deeper than `most_m`. `width_m` is the outline's, 0 where there is none.
+    forest: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var outline_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var outline_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
 const DESK_TOP_M: f32 = 0.75;
-const FOREST_DEPTH_M: f32 = 25.0;
 const CROWN_M: f32 = 5.0;
 const GROVE_M: f32 = 40.0;
-const STRATUS_DEPTH_M: f32 = 10.0;
+/// How far down the stratus lies, as a share of the forest's depth.
+const STRATUS_SHARE: f32 = 0.4;
+const WALL_STEPS: i32 = 32;
+const WALL_ALBEDO: f32 = 0.25;
 const STRATUS_SCALE_M: vec2<f32> = vec2<f32>(35.0, 12.0);
 /// What of the forest the thickest stratus hides.
 const STRATUS_ALPHA: f32 = 0.6;
@@ -445,12 +454,65 @@ fn stratus(q: vec2<f32>) -> f32 {
 }
 
 /// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
-/// glass. A forest `FOREST_DEPTH_M` down is seen where the eye's ray meets it, so it moves against
+/// glass. A forest [`forest_depth`] down is seen where the eye's ray meets it, so it moves against
 /// the frame as the eye does, through air that scatters the light back blue by day and red as the
 /// star sets over the roof; the longer the ray's path, the more air hides the forest, so a glancing
-/// look sees sky only. A stratus deck `STRATUS_DEPTH_M` down lies over the forest, and shades it
+/// look sees sky only. Walls drop from the rim to the forest, so a ray never runs on past the hull's
+/// edge. A stratus deck `STRATUS_SHARE` of the way down lies over the forest, and shades it
 /// where the star's light passes through it on the way down. Nothing by night.
-fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
+/// Signed meters from world XZ `q` to the roof's outline seen from above, positive inside: a unit
+/// box's own rectangle, or `outline_map`. Far inside where neither is known, so the ground runs on.
+fn inside_outline(q: vec2<f32>, in: VertexOutput) -> f32 {
+    if (m.finish.z > 0.5) {
+        let d = in.box_half.xz - abs(q - in.box_center.xz);
+        return min(d.x, d.y);
+    }
+    let span = m.outline.zw - m.outline.xy;
+    if (span.x <= 0.0) {
+        return 1.0e6;
+    }
+    let uv = (q - m.outline.xy) / span;
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
+        return -1.0;
+    }
+    return textureSampleLevel(outline_map, outline_sampler, uv, 0.0).r;
+}
+
+/// How far down the eye's ray through the glass meets the wall dropping from the rim, or `limit`
+/// if it reaches that depth first. Walls are vertical, so the ray's shadow on XZ is a line, and
+/// the outline's distance is a safe step along it.
+fn wall_depth(world: vec3<f32>, e: vec3<f32>, limit: f32, in: VertexOutput) -> f32 {
+    let slope = -e.xz / max(e.y, 0.02);
+    let run = max(length(slope), 1.0e-3);
+    var h = 0.0;
+    for (var i = 0; i < WALL_STEPS; i++) {
+        let d = inside_outline(world.xz + slope * h, in);
+        // The glass itself may sit a texel outside the map's edge; only a step taken can hit.
+        if (i > 0 && d < 0.02) {
+            return h;
+        }
+        h += max(d, 0.05) / run;
+        if (h >= limit) {
+            return limit;
+        }
+    }
+    return limit;
+}
+
+/// How deep the forest lies under this roof: a share of its width, so a small roof is not a deep
+/// well, up to a most. A unit box's width is its own; a mesh's, its outline's.
+fn forest_depth(in: VertexOutput) -> f32 {
+    var width = m.forest.z;
+    if (m.finish.z > 0.5) {
+        width = 2.0 * min(in.box_half.x, in.box_half.z);
+    }
+    if (width <= 0.0) {
+        return m.forest.x;
+    }
+    return min(m.forest.x, m.forest.y * width);
+}
+
+fn sky_below(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
     let star = turned(m.to_star);
     let over = dot(star, surface);
     let day = smoothstep(-0.08, 0.25, over);
@@ -460,21 +522,33 @@ fn sky_below(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32)
     let air = m.star_color.rgb * m.sky.w * day * mix(vec3<f32>(1.0), tint, 0.7) * rayleigh;
 
     let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.02));
-    let path = FOREST_DEPTH_M / d.z;
-    let through = exp(-path / AIR_M);
     let sunlight = m.star_color.rgb * day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
     let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
-    let ground = p + d.xy * path;
-    let up_to_deck = (FOREST_DEPTH_M - STRATUS_DEPTH_M) / max(star_face.z, 0.1);
-    let shade = 1.0 - 0.6 * stratus(ground + star_face.xy * up_to_deck);
-    let forest = canopy(ground, star_face) * sunlight * shade / PI;
-    var below = forest * through + air * (1.0 - through);
+    let floor_m = forest_depth(in);
+    let deck_m = STRATUS_SHARE * floor_m;
+    let depth = wall_depth(in.world_position, e, floor_m, in);
+    let path = depth / d.z;
+    let through = exp(-path / AIR_M);
+    var seen: vec3<f32>;
+    if (depth < floor_m) {
+        // The inside of the hull under the rim, banded by its decks, darker toward the floor.
+        let band = select(1.0, 0.5, fract(depth / max(m.deck.x, 3.0)) < 0.06);
+        seen = sunlight * WALL_ALBEDO * (0.3 + 0.7 * max(over, 0.0)) * mix(1.0, 0.4, depth / floor_m) * band / PI;
+    } else {
+        let ground = p + d.xy * path;
+        let up_to_deck = (floor_m - deck_m) / max(star_face.z, 0.1);
+        let shade = 1.0 - 0.6 * stratus(ground + star_face.xy * up_to_deck);
+        seen = canopy(ground, star_face) * sunlight * shade / PI;
+    }
+    var below = seen * through + air * (1.0 - through);
 
-    let deck_path = STRATUS_DEPTH_M / d.z;
-    let cover = STRATUS_ALPHA * stratus(p + d.xy * deck_path);
-    let deck_through = exp(-deck_path / AIR_M);
-    let cloud = sunlight * (0.2 + 0.3 * max(over, 0.0)) * mix(0.8, 1.0, high);
-    below = mix(below, cloud * deck_through + air * (1.0 - deck_through), cover);
+    if (depth > deck_m) {
+        let deck_path = deck_m / d.z;
+        let cover = STRATUS_ALPHA * stratus(p + d.xy * deck_path);
+        let deck_through = exp(-deck_path / AIR_M);
+        let cloud = sunlight * (0.2 + 0.3 * max(over, 0.0)) * mix(0.8, 1.0, high);
+        below = mix(below, cloud * deck_through + air * (1.0 - deck_through), cover);
+    }
     // The frame shades what is just inside it.
     below *= mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
     let planet = m.planet_color.rgb * m.sky.rgb * max(dot(normalize(m.to_planet.xyz), surface), 0.0) * 0.3;
@@ -530,7 +604,7 @@ fn roof_metal(n: vec3<f32>, e: vec3<f32>, surface: vec3<f32>) -> vec3<f32> {
 }
 
 /// The top's roof: clear glass hexes in a metal frame, the glass over [`sky_below`].
-fn roof(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
+fn roof(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
     let cell = hex(p, m.roof.x);
     let frame = roof_metal(surface, e, surface);
 
@@ -538,7 +612,7 @@ fn roof(p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
     let roughness = 0.05;
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
     let half_seam = 0.5 * m.roof.y;
-    var pane = (1.0 - fresnel) * sky_below(p, f, surface, e, cell.z - half_seam);
+    var pane = (1.0 - fresnel) * sky_below(in, p, f, surface, e, cell.z - half_seam);
     let star = turned(m.to_star);
     if (dot(star, surface) > 0.0) {
         pane += m.star_color.rgb * specular(surface, star, e, f0, roughness);
@@ -563,7 +637,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let bevel = roof_metal(edged.normal, e, surface);
     if (m.roof.x > 0.0 && f.n.y > 0.5) {
-        return vec4<f32>(mix(roof(p, f, surface, e), bevel, edged.share) * m.finish.x, 1.0);
+        return vec4<f32>(mix(roof(in, p, f, surface, e), bevel, edged.share) * m.finish.x, 1.0);
     }
     let cell = panel(p, f.id);
 

@@ -29,6 +29,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
+use lc_client::looks::outline::RoofOutline;
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
 
@@ -172,6 +173,7 @@ fn spawn(
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
         MeshMaterial3d(habitat_ovoid),
+        RoofOutline,
         Transform::from_translation(ovoid_at).with_scale(Vec3::new(0.5, 0.1, 0.25) * length),
     ));
     stations.push((ovoid_at, 0.6 * length));

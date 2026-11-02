@@ -6,6 +6,7 @@
 //! divides an hour turns seamlessly through the hourly wrap of that clock.
 
 pub mod aztec;
+pub mod outline;
 pub mod sprue;
 
 use bevy::prelude::*;
@@ -17,7 +18,8 @@ impl Plugin for LooksPlugin {
         app.add_plugins((
             MaterialPlugin::<aztec::AztecMaterial>::default(),
             MaterialPlugin::<sprue::SprueMaterial>::default(),
-        ));
+        ))
+        .add_systems(PostUpdate, outline::outline_roofs.after(bevy::transform::TransformSystems::Propagate));
     }
 }
 

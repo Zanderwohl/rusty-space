@@ -33,6 +33,7 @@ use lc_client::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, Hull
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::LooksPlugin;
+use lc_client::looks::outline::RoofOutline;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape as Target2d, Target, placeholder};
 use lc_client::tonemap::ToneMap;
 use lc_world::form::place::{Pose, Side};
@@ -343,7 +344,10 @@ fn spawn(
                         "habitat" => habitat.clone(),
                         _ => aztec.clone(),
                     };
-                    commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform));
+                    let piece = commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform)).id();
+                    if look == "habitat" {
+                        commands.entity(piece).insert(RoofOutline);
+                    }
                 }
             }
         }

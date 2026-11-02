@@ -5029,6 +5029,7 @@ dependencies = [
  "em-ui",
  "getrandom 0.3.3",
  "glam",
+ "half",
  "image",
  "js-sys",
  "keyring",
