@@ -143,6 +143,10 @@ pub struct HullUniform {
     /// Which regions are azteced plate, one bit a region: their tile gives way to panels cut by
     /// chamfered seams, each its own shade and lit at its own tilt.
     pub plated: u32,
+    /// Which regions are habitat, one bit a region: plate with office windows on the sides, rooms
+    /// traced behind them, and over the top a roof of glass hexes on a forest. Decks stack along
+    /// the ship's z. A lit window is the region's [`Self::emitted`].
+    pub habitat: u32,
     /// Per region, what a fully lit texel of its lights sends, in [`Self::reflected`]'s units.
     /// A real, small power: it shows on a night side and is lost against a lit one.
     pub emitted: [Vec4; REGIONS],
@@ -165,6 +169,19 @@ pub struct HullUniform {
     pub plate_finish: Vec4,
     /// `(roughness, metallic, paint, 0)`, the last scaling every panel's shade.
     pub plate_metal: Vec4,
+    /// A habitat's decks: `(deck_m, pitch_m, sill_m, room_m)`, the deck height, window centers
+    /// along a row, from the deck to a window's bottom, and how deep the room behind it is.
+    pub deck: Vec4,
+    /// A window: `(width_m, height_m, f0, roughness)`.
+    pub pane: Vec4,
+    /// A habitat's roof: `(hex_m, seam_m, rim_m, forest_m)`, across a hex's flats, the frame
+    /// between, the chamfer where it meets the sides, and the deepest the forest lies.
+    pub roof: Vec4,
+    /// The air under the roof's color by day, and the share of the star it scatters back up.
+    pub roof_sky: Vec4,
+    /// `(depth_share, lit_share, 0, 0)`: the forest lies this share of the roof's width down, and
+    /// this share of a row's runs of windows is lit.
+    pub roof_shape: Vec4,
 }
 
 impl Default for HullUniform {
@@ -185,6 +202,7 @@ impl Default for HullUniform {
             bolted: 0,
             glassy: 0,
             plated: 0,
+            habitat: 0,
             emitted: [Vec4::ZERO; REGIONS],
             open: UVec4::ZERO,
             faces: [Vec4::ZERO; FACES],
@@ -193,6 +211,11 @@ impl Default for HullUniform {
             plates: Vec4::new(24.0, 3.0, 0.25, 0.0),
             plate_finish: Vec4::ZERO,
             plate_metal: Vec4::ZERO,
+            deck: Vec4::new(3.0, 2.0, 0.9, 4.0),
+            pane: Vec4::ZERO,
+            roof: Vec4::ZERO,
+            roof_sky: Vec4::ZERO,
+            roof_shape: Vec4::ZERO,
         }
     }
 }
@@ -208,6 +231,22 @@ pub struct HullMaterial {
     /// The same with [`Tile::Lights`]: the share of each texel that is lit.
     #[texture(3, dimension = "2d_array", visibility(fragment))]
     pub lights: Handle<Image>,
+    /// A habitat roof's outline seen from above, in the ship's frame: signed meters to its edge,
+    /// positive inside, so a ray through the glass meets a wall dropping from the rim. Taken from
+    /// the mesh, so kept apart from [`Self::uniforms`], which follow the ship's light.
+    #[texture(4, visibility(fragment))]
+    #[sampler(5, visibility(fragment))]
+    pub roof_map: Option<Handle<Image>>,
+    #[uniform(6, visibility(fragment))]
+    pub roof_outline: RoofOutline,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub struct RoofOutline {
+    /// The ship-frame XY the map spans, `(x0, y0, x1, y1)`; empty where there is no map.
+    pub bounds: Vec4,
+    /// `(width_m, 0, 0, 0)`: the widest circle the outline holds.
+    pub width: Vec4,
 }
 
 impl Material for HullMaterial {

@@ -290,6 +290,8 @@ fn spawn_hull(
         },
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
+        roof_map: None,
+        roof_outline: default(),
     });
     let hull = sphere(args.radius, args.center);
     commands.spawn((Mesh3d(meshes.add(hull)), MeshMaterial3d(material), Spun));

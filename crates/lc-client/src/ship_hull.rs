@@ -64,7 +64,7 @@ pub struct ShipHullPlugin;
 
 impl Plugin for ShipHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin))
+        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin))
             .init_resource::<Palette>()
             .init_resource::<Rolls>()
             .init_resource::<RealHulls>()
@@ -404,10 +404,10 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone() });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default() });
                         commands
                             .entity(hull.mesh)
-                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material)));
+                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
                     }
                 }
             }

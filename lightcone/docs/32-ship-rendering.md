@@ -137,7 +137,7 @@ client warns when it meshes one.
 |---|---|
 | storage | azteced plate: panels cut from a staggered grid by snapped splits, each its own gray or a little browner and tipped a few degrees, with chamfered seams. The mass of the ship. As built, a `plated` region of the hull material, cut in the ship's frame with its z up by `panels.wgsl`, which the aztec look's settings feed through `looks::kinds::wear`, its paint darkened and its metal dulled to sit among the hull's own textures under the hull's exposure |
 | drone | hangar doors in rows, docks lit when drones are home |
-| living | window bands. Lit on the night side, where they are the brightest thing on the hull |
+| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Decks stack along the ship's z. Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the roof's outline is a map taken from each hull mesh by `looks::outline::hull_roof`, held in the material beside its uniforms so the ship's light can be rewritten without touching it. A refit's pieces carry no map, so their forest runs on past the rim until the refit is done |
 | engine | an emitter grid on the open face, glowing at whatever leaves through it, and greebled machinery on its flanks: housings, louvered recesses, fittings and pipe runs, unlit. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
@@ -200,7 +200,7 @@ and shader rather than a graph in the hull material's palette:
   peak, and a facet flashes whole. The scars are cells of a 3D Voronoi on world position, so any
   shape takes them without a seam, and they give way to a rougher sheen where they shrink under a
   few pixels. The Mind wears it, through the hull material's `glassy` regions (§Materials by kind):
-  the first look given to a kind. Storage wears the aztec plate the same way, and
+  the first look given to a kind. Storage wears the aztec plate and Living the habitat the same way, and
   `looks::kinds::wear` is where each kind's look is decided.
 
 They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,

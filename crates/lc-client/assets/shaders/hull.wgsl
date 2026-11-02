@@ -13,7 +13,8 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
-#import "shaders/panels.wgsl"::{plate}
+#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate}
+#import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -89,6 +90,8 @@ struct HullUniform {
     glassy: u32,
     /// One bit a region: azteced plate.
     plated: u32,
+    /// One bit a region: habitat.
+    habitat: u32,
     emitted: array<vec4<f32>, REGIONS>,
     /// `(region, flank, on, 0)`.
     open: vec4<u32>,
@@ -103,12 +106,32 @@ struct HullUniform {
     plate_finish: vec4<f32>,
     /// `(roughness, metallic, paint, 0)`.
     plate_metal: vec4<f32>,
+    /// `(deck_m, pitch_m, sill_m, room_m)`.
+    deck: vec4<f32>,
+    /// `(width_m, height_m, f0, roughness)`.
+    pane: vec4<f32>,
+    /// `(hex_m, seam_m, rim_m, forest_m)`.
+    roof: vec4<f32>,
+    /// The air's color by day, and what of the star it scatters back up in `w`.
+    roof_sky: vec4<f32>,
+    /// `(depth_share, lit_share, 0, 0)`.
+    roof_shape: vec4<f32>,
+}
+
+struct RoofOutline {
+    /// Ship-frame XY `roof_map` spans, `(x0, y0, x1, y1)`; empty where there is none.
+    bounds: vec4<f32>,
+    /// `(width_m, 0, 0, 0)`.
+    width: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_tiles: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var tile_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var light_tiles: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var roof_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var roof_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var<uniform> roof_outline: RoofOutline;
 
 /// Obsidian's index is about 1.49.
 const GLASS_F0: f32 = 0.04;
@@ -116,6 +139,18 @@ const GLASS_F0: f32 = 0.04;
 const GLASS_SKY: f32 = 0.25;
 /// The same for plate metal.
 const PLATE_SKY: f32 = 0.1;
+const PI: f32 = 3.14159265;
+/// The roof's clear glass.
+const ROOF_F0: f32 = 0.04;
+const ROOF_ROUGHNESS: f32 = 0.05;
+/// How far down the stratus lies, as a share of the forest's depth.
+const STRATUS_SHARE: f32 = 0.4;
+/// What of the forest the thickest stratus hides.
+const STRATUS_ALPHA: f32 = 0.6;
+/// How far through the dome's air the forest fades to 1/e.
+const AIR_M: f32 = 160.0;
+const WALL_STEPS: i32 = 32;
+const WALL_ALBEDO: f32 = 0.25;
 
 /// em_render::hull_material::ALL_PLATED.
 const ALL_PLATED: f32 = 1.0e30;
@@ -407,9 +442,13 @@ const SHIP_UP: vec3<f32> = vec3<f32>(0.0, 0.0, 1.0);
 /// its own tilt, a seam's walls at theirs, the star's highlight off the metal, and a faint sky.
 fn plate_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
     let surface = normalize(in.ship_normal);
-    let star = normalize(in.star_ship);
-    let e = normalize(in.eye_ship - in.ship_position);
     let k = plate(in.ship_position, surface, SHIP_UP, material.plates, material.plate_finish, pixel, 0u);
+    return material.reflected.rgb * plate_lit(k, normalize(in.star_ship), normalize(in.eye_ship - in.ship_position), surface);
+}
+
+/// A plate's light in units of reflected: each panel's own shade lit at its own tilt, a seam's walls
+/// at theirs, the star's highlight off the metal, and a faint sky.
+fn plate_lit(k: Plate, star: vec3<f32>, e: vec3<f32>, surface: vec3<f32>) -> vec3<f32> {
     let lit_side = dot(star, surface) > 0.0;
     let roughness = material.plate_metal.x;
     let metallic = material.plate_metal.y;
@@ -421,18 +460,159 @@ fn plate_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
     var light = vec3<f32>(0.0);
     for (var i = 0; i < 2; i++) {
         let n = select(k.normal, k.wall, i == 1);
-        let facing = select(0.0, max(dot(n, star), 0.0), lit_side);
-        let ne = max(dot(n, e), 0.0);
-        let fresnel = f0 + (1.0 - f0) * pow(1.0 - ne, 5.0);
-        let r = reflect(-e, n);
-        var here = albedo * max(facing, material.to_star.w);
-        here += tint * PLATE_SKY * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0));
-        if (lit_side) {
-            here += tint * 3.14159265 * glass_specular(n, star, e, roughness, f0);
-        }
-        light += here * select(1.0 - k.wall_share, k.wall_share, i == 1);
+        light += metal_lit(n, star, e, lit_side, albedo, f0, tint, roughness) * select(1.0 - k.wall_share, k.wall_share, i == 1);
     }
-    return material.reflected.rgb * light;
+    return light;
+}
+
+fn metal_lit(n: vec3<f32>, star: vec3<f32>, e: vec3<f32>, lit_side: bool, albedo: vec3<f32>, f0: f32, tint: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let facing = select(0.0, max(dot(n, star), 0.0), lit_side);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, e), 0.0), 5.0);
+    let r = reflect(-e, n);
+    var here = albedo * max(facing, material.to_star.w);
+    here += tint * PLATE_SKY * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0));
+    if (lit_side) {
+        here += tint * PI * glass_specular(n, star, e, roughness, f0);
+    }
+    return here;
+}
+
+fn habitable(region: u32) -> bool {
+    return ((material.habitat >> region) & 1u) != 0u;
+}
+
+/// Signed meters from ship-frame XY `q` to the roof's outline seen from above, positive inside; far
+/// inside where no map is bound, so the ground runs on.
+fn inside_roof(q: vec2<f32>) -> f32 {
+    let span = roof_outline.bounds.zw - roof_outline.bounds.xy;
+    if (span.x <= 0.0) {
+        return 1.0e6;
+    }
+    let uv = (q - roof_outline.bounds.xy) / span;
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
+        return -1.0;
+    }
+    return textureSampleLevel(roof_map, roof_sampler, uv, 0.0).r;
+}
+
+/// How far down the eye's ray through the glass meets the wall dropping from the rim, or `limit`
+/// if it reaches that depth first. Walls are vertical, so the ray's shadow on XY is a line, and the
+/// outline's distance is a safe step along it.
+fn wall_depth(pos: vec3<f32>, e: vec3<f32>, limit: f32) -> f32 {
+    let slope = -e.xy / max(e.z, 0.02);
+    let run = max(length(slope), 1.0e-3);
+    var h = 0.0;
+    for (var i = 0; i < WALL_STEPS; i++) {
+        let d = inside_roof(pos.xy + slope * h);
+        // The glass itself may sit a texel outside the map's edge; only a step taken can hit.
+        if (i > 0 && d < 0.02) {
+            return h;
+        }
+        h += max(d, 0.05) / run;
+        if (h >= limit) {
+            return limit;
+        }
+    }
+    return limit;
+}
+
+/// What a roof pane shows, in units of reflected: no light of its own, only the star's let in
+/// through the glass. A forest a share of the roof's width down, at most roof.w, is seen where the
+/// eye's ray meets it, so it moves against the frame, through air that scatters the star back blue
+/// by day and red as it sets over the roof and hides the forest the longer the ray's path; walls
+/// drop from the rim to the forest; a stratus deck part way down lies over it and shades it.
+fn under_roof(in: VertexOutput, p: vec2<f32>, f: PanelFace, surface: vec3<f32>, e: vec3<f32>, star: vec3<f32>, edge: f32) -> vec3<f32> {
+    let over = dot(star, surface);
+    let day = smoothstep(-0.08, 0.25, over);
+    let high = smoothstep(0.0, 0.45, over);
+    let tint = mix(vec3<f32>(1.0, 0.42, 0.16), material.roof_sky.rgb, high);
+    let rayleigh = 0.75 * (1.0 + pow(dot(-star, e), 2.0));
+    // The star is pi in reflected's units.
+    let air = PI * material.roof_sky.w * day * mix(vec3<f32>(1.0), tint, 0.7) * rayleigh;
+
+    let width = roof_outline.width.x;
+    let floor_m = select(material.roof.w, min(material.roof.w, material.roof_shape.x * width), width > 0.0);
+    let deck_m = STRATUS_SHARE * floor_m;
+    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.02));
+    let sunlight = day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
+    let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
+    let depth = wall_depth(in.ship_position, e, floor_m);
+    let through = exp(-(depth / d.z) / AIR_M);
+    var seen: vec3<f32>;
+    if (depth < floor_m) {
+        let band = select(1.0, 0.5, fract(depth / max(material.deck.x, 1.0)) < 0.06);
+        seen = sunlight * WALL_ALBEDO * (0.3 + 0.7 * max(over, 0.0)) * mix(1.0, 0.4, depth / floor_m) * band;
+    } else {
+        let ground = p + d.xy * (floor_m / d.z);
+        let shade = 1.0 - 0.6 * stratus(ground + star_face.xy * (floor_m - deck_m) / max(star_face.z, 0.1));
+        seen = canopy(ground, star_face) * sunlight * shade;
+    }
+    var below = seen * through + air * (1.0 - through);
+    if (depth > deck_m) {
+        let deck_path = deck_m / d.z;
+        let cover = STRATUS_ALPHA * stratus(p + d.xy * deck_path);
+        let deck_through = exp(-deck_path / AIR_M);
+        let cloud = PI * sunlight * (0.2 + 0.3 * max(over, 0.0)) * mix(0.8, 1.0, high);
+        below = mix(below, cloud * deck_through + air * (1.0 - deck_through), cover);
+    }
+    // The frame shades what is just inside it.
+    return below * mix(0.55, 1.0, smoothstep(0.0, 2.0, edge));
+}
+
+/// What a habitat region sends toward the eye, in reflected's units: office plate on the sides with
+/// windows over traced rooms, lit by `glow` where a room's lights are on, and over the top a roof of
+/// glass hexes on a forest, chamfered where the two meet. `lead_rate` is how fast the roof's lead
+/// changes across a pixel, taken outside any branch.
+fn habitat_light(in: VertexOutput, pixel: f32, lead: f32, lead_rate: f32, glow: vec3<f32>) -> vec3<f32> {
+    let surface = normalize(in.ship_normal);
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    let lit_side = dot(star, surface) > 0.0;
+    let metal = vec3<f32>(0.4) * material.plate_metal.z;
+    let metal_f0 = mix(0.04, dot(metal, LUMA), material.plate_metal.y);
+    var lit = vec3<f32>(0.0);
+    var lamp = vec3<f32>(0.0);
+    let f = panel_face(surface, SHIP_UP);
+    let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v));
+    if (f.n.z > 0.5) {
+        let cell = hex(p, material.roof.x);
+        let frame = metal_lit(surface, star, e, lit_side, metal * (1.0 - material.plate_metal.y), metal_f0, vec3<f32>(1.0), material.plate_metal.x);
+        let fresnel = ROOF_F0 + (1.0 - ROOF_F0) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
+        let half_seam = 0.5 * material.roof.y;
+        var pane = (1.0 - fresnel) * under_roof(in, p, f, surface, e, star, cell.z - half_seam);
+        pane += vec3<f32>(PLATE_SKY * fresnel);
+        if (lit_side) {
+            pane += vec3<f32>(PI * glass_specular(surface, star, e, ROOF_ROUGHNESS, ROOF_F0));
+        }
+        lit = mix(frame, pane, smoothstep(half_seam - pixel, half_seam + pixel, cell.z));
+    } else {
+        let k = plate(in.ship_position, surface, SHIP_UP, material.plates, material.plate_finish, pixel, 0u);
+        lit = plate_lit(k, star, e, surface);
+        // Glazing leans no more than 30 degrees off the vertical.
+        if (abs(f.n.z) < 0.9 && abs(surface.z) <= 0.5) {
+            let pane = window(k.p, k.panel, k.face.id, material.deck, material.pane.xy, material.plate_finish.z + 0.1, material.roof_shape.y, vec2<f32>(pixel));
+            if (pane.cover > 0.0) {
+                let fresnel = material.pane.z + (1.0 - material.pane.z) * pow(1.0 - max(dot(k.normal, e), 0.0), 5.0);
+                var glass = vec3<f32>(PLATE_SKY * fresnel);
+                if (lit_side) {
+                    glass += vec3<f32>(PI * glass_specular(k.normal, star, e, material.pane.w, material.pane.z));
+                }
+                let on = select(0.0, 1.0, pane.lit);
+                lamp = pane.cover * (1.0 - fresnel) * on * room(k.p, e, k.face, pane, material.deck, material.deck.w);
+                lit = mix(lit, glass, pane.cover);
+            }
+        }
+    }
+
+    // The chamfer where the roof meets the sides: each side of the line leans 45 degrees toward it.
+    let dist = abs(lead) * pixel * 0.7071 / max(lead_rate, 1.0e-6);
+    let side = normalize(vec3<f32>(surface.xy, 0.0) + vec3<f32>(1.0e-6, 0.0, 0.0));
+    let along = select(SHIP_UP, side, lead > 0.0);
+    let toward = normalize(along - surface * dot(along, surface));
+    let half_width = 0.5 * material.roof.z;
+    let share = (1.0 - smoothstep(half_width - pixel, half_width + pixel, dist)) * clamp(half_width / pixel, 0.0, 1.0);
+    let bevel = metal_lit(normalize(surface + toward), star, e, lit_side, metal * (1.0 - material.plate_metal.y), metal_f0, vec3<f32>(1.0), material.plate_metal.x);
+    return material.reflected.rgb * mix(lit, bevel, share) + glow * lamp * (1.0 - share);
 }
 
 @fragment
@@ -446,6 +626,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Before any discard: these take derivatives.
     let bolt = bolt_cover(in.seam);
     let pixel = pixel_m(in.ship_position);
+    // Taken here, outside any branch, for the habitat's rim chamfer.
+    let up_normal = normalize(in.ship_normal);
+    let roof_lead = up_normal.z - max(abs(up_normal.x), abs(up_normal.y));
+    let roof_lead_rate = length(vec2<f32>(dpdx(roof_lead), dpdy(roof_lead)));
     let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
     let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
@@ -464,6 +648,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // Glass is lit at its facets' lean in glass_light, not as albedo at the surface's.
         albedo *= 1.0 - glass;
         emitted += glass * glass_light(in, pixel);
+    }
+    let home = select(0.0, 1.0 - t, habitable(pair.first)) + select(0.0, t, habitable(pair.second));
+    if (home > 0.0) {
+        let living = select(pair.second, pair.first, habitable(pair.first));
+        albedo *= 1.0 - home;
+        emitted = emitted * (1.0 - home) + home * habitat_light(in, pixel, roof_lead, roof_lead_rate, material.emitted[living].rgb);
     }
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {

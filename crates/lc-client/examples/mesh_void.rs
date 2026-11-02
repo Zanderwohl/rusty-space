@@ -36,7 +36,7 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use lc_client::looks::kinds::wear;
+use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
 use lc_client::hull_mesh::{
     Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
@@ -182,7 +182,7 @@ fn main() {
         .init_asset::<PopulationMaterial>()
         .init_asset::<BodySurfaceMaterial>()
         .init_asset::<RelativisticStarfieldMaterial>()
-        .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin))
+        .add_plugins((ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin, HullLooksPlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Scene {
             args,
@@ -293,6 +293,8 @@ fn spawn(
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
+        roof_map: None,
+        roof_outline: default(),
     });
 
     // Side by side in slots as wide as the largest, three to a row.
@@ -327,6 +329,7 @@ fn spawn(
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
+            living_roof(),
             HullForm { cells: args.cells, ..HullForm::form(form, balance, args.finish) },
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world() * center).with_rotation(ship_to_world()),
