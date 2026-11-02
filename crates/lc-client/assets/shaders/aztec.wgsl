@@ -1,8 +1,9 @@
 // Azteced sheet metal: rectangles cut from a staggered grid by random splits, each panel one
 // color and one flat normal tipped a few degrees, so panels catch the light one by one. Fully
 // procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters, and a
-// curved mesh by the face each point faces most. Decks stack along world Y, so on a side v is up, and windows,
-// when there are any, are only on the sides, in rows level at the same heights all round. Look development: crates/lc-client/src/looks/aztec.rs.
+// curved mesh by the face each point faces most. Decks stack along world Y, so on a side v is up,
+// and windows, when there are any, are only on the sides, in rows level at the same heights all
+// round. Look development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -38,8 +39,8 @@ struct AztecUniform {
     to_planet: vec4<f32>,
     planet_color: vec4<f32>,
     ambient: vec4<f32>,
-    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is a unit cube scaled by
-    /// its transform, which is how a face's edges are known.
+    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is an axis-aligned unit
+    /// cube scaled by its transform, which is how a face's edges are known.
     finish: vec4<f32>,
     /// `(deck_m, pitch_m, sill_m, face_margin_m)`: no windows where `deck_m` is 0.
     deck: vec4<f32>,
@@ -77,7 +78,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
-    // The mesh is a unit cube, so the transform carries the box.
+    // An axis-aligned unit cube, where `unit_box` says so: the transform's scale is the box.
     out.box_center = world_from_local[3].xyz;
     out.box_half = 0.5 * vec3<f32>(length(world_from_local[0].xyz), length(world_from_local[1].xyz), length(world_from_local[2].xyz));
     return out;
@@ -293,7 +294,9 @@ fn room(p: vec2<f32>, e: vec3<f32>, f: Face, pane: Window) -> vec3<f32> {
     let lo = vec2<f32>(pane.col * m.deck.y, pane.deck * m.deck.x);
     let hi = lo + m.deck.yx;
     let toward = select(lo, hi, d.xy > vec2<f32>(0.0));
-    let safe = select(d.xy, vec2<f32>(1.0e-6), abs(d.xy) < vec2<f32>(1.0e-6));
+    // Signed as `toward` was chosen, or a ray square to an axis would meet a wall behind the glass.
+    let tiny = select(vec2<f32>(-1.0e-6), vec2<f32>(1.0e-6), d.xy > vec2<f32>(0.0));
+    let safe = select(d.xy, tiny, abs(d.xy) < vec2<f32>(1.0e-6));
     let t_side = (toward - p) / safe;
     let t_back = m.room.x / d.z;
     let t = min(min(t_side.x, t_side.y), t_back);

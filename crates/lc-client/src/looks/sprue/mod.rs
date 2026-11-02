@@ -56,6 +56,7 @@ pub struct Sprue {
     pub sodium: Vec3,
     pub to_star: Vec3,
     pub star: f32,
+    /// The star's turn about world Y, rad/s; see [`super::spin`].
     pub star_spin: f32,
     /// The lamps' power, the haze they light, and their bulbs'.
     pub lamp: f32,

@@ -28,15 +28,19 @@ pub struct Aztec {
     pub metallic: f32,
     pub to_star: Vec3,
     pub star: f32,
+    /// The star's turn about world Y, rad/s; see [`super::spin`].
     pub star_spin: f32,
     pub to_planet: Vec3,
+    /// The planet's angular radius.
     pub planet_deg: f32,
     pub planet: f32,
     pub exposure_stops: f32,
+    /// Below 2^24: it reaches the shader as an f32.
     pub seed: u32,
     pub windows: Option<Windows>,
-    /// The mesh is a unit cube scaled by its transform, which is how the shader knows where a face
-    /// ends, and so keeps windows [`Windows::face_margin_m`] off it. Otherwise there is no margin.
+    /// The mesh is an axis-aligned unit cube scaled by its transform, unrotated, which is how the
+    /// shader knows where a face ends, and so keeps windows [`Windows::face_margin_m`] off it.
+    /// Otherwise there is no margin.
     pub unit_box: bool,
 }
 
