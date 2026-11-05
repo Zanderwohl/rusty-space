@@ -296,7 +296,7 @@ fn spawn_ships(
             // Enough fill to see an unlit side against the black.
             to_star: ships.to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-HULL_STOPS), ToneMap::default().surface_stops, 0.0, 0.0),
-            detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
+            detail: Vec4::new(TILE_M, if ships.joins == Joins::Hard { 1.0 } else { 0.0 }, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),

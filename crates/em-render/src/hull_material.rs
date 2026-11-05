@@ -110,7 +110,8 @@ pub struct HullUniform {
     /// `(surface_reference, stops, 0, 0)`, evaluated per fragment as `body_surface.wgsl` does:
     /// lights and sunlight mix across the hull and the curve is logarithmic.
     pub exposure: Vec4,
-    /// `(tile_m, 0, 0, 0)`: meters one tile spans.
+    /// `(tile_m, hard, 0, 0)`: meters one tile spans, and whether parts meet hard, each fragment
+    /// drawing only its heavier region. Pair with `Joins::Hard` meshes.
     pub detail: Vec4,
     /// Plating's sweep: `(origin, front)`, ship frame, meters. A panel is plated once `front`
     /// passes its distance from `origin` plus its hashed share of the spread. Anything at or past

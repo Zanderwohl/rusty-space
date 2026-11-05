@@ -778,7 +778,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pipe_dy = dpdy(pipe_uv);
     let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
     let plated_here = plated(in.ship_position, in.ship_normal);
-    let t = pair.share;
+    // Hard joins: weights a vertex gives one region still mix across each triangle, so only the
+    // heavier is drawn, softened over a pixel where the two weigh alike.
+    let share_rate = max(fwidth(pair.share), 1.0e-4);
+    let t = select(pair.share, 0.5 * smoothstep(0.5 - share_rate, 0.5, pair.share), material.detail.y > 0.0);
     var albedo = mix(near.albedo, far.albedo, t);
     let side = select(max(pair.first, pair.second), min(pair.first, pair.second), in.seam.x > 0.0);
     if (((material.bolted >> side) & 1u) != 0u) {
