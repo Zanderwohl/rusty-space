@@ -1,0 +1,190 @@
+(
+    name: "A Frank Exchange of Views",
+    form: (
+        parts: [
+            (
+                id: (0),
+                kind: Mind,
+                primitive: Slab(
+                    edges: (1.0, 1.0, 1.0),
+                    corner: 0.0,
+                ),
+                volume_m3: 1000.0,
+                placement: None,
+            ),
+            (
+                id: (1),
+                kind: Storage,
+                primitive: Slab(
+                    edges: (31.499999999999993, 6.3, 2.5),
+                    corner: 0.2,
+                ),
+                volume_m3: 299289994.8723854,
+                placement: Some((
+                    parent: (0),
+                    mount: Enclosing,
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (2),
+                kind: Engine,
+                primitive: Cylinder(
+                    length: 1.6,
+                ),
+                volume_m3: 42270637.44016126,
+                placement: Some((
+                    parent: (1),
+                    mount: Attached(
+                        anchor: (-1.0, 0.0, 0.0),
+                        standoff: -0.2,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (6),
+                kind: Living,
+                primitive: Slab(
+                    edges: (0.25, 6.3, 12.500000000000002),
+                    corner: 0.2,
+                ),
+                volume_m3: 8188223.9822332775,
+                placement: Some((
+                    parent: (1),
+                    mount: Attached(
+                        anchor: (1.0, 0.0, 1.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (7),
+                kind: Drone,
+                primitive: Slab(
+                    edges: (24.999999999999993, 16.0, 2.5),
+                    corner: 0.2,
+                ),
+                volume_m3: 20647540.73150033,
+                placement: Some((
+                    parent: (6),
+                    mount: Attached(
+                        anchor: (0.0, 0.0, 1.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (8),
+                kind: Engine,
+                primitive: Cylinder(
+                    length: 0.1,
+                ),
+                volume_m3: 249999.99999999994,
+                placement: Some((
+                    parent: (1),
+                    mount: Attached(
+                        anchor: (1.0, 0.0, 0.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (9),
+                kind: Storage,
+                primitive: Slab(
+                    edges: (1.0, 1.25, 20.000000000000004),
+                    corner: 0.2,
+                ),
+                volume_m3: 10105351.048137287,
+                placement: Some((
+                    parent: (1),
+                    mount: Attached(
+                        anchor: (0.0, -1.0, 0.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (10),
+                kind: Storage,
+                primitive: Slab(
+                    edges: (1.0, 1.6, 20.000000000000004),
+                    corner: 0.2,
+                ),
+                volume_m3: 13017744.19723528,
+                placement: Some((
+                    parent: (1),
+                    mount: Attached(
+                        anchor: (0.0, 1.0, 0.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (11),
+                kind: Engine,
+                primitive: Capsule(
+                    length: 16.0,
+                ),
+                volume_m3: 10400000.000000002,
+                placement: Some((
+                    parent: (9),
+                    mount: Attached(
+                        anchor: (0.0, 0.0, 1.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+            (
+                id: (12),
+                kind: Engine,
+                primitive: Capsule(
+                    length: 16.0,
+                ),
+                volume_m3: 10400000.000000002,
+                placement: Some((
+                    parent: (10),
+                    mount: Attached(
+                        anchor: (0.0, 0.0, -1.0),
+                        standoff: -0.1,
+                    ),
+                    twist: 0.0,
+                    tilt: (0.0, 0.0),
+                    blend: 0.0,
+                    mirror: false,
+                )),
+            ),
+        ],
+    ),
+)

@@ -66,12 +66,19 @@ pub struct ShipHullPlugin;
 
 impl Plugin for ShipHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin))
-            .init_resource::<Palette>()
+        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin, HullPalettePlugin))
             .init_resource::<Rolls>()
             .init_resource::<RealHulls>()
-            .add_systems(Update, request_palette.run_if(in_state(crate::app::AppState::InGame)))
-            .add_systems(Last, take_texels);
+            .add_systems(Update, request_palette.run_if(in_state(crate::app::AppState::InGame)));
+    }
+}
+
+/// The [`Palette`], baked once something runs [`request_palette`].
+pub struct HullPalettePlugin;
+
+impl Plugin for HullPalettePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Palette>().add_systems(Last, take_texels);
     }
 }
 
@@ -100,7 +107,7 @@ impl Palette {
     }
 }
 
-fn request_palette(
+pub fn request_palette(
     mut palette: ResMut<Palette>,
     assets: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
