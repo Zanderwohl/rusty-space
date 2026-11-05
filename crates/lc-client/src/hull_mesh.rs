@@ -25,7 +25,7 @@ use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
-use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
+use crate::surface_nets::{AXES, Field, Grid, Place, Surface, gradients, nets};
 
 /// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
 /// kind's region is its own layer, and the engine is drawn with [`ENGINE_FLANK`] off its open
@@ -93,9 +93,24 @@ pub enum Joins {
     /// Filleted by each placement's blend, and the regions mixed across the fillet or a cell.
     #[default]
     Blended,
-    /// The bare union, every blend taken as zero, each vertex wearing only its nearest part.
+    /// The bare union, every blend taken as zero, each vertex wearing only its nearest part, and
+    /// creases kept: vertices placed by dual contouring, and shaded flat where they turn.
     Hard,
 }
+
+impl Joins {
+    fn place<'a>(self, finish: Finish, field: &'a dyn Field) -> Place<'a> {
+        match (finish, self) {
+            (Finish::Blocky, _) => Place::Center,
+            (_, Joins::Blended) => Place::Mean,
+            (_, Joins::Hard) => Place::Sharp(field),
+        }
+    }
+}
+
+/// Under [`Joins::Hard`], a triangle corner whose field normal is farther than about 37 degrees
+/// from the triangle's own takes the triangle's: the corner is on a crease.
+const CREASE_COS: f64 = 0.8;
 
 /// Mesh buffers in the ship's frame, meters.
 #[derive(Clone, Debug, Default)]
@@ -141,13 +156,13 @@ pub fn mesh_form(form: &Form, balance: &Balance, cells: u32, finish: Finish, joi
     };
     let sdf = Sdf::new(form, balance)?;
     let grid = Grid::sample(&sdf, cells);
-    let surface = nets(&grid, finish == Finish::Blocky);
+    let surface = nets(&grid, joins.place(finish, &sdf));
     let paint = Paint::new(&sdf, form, balance, grid.step, joins);
     let mut scratch = Vec::new();
     let mut painted: Vec<Painted> = surface.vertices.iter().map(|&p| paint.at(p, &mut scratch)).collect();
     along_seams(&mut painted);
     let normals = (finish == Finish::Smooth).then(|| gradients(&sdf, &surface, grid.step));
-    Ok(buffers(&surface, &painted, normals.as_deref(), grid.step))
+    Ok(buffers(&surface, &painted, normals.as_deref(), grid.step, joins))
 }
 
 /// FNV-1a over a canonical encoding of the form, each part's solved shape, and what of
@@ -556,7 +571,7 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish, joins: Joins) -
     }
     let union = Union::new(pieces);
     let grid = Grid::sample(&union, cells);
-    let surface = nets(&grid, finish == Finish::Blocky);
+    let surface = nets(&grid, joins.place(finish, &union));
     let region: Vec<u32> = pieces.iter().map(|p| region(p.kind)).collect();
     let fillet = vec![0.0; pieces.len()];
     let mut scratch = Vec::new();
@@ -571,14 +586,15 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish, joins: Joins) -
         })
         .collect();
     let normals = (finish == Finish::Smooth).then(|| gradients(&union, &surface, grid.step));
-    buffers(&surface, &painted, normals.as_deref(), grid.step)
+    buffers(&surface, &painted, normals.as_deref(), grid.step, joins)
 }
 
 /// Lays the surface out as buffers. Shared vertices stay shared where `normals` is given;
-/// otherwise each triangle gets its own three with its flat normal. A triangle straddling the
+/// otherwise each triangle gets its own three with its flat normal. Under [`Joins::Hard`] a corner
+/// on a crease gets its own too, with the flat normal. A triangle straddling the
 /// cut of a seam's angle takes copies of its corners on one side with a turn added, so `along`
 /// never runs backwards across one triangle.
-fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, step: f64) -> HullBuffers {
+fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, step: f64, joins: Joins) -> HullBuffers {
     let mut out = HullBuffers { step, ..default() };
     let mut shared: HashMap<(u32, bool), u32> = HashMap::new();
     for t in &surface.triangles {
@@ -594,17 +610,24 @@ fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, st
         for &v in t {
             let paint = painted[v as usize];
             let wrapped = unwrap && paint.about.is_some_and(|(_, theta, _)| theta < 0.0);
+            let creased = joins == Joins::Hard
+                && flat != DVec3::ZERO
+                && normals.is_some_and(|n| n[v as usize].dot(flat) < CREASE_COS);
             let push = |out: &mut HullBuffers| {
                 let along = paint.along + if wrapped { TAU * paint.about.map_or(0.0, |a| a.2) } else { 0.0 };
                 out.positions.push(surface.vertices[v as usize].as_vec3().to_array());
-                out.normals.push(normals.map_or(flat, |n| n[v as usize]).as_vec3().to_array());
+                let normal = match normals {
+                    Some(n) if !creased => n[v as usize],
+                    _ => flat,
+                };
+                out.normals.push(normal.as_vec3().to_array());
                 out.regions.push(paint.regions);
                 out.seams.push([paint.across, along as f32]);
                 out.faces.push(paint.face);
                 out.positions.len() as u32 - 1
             };
             let index = match normals {
-                Some(_) => match shared.get(&(v, wrapped)) {
+                Some(_) if !creased => match shared.get(&(v, wrapped)) {
                     Some(&i) => i,
                     None => {
                         let i = push(&mut out);
@@ -612,7 +635,7 @@ fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, st
                         i
                     }
                 },
-                None => push(&mut out),
+                _ => push(&mut out),
             };
             out.indices.push(index);
         }
@@ -878,7 +901,8 @@ mod tests {
         let sdf = Sdf::new(form, &B).unwrap();
         let grid = Grid::sample(&sdf, cells);
         let step = grid.step;
-        let surface = nets(&grid, finish == Finish::Blocky);
+        let place = if finish == Finish::Blocky { Place::Center } else { Place::Mean };
+        let surface = nets(&grid, place);
         (surface, sdf, step)
     }
 
@@ -1318,6 +1342,17 @@ mod tests {
     /// Break the cleaning on purpose: without it, alternating squares survive and the mesh has
     /// edges with four faces.
     #[test]
+    fn hard_joins_mesh_closed() {
+        for form in [Form::starting(), Builtin::Cluster.form(), spar_fixture(SparMode::Saddle)] {
+            for cells in [16, 64] {
+                let sdf = Sdf::new(&form, &B).unwrap();
+                let s = nets(&Grid::sample(&sdf, cells), Place::Sharp(&sdf));
+                check_closed(&s, &format!("sharp at {cells}"));
+            }
+        }
+    }
+
+    #[test]
     fn without_cleaning_a_checkerboard_is_not_manifold() {
         let mut grid = Grid { origin: DVec3::ZERO, step: 1.0, n: [4, 4, 4], values: vec![1.0; 64], near: vec![[0, 0, 0]] };
         for i in [[1, 1, 1], [2, 2, 1], [1, 1, 2], [2, 2, 2]] {
@@ -1325,14 +1360,14 @@ mod tests {
             grid.values[k] = -1.0;
         }
         let dirty = std::panic::catch_unwind(|| {
-            let s = nets(&grid, false);
+            let s = nets(&grid, Place::Mean);
             check_closed(&s, "dirty");
         });
         assert!(dirty.is_err(), "an uncleaned checkerboard came out closed");
         grid.clean();
-        let s = nets(&grid, false);
+        let s = nets(&grid, Place::Mean);
         assert_eq!(check_closed(&s, "clean"), (2, 1));
-        let s = nets(&grid, true);
+        let s = nets(&grid, Place::Center);
         assert_eq!(check_closed(&s, "clean voxels"), (2, 1));
     }
 }
