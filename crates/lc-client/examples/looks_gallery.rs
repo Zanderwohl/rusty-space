@@ -1,5 +1,5 @@
 //! Every one of [`lc_client::looks`] on boxes of several sizes, with the camera circling each box
-//! in turn and gliding on to the next, forever, while the star turns on its own period: a
+//! in turn and gliding on to the next, turning to face it as it leaves, forever, while the star turns on its own period: a
 //! screensaver that shows each look at every angle of light and view.
 //!
 //! ```text
@@ -36,6 +36,8 @@ use lc_client::looks::{LooksPlugin, direction, spin};
 
 /// How far off a box the camera circles, in its edges.
 const STANDOFF: f32 = 2.2;
+/// The share of a glide the camera takes to turn from the box it leaves to the one it heads for.
+const TURN: f32 = 0.2;
 
 struct Args {
     sizes: Vec<f32>,
@@ -238,8 +240,13 @@ fn orbit(
     // Off a whole number of turns, so the pitch's swing does not line up with the stations.
     let pitch = (15.0 + 30.0 * (TAU * t / (2.7 * segment)).sin()).to_radians();
     let eye = target + dist * Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
+    // Looking at `target` mid-glide is looking at the empty space between boxes.
+    let turn = (into_glide / TURN).min(1.0);
+    let turn = turn * turn * (3.0 - 2.0 * turn);
+    let ahead = Transform::from_translation(eye).looking_at(target, Vec3::Y).rotation;
+    let onward = Transform::from_translation(eye).looking_at(to.0, Vec3::Y).rotation;
     for mut transform in &mut cameras {
-        *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+        *transform = Transform::from_translation(eye).with_rotation(ahead.slerp(onward, turn));
     }
 }
 
