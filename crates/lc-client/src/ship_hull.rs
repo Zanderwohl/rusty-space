@@ -35,7 +35,7 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, Kind, SparMode};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
-use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
+use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, Joins, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
 use crate::system::UNIT_M;
@@ -416,7 +416,7 @@ pub fn draw_hulls(
                         let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None });
                         commands
                             .entity(hull.mesh)
-                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
+                            .insert((HullForm { source, finish: Finish::Smooth, cells: None, joins: Joins::Blended }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
                     }
                 }
             }

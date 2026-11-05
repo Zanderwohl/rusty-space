@@ -87,6 +87,16 @@ pub enum Finish {
     Blocky,
 }
 
+/// What happens where two parts meet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Joins {
+    /// Filleted by each placement's blend, and the regions mixed across the fillet or a cell.
+    #[default]
+    Blended,
+    /// The bare union, every blend taken as zero, each vertex wearing only its nearest part.
+    Hard,
+}
+
 /// Mesh buffers in the ship's frame, meters.
 #[derive(Clone, Debug, Default)]
 pub struct HullBuffers {
@@ -116,11 +126,23 @@ impl HullBuffers {
 }
 
 /// `cells` along the longest side of the form's bounds.
-pub fn mesh_form(form: &Form, balance: &Balance, cells: u32, finish: Finish) -> Result<HullBuffers, FormError> {
+pub fn mesh_form(form: &Form, balance: &Balance, cells: u32, finish: Finish, joins: Joins) -> Result<HullBuffers, FormError> {
+    let unblended;
+    let form = match joins {
+        Joins::Blended => form,
+        Joins::Hard => {
+            let mut bare = form.clone();
+            for placement in bare.parts.iter_mut().filter_map(|p| p.placement.as_mut()) {
+                placement.blend = 0.0;
+            }
+            unblended = bare;
+            &unblended
+        }
+    };
     let sdf = Sdf::new(form, balance)?;
     let grid = Grid::sample(&sdf, cells);
     let surface = nets(&grid, finish == Finish::Blocky);
-    let paint = Paint::new(&sdf, form, balance, grid.step);
+    let paint = Paint::new(&sdf, form, balance, grid.step, joins);
     let mut scratch = Vec::new();
     let mut painted: Vec<Painted> = surface.vertices.iter().map(|&p| paint.at(p, &mut scratch)).collect();
     along_seams(&mut painted);
@@ -185,10 +207,11 @@ pub fn pieces_hash(pieces: &[Piece]) -> u64 {
     h.0
 }
 
-fn mesh_key(form: u64, cells: u32, finish: Finish) -> u64 {
+fn mesh_key(form: u64, cells: u32, finish: Finish, joins: Joins) -> u64 {
     let mut h = Fnv(form);
     h.u64(cells as u64);
     h.u64(finish as u64);
+    h.u64(joins as u64);
     h.0
 }
 
@@ -326,10 +349,11 @@ struct Paint<'a> {
     /// Each engine's piece and its open face, in [`apertures`]' order.
     faces: Vec<(usize, Aperture)>,
     step: f64,
+    joins: Joins,
 }
 
 impl<'a> Paint<'a> {
-    fn new(sdf: &'a Sdf, form: &Form, balance: &Balance, step: f64) -> Self {
+    fn new(sdf: &'a Sdf, form: &Form, balance: &Balance, step: f64, joins: Joins) -> Self {
         let pieces = sdf.pieces();
         let parts: HashMap<PartId, &Part> = form.parts.iter().map(|p| (p.id, p)).collect();
         let least = |id: PartId| parts[&id].shape(balance.min_part_m3).least_dimension();
@@ -354,6 +378,7 @@ impl<'a> Paint<'a> {
             spars: (0..pieces.len()).filter(|&i| matches!(pieces[i].kind, Kind::Spar(_))).collect(),
             faces: engine_faces(pieces, form, balance),
             step,
+            joins,
         }
     }
 
@@ -441,7 +466,8 @@ impl<'a> Paint<'a> {
     /// The nearest region and the next, blended across the fillet between them, or across a
     /// cell where they meet hard so the edge is not a stair of whole triangles.
     fn regions(&self, distances: &[f64]) -> [[u8; 4]; 4] {
-        blended(distances, &self.region, &self.fillet, self.step)
+        let step = if self.joins == Joins::Hard { 0.0 } else { self.step };
+        blended(distances, &self.region, &self.fillet, step)
     }
 }
 
@@ -463,7 +489,8 @@ fn smoothstep(lo: f64, hi: f64, x: f64) -> f64 {
 }
 
 /// The nearest region to a point and the next, from each piece's distance, `fillet` meters wide
-/// where two pieces are blended and a cell `step` wide where they meet hard.
+/// where two pieces are blended and a cell `step` wide where they meet hard. With neither, the
+/// nearest alone.
 fn blended(distances: &[f64], region: &[u32], fillet: &[f64], step: f64) -> [[u8; 4]; 4] {
     let mut best = [(f64::INFINITY, usize::MAX); REGION_GRAPHS.len()];
     for (i, &d) in distances.iter().enumerate() {
@@ -479,6 +506,9 @@ fn blended(distances: &[f64], region: &[u32], fillet: &[f64], step: f64) -> [[u8
     let (d1, i1) = best[first];
     let (d2, i2) = best[second];
     let width = step.max(fillet[i1].min(fillet[i2]));
+    if width <= 0.0 {
+        return region_weights(first as u32, first as u32, 0.0);
+    }
     let x = ((d2 - d1) / width).clamp(0.0, 1.0);
     let share = 0.5 * (1.0 - x * x * (3.0 - 2.0 * x));
     region_weights(first as u32, second as u32, share as f32)
@@ -520,7 +550,7 @@ impl Field for Union<'_> {
 }
 
 /// [`mesh_form`] for bare copies, in the frame their poses are in. Empty for no pieces.
-pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish) -> HullBuffers {
+pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish, joins: Joins) -> HullBuffers {
     if pieces.is_empty() {
         return HullBuffers::default();
     }
@@ -535,7 +565,8 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish) -> HullBuffers 
         .iter()
         .map(|&p| {
             union.each(p, &mut scratch);
-            let regions = blended(&scratch, &region, &fillet, grid.step);
+            let step = if joins == Joins::Hard { 0.0 } else { grid.step };
+            let regions = blended(&scratch, &region, &fillet, step);
             Painted { regions, face: face_attribute(0.0, None), across: SEAM_FAR as f32, along: 0.0, about: None, seam: None }
         })
         .collect();
@@ -627,11 +658,13 @@ pub struct HullForm {
     pub finish: Finish,
     /// A fixed resolution instead of one from [`HullPixels`].
     pub cells: Option<u32>,
+    /// Pieces are a union already, unblended; only their regions' mixing changes.
+    pub joins: Joins,
 }
 
 impl HullForm {
     pub fn form(form: Form, balance: Balance, finish: Finish) -> Self {
-        HullForm { source: HullSource::Form(Arc::new(form), balance), finish, cells: None }
+        HullForm { source: HullSource::Form(Arc::new(form), balance), finish, cells: None, joins: Joins::Blended }
     }
 }
 
@@ -662,10 +695,10 @@ impl HullSource {
         (max - min).max_element()
     }
 
-    fn mesh(&self, cells: u32, finish: Finish) -> Result<HullBuffers, FormError> {
+    fn mesh(&self, cells: u32, finish: Finish, joins: Joins) -> Result<HullBuffers, FormError> {
         match self {
-            HullSource::Form(form, balance) => mesh_form(form, balance, cells, finish),
-            HullSource::Pieces(pieces) => Ok(mesh_pieces(pieces, cells, finish)),
+            HullSource::Form(form, balance) => mesh_form(form, balance, cells, finish, joins),
+            HullSource::Pieces(pieces) => Ok(mesh_pieces(pieces, cells, finish, joins)),
         }
     }
 }
@@ -757,7 +790,7 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
             state.extent_m = hull.source.extent_m();
         }
         let cells = hull.cells.unwrap_or_else(|| cells_for(pixels.0, state.cells));
-        let key = mesh_key(state.form, cells, hull.finish);
+        let key = mesh_key(state.form, cells, hull.finish, hull.joins);
         if state.wanted == Some(key) {
             continue;
         }
@@ -766,10 +799,10 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
         if meshes.ready.contains_key(&key) || meshes.pending.contains_key(&key) {
             continue;
         }
-        let (source, finish) = (hull.source.clone(), hull.finish);
+        let (source, finish, joins) = (hull.source.clone(), hull.finish, hull.joins);
         let task = AsyncComputeTaskPool::get().spawn(async move {
             let started = bevy::platform::time::Instant::now();
-            match source.mesh(cells, finish) {
+            match source.mesh(cells, finish, joins) {
                 Ok(buffers) => {
                     let (vertices, ms) = (buffers.positions.len(), started.elapsed().as_secs_f64() * 1e3);
                     debug!("hull_mesh: {cells} cells {finish:?}, {vertices} vertices in {ms:.0} ms");
@@ -1010,7 +1043,7 @@ mod tests {
     #[test]
     fn the_open_face_is_the_engines_wide_end_and_nothing_else() {
         for form in [Form::reference(), Builtin::Plate.form()] {
-            let b = mesh_form(&form, &B, 96, Finish::Smooth).unwrap();
+            let b = mesh_form(&form, &B, 96, Finish::Smooth, Joins::Blended).unwrap();
             let faces = apertures(&form, &B).unwrap();
             let (mut on, mut away) = (0, 0);
             for ((p, n), face) in b.positions.iter().zip(&b.normals).zip(&b.faces) {
@@ -1061,7 +1094,7 @@ mod tests {
     fn buffers_keep_the_surface_and_carry_every_attribute() {
         let form = Builtin::Cluster.form();
         for finish in [Finish::Smooth, Finish::Faceted, Finish::Blocky] {
-            let b = mesh_form(&form, &B, 32, finish).unwrap();
+            let b = mesh_form(&form, &B, 32, finish, Joins::Blended).unwrap();
             let n = b.positions.len();
             assert!(n > 0 && b.indices.len() % 3 == 0);
             assert_eq!((b.normals.len(), b.regions.len(), b.seams.len()), (n, n, n));
@@ -1085,7 +1118,7 @@ mod tests {
     fn regions_follow_the_nearest_part_and_seams_ring_the_spars() {
         let form = spar_fixture(SparMode::Saddle);
         let sdf = Sdf::new(&form, &B).unwrap();
-        let b = mesh_form(&form, &B, 128, Finish::Smooth).unwrap();
+        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
         let mut near_seam = 0;
         for k in 0..b.positions.len() {
             let p = Vec3::from(b.positions[k]).as_dvec3();
@@ -1109,7 +1142,7 @@ mod tests {
     #[test]
     fn a_seams_along_does_not_run_backwards_across_a_triangle() {
         let form = spar_fixture(SparMode::Saddle);
-        let b = mesh_form(&form, &B, 128, Finish::Smooth).unwrap();
+        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
         let spar = Sdf::new(&form, &B).unwrap().pieces()[2];
         let rho = match spar.shape {
             lc_world::form::primitive::Shape::Cylinder { radius, .. } => radius,
@@ -1147,7 +1180,7 @@ mod tests {
     fn along_is_meters_along_a_seam_that_climbs() {
         let form = tilted_boom();
         let sdf = Sdf::new(&form, &B).unwrap();
-        let b = mesh_form(&form, &B, 128, Finish::Smooth).unwrap();
+        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
         let spar = 2;
         let h = 1e-4;
         let grad = |i: usize, p: DVec3| DVec3::from_array([0, 1, 2].map(|a| sdf.primitive(i, p + AXES[a] * h) - sdf.primitive(i, p - AXES[a] * h)));
