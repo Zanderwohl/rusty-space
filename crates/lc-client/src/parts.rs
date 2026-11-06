@@ -230,14 +230,13 @@ pub(crate) fn solid(shape: &Shape) -> (Mesh, Vec3) {
             let frustum = ConicalFrustum { radius_top: f(end), radius_bottom: f(start), height: f(length) };
             (frustum.into(), Vec3::ONE)
         }
-        Shape::Trapezoid { .. } => (prism(shape), Vec3::ONE),
+        Shape::Trapezoid { lower, upper, height, length } => (prism(lower, upper, height, length), Vec3::ONE),
     }
 }
 
 /// A trapezoid's six faces, flat shaded, in the mesh's axes.
-fn prism(shape: &Shape) -> Mesh {
-    let c = shape.corners().map(|p| AXIS.inverse() * p.as_vec3());
-    // Corner `i` has x from bit 2, y from bit 0 and the top from bit 1.
+fn prism(lower: f64, upper: f64, height: f64, length: f64) -> Mesh {
+    let c = lc_world::form::sdf::trapezoid_corners(lower, upper, height, length).map(|p| AXIS.inverse() * p.as_vec3());
     let faces = [[0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5], [0, 2, 3, 1], [4, 5, 7, 6]];
     let middle = c.iter().copied().sum::<Vec3>() / 8.0;
     let (mut positions, mut normals, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());

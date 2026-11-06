@@ -327,30 +327,29 @@ impl Shape {
             Shape::Frustum { length, start, end } => axis * (length / 2.0) + across * start.max(end) + margin,
             // A box's reach along each axis is its furthest corner's, and a distance offset adds
             // the margin to every direction.
-            Shape::Trapezoid { .. } => {
-                let corners = self.corners().map(|c| (rotation * c).abs());
+            Shape::Trapezoid { lower, upper, height, length } => {
+                let corners = trapezoid_corners(lower, upper, height, length).map(|c| (rotation * c).abs());
                 corners.into_iter().fold(DVec3::ZERO, DVec3::max) + margin
             }
         }
     }
+}
 
-    /// A trapezoid's eight corners, in its own frame; nothing for any other primitive, which is no
-    /// polytope.
-    pub fn corners(&self) -> [DVec3; 8] {
-        let Shape::Trapezoid { lower, upper, height, length } = *self else { return [DVec3::ZERO; 8] };
-        let (x, z) = (length / 2.0, height / 2.0);
-        let (l, u) = (lower / 2.0, upper / 2.0);
-        [
-            DVec3::new(-x, -l, -z),
-            DVec3::new(-x, l, -z),
-            DVec3::new(-x, -u, z),
-            DVec3::new(-x, u, z),
-            DVec3::new(x, -l, -z),
-            DVec3::new(x, l, -z),
-            DVec3::new(x, -u, z),
-            DVec3::new(x, u, z),
-        ]
-    }
+/// A trapezoid's eight corners in its own frame, from [`Shape::Trapezoid`]'s dimensions. Corner
+/// `i` takes its y's sign from bit 0, the top from bit 1 and its x's sign from bit 2.
+pub fn trapezoid_corners(lower: f64, upper: f64, height: f64, length: f64) -> [DVec3; 8] {
+    let (x, z) = (length / 2.0, height / 2.0);
+    let (l, u) = (lower / 2.0, upper / 2.0);
+    [
+        DVec3::new(-x, -l, -z),
+        DVec3::new(-x, l, -z),
+        DVec3::new(-x, -u, z),
+        DVec3::new(-x, u, z),
+        DVec3::new(x, -l, -z),
+        DVec3::new(x, l, -z),
+        DVec3::new(x, -u, z),
+        DVec3::new(x, u, z),
+    ]
 }
 
 /// `q` is (distance from the axis, x). The nearer of the end disk on the point's side and the

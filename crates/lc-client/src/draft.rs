@@ -204,11 +204,14 @@ impl Draft {
     }
 
     /// Edit against another form of the ship's, keeping the edits: the target of a round once one
-    /// is accepted, and wherever a cancel left the ship after that. A scaffold the new form lacks
-    /// was that round's, which strikes it, so it goes from the draft too.
+    /// is accepted, and wherever a cancel left the ship after that. When the ship becomes what the
+    /// round it was edited against leaves, the round struck its scaffolds, so they go from the draft
+    /// too; a cancel leaves them, for Apply to resume.
     pub fn rebase(&mut self, mut ship: Form) {
         ship.parts.sort_by_key(|p| p.id);
-        self.form.parts.retain(|p| p.kind != Kind::Scaffold || ship.parts.iter().any(|s| s.id == p.id));
+        if self.ship.settled() == ship {
+            self.form.parts.retain(|p| p.kind != Kind::Scaffold || ship.parts.iter().any(|s| s.id == p.id));
+        }
         self.ship = ship;
     }
 
@@ -383,7 +386,7 @@ impl Draft {
         // A ship part of its kind the draft has dropped lends its id, so the round reshapes and
         // moves it rather than taking it apart and building this.
         let dropped = self.ship.parts.iter().filter(|s| s.kind == kind && self.part(s.id).is_none()).map(|s| s.id).min();
-        let id = dropped.unwrap_or_else(|| PartId(self.form.parts.iter().chain(&self.ship.parts).map(|p| p.id.0).max().map_or(0, |m| m + 1)));
+        let id = dropped.unwrap_or_else(|| PartId::fresh(self.form.parts.iter().chain(&self.ship.parts).map(|p| p.id)));
         let placement = Placement {
             parent,
             mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF, seated: true },
@@ -807,11 +810,19 @@ mod tests {
         draft.apply(&scaffold, &B).unwrap();
         let elsewhere = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::NEG_Y, &B).unwrap();
         draft.apply(&elsewhere, &B).unwrap();
-        let mut settled = draft.form.clone();
-        settled.parts.retain(|p| p.kind != Kind::Scaffold);
+        let target = draft.form.clone();
+        let settled = target.settled();
+        let mut canceled = draft.clone();
+
+        draft.rebase(target.clone());
+        assert_eq!(draft.form, target, "accepted, the round still has its scaffold to stand");
         draft.rebase(settled.clone());
-        assert_eq!(draft.form, draft.ship, "nothing left to apply");
+        assert_eq!(draft.form, draft.ship, "finished, nothing left to apply");
         assert!(draft.form.parts.iter().all(|p| p.kind != Kind::Scaffold));
+
+        canceled.rebase(target);
+        canceled.rebase(ship);
+        assert!(canceled.form.parts.iter().any(|p| p.kind == Kind::Scaffold), "a cancel keeps it for Apply to resume");
     }
 
     #[test]

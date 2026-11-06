@@ -22,6 +22,18 @@ pub const MAX_PARTS: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PartId(pub u16);
 
+impl PartId {
+    /// One past the highest of `taken`, or the lowest free id once that is the last a `u16` holds.
+    pub fn fresh(taken: impl IntoIterator<Item = PartId>) -> PartId {
+        let taken: std::collections::BTreeSet<u16> = taken.into_iter().map(|id| id.0).collect();
+        match taken.last() {
+            None => PartId(0),
+            Some(&m) if m < u16::MAX => PartId(m + 1),
+            Some(_) => PartId((0..=u16::MAX).find(|id| !taken.contains(id)).expect("MAX_PARTS is far below a u16")),
+        }
+    }
+}
+
 impl std::fmt::Display for PartId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "part {}", self.0)
@@ -224,6 +236,11 @@ impl std::fmt::Display for FormError {
 impl std::error::Error for FormError {}
 
 impl Form {
+    /// What a round toward this form leaves: it without its scaffolds, which the round strikes.
+    pub fn settled(&self) -> Form {
+        Form { parts: self.parts.iter().filter(|p| p.kind != Kind::Scaffold).copied().collect() }
+    }
+
     /// Structure and well-formed numbers only: one Mind at the root, one tree, unique ids, at
     /// most [`MAX_PARTS`], and nothing NaN, infinite or of the wrong sign. Sizes and the
     /// placement rules are [`rules::check`].

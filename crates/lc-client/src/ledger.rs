@@ -244,7 +244,8 @@ impl crate::form_view::FormView {
 /// What the draft is edited against: the target of a round the shard is running, since that is
 /// what the ship becomes, and otherwise the form the ship has settled into, partway after a cancel.
 pub fn base(fitting: &lc_world::fitting::Fitting) -> &Form {
-    fitting.refit().map_or(fitting.form(), Plan::target)
+    // The target as Applied, scaffolds and all, so the draft keeps them until the round strikes them.
+    fitting.refit().map_or(fitting.form(), |plan| &plan.round().target)
 }
 
 #[cfg(test)]

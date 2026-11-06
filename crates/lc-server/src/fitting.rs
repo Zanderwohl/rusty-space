@@ -133,8 +133,13 @@ impl<J: Journal> Server<J> {
             return Err(Refusal::Refitting);
         }
         let target = Form::from(target);
-        if let Err(faults) = rules::check(&target, &balance) {
-            return Err(faults.first().map_or(Refusal::Impossible, |fault| Refusal::Form((*fault).into())));
+        // The ship ends in the target without its scaffolds, which must pass as well.
+        let settled = target.settled();
+        let checked = if settled == target { vec![&target] } else { vec![&target, &settled] };
+        for form in checked {
+            if let Err(faults) = rules::check(form, &balance) {
+                return Err(faults.first().map_or(Refusal::Impossible, |fault| Refusal::Form((*fault).into())));
+            }
         }
         craft.begin_refit(target, at_s).map_err(unplanned)?;
         self.refitting.insert(id, 0);

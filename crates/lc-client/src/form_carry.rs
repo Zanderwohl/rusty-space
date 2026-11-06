@@ -120,14 +120,15 @@ pub struct Guide {
     pub axes: [usize; 2],
 }
 
-/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame. It is
-/// seated, so the anchor is `target` in the host's proportions and a lying part rests on its middle
-/// there.
+/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame. A
+/// lying part is seated, so the anchor is `target` in the host's proportions and it rests on its
+/// middle there; a standing one stays hung as it was, so a tilt keeps pivoting where it did.
 struct Seat {
     anchor: DVec3,
     twist: f64,
     tilt: DVec2,
     standoff: Option<f64>,
+    seated: bool,
 }
 
 impl Seat {
@@ -135,7 +136,10 @@ impl Seat {
     /// carried with and whether that was seated, which a lying part keeps the height of.
     fn on(host: &Piece, target: DVec3, child: &lc_world::form::primitive::Shape, orient: Orient, heading: DVec3, hung: (f64, bool)) -> Seat {
         let anchor = target / host.shape.extent(DMat3::IDENTITY, 0.0);
-        let standing = |twist, tilt| Seat { anchor, twist, tilt, standoff: None };
+        let standing = |twist, tilt| {
+            let anchor = if hung.1 { anchor } else { target.normalize_or(DVec3::X) };
+            Seat { anchor, twist, tilt, standoff: None, seated: hung.1 }
+        };
         let Orient::Lying { down, rest, .. } = orient else {
             let Orient::Standing { twist, tilt } = orient else { unreachable!() };
             return standing(twist, tilt);
@@ -154,7 +158,7 @@ impl Seat {
         let (standoff, seated) = hung;
         let under = (child.extent(DMat3::IDENTITY, 0.0) * down).abs().max_element() / child.reach();
         let standoff = if rest { 0.0 } else if seated { standoff } else { standoff - under };
-        Seat { anchor, twist, tilt, standoff: Some(standoff) }
+        Seat { anchor, twist, tilt, standoff: Some(standoff), seated: true }
     }
 }
 
@@ -192,9 +196,9 @@ impl Carry {
         let pieces = sdf.pieces().iter().filter(|p| subtree.contains(&p.part)).map(|p| Piece { pose: inverse.then(&p.pose), ..p.clone() }).collect();
         let depth_m = lens.project(about.position).map(|(_, depth)| depth);
         let placement = part.placement?;
-        let Mount::Attached { anchor, .. } = placement.mount else { return None };
+        let Mount::Attached { anchor, seated, .. } = placement.mount else { return None };
         let (_, host) = original(sdf, placement.parent)?;
-        let normal = host.pose.rotation * host.shape.exit(anchor.normalize_or(DVec3::X)).normal;
+        let normal = host.pose.rotation * host.shape.anchored(anchor, seated).normal;
         let orient = Orient::of(&placement, about.rotation, normal);
         let float = Float { pieces, rotation: about.rotation, depth_m };
         Some(Carry { was: Some(part), part, hung: true, subtree, float, orient, guide: None })
@@ -245,7 +249,7 @@ impl Carry {
         let mut placement = unturned.placement?;
         let Mount::Attached { standoff, seated, .. } = placement.mount else { return None };
         let seat = Seat::on(host, target, &unturned.shape(balance.min_part_m3), self.orient, heading, (standoff, seated));
-        placement.mount = Mount::Attached { anchor: seat.anchor, standoff: seat.standoff.unwrap_or(standoff), seated: true };
+        placement.mount = Mount::Attached { anchor: seat.anchor, standoff: seat.standoff.unwrap_or(standoff), seated: seat.seated };
         placement.twist = seat.twist;
         placement.tilt = seat.tilt;
         let part = Part { placement: Some(placement), ..unturned };
@@ -603,7 +607,7 @@ mod tests {
         let placement = draft.part(data).unwrap().placement.unwrap();
         assert_eq!(placement.parent, PartId(4));
         let Mount::Attached { anchor, standoff, seated } = placement.mount else { panic!() };
-        assert!(anchor.z > 0.0 && seated, "seated on the deck's top: {anchor}");
+        assert!(anchor.z > 0.0 && !seated, "on the deck's top, still hung by its foot as it stood: {anchor}");
         assert_eq!(standoff, -0.3, "the standoff comes along");
         let down = carry.put_down().unwrap();
         assert!(down.settled && down.what == What::Move);

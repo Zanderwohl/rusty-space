@@ -370,7 +370,9 @@ fn prepare(
     let target_copies = round.target.copies();
     let mut later = Vec::new();
     let mut prepared = Vec::new();
-    for p in builds {
+    // Scaffolds first: one that cannot be paid refuses the round, where the rest only wait.
+    let (scaffolds, rest): (Vec<Pending>, Vec<Pending>) = builds.into_iter().partition(|p| p.kind == Kind::Scaffold);
+    for p in scaffolds.into_iter().chain(rest) {
         let early = match (p.change, p.after) {
             _ if !matches!(p.kind, Kind::Storage | Kind::Drone | Kind::Scaffold) => None,
             (Change::Grow, Some(after)) if from_copies.get(&p.part) == target_copies.get(&p.part) => {
@@ -379,10 +381,16 @@ fn prepare(
             (Change::Add, Some(new)) if !round.from.parts.iter().any(|f| f.id == p.part) => {
                 let parent = new.placement.map(|placement| placement.parent);
                 let hung = parent.is_some_and(|id| parts.contains_key(&id) && !gone.contains(&id));
-                let mut with = parts.clone();
-                with.insert(new.id, new);
-                let copies = Form { parts: with.into_values().collect() }.copies();
-                (hung && copies.get(&new.id) == target_copies.get(&new.id)).then_some(new)
+                // Two copies when it or anything it hangs from is mirrored, as `Form::copies` counts.
+                let mut mirrored = new.placement.is_some_and(|p| p.mirror);
+                let mut up = parent;
+                for _ in 0..=parts.len() {
+                    let Some(placement) = up.and_then(|id| parts.get(&id)).and_then(|p| p.placement) else { break };
+                    mirrored |= placement.mirror;
+                    up = Some(placement.parent);
+                }
+                let copies = 1 + u32::from(mirrored);
+                (hung && Some(&copies) == target_copies.get(&new.id)).then_some(new)
             }
             _ => None,
         };
@@ -447,11 +455,12 @@ pub fn matched(from: &Form, mut target: Form) -> Form {
         }
     }
     let taken: BTreeSet<PartId> = renamed.values().copied().collect();
-    let mut fresh = from.parts.iter().chain(&target.parts).map(|p| p.id.0).max().map_or(0, |m| m + 1);
+    let mut used: BTreeSet<PartId> = from.parts.iter().chain(&target.parts).map(|p| p.id).collect();
     for t in &target.parts {
         if !renamed.contains_key(&t.id) && taken.contains(&t.id) {
-            renamed.insert(t.id, PartId(fresh));
-            fresh += 1;
+            let fresh = PartId::fresh(used.iter().copied());
+            used.insert(fresh);
+            renamed.insert(t.id, fresh);
         }
     }
     let to = |id: PartId| renamed.get(&id).copied().unwrap_or(id);
@@ -585,7 +594,7 @@ impl Plan {
             strikes.push(Pending::remove(part, copies[&part.id], balance));
         }
         take_apart(strikes, Phase::Strike, &mut parts, &mut stored, &mut elapsed, &mut steps, balance)?;
-        let settled = Form { parts: round.target.parts.iter().filter(|p| p.kind != Kind::Scaffold).copied().collect() };
+        let settled = round.target.settled();
         Ok(Self { round, settled, balance: *balance, steps })
     }
 
@@ -1294,6 +1303,17 @@ mod tests {
         assert_eq!(sorted(plan.target()), sorted(&bare));
         let lost = energy(&get(&held, 10)) * (1.0 - B.recovery);
         assert!(lost < 0.1 * vented, "it costs the loss on itself: {lost} against {vented}");
+    }
+
+    #[test]
+    fn a_scaffold_is_paid_for_before_the_storage_and_drones_built_first() {
+        let from = ship();
+        let target = adding(&without(&from, &[4]), &[part(10, Kind::Scaffold, ROD, 0.5, 1), part(12, Kind::Drone, ROD, 0.5, 1)]);
+        // Enough for the scaffold or the drones up front, not both; the habitat pays the rest.
+        let stored = 1.5 * energy(&get(&target, 10));
+        let plan = solve(&from, &target, stored).unwrap();
+        let prepared: Vec<_> = plan.steps().iter().filter(|s| s.phase == Phase::Prepare).map(|s| s.part.0).collect();
+        assert_eq!(prepared, [10], "the drones wait for the build phase");
     }
 
     #[test]

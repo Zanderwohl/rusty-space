@@ -121,7 +121,7 @@ pub fn oriented(shape: &Shape, up: DVec3) -> Oriented {
     }
 }
 
-/// A trapezoid is charted as the box around it: six rectangles, its roof the face at +z. A
+/// A trapezoid is laid out as the box around it: six rectangles, its roof the face at +z. A
 /// slanted side reads as the box's side it leans from, stretched by the slant at most.
 fn boxed(shape: &Shape) -> Option<Shape> {
     let Shape::Trapezoid { lower, upper, height, length } = *shape else { return None };
@@ -130,8 +130,13 @@ fn boxed(shape: &Shape) -> Option<Shape> {
 
 /// Which chart of `shape` holds `p`, in the part's frame: the one whose surface is nearest.
 pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
-    if let Some(boxed) = boxed(shape) {
-        return chart_of(&boxed, p);
+    // By its own faces, not its box's, so a steep slope is a side all the way up. Its charts are
+    // its box's: a slanted side is the box's side at the same y.
+    if let Shape::Trapezoid { lower, upper, height, length } = *shape {
+        let (m, k) = ((lower + upper) / 4.0, (upper - lower) / (2.0 * height));
+        let off = [p.x.abs() - length / 2.0, (p.y.abs() - m - k * p.z) / k.hypot(1.0), p.z.abs() - height / 2.0];
+        let axis = if off[0] >= off[1] && off[0] >= off[2] { 0 } else if off[1] >= off[2] { 1 } else { 2 };
+        return 2 * axis as u8 + u8::from(p[axis] > 0.0);
     }
     let rho = p.y.hypot(p.z);
     let end = |far_side: bool| if far_side { 2 } else { 1 };
