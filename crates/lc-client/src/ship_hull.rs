@@ -441,8 +441,8 @@ pub fn draw_hulls(
         if let Some(material) = material
             && let Some(asset) = materials.get(&material.0)
         {
-            // The shadow's sphere is the mesh's, kept by hull_shadow.
-            let uniforms = HullUniform { shadow: asset.uniforms.shadow, ..uniforms };
+            // These are the mesh's, kept by hull_shadow and bay_mesh.
+            let uniforms = HullUniform { shadow: asset.uniforms.shadow, bays: asset.uniforms.bays, ..uniforms };
             if asset.uniforms != uniforms
                 && let Some(mut asset) = materials.get_mut(&material.0)
             {

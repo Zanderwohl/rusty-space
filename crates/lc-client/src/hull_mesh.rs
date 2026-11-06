@@ -135,9 +135,10 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuff
     }
     let step = extent(Union::new(pieces).bounds) / cells.max(1) as f64;
     let (mut scratch, mut aside) = (Vec::new(), Vec::new());
+    let mut bays = 0..;
     for piece in pieces {
         if crate::bay_mesh::takes(piece) {
-            crate::bay_mesh::mesh(piece, &mut out);
+            crate::bay_mesh::mesh(piece, bays.next(), &mut out);
             continue;
         }
         let alone = Union::new(std::slice::from_ref(piece));
@@ -539,7 +540,7 @@ pub struct HullMeshPlugin;
 
 impl Plugin for HullMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HullMeshes>().add_systems(Update, (measure, want, land).chain().in_set(HullMeshSystems));
+        app.init_resource::<HullMeshes>().add_systems(Update, (measure, want, land, crate::bay_mesh::fit_bays).chain().in_set(HullMeshSystems));
     }
 }
 

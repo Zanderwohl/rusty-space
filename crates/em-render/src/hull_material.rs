@@ -54,9 +54,10 @@ pub const ATTRIBUTE_HULL_CHART_BOUNDS: MeshVertexAttribute =
 pub const ATTRIBUTE_HULL_GIRDER: MeshVertexAttribute =
     MeshVertexAttribute::new("HullGirder", 0x4855_4C4C_0000_0006, VertexFormat::Float32x4);
 
-/// `(share, face, 0, 0)`: how much of the vertex lies on an open face, and that face's index into
-/// [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so a
-/// triangle at a face's rim names one face at all three corners. The index is read flat.
+/// `(share, face, bay, lamp)`: how much of the vertex lies on an open face, and that face's index
+/// into [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so
+/// a triangle at a face's rim names one face at all three corners. The index is read flat. `bay`
+/// and `lamp` are [`HullBay`]'s.
 pub const ATTRIBUTE_HULL_FACE: MeshVertexAttribute =
     MeshVertexAttribute::new("HullFace", 0x4855_4C4C_0000_0007, VertexFormat::Unorm8x4);
 
@@ -71,6 +72,20 @@ pub fn face_attribute(share: f32, face: Option<usize>) -> [u8; 4] {
         Some(f) => [(share.clamp(0.0, 1.0) * 255.0).round() as u8, f as u8, 0, 0],
         None => [0, NO_FACE, 0, 0],
     }
+}
+
+/// Bays a hull lights from inside. Must match `BAYS` in `hull.wgsl`.
+pub const BAYS: usize = 4;
+
+/// A bay's hold, for the lamps the hull material draws in it: the transform into the bay's frame
+/// (x out of its mouth, z its up) as three rows, `(half_x, back, wide, tall)` meters, and
+/// `(spans, levels, reach_m, seed)`. A vertex names its bay in [`ATTRIBUTE_HULL_FACE`]'s third
+/// byte, one past its index, and what lamp it is in the fourth. All zero is no bay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub struct HullBay {
+    pub to_bay: [Vec4; 3],
+    pub hold: Vec4,
+    pub grid: Vec4,
 }
 
 /// Regions a palette may hold. Must match `REGIONS` in `hull.wgsl`.
@@ -229,6 +244,8 @@ pub struct HullUniform {
     /// The sphere [`HullMaterial::shadow_map`] is fit to, its center in the ship's frame and its
     /// radius in `w`, meters; a radius of 0 is no shadow.
     pub shadow: Vec4,
+    /// Each bay's hold, from the mesh rather than the lighting; see [`HullBay`].
+    pub bays: [HullBay; BAYS],
 }
 
 impl Default for HullUniform {
@@ -276,6 +293,7 @@ impl Default for HullUniform {
             tube_depth: Vec4::ZERO,
             tube_guide: Vec4::new(1.2, 0.0, 0.0, 0.0),
             shadow: Vec4::ZERO,
+            bays: [HullBay::default(); BAYS],
         }
     }
 }

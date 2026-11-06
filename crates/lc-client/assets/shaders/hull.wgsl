@@ -32,7 +32,7 @@ struct Vertex {
     @location(3) regions_1: vec4<f32>,
     @location(4) regions_2: vec4<f32>,
     @location(5) regions_3: vec4<f32>,
-    // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
+    // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, bay / 255, lamp / 255).
     @location(6) face: vec4<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS, and the
     // direction the chart's u grows, in the ship's frame.
@@ -63,11 +63,22 @@ struct VertexOutput {
     @location(11) chart: vec4<f32>,
     @location(12) @interpolate(flat) bounds: vec4<f32>,
     @location(13) chart_tangent: vec3<f32>,
+    // One past the bay's slot in material.bays, 0 for none, and what lamp the vertex is.
+    @location(14) @interpolate(flat) bay: vec2<u32>,
 #endif
 }
 
 const REGIONS: u32 = 16u;
 const FACES: u32 = 16u;
+const BAYS: u32 = 4u;
+
+/// em_render::hull_material::HullBay: rows into the bay's frame, (half_x, back, wide, tall) and
+/// (spans, levels, reach, seed).
+struct HullBay {
+    to_bay: array<vec4<f32>, 3>,
+    hold: vec4<f32>,
+    grid: vec4<f32>,
+}
 
 struct HullUniform {
     /// World direction to the star; `w` is the light on the unlit side.
@@ -150,6 +161,7 @@ struct HullUniform {
     tube_guide: vec4<f32>,
     /// The sphere shadow_map is fit to: center, ship frame, and radius in `w`, meters; 0 for none.
     shadow: vec4<f32>,
+    bays: array<HullBay, BAYS>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
@@ -168,6 +180,125 @@ struct HullUniform {
 /// direct term of the star is scaled by it, and the sky and night fill are not. Set first thing in
 /// `fragment`.
 var<private> sun_share: f32 = 1.0;
+
+// A bay's hold and lamps, as lc_client::bay_mesh lays them out; a test there checks these.
+const BAY_REGION: u32 = 7u;
+const BAY_RIB_DEPTH_M: f32 = 1.2;
+const BAY_DECK_M: f32 = 0.8;
+const BAY_PAD_M: f32 = 0.25;
+const BAY_FLOOD_INSET_M: f32 = 0.6;
+const BAY_FLOOD_DROP_M: f32 = 0.3;
+const BAY_FLOOD_HEAD_M: f32 = 0.5;
+const BAY_RUNWAY_SHARE: f32 = 0.5;
+const BAY_STRIP_RISE_M: f32 = 0.08;
+const BAY_VACANT: f32 = 0.3;
+const BAY_RUNWAY_LAMP: u32 = 1u;
+const BAY_FLOOD_LAMP: u32 = 2u;
+/// A flood's beam: full inside 25 degrees off its aim, gone past 40, so 50 to 80 degrees across.
+const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.766, 0.906);
+/// What the lamps give a surface, as multiples of the bay region's lit window: a flood's in square
+/// meters, as it falls off with distance squared, and a runway strip's in meters, as a line does.
+const BAY_FLOOD_GAIN: f32 = 48.0;
+const BAY_RUNWAY_GAIN: f32 = 2.0;
+/// The lamps themselves, seen.
+const BAY_FIXTURE_GAIN: f32 = 4.0;
+const BAY_RUNWAY_TINT: vec3<f32> = vec3<f32>(0.75, 0.88, 1.0);
+const BAY_RUNWAY_DASH_M: f32 = 3.0;
+
+struct BayLight {
+    /// What multiplies albedo.
+    light: vec3<f32>,
+    /// What glows on its own.
+    glow: vec3<f32>,
+}
+
+/// As lc_client::bay_mesh::occupied.
+fn bay_occupied(seed: u32, index: u32) -> bool {
+    return unit(mix_hash(seed, index)) >= BAY_VACANT;
+}
+
+/// The lamps of bay `tag.x` at `p_ship` on a surface facing `n_ship`. Only the hold's inside is
+/// lit, and a berth's floods light only that berth, which is how the decks and ribs hold the light
+/// in: no lamp casts a shadow.
+fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
+    var out = BayLight(vec3<f32>(0.0), vec3<f32>(0.0));
+    if (tag.x == 0u || tag.x > BAYS) {
+        return out;
+    }
+    let bay = material.bays[tag.x - 1u];
+    let p = vec3<f32>(
+        dot(bay.to_bay[0].xyz, p_ship) + bay.to_bay[0].w,
+        dot(bay.to_bay[1].xyz, p_ship) + bay.to_bay[1].w,
+        dot(bay.to_bay[2].xyz, p_ship) + bay.to_bay[2].w,
+    );
+    let n = vec3<f32>(dot(bay.to_bay[0].xyz, n_ship), dot(bay.to_bay[1].xyz, n_ship), dot(bay.to_bay[2].xyz, n_ship));
+    let mouth = bay.hold.x;
+    let back = bay.hold.y;
+    let wide = bay.hold.z;
+    let tall = bay.hold.w;
+    let spans = max(bay.grid.x, 1.0);
+    let levels = max(bay.grid.y, 1.0);
+    let reach = bay.grid.z;
+    let seed = u32(bay.grid.w);
+    let slack = 0.05;
+    if (abs(p.y) > wide + slack || abs(p.z) > tall + slack || p.x < back - slack || p.x > mouth + slack) {
+        return out;
+    }
+    let lamp = material.emitted[BAY_REGION].rgb;
+
+    // The runway: four line lamps down the shaft, falling off as lines do.
+    let runway_y = BAY_RUNWAY_SHARE * (wide - reach);
+    var strips = 0.0;
+    for (var k = 0u; k < 4u; k++) {
+        let at = vec2<f32>(select(-runway_y, runway_y, (k & 1u) == 1u), select(-tall, tall, k >= 2u));
+        let off = at - p.yz;
+        let d = length(off);
+        let toward = vec3<f32>(0.0, off / max(d, 1.0e-3));
+        strips += max(dot(n, toward), 0.0) / max(d, 1.0);
+    }
+    out.light += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_GAIN * strips;
+    if (tag.y == BAY_RUNWAY_LAMP) {
+        let dashed = select(0.1, 1.0, fract((p.x - back) / BAY_RUNWAY_DASH_M) < 0.35);
+        out.glow += BAY_RUNWAY_TINT * lamp * BAY_FIXTURE_GAIN * dashed;
+    }
+
+    // The berth this is in, if it is on a deck's side of the shaft, and its floods if occupied.
+    let edge = wide - reach;
+    if (abs(p.y) < edge - slack) {
+        return out;
+    }
+    let side = sign(p.y);
+    let pitch = (mouth - back) / spans;
+    let span = clamp(floor((p.x - back) / pitch), 0.0, spans - 1.0);
+    let level_m = 2.0 * tall / levels;
+    // A deck's top is the berth above it, its underside the berth below.
+    let level = clamp(floor((p.z + tall + 1.0e-3) / level_m), 0.0, levels - 1.0);
+    let index = u32((span * levels + level) * 2.0) + select(0u, 1u, side > 0.0);
+    if (!bay_occupied(seed, index)) {
+        return out;
+    }
+    let floor_z = -tall + level * level_m;
+    let ceiling = select(floor_z + level_m - BAY_DECK_M, tall, level + 1.0 >= levels);
+    let x0 = back + span * pitch + 0.5 * BAY_RIB_DEPTH_M;
+    let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
+    let head_y = side * (edge + 0.5 * BAY_FLOOD_HEAD_M);
+    let target = vec3<f32>(0.5 * (x0 + x1), side * (wide - 0.5 * reach), floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
+    var floods = 0.0;
+    for (var k = 0u; k < 2u; k++) {
+        let head = vec3<f32>(select(x0 + BAY_FLOOD_INSET_M, x1 - BAY_FLOOD_INSET_M, k == 1u), head_y, ceiling - BAY_FLOOD_DROP_M);
+        let aim = normalize(target - head);
+        let off = p - head;
+        let d = length(off);
+        let from_head = off / max(d, 1.0e-3);
+        let cone = smoothstep(BAY_FLOOD_COS.x, BAY_FLOOD_COS.y, dot(from_head, aim));
+        floods += cone * max(dot(n, -from_head), 0.0) / max(d * d, 1.0);
+    }
+    out.light += lamp * BAY_FLOOD_GAIN * floods;
+    if (tag.y == BAY_FLOOD_LAMP) {
+        out.glow += lamp * BAY_FIXTURE_GAIN;
+    }
+    return out;
+}
 
 /// The star's highlight, in the share of it that reaches.
 fn star_specular(n: vec3<f32>, l: vec3<f32>, e: vec3<f32>, roughness: f32, f0: f32) -> f32 {
@@ -259,6 +390,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_3 = vertex.regions_3;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
+    out.bay = vec2<u32>(round(vertex.face.zw * 255.0));
     out.chart = vertex.chart;
     out.bounds = vertex.bounds;
     out.chart_tangent = vertex.tangent.xyz;
@@ -1361,6 +1493,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
     var albedo = mix(near.albedo, far.albedo, t);
+    // Before any look takes it over: what a bay's lamps light, which have no look of their own.
+    let lamp_albedo = albedo;
     var emitted = mix(
         near.lit * light_of(pair.first, near_layer, in),
         far.lit * light_of(pair.second, far_layer, in),
@@ -1408,6 +1542,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         albedo *= 1.0 - plate_share;
         emitted += plate_share * plate_light(in, chart, pixel);
     }
+    let lamps = bay_light(in.bay, in.ship_position, normalize(in.ship_normal));
+    emitted += lamp_albedo * lamps.light + lamps.glow;
     if (material.reveal.w >= ALL_PLATED) {
         return shade(albedo, emitted, in.world_normal);
     }

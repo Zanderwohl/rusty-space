@@ -10,6 +10,11 @@
 //! plate in the part's own charts, as any slab would; everything inside is charted on its own
 //! faces. Detail is in meters and does not change with the mesher's resolution.
 //!
+//! Lit from inside by the hull material, which finds a fragment's berth from [`HullBay`] by the
+//! same arithmetic as [`Hold`]: runway strips down the shaft's floor and ceiling, and two floods in
+//! each occupied berth aimed at what is in it. The constants the shader repeats are checked against
+//! `hull.wgsl` by a test.
+//!
 //! Square cornered: a slab's rounded `corner` is not drawn, so the shell stands proud of the
 //! distance field at its edges by at most `corner · (1 − 1/√3)`.
 
@@ -18,10 +23,12 @@ use lc_world::form::{Kind, SparMode};
 use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::Piece;
-use em_render::hull_material::{face_attribute, region_weights};
+use bevy::prelude::{Assets, DetectChanges, Mesh3d, MeshMaterial3d, Query, Ref, ResMut};
+use em_render::hull_material::{BAYS, HullBay, HullMaterial, face_attribute, region_weights};
+use glam::Vec4;
 
 use crate::charts::{ChartKind, Oriented, chart_at, chart_of, oriented, tangent};
-use crate::hull_mesh::{HullBuffers, region};
+use crate::hull_mesh::{HullBuffers, HullForm, HullSource, region};
 
 const WALL_M: f64 = 1.5;
 const RIB_PITCH_M: f64 = 12.0;
@@ -42,7 +49,23 @@ const MAX_SPANS: usize = 48;
 const MAX_LEVELS: usize = 16;
 const MAX_PANELS: usize = 24;
 /// The share of berths left empty.
-const VACANT: f64 = 0.3;
+const VACANT: f32 = 0.3;
+/// Each berth's floods hang under its ceiling at its front edge, in from each rib.
+const FLOOD_INSET_M: f64 = 0.6;
+const FLOOD_DROP_M: f64 = 0.3;
+const FLOOD_HEAD_M: f64 = 0.5;
+/// The runway strips lie down the shaft at this share of the way from its middle to the decks.
+const RUNWAY_SHARE: f64 = 0.5;
+const STRIP_M: f64 = 0.3;
+const STRIP_RISE_M: f64 = 0.08;
+
+/// What a vertex is, for the lamps: [`HullBay`]'s fourth byte.
+#[derive(Clone, Copy)]
+enum Lamp {
+    None = 0,
+    Runway = 1,
+    Flood = 2,
+}
 const DISC_SIDES: usize = 20;
 
 /// Whether `piece` is meshed here rather than by the distance field.
@@ -50,26 +73,108 @@ pub fn takes(piece: &Piece) -> bool {
     piece.kind == Kind::Bay && matches!(piece.shape, Shape::Slab { .. })
 }
 
-/// Appends `piece`, which [`takes`], to `out`.
-pub fn mesh(piece: &Piece, out: &mut HullBuffers) {
-    let Shape::Slab { edges, .. } = piece.shape else { return };
+/// The bay's frame in the part's, and its hold. Up is the part's y or z, whichever runs more along
+/// the ship's z.
+fn layout(piece: &Piece) -> Option<(DMat3, Hold)> {
+    let Shape::Slab { edges, .. } = piece.shape else { return None };
     let up = piece.pose.rotation.transpose() * DVec3::Z;
     let u = if up.y.abs() > up.z.abs() { DVec3::Y * up.y.signum() } else { DVec3::Z * if up.z < 0.0 { -1.0 } else { 1.0 } };
     // Proper, so a bay-frame triangle keeps its winding in the part's.
     let frame = DMat3::from_cols(DVec3::X, u.cross(DVec3::X), u);
     let dims = DVec3::from_array([0, 1, 2].map(|k| edges.dot(frame.col(k).abs())));
-    let hold = Hold::new(dims);
+    Some((frame, Hold::new(dims)))
+}
+
+/// Appends `piece`, which [`takes`], to `out`. `slot` is its place in [`HullBay`]s, if it has one,
+/// and lights it.
+pub fn mesh(piece: &Piece, slot: Option<usize>, out: &mut HullBuffers) {
+    let Some((frame, hold)) = layout(piece) else { return };
+    let up = piece.pose.rotation.transpose() * DVec3::Z;
     let mut b = Builder {
         out,
         piece,
         frame,
         hull: oriented(&piece.shape, up),
         h: 1.0e-4 * piece.shape.least_dimension().max(1.0),
+        bay: slot.filter(|&s| s < BAYS).map_or(0, |s| s as u8 + 1),
+        lamp: Lamp::None,
     };
     b.shell(&hold);
     b.ribs(&hold);
     b.decks(&hold);
+    b.runway(&hold);
     b.berths(&hold, seed(piece));
+}
+
+/// `piece`'s hold as the hull material reads it.
+pub fn hull_bay(piece: &Piece) -> Option<HullBay> {
+    let (frame, hold) = layout(piece)?;
+    // The bay's axes in the ship's frame.
+    let axes = piece.pose.rotation * frame;
+    let row = |i: usize| {
+        let a = axes.col(i);
+        Vec4::new(a.x as f32, a.y as f32, a.z as f32, -a.dot(piece.pose.position) as f32)
+    };
+    Some(HullBay {
+        to_bay: [row(0), row(1), row(2)],
+        hold: Vec4::new(hold.half.x as f32, hold.back as f32, hold.wide as f32, hold.tall as f32),
+        grid: Vec4::new(hold.spans as f32, hold.levels as f32, hold.reach as f32, seed(piece) as f32),
+    })
+}
+
+/// The first [`BAYS`] bays among `pieces`, in the order [`crate::hull_mesh::mesh_pieces`] gives
+/// them their slots.
+pub fn hull_bays(pieces: &[Piece]) -> [HullBay; BAYS] {
+    let mut out = [HullBay::default(); BAYS];
+    for (slot, bay) in pieces.iter().filter(|p| takes(p)).filter_map(hull_bay).take(BAYS).enumerate() {
+        out[slot] = bay;
+    }
+    out
+}
+
+/// Hands each hull material its bays once the mesh they were built into lands.
+pub fn fit_bays(hulls: Query<(Ref<Mesh3d>, &HullForm, &MeshMaterial3d<HullMaterial>)>, mut materials: ResMut<Assets<HullMaterial>>) {
+    for (mesh, form, material) in &hulls {
+        if !mesh.is_changed() {
+            continue;
+        }
+        let bays = match &form.source {
+            HullSource::Form(form, balance) => {
+                lc_world::form::sdf::Sdf::new(form, balance).map(|sdf| hull_bays(sdf.pieces())).unwrap_or_default()
+            }
+            HullSource::Pieces(pieces) => hull_bays(pieces),
+        };
+        if materials.get(&material.0).is_some_and(|m| m.uniforms.bays != bays)
+            && let Some(mut asset) = materials.get_mut(&material.0)
+        {
+            asset.uniforms.bays = bays;
+        }
+    }
+}
+
+/// Whether berth `index` of a bay seeded `seed` holds something. `hull.wgsl`'s `bay_occupied`.
+pub fn occupied(seed: u32, index: u32) -> bool {
+    unit(mix_hash(seed, index)) >= VACANT
+}
+
+/// Counting up the levels and then the spans, the -y side before the +y.
+fn berth_index(hold: &Hold, span: usize, level: usize, side: f64) -> u32 {
+    ((span * hold.levels + level) * 2 + usize::from(side > 0.0)) as u32
+}
+
+/// `hash.wgsl`'s, bit for bit.
+fn pcg(x: u32) -> u32 {
+    let state = x.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
+    let word = ((state >> ((state >> 28) + 4)) ^ state).wrapping_mul(277_803_737);
+    (word >> 22) ^ word
+}
+
+fn mix_hash(a: u32, b: u32) -> u32 {
+    pcg(a ^ b.wrapping_add(0x9e37_79b9).wrapping_add(a << 6).wrapping_add(a >> 2))
+}
+
+fn unit(h: u32) -> f32 {
+    (h >> 8) as f32 / 16_777_216.0
 }
 
 /// The cavity and how it is divided. `half` is the shell's half extent; the hold runs x from
@@ -131,6 +236,9 @@ struct Builder<'a> {
     frame: DMat3,
     hull: Oriented,
     h: f64,
+    /// One past the bay's slot, 0 for none.
+    bay: u8,
+    lamp: Lamp,
 }
 
 impl Builder<'_> {
@@ -172,7 +280,10 @@ impl Builder<'_> {
         self.out.positions.push(pose.to_outer(self.frame * at).as_vec3().to_array());
         self.out.normals.push((pose.rotation * self.frame * normal).as_vec3().to_array());
         self.out.regions.push(region_weights(region, region, 0.0));
-        self.out.faces.push(face_attribute(0.0, None));
+        let mut face = face_attribute(0.0, None);
+        face[2] = self.bay;
+        face[3] = self.lamp as u8;
+        self.out.faces.push(face);
         self.out.charts.push(chart.map(|x| x as f32));
         self.out.chart_bounds.push(bounds.map(|x| x as f32));
         self.out.tangents.push(along.as_vec3().extend(1.0).to_array());
@@ -327,26 +438,48 @@ impl Builder<'_> {
         }
     }
 
-    /// A pad on every berth's floor, and on most a cutout card standing on it facing the mouth.
-    fn berths(&mut self, hold: &Hold, seed: u64) {
+    /// Two strips of lamps down the shaft on its floor and two on its ceiling, mouth to back.
+    fn runway(&mut self, hold: &Hold) {
+        let length = hold.half.x - hold.back;
+        let y = RUNWAY_SHARE * (hold.wide - hold.reach);
+        let axes = [DVec3::X, DVec3::Y, DVec3::Z];
+        self.lamp = Lamp::Runway;
+        for (z, side) in [(-hold.tall, 1.0), (hold.tall, -1.0)] {
+            for across in [-y, y] {
+                let center = DVec3::new(hold.back + length / 2.0, across, z + side * STRIP_RISE_M / 2.0);
+                self.cuboid(center, axes, DVec3::new(length / 2.0, STRIP_M / 2.0, STRIP_RISE_M / 2.0), region(Kind::Bay));
+            }
+        }
+        self.lamp = Lamp::None;
+    }
+
+    /// A pad on every berth's floor, on most a cutout card standing on it facing the mouth, and two
+    /// flood heads under its ceiling, lit only when it is occupied.
+    fn berths(&mut self, hold: &Hold, seed: u32) {
         let (pad, card) = (region(Kind::Spar(SparMode::Saddle)), region(Kind::Storage));
         let axes = [DVec3::X, DVec3::Y, DVec3::Z];
-        let mut berth = 0u64;
         for i in 0..hold.spans {
             let (x0, x1) = (hold.rib(i) + RIB_DEPTH_M / 2.0, hold.rib(i + 1) - RIB_DEPTH_M / 2.0);
             let x = (x0 + x1) / 2.0;
             for k in 0..hold.levels {
                 let (floor, ceiling) = (hold.floor(k), hold.ceiling(k));
                 for side in [-1.0, 1.0] {
-                    berth += 1;
-                    let mut roll = Roll(splitmix(seed ^ berth.wrapping_mul(0x9e37_79b9_7f4a_7c15)));
+                    let index = berth_index(hold, i, k, side);
+                    let mut roll = Roll(splitmix(u64::from(seed) << 32 | u64::from(index)));
                     let y = side * (hold.wide - hold.reach / 2.0);
                     let size = 0.7 * (x1 - x0).min(hold.reach);
                     if size <= 0.0 {
                         continue;
                     }
                     self.cuboid(DVec3::new(x, y, floor + PAD_M / 2.0), axes, DVec3::new(size / 2.0, size / 2.0, PAD_M / 2.0), pad);
-                    if roll.next() < VACANT {
+                    self.lamp = Lamp::Flood;
+                    let edge = side * (hold.wide - hold.reach + FLOOD_HEAD_M / 2.0);
+                    for at in [x0 + FLOOD_INSET_M, x1 - FLOOD_INSET_M] {
+                        let head = DVec3::new(at, edge, ceiling - FLOOD_DROP_M);
+                        self.cuboid(head, axes, DVec3::splat(FLOOD_HEAD_M / 2.0), pad);
+                    }
+                    self.lamp = Lamp::None;
+                    if !occupied(seed, index) {
                         continue;
                     }
                     let room = (ceiling - floor - PAD_M).max(0.0);
@@ -447,8 +580,9 @@ impl Outline {
     }
 }
 
-fn seed(piece: &Piece) -> u64 {
-    splitmix(piece.part.0 as u64 * 2 + u64::from(piece.side == Side::Mirror))
+/// Small enough to ride in an `f32` exactly.
+fn seed(piece: &Piece) -> u32 {
+    u32::from(piece.part.0) * 2 + u32::from(piece.side == Side::Mirror)
 }
 
 fn splitmix(mut x: u64) -> u64 {
@@ -483,7 +617,7 @@ mod tests {
             pose: Pose { position: DVec3::new(5.0, -2.0, 1.0), rotation },
         };
         let mut out = HullBuffers::default();
-        mesh(&piece, &mut out);
+        mesh(&piece, Some(0), &mut out);
         (piece, out)
     }
 
@@ -555,6 +689,52 @@ mod tests {
         // Up the shaft from floor to ceiling: only the shell, twice, and the shaft's own ends.
         let at = |h: f64| piece.pose.to_outer(DVec3::new(1.3, 0.0, 0.0) + up * h + DVec3::Z * 0.17);
         assert_eq!(crossings(&out, at(-30.0), at(30.0)), 4);
+    }
+
+    /// The hull material finds berths and lamps by the same numbers.
+    #[test]
+    fn hull_wgsl_repeats_the_holds_constants() {
+        let wgsl = include_str!("../assets/shaders/hull.wgsl");
+        let constants = [
+            ("BAY_RIB_DEPTH_M", RIB_DEPTH_M),
+            ("BAY_DECK_M", DECK_M),
+            ("BAY_PAD_M", PAD_M),
+            ("BAY_FLOOD_INSET_M", FLOOD_INSET_M),
+            ("BAY_FLOOD_DROP_M", FLOOD_DROP_M),
+            ("BAY_FLOOD_HEAD_M", FLOOD_HEAD_M),
+            ("BAY_RUNWAY_SHARE", RUNWAY_SHARE),
+            ("BAY_STRIP_RISE_M", STRIP_RISE_M),
+            ("BAY_VACANT", VACANT as f64),
+        ];
+        assert!(wgsl.contains(&format!("const BAY_REGION: u32 = {}u;", region(Kind::Bay))));
+        for (name, value) in constants {
+            let line = wgsl.lines().find(|l| l.starts_with(&format!("const {name}: f32 = "))).unwrap_or_else(|| panic!("{name} missing"));
+            let text = line.split('=').nth(1).unwrap().trim().trim_end_matches(';');
+            assert_eq!(text.parse::<f32>().unwrap(), value as f32, "{name}");
+        }
+        assert!(wgsl.contains(&format!("const BAYS: u32 = {}u;", BAYS)));
+    }
+
+    /// The formula in `hash.wgsl`, worked out apart from this port, so a slip in either shows.
+    #[test]
+    fn the_occupancy_hash_is_pcg() {
+        assert_eq!(pcg(0), 129_708_002);
+        assert_eq!(pcg(1), 2_831_084_092);
+    }
+
+    #[test]
+    fn a_bays_rows_carry_the_ship_frame_into_its_own() {
+        let rotation = DMat3::from_rotation_z(0.7) * DMat3::from_rotation_x(0.3);
+        let (piece, _) = bay(DVec3::new(90.0, 40.0, 60.0), rotation);
+        let hull = hull_bay(&piece).unwrap();
+        let (frame, hold) = layout(&piece).unwrap();
+        let inside = DVec3::new(10.0, -5.0, 3.0);
+        let ship = piece.pose.to_outer(frame * inside);
+        let row = |r: glam::Vec4| r.truncate().as_dvec3().dot(ship) + r.w as f64;
+        let got = DVec3::new(row(hull.to_bay[0]), row(hull.to_bay[1]), row(hull.to_bay[2]));
+        assert!(got.abs_diff_eq(inside, 1e-3), "{got}");
+        assert_eq!(hull.grid.x as usize, hold.spans);
+        assert_eq!(hull.grid.w as u32, seed(&piece));
     }
 
     #[test]
