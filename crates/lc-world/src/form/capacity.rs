@@ -38,7 +38,8 @@ impl Capacities {
         for part in &form.parts {
             let v = part.volume_m3 * f64::from(copies[&part.id]);
             match part.kind {
-                Kind::Storage => storage_m3 += v,
+                // A scaffold holds what storage does, for as long as it stands.
+                Kind::Storage | Kind::Scaffold => storage_m3 += v,
                 Kind::Drone => drone_m3 += v,
                 Kind::Engine => engine_m3 += v,
                 Kind::Living => living_m3 += v,
@@ -153,7 +154,7 @@ pub fn mass_fraction(kind: Kind, balance: &Balance) -> f64 {
         Kind::Data => balance.data_mass_fraction,
         Kind::Bay => balance.bay_mass_fraction,
         Kind::Spar(_) => balance.spar_mass_fraction,
-        Kind::Mind | Kind::Storage | Kind::Drone | Kind::Engine | Kind::Living => 1.0,
+        Kind::Mind | Kind::Storage | Kind::Scaffold | Kind::Drone | Kind::Engine | Kind::Living => 1.0,
     }
 }
 

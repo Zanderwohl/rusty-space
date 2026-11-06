@@ -43,7 +43,8 @@ pub fn region(kind: Kind) -> u32 {
         Kind::Engine => 3,
         Kind::Data => 4,
         Kind::Mind => 5,
-        Kind::Spar(_) => 6,
+        // Structure, standing only while the round that built it runs.
+        Kind::Spar(_) | Kind::Scaffold => 6,
         Kind::Bay => 7,
     }
 }
@@ -267,6 +268,7 @@ impl Fnv {
             Kind::Bay => 6,
             Kind::Spar(SparMode::Saddle) => 7,
             Kind::Spar(SparMode::Strap) => 8,
+            Kind::Scaffold => 9,
         });
     }
 

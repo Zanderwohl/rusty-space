@@ -139,8 +139,16 @@ pub const PRIMITIVES: [Primitive; 6] = [
     Primitive::Frustum { length: 2.0, taper: 1.5 },
 ];
 
-pub const KINDS: [Kind; 7] =
-    [Kind::Storage, Kind::Drone, Kind::Engine, Kind::Living, Kind::Data, Kind::Bay, Kind::Spar(SparMode::Saddle)];
+pub const KINDS: [Kind; 8] = [
+    Kind::Storage,
+    Kind::Drone,
+    Kind::Engine,
+    Kind::Living,
+    Kind::Data,
+    Kind::Bay,
+    Kind::Spar(SparMode::Saddle),
+    Kind::Scaffold,
+];
 
 /// Of the parent's volume, what an added part starts at, before snapping.
 const ADDED_SHARE: f64 = 0.1;
@@ -169,6 +177,7 @@ pub fn kind_name(kind: Kind) -> &'static str {
         Kind::Bay => "bay",
         Kind::Spar(SparMode::Saddle) => "spar, saddle",
         Kind::Spar(SparMode::Strap) => "spar, strap",
+        Kind::Scaffold => "scaffold",
     }
 }
 
@@ -190,9 +199,11 @@ impl Draft {
     }
 
     /// Edit against another form of the ship's, keeping the edits: the target of a round once one
-    /// is accepted, and wherever a cancel left the ship after that.
+    /// is accepted, and wherever a cancel left the ship after that. A scaffold the new form lacks
+    /// was that round's, which strikes it, so it goes from the draft too.
     pub fn rebase(&mut self, mut ship: Form) {
         ship.parts.sort_by_key(|p| p.id);
+        self.form.parts.retain(|p| p.kind != Kind::Scaffold || ship.parts.iter().any(|s| s.id == p.id));
         self.ship = ship;
     }
 
@@ -453,7 +464,7 @@ impl Draft {
         let held = Capacities::of(&alone, balance);
         let dry_kg = part_kg(part, balance) * copies;
         let mut out = match part.kind {
-            Kind::Storage => vec![("capacity", format!("{} ME", figure(held.storage_j / balance.module_energy_j())))],
+            Kind::Storage | Kind::Scaffold => vec![("capacity", format!("{} ME", figure(held.storage_j / balance.module_energy_j())))],
             Kind::Drone => vec![("building", format!("{} W", figure(held.building_w)))],
             Kind::Engine => {
                 let thrust_n = held.aperture_w / lc_world::flight::C_M_S;
@@ -733,6 +744,22 @@ mod tests {
 
     fn ids(parts: &[Part]) -> Vec<u16> {
         parts.iter().map(|p| p.id.0).collect()
+    }
+
+    #[test]
+    fn a_scaffold_goes_from_the_draft_with_the_round_that_struck_it() {
+        let ship = Form::reference();
+        let mut draft = Draft::new(ship.clone());
+        let storage = draft.form.parts.iter().find(|p| p.kind == Kind::Storage).unwrap().id;
+        let scaffold = draft.add(storage, Kind::Scaffold, PRIMITIVES[1], DVec3::Y, &B).unwrap();
+        draft.apply(&scaffold, &B).unwrap();
+        let elsewhere = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::NEG_Y, &B).unwrap();
+        draft.apply(&elsewhere, &B).unwrap();
+        let mut settled = draft.form.clone();
+        settled.parts.retain(|p| p.kind != Kind::Scaffold);
+        draft.rebase(settled.clone());
+        assert_eq!(draft.form, draft.ship, "nothing left to apply");
+        assert!(draft.form.parts.iter().all(|p| p.kind != Kind::Scaffold));
     }
 
     #[test]

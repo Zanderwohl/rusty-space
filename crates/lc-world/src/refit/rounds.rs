@@ -1,4 +1,4 @@
-//! A refit round: from one form to another in four strict phases, one step per part change.
+//! A refit round: from one form to another in five strict phases, one step per part change.
 //!
 //! The [`Round`] is the recipe, both ends run [`Round::solve`], and progress is a closed form in
 //! time. The ledger is the store's own: what the round takes and returns, with drain and income
@@ -20,6 +20,8 @@ pub enum Phase {
     Dismantle,
     Move,
     Build,
+    /// Every scaffold taken down, once everything else is built.
+    Strike,
 }
 
 /// What a step does to its part, whichever phase it runs in.
@@ -108,8 +110,12 @@ pub enum Refusal {
     Mind(PartId),
     /// A step would begin with no drone to do it, as when every drone is being rebuilt.
     NoDrones { part: PartId },
-    /// The build phase costs more than the dismantle phase leaves in storage.
+    /// The build phase costs more than the dismantle phase leaves in storage, or a scaffold more
+    /// than is stored as the round begins.
     Energy { short_j: f64 },
+    /// A scaffold that cannot be built before anything is taken apart: it hangs from a part the
+    /// round builds or takes apart whole, or is a copy a mirror adds.
+    Scaffold { part: PartId },
 }
 
 /// A burst of heat from a finished step.
@@ -148,6 +154,8 @@ pub struct Canceled {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     round: Round,
+    /// The target without its scaffolds, which is what the round leaves.
+    settled: Form,
     balance: Balance,
     steps: Vec<Step>,
 }
@@ -294,6 +302,53 @@ pub fn changes(from: &Form, target: &Form, balance: &Balance) -> Vec<(PartId, Ch
     matter.chain(moves.into_iter().map(|id| (id, Change::Move))).collect()
 }
 
+/// Each of `dismantles` in order, its return kept in storage as far as there is room and vented
+/// past it. Room is judged against the capacity the whole phase leaves, so a return is not taken in
+/// by a store that a later step of the same phase takes apart.
+fn take_apart(
+    dismantles: Vec<Pending>,
+    phase: Phase,
+    parts: &mut Parts,
+    stored: &mut f64,
+    elapsed: &mut f64,
+    steps: &mut Vec<Step>,
+    balance: &Balance,
+) -> Result<(), Refusal> {
+    let left_j = {
+        let mut after = parts.clone();
+        for p in &dismantles {
+            apply(&mut after, p.part, p.after);
+        }
+        capacities(&after, balance).storage_j
+    };
+    for p in dismantles {
+        let power = building_w(parts, balance, p.part)?;
+        let Transfer::Dismantle { gross_j, returned_j } = p.transfer else { unreachable!() };
+        let duration_s = p.duration_s(gross_j, power, balance);
+        apply(parts, p.part, p.after);
+        let kept = returned_j.min((left_j - *stored).max(0.0));
+        *stored += kept;
+        let spilled = (*stored - capacities(parts, balance).storage_j).max(0.0);
+        *stored -= spilled;
+        let vented_j = (returned_j - kept) + spilled;
+        steps.push(Step {
+            part: p.part,
+            phase,
+            change: p.change,
+            kind: p.kind,
+            begins_s: *elapsed,
+            duration_s,
+            gross_j,
+            stored_j: kept,
+            spilled_j: spilled,
+            vented_j,
+            after: p.after,
+        });
+        *elapsed += duration_s;
+    }
+    Ok(())
+}
+
 /// Which of `builds` run before anything is taken apart, done onto `parts`: storage and drones
 /// that grow or are new, in the builds' order, each if what is stored now pays for it. A part that
 /// grows does so where it stands, and moves after. A new part must hang from one the round keeps
@@ -317,7 +372,7 @@ fn prepare(
     let mut prepared = Vec::new();
     for p in builds {
         let early = match (p.change, p.after) {
-            _ if !matches!(p.kind, Kind::Storage | Kind::Drone) => None,
+            _ if !matches!(p.kind, Kind::Storage | Kind::Drone | Kind::Scaffold) => None,
             (Change::Grow, Some(after)) if from_copies.get(&p.part) == target_copies.get(&p.part) => {
                 parts.get(&p.part).map(|now| Part { volume_m3: after.volume_m3, primitive: after.primitive, ..*now })
             }
@@ -332,6 +387,15 @@ fn prepare(
             _ => None,
         };
         let Transfer::Build { cost_j } = p.transfer else { unreachable!("builds build") };
+        if p.kind == Kind::Scaffold {
+            // Standing only after the dismantle phase, it would hold nothing it was built for.
+            if early.is_none() {
+                return Err(Refusal::Scaffold { part: p.part });
+            }
+            if cost_j > *stored {
+                return Err(Refusal::Energy { short_j: cost_j - *stored });
+            }
+        }
         let Some(early) = early.filter(|_| cost_j <= *stored) else {
             later.push(p);
             continue;
@@ -427,40 +491,7 @@ impl Plan {
 
         let (builds, prepared) = prepare(builds, &round, &mut parts, &mut stored, &mut elapsed, &mut steps, &dismantles, balance)?;
 
-        // Room is judged against the capacity the whole phase leaves, so a return is not taken in
-        // by a store that a later step of the same phase takes apart.
-        let left_j = {
-            let mut after = parts.clone();
-            for p in &dismantles {
-                apply(&mut after, p.part, p.after);
-            }
-            capacities(&after, balance).storage_j
-        };
-        for p in dismantles {
-            let power = building_w(&parts, balance, p.part)?;
-            let Transfer::Dismantle { gross_j, returned_j } = p.transfer else { unreachable!() };
-            let duration_s = p.duration_s(gross_j, power, balance);
-            apply(&mut parts, p.part, p.after);
-            let kept = returned_j.min((left_j - stored).max(0.0));
-            stored += kept;
-            let spilled = (stored - capacities(&parts, balance).storage_j).max(0.0);
-            stored -= spilled;
-            let vented_j = (returned_j - kept) + spilled;
-            steps.push(Step {
-                part: p.part,
-                phase: Phase::Dismantle,
-                change: p.change,
-                kind: p.kind,
-                begins_s: elapsed,
-                duration_s,
-                gross_j,
-                stored_j: kept,
-                spilled_j: spilled,
-                vented_j,
-                after: p.after,
-            });
-            elapsed += duration_s;
-        }
+        take_apart(dismantles, Phase::Dismantle, &mut parts, &mut stored, &mut elapsed, &mut steps, balance)?;
 
         let children = {
             let mut children: HashMap<PartId, Vec<PartId>> = HashMap::new();
@@ -532,6 +563,7 @@ impl Plan {
             let gross_j = cost_j(&p);
             let duration_s = p.duration_s(gross_j, power, balance);
             apply(&mut parts, p.part, p.after);
+            stored -= gross_j;
             steps.push(Step {
                 part: p.part,
                 phase: Phase::Build,
@@ -547,15 +579,23 @@ impl Plan {
             });
             elapsed += duration_s;
         }
-        Ok(Self { round, balance: *balance, steps })
+        let mut strikes: Vec<Pending> = Vec::new();
+        let copies = Form { parts: parts.values().copied().collect() }.copies();
+        for part in parts.values().filter(|p| p.kind == Kind::Scaffold) {
+            strikes.push(Pending::remove(part, copies[&part.id], balance));
+        }
+        take_apart(strikes, Phase::Strike, &mut parts, &mut stored, &mut elapsed, &mut steps, balance)?;
+        let settled = Form { parts: round.target.parts.iter().filter(|p| p.kind != Kind::Scaffold).copied().collect() };
+        Ok(Self { round, settled, balance: *balance, steps })
     }
 
     pub fn round(&self) -> &Round {
         &self.round
     }
 
+    /// What the round leaves: its target, without the scaffolds it struck.
     pub fn target(&self) -> &Form {
-        &self.round.target
+        &self.settled
     }
 
     pub fn steps(&self) -> &[Step] {
@@ -1223,6 +1263,48 @@ mod tests {
         assert!((raw.net_j() - plan.net_j() - 0.05 * new_store).abs() < 1e-9 * new_store, "{} against {}", raw.net_j(), plan.net_j());
         assert!(plan.duration_s() < 0.5 * raw.duration_s(), "{} against {}", plan.duration_s(), raw.duration_s());
         assert_eq!(matched(&from, paired.clone()), paired, "matching twice changes nothing");
+    }
+
+    /// A full ship trades its habitat for an engine of the same mass: what the habitat gives back
+    /// has nowhere to go until the engine takes it.
+    fn traded(scaffold: Option<f64>) -> (Form, Form) {
+        let from = ship();
+        let mut target = adding(&without(&from, &[4]), &[part(9, Kind::Engine, ROD, 0.5, 1)]);
+        if let Some(slots) = scaffold {
+            target = adding(&target, &[part(10, Kind::Scaffold, ROD, slots, 1)]);
+        }
+        (from, target)
+    }
+
+    #[test]
+    fn a_scaffold_holds_what_is_in_transit_and_is_struck_at_the_end() {
+        let (from, bare) = traded(None);
+        let full = capacity(&from);
+        let vented = solve(&from, &bare, full).unwrap().vented_j();
+        assert!(vented > 0.9 * energy(&get(&from, 4)), "premise: the habitat's return has no room: {vented}");
+
+        let (_, held) = traded(Some(0.5));
+        let plan = solve(&from, &held, full).unwrap();
+        assert_eq!(plan.vented_j(), 0.0, "{:?}", plan.steps());
+        let first = plan.steps().first().unwrap();
+        let last = plan.steps().last().unwrap();
+        assert_eq!((first.part, first.phase, first.change), (PartId(10), Phase::Prepare, Change::Add));
+        assert_eq!((last.part, last.phase, last.change), (PartId(10), Phase::Strike, Change::Remove));
+        assert_eq!(sorted(&plan.at(1e12).form), sorted(&bare), "the round leaves no scaffold");
+        assert_eq!(sorted(plan.target()), sorted(&bare));
+        let lost = energy(&get(&held, 10)) * (1.0 - B.recovery);
+        assert!(lost < 0.1 * vented, "it costs the loss on itself: {lost} against {vented}");
+    }
+
+    #[test]
+    fn a_scaffold_must_stand_before_anything_is_taken_apart() {
+        let (from, target) = traded(Some(0.5));
+        let on_new = with(&target, 10, |p| p.placement.as_mut().unwrap().parent = PartId(9));
+        assert_eq!(solve(&from, &on_new, capacity(&from)).unwrap_err(), Refusal::Scaffold { part: PartId(10) });
+        let short = 0.5 * energy(&get(&target, 10));
+        assert!(matches!(solve(&from, &target, short), Err(Refusal::Energy { .. })));
+        let hung = adding(&target, &[part(11, Kind::Data, ROD, 0.1, 10)]);
+        assert_eq!(solve(&from, &hung, capacity(&from)).unwrap_err(), Refusal::Form(FormError::OnScaffold(PartId(11))));
     }
 
     #[test]

@@ -204,6 +204,7 @@ pub(crate) fn paint(kind: Kind) -> Vec4 {
         Kind::Data => [0.10, 0.24, 0.55],
         Kind::Bay => [0.45, 0.40, 0.28],
         Kind::Spar(_) => [0.12, 0.12, 0.13],
+        Kind::Scaffold => [0.50, 0.42, 0.18],
     };
     Vec4::new(r, g, b, 1.0)
 }

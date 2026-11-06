@@ -75,7 +75,7 @@ pub fn phases(plan: &Plan, now_s: f64) -> Vec<(Phase, Vec<StepRow>)> {
         // Past the round's end `at` finishes every step.
         _ => StepState::Waiting,
     };
-    [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build]
+    [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build, Phase::Strike]
         .into_iter()
         .map(|phase| {
             let rows = plan
@@ -102,6 +102,7 @@ pub fn phase_name(phase: Phase) -> &'static str {
         Phase::Dismantle => "dismantle",
         Phase::Move => "move",
         Phase::Build => "build",
+        Phase::Strike => "strike",
     }
 }
 
@@ -287,7 +288,7 @@ mod tests {
         let p = plan();
         let start = p.round().start_s;
         let before = phases(&p, start);
-        assert_eq!(before.iter().map(|(ph, _)| *ph).collect::<Vec<_>>(), [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build]);
+        assert_eq!(before.iter().map(|(ph, _)| *ph).collect::<Vec<_>>(), [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build, Phase::Strike]);
         assert!(before[0].1.is_empty(), "a bay is not built first");
         assert!(before.iter().flat_map(|(_, r)| r).all(|r| r.state == StepState::Waiting));
         assert_eq!(before[1].1[0].what, format!("take apart data {}", before_data()));

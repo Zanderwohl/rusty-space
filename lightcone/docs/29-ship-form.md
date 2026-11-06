@@ -50,6 +50,7 @@ value over its 392 699 m³ slot.
 | **data** | 7.5 bytes | half | three times as slow to build |
 | **bay** | a mouth, whose smaller dimension is the largest hull it can launch | a tenth | a shell with a procedural interior. After construction exists |
 | **spar** | nothing | a twentieth | structure for holding parts apart: cluster spokes, booms, straps. Conforms to what it touches; see below |
+| **scaffold** | as storage | module density | storage a round puts up first and takes down last, so energy in transit has room. Never in the form a round leaves; see §Refits |
 
 Module density is 395.8 kg/m³. **ME is the unit of energy**, 1.397 × 10²⁵ J.
 
@@ -330,7 +331,7 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 ## Refits
 
 A refit takes the ship from its form to a target form. It is one **round** of edits, and a round runs
-in four phases, strictly in order:
+in five phases, strictly in order:
 
 1. **Prepare.** Storage and drones that grow or are new are built first, each if what is stored as
    the round begins still pays for it, so what the dismantle phase returns has room and a drone
@@ -344,7 +345,9 @@ in four phases, strictly in order:
    finds the room already filled by starlight is heat as it arrives instead ([30](30-the-field.md#the-inputs)).
 3. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
 4. **Build.** Every part that grows, is new or is being rebuilt and was not built in the prepare
-   phase is built, drones first. Each takes its
+   phase is built, drones first.
+5. **Strike.** Every scaffold in the target is taken down, in id order, its return going to storage
+   as a dismantle's does. The round leaves the target without them. Each takes its
    added mass-energy, structure included, from storage.
 
 | change to a part | phase | energy | time |
@@ -400,6 +403,15 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
   that the preset drops or holds as another kind, largest with largest. A part left on an id
   another takes moves to a fresh one. Anything a drag and the axis handles could do, this does, at
   their price.
+- **A scaffold is built in the prepare phase or the round is refused**: `Shortfall::Scaffold` when
+  it hangs from a part the round builds or takes apart whole, or is a copy a mirror adds, and
+  `Energy` when what is stored as the round begins cannot pay for it. Standing only after the
+  dismantle phase, it would hold nothing it was put up for. Nothing may hang from one
+  (`FormFault::OnScaffold`), since it goes. It holds and weighs what storage does, so it costs the
+  5% loss on itself and the time to build and strike it: storage holds about five times its own
+  mass-energy, so holding `E` in transit loses about 1% of `E`, where venting it loses all of it.
+  The placement rules judge the target with its scaffolds, so one may not stand in an engine's cone.
+  Once a round is accepted the editor's draft loses its scaffolds with it.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 - **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
   part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
@@ -418,7 +430,9 @@ difference into the field, which may kill the ship. Done properly it takes round
 2. Spend that storage on the new section.
 3. If you like, shrink the extra storage away again.
 
-Each round is visible and survivable, and the editor says so before each Apply. Emptying a full
+Each round is visible and survivable, and the editor says so before each Apply. A **scaffold** does
+the same in one round: put up first to hold what the old section gives back, struck once the new one
+has taken it. Emptying a full
 storage part before changing its kind follows from the same rule, with nothing special added.
 Resizing or reshaping one does not need it: a change of shape is done in place, so a full store
 gives up only what its new volume cannot hold.
@@ -432,7 +446,8 @@ radiated loss is not recovered: putting a part back costs its whole mass-energy.
 pay, the dismantling finishes at once instead, and its return goes to storage as far as there is
 room. A move snaps back. Whatever the reversal or the finish loses, and whatever has no room, is a
 burst at the moment of cancel. The ship is left partway between its form and the
-target, which may be worse than either, and that is intended. The picture runs the step backward
+target, which may be worse than either, and that is intended. A scaffold already up stays, as any
+part does, until a later round takes it down. The picture runs the step backward
 from where it was, at its own pace ([32](32-ship-rendering.md#the-other-steps)).
 
 Flying and refitting still exclude each other, as in 19.
@@ -561,7 +576,7 @@ Check any that do not before it lands. The editor's camera must also never be th
 or `bevy_egui` gives it the primary context.
 
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
-four phases, progress, and Cancel.
+five phases, progress, and Cancel.
 
 ### Apply and the ledger
 
@@ -924,7 +939,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: four phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: five phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
 | `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |

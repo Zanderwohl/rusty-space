@@ -80,6 +80,7 @@ fn unplanned(why: rounds::Refusal) -> Refusal {
         rounds::Refusal::Form(fault) => Refusal::Form(fault.into()),
         rounds::Refusal::Mind(part) => Refusal::Form(FormFault::OtherMind(part.into())),
         rounds::Refusal::NoDrones { part } => Refusal::Short(Shortfall::NoDrones(part.into())),
+        rounds::Refusal::Scaffold { part } => Refusal::Short(Shortfall::Scaffold(part.into())),
         rounds::Refusal::Energy { .. } => Refusal::Short(Shortfall::Energy),
     }
 }

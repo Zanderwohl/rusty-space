@@ -76,6 +76,7 @@ pub fn budget_figures(preview: &Preview, module_j: f64) -> [String; 4] {
                 Refusal::Form(fault) => fault.to_string(),
                 Refusal::NoDrones { part } => format!("no drones left to work on {part}"),
                 Refusal::Mind(part) => format!("{part} is not this ship's Mind"),
+                Refusal::Scaffold { part } => format!("{part} must hang from a part already built and kept"),
             };
             return [why, String::new(), String::new(), String::new()];
         }

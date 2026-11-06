@@ -47,6 +47,9 @@ pub enum Kind {
     Data,
     Bay,
     Spar(SparMode),
+    /// Storage a round builds before anything is taken apart and takes down once it has built
+    /// everything else, so energy in transit has somewhere to be. Never in the form a round leaves.
+    Scaffold,
 }
 
 /// Shape without size: every field is a dimensionless ratio, and scale is solved from the
@@ -181,6 +184,8 @@ pub enum FormError {
     TooSmall(PartId),
     /// Less than `min_drone_m3` of drone, every copy counted.
     TooFewDrones,
+    /// A part hanging from a scaffold, which would go with it.
+    OnScaffold(PartId),
 }
 
 impl std::fmt::Display for FormError {
@@ -203,6 +208,7 @@ impl std::fmt::Display for FormError {
             Self::Extent => write!(f, "the ship is longer or shorter than a ship may be"),
             Self::TooSmall(id) => write!(f, "{id} is smaller than the smallest part"),
             Self::TooFewDrones => write!(f, "fewer drones than a ship may keep"),
+            Self::OnScaffold(id) => write!(f, "{id} hangs from a scaffold"),
         }
     }
 }
@@ -249,6 +255,9 @@ impl Form {
                 (_, None) => return Err(FormError::Unplaced(part.id)),
                 (_, Some(p)) if !index.contains_key(&p.parent) => {
                     return Err(FormError::MissingParent { part: part.id, parent: p.parent });
+                }
+                (_, Some(p)) if self.parts[index[&p.parent]].kind == Kind::Scaffold => {
+                    return Err(FormError::OnScaffold(part.id));
                 }
                 (_, Some(_)) => {}
             }
@@ -361,6 +370,7 @@ impl From<lc_proto::form::Kind> for Kind {
             K::Bay => Self::Bay,
             K::Spar(S::Saddle) => Self::Spar(SparMode::Saddle),
             K::Spar(S::Strap) => Self::Spar(SparMode::Strap),
+            K::Scaffold => Self::Scaffold,
         }
     }
 }
@@ -378,6 +388,7 @@ impl From<Kind> for lc_proto::form::Kind {
             Kind::Bay => Self::Bay,
             Kind::Spar(SparMode::Saddle) => Self::Spar(S::Saddle),
             Kind::Spar(SparMode::Strap) => Self::Spar(S::Strap),
+            Kind::Scaffold => Self::Scaffold,
         }
     }
 }
@@ -555,6 +566,7 @@ impl From<FormError> for lc_proto::FormFault {
             FormError::Uncontained(id) => Self::Uncontained(id.into()),
             FormError::TooSmall(id) => Self::TooSmall(id.into()),
             FormError::TooFewDrones => Self::TooFewDrones,
+            FormError::OnScaffold(id) => Self::OnScaffold(id.into()),
         }
     }
 }

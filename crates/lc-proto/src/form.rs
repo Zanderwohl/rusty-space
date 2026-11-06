@@ -31,6 +31,7 @@ pub enum Kind {
     Data,
     Bay,
     Spar(SparMode),
+    Scaffold,
 }
 
 /// Relative proportions only; each part's scale is solved from its volume.
@@ -165,4 +166,6 @@ pub enum FormFault {
     TooFewDrones,
     /// The target's Mind is not the ship's: a ship keeps its Mind through every refit.
     OtherMind(PartId),
+    /// A part hanging from a scaffold, which the round takes down.
+    OnScaffold(PartId),
 }
