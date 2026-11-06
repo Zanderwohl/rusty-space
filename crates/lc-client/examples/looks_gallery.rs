@@ -47,6 +47,7 @@ use lc_world::form::{Form, Kind};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::racks::{Racks, RacksMaterial};
+use lc_client::looks::tubes::{Tubes, TubesMaterial};
 use lc_client::looks::outline::RoofOutline;
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
@@ -161,6 +162,7 @@ fn spawn(
     mut aztecs: ResMut<Assets<AztecMaterial>>,
     mut obsidians: ResMut<Assets<ObsidianMaterial>>,
     mut racks: ResMut<Assets<RacksMaterial>>,
+    mut tubes: ResMut<Assets<TubesMaterial>>,
 ) {
     let args = &setup.0;
     let to_star = direction(25.0, -60.0);
@@ -174,6 +176,7 @@ fn spawn(
     let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
     let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
     let rack = racks.add(Racks { to_star, star_spin, ..default() }.material(&mut images));
+    let tube = tubes.add(Tubes { to_star, star_spin, ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
@@ -206,7 +209,7 @@ fn spawn(
         }
         columns.push(x);
     }
-    let rows = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0].map(|row| row * 3.0 * STANDOFF * largest);
+    let rows = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0].map(|row| row * 3.0 * STANDOFF * largest);
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
             let center = Vec3::new(x, 0.0, z);
@@ -231,6 +234,13 @@ fn spawn(
                     MeshMaterial3d(rack.clone()),
                     Transform::from_translation(center),
                 ));
+            } else if look == 6 {
+                // A unit cube scaled, which is how the tubes know where a face ends.
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                    MeshMaterial3d(tube.clone()),
+                    Transform::from_translation(center).with_scale(Vec3::splat(size)),
+                ));
             } else {
                 commands.spawn((
                     Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
@@ -243,7 +253,7 @@ fn spawn(
     }
     // Past the last column, in the middle of the rows, its long axis along x.
     let length = args.ovoid;
-    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[5]);
+    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[6]);
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
         MeshMaterial3d(habitat_ovoid),
@@ -258,7 +268,7 @@ fn spawn(
         Projection::Perspective(PerspectiveProjection {
             fov: 40f32.to_radians(),
             near: 0.1,
-            far: 10.0 * (ovoid_at.x - leftmost + rows[5] + length),
+            far: 10.0 * (ovoid_at.x - leftmost + rows[6] + length),
             ..default()
         }),
         Hdr,

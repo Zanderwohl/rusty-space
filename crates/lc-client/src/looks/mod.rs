@@ -11,6 +11,7 @@ pub mod obsidian;
 pub mod outline;
 pub mod racks;
 pub mod sprue;
+pub mod tubes;
 
 use bevy::prelude::*;
 
@@ -23,6 +24,7 @@ impl Plugin for LooksPlugin {
             MaterialPlugin::<sprue::SprueMaterial>::default(),
             MaterialPlugin::<obsidian::ObsidianMaterial>::default(),
             MaterialPlugin::<racks::RacksMaterial>::default(),
+            MaterialPlugin::<tubes::TubesMaterial>::default(),
         ))
         .add_systems(PostUpdate, outline::outline_roofs.after(bevy::transform::TransformSystems::Propagate));
     }
