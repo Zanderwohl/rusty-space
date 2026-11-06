@@ -266,6 +266,12 @@ impl Shape {
             }
             Shape::Torus { major, minor } => DVec2::new(rho - major, p.x).length() - minor,
             Shape::Frustum { length, start, end } => frustum(DVec2::new(rho, p.x), length / 2.0, start, end),
+            Shape::Trapezoid { lower, upper, height, length } => {
+                // The section is the frustum's profile, with |y| for the radius and z for its axis.
+                let across = frustum(DVec2::new(p.y.abs(), p.z), height / 2.0, lower / 2.0, upper / 2.0);
+                let q = DVec2::new(across, p.x.abs() - length / 2.0);
+                q.max(DVec2::ZERO).length() + q.max_element().min(0.0)
+            }
         }
     }
 
@@ -293,6 +299,7 @@ impl Shape {
             Shape::Cylinder { radius, length } => (2.0 * radius).min(length),
             Shape::Torus { minor, .. } => 2.0 * minor,
             Shape::Frustum { length, start, end } => (2.0 * start.max(end)).min(length),
+            Shape::Trapezoid { lower, upper, height, length } => lower.max(upper).min(height).min(length),
         }
     }
 
@@ -318,7 +325,31 @@ impl Shape {
             Shape::Cylinder { radius, length } => axis * (length / 2.0) + across * radius + margin,
             Shape::Torus { major, minor } => across * major + minor + margin,
             Shape::Frustum { length, start, end } => axis * (length / 2.0) + across * start.max(end) + margin,
+            // A box's reach along each axis is its furthest corner's, and a distance offset adds
+            // the margin to every direction.
+            Shape::Trapezoid { .. } => {
+                let corners = self.corners().map(|c| (rotation * c).abs());
+                corners.into_iter().fold(DVec3::ZERO, DVec3::max) + margin
+            }
         }
+    }
+
+    /// A trapezoid's eight corners, in its own frame; nothing for any other primitive, which is no
+    /// polytope.
+    pub fn corners(&self) -> [DVec3; 8] {
+        let Shape::Trapezoid { lower, upper, height, length } = *self else { return [DVec3::ZERO; 8] };
+        let (x, z) = (length / 2.0, height / 2.0);
+        let (l, u) = (lower / 2.0, upper / 2.0);
+        [
+            DVec3::new(-x, -l, -z),
+            DVec3::new(-x, l, -z),
+            DVec3::new(-x, -u, z),
+            DVec3::new(-x, u, z),
+            DVec3::new(x, -l, -z),
+            DVec3::new(x, l, -z),
+            DVec3::new(x, -u, z),
+            DVec3::new(x, u, z),
+        ]
     }
 }
 
@@ -361,6 +392,9 @@ mod tests {
             Primitive::Frustum { length: 2.0, taper: 2.5 },
             Primitive::Frustum { length: 3.0, taper: 0.0 },
             Primitive::Frustum { length: 1.0, taper: 1.0 },
+            Primitive::Trapezoid { upper: 0.5, height: 0.4, length: 3.0 },
+            Primitive::Trapezoid { upper: 0.0, height: 1.5, length: 2.0 },
+            Primitive::Trapezoid { upper: 1.0, height: 1.0, length: 1.0 },
         ]
         .map(|p| p.at(1.7))
         .to_vec()
@@ -381,6 +415,10 @@ mod tests {
             Shape::Torus { major, minor } => (rho - major).hypot(p.x) < minor,
             Shape::Frustum { length, start, end } => {
                 p.x.abs() < length / 2.0 && rho < start + (end - start) * (p.x / length + 0.5)
+            }
+            Shape::Trapezoid { lower, upper, height, length } => {
+                let half = (lower + (upper - lower) * (p.z / height + 0.5)) / 2.0;
+                p.x.abs() < length / 2.0 && p.z.abs() < height / 2.0 && p.y.abs() < half
             }
         }
     }

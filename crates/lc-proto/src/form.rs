@@ -43,6 +43,7 @@ pub enum Primitive {
     Cylinder { length: f64 },
     Torus { major: f64 },
     Frustum { length: f64, taper: f64 },
+    Trapezoid { upper: f64, height: f64, length: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

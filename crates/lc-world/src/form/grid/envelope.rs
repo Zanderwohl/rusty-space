@@ -128,6 +128,7 @@ fn extremes(sdf: &Sdf) -> Vec<DVec3> {
             Shape::Frustum { length, start, end } => {
                 local.extend(circle(-length / 2.0, start, RIM_STEPS).chain(circle(length / 2.0, end, RIM_STEPS)));
             }
+            Shape::Trapezoid { .. } => local.extend(piece.shape.corners()),
         }
         out.extend(local.into_iter().map(|p| piece.pose.position + piece.pose.rotation * p));
     }

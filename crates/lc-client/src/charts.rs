@@ -121,8 +121,18 @@ pub fn oriented(shape: &Shape, up: DVec3) -> Oriented {
     }
 }
 
+/// A trapezoid is charted as the box around it: six rectangles, its roof the face at +z. A
+/// slanted side reads as the box's side it leans from, stretched by the slant at most.
+fn boxed(shape: &Shape) -> Option<Shape> {
+    let Shape::Trapezoid { lower, upper, height, length } = *shape else { return None };
+    Some(Shape::Slab { edges: DVec3::new(length, lower.max(upper), height), corner: 0.0 })
+}
+
 /// Which chart of `shape` holds `p`, in the part's frame: the one whose surface is nearest.
 pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
+    if let Some(boxed) = boxed(shape) {
+        return chart_of(&boxed, p);
+    }
     let rho = p.y.hypot(p.z);
     let end = |far_side: bool| if far_side { 2 } else { 1 };
     match *shape {
@@ -147,7 +157,7 @@ pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
             let q = p / semi_axes;
             if q.x.atan2(q.y.hypot(q.z)).abs() <= BAND_LATITUDE { 0 } else { end(p.x > 0.0) }
         }
-        Shape::Torus { .. } => 0,
+        Shape::Torus { .. } | Shape::Trapezoid { .. } => 0,
     }
 }
 
@@ -162,6 +172,9 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
 }
 
 fn laid(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
+    if let Some(boxed) = boxed(shape) {
+        return laid(&boxed, chart, p, lying);
+    }
     let theta = around(p);
     let far = chart == 2;
     let across = |p: DVec3, far: bool| across(p, far, lying);
@@ -232,6 +245,7 @@ fn laid(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
                 lying: false,
             }
         }
+        Shape::Trapezoid { .. } => unreachable!("charted as its box"),
     }
 }
 

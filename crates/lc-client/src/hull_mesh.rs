@@ -279,6 +279,8 @@ impl Fnv {
             Shape::Slab { edges, corner } => vec![edges.x, edges.y, edges.z, corner],
             Shape::Torus { major, minor } => vec![major, minor],
             Shape::Frustum { length, start, end } => vec![length, start, end],
+            // Led by a mark no length can be, so it never hashes as a slab of the same numbers.
+            Shape::Trapezoid { lower, upper, height, length } => vec![-1.0, lower, upper, height, length],
         };
         for x in dimensions {
             self.f64(x);

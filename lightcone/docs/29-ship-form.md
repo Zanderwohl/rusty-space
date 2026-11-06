@@ -29,6 +29,7 @@ A `Form` is a tree of **parts**. Each part is one primitive of one kind, with a 
 | cylinder | length over radius | `π r² h` |
 | torus | major radius over minor | `2 π² R r²` |
 | frustum | length over the first end's radius, and the second end's radius over the first's | `π h (r₁² + r₁ r₂ + r₂²) / 3` |
+| trapezoid | an isosceles trapezoid across y and z, extruded along x: its upper width, height and length, each over its lower width | `L h (a + b) / 2` |
 
 **Volume and proportions are stored. Scale is solved** from them in closed form. Overlaps and
 fillets are ignored when sizing: the volume of a blended union depends on the neighbors, which
@@ -195,9 +196,12 @@ torus's center lies in a plane through its axis, which cuts the tube in two circ
 exit is a quadratic; a rounded slab's is a quadratic on each of at most four pieces of the ray.
 Trigonometry is `libm`'s, as [06](06-crate-layout.md) §Shared determinism asks.
 
-**A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
-symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x.
-Every part is centered on its own origin, a frustum at half its length rather than its centroid. At
+**A part's axis is its local x**: a capsule's, cylinder's, frustum's or trapezoid's length, a
+torus's axis of symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first
+end is at −x, and a trapezoid's lower face at −z, so one enclosing the Mind is a hull section wide at
+the keel, and seated along a deck it lies on its lower face. Every part is centered on its own
+origin, a frustum at half its length and a trapezoid at half its height rather than their centroids.
+A trapezoid's corners are sharp; an upper width of zero is a wedge. At
 zero twist and tilt, a child's axis lies along the normal (attached) or its parent's axis (enclosing),
 and its y along the parent's y projected across that, or the parent's z where the y is parallel. Twist
 turns it about its axis. Tilt then rotates it by a rotation vector whose two components are along the
@@ -339,7 +343,8 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 - **An engine's or a bay's open face** is where its axis leaves it: a frustum's wide end, as 31 makes
   its aperture, and every other primitive's +x end, away from the foot it hangs by. A torus opens
   through its hole. Its radius is the disk inscribed in that end: the lesser cross semi-axis of an
-  ellipsoid, half the lesser end edge of a slab, so a slab's corners reach outside it.
+  ellipsoid, half the lesser end edge of a slab, so a slab's corners reach outside it, and for a
+  trapezoid the disk on its axis held in by its top, bottom and slanted sides.
 - **The cone** widens at the half-angle from the face's rim, not from its center, since the exhaust
   leaves the whole aperture. A filled cell in it that lies inside any other part blocks the engine,
   the engine's own mirrored copy included. Every filled cell is tested rather than rays marched

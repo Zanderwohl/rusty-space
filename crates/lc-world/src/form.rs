@@ -69,6 +69,9 @@ pub enum Primitive {
     /// Length over the radius of the end at −x, and the +x end's radius over it. Zero taper is a
     /// cone.
     Frustum { length: f64, taper: f64 },
+    /// An isosceles trapezoid across y and z, extruded along x. Each over the width of its face at
+    /// −z: the width at +z, the height along z and the length along x. Zero upper is a wedge.
+    Trapezoid { upper: f64, height: f64, length: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -323,6 +326,13 @@ impl Part {
                     (!non_negative(taper)).then_some(Number::Taper)
                 }
             }
+            Primitive::Trapezoid { upper, height, length } => {
+                if !positive(length) {
+                    Some(Number::Length)
+                } else {
+                    (!(non_negative(upper) && positive(height))).then_some(Number::Proportions)
+                }
+            }
         };
         if shape.is_some() {
             return shape;
@@ -408,6 +418,7 @@ impl From<lc_proto::form::Primitive> for Primitive {
             P::Cylinder { length } => Self::Cylinder { length },
             P::Torus { major } => Self::Torus { major },
             P::Frustum { length, taper } => Self::Frustum { length, taper },
+            P::Trapezoid { upper, height, length } => Self::Trapezoid { upper, height, length },
         }
     }
 }
@@ -421,6 +432,7 @@ impl From<Primitive> for lc_proto::form::Primitive {
             Primitive::Cylinder { length } => Self::Cylinder { length },
             Primitive::Torus { major } => Self::Torus { major },
             Primitive::Frustum { length, taper } => Self::Frustum { length, taper },
+            Primitive::Trapezoid { upper, height, length } => Self::Trapezoid { upper, height, length },
         }
     }
 }

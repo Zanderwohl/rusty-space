@@ -119,6 +119,9 @@ pub enum Field {
     Corner,
     Major,
     Taper,
+    /// A trapezoid's width at +z and its height, over its width at −z.
+    Upper,
+    Height,
     Anchor(usize),
     Standoff,
     /// Degrees.
@@ -130,13 +133,14 @@ pub enum Field {
 }
 
 /// The primitives the editor adds, each at proportions that read as that primitive.
-pub const PRIMITIVES: [Primitive; 6] = [
+pub const PRIMITIVES: [Primitive; 7] = [
     Primitive::Ellipsoid { axes: DVec3::new(2.0, 1.0, 1.0) },
     Primitive::Capsule { length: 2.0 },
     Primitive::Slab { edges: DVec3::new(1.0, 2.0, 2.0), corner: 0.2 },
     Primitive::Cylinder { length: 2.0 },
     Primitive::Torus { major: 3.0 },
     Primitive::Frustum { length: 2.0, taper: 1.5 },
+    Primitive::Trapezoid { upper: 0.5, height: 0.5, length: 2.0 },
 ];
 
 pub const KINDS: [Kind; 8] = [
@@ -163,6 +167,7 @@ pub fn primitive_name(primitive: &Primitive) -> &'static str {
         Primitive::Cylinder { .. } => "cylinder",
         Primitive::Torus { .. } => "torus",
         Primitive::Frustum { .. } => "frustum",
+        Primitive::Trapezoid { .. } => "trapezoid",
     }
 }
 
@@ -429,6 +434,9 @@ impl Draft {
             (Field::Taper, Primitive::Frustum { length, .. }) => reshaped(Primitive::Frustum { length, taper: value }),
             (Field::Corner, Primitive::Slab { edges, .. }) => reshaped(Primitive::Slab { edges, corner: value }),
             (Field::Major, Primitive::Torus { .. }) => reshaped(Primitive::Torus { major: value }),
+            (Field::Length, Primitive::Trapezoid { upper, height, .. }) => reshaped(Primitive::Trapezoid { upper, height, length: value }),
+            (Field::Upper, Primitive::Trapezoid { height, length, .. }) => reshaped(Primitive::Trapezoid { upper: value, height, length }),
+            (Field::Height, Primitive::Trapezoid { upper, length, .. }) => reshaped(Primitive::Trapezoid { upper, height: value, length }),
             (Field::Anchor(i), _) => match placement.mount {
                 Mount::Attached { mut anchor, .. } => {
                     anchor[i] = value;
@@ -625,6 +633,12 @@ pub fn stretched(primitive: Primitive, axis: usize, factor: f64, fine: bool) -> 
         Primitive::Capsule { length } => Primitive::Capsule { length: along(length) },
         Primitive::Cylinder { length } => Primitive::Cylinder { length: along(length) },
         Primitive::Frustum { length, taper } => Primitive::Frustum { length: along(length), taper },
+        // Its ratios are over its lower width, so widening it shortens the other two.
+        Primitive::Trapezoid { upper, height, length } => match axis {
+            0 => Primitive::Trapezoid { upper, height, length: snap::ratio(length * factor, fine) },
+            1 => Primitive::Trapezoid { upper, height: snap::ratio(height / factor, fine), length: snap::ratio(length / factor, fine) },
+            _ => Primitive::Trapezoid { upper, height: snap::ratio(height * factor, fine), length },
+        },
         // The torus's axis is across its ring, so stretching along it fattens the tube.
         Primitive::Torus { major } => {
             let f = if axis == 0 { 1.0 / factor } else { factor };
@@ -646,6 +660,7 @@ pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
             Primitive::Capsule { length: b } | Primitive::Cylinder { length: b } | Primitive::Frustum { length: b, .. },
         ) if axis != 0 && b > 0.0 => scale * a / b,
         (Primitive::Torus { major: a }, Primitive::Torus { major: b }) if axis == 0 => scale * a / b,
+        (Primitive::Trapezoid { length: a, .. }, Primitive::Trapezoid { length: b, .. }) if axis == 1 => scale * a / b,
         _ => scale,
     };
     Part { primitive, volume_m3: primitive.volume(kept), ..*part }
@@ -698,6 +713,9 @@ pub fn value(part: &Part, field: Field) -> Option<f64> {
         (Field::Corner, Primitive::Slab { corner, .. }) => Some(corner),
         (Field::Major, Primitive::Torus { major }) => Some(major),
         (Field::Taper, Primitive::Frustum { taper, .. }) => Some(taper),
+        (Field::Length, Primitive::Trapezoid { length, .. }) => Some(length),
+        (Field::Upper, Primitive::Trapezoid { upper, .. }) => Some(upper),
+        (Field::Height, Primitive::Trapezoid { height, .. }) => Some(height),
         (Field::Anchor(i), _) => attached.map(|(anchor, _)| anchor[i]),
         (Field::Standoff, _) => attached.map(|(_, standoff)| standoff),
         (Field::Twist, _) => placement.map(|p| p.twist.to_degrees()),
@@ -718,6 +736,9 @@ pub fn fields(part: &Part) -> Vec<(&'static str, Vec<Field>)> {
         Primitive::Capsule { .. } | Primitive::Cylinder { .. } => vec![("length", vec![Field::Length])],
         Primitive::Frustum { .. } => vec![("length", vec![Field::Length]), ("taper", vec![Field::Taper])],
         Primitive::Torus { .. } => vec![("major", vec![Field::Major])],
+        Primitive::Trapezoid { .. } => {
+            vec![("upper", vec![Field::Upper]), ("height", vec![Field::Height]), ("length", vec![Field::Length])]
+        }
     });
     let Some(placement) = part.placement else { return out };
     out.push(("parent", vec![Field::Parent]));
@@ -743,6 +764,38 @@ mod tests {
 
     fn ids(parts: &[Part]) -> Vec<u16> {
         parts.iter().map(|p| p.id.0).collect()
+    }
+
+    #[test]
+    fn a_trapezoid_stretches_and_grows_along_each_of_its_dimensions() {
+        let part = Part {
+            id: PartId(9),
+            kind: Kind::Storage,
+            primitive: Primitive::Trapezoid { upper: 0.5, height: 0.5, length: 2.0 },
+            volume_m3: 1.0e6,
+            placement: None,
+        };
+        let dims = |p: &Part| {
+            let lc_world::form::primitive::Shape::Trapezoid { lower, upper, height, length } = p.shape(B.min_part_m3) else { panic!() };
+            DVec3::new(length, lower, height).extend(upper)
+        };
+        let before = dims(&part);
+        for axis in 0..3 {
+            let wider = Part { primitive: stretched(part.primitive, axis, 1.25, false), ..part };
+            assert!((wider.shape(B.min_part_m3).volume() - part.volume_m3).abs() < 1e-6 * part.volume_m3, "stretched at its volume");
+            let after = dims(&wider);
+            assert!(after[axis] > before[axis], "axis {axis} longer: {after} against {before}");
+            let grown = grown(&part, axis, 1.25, false);
+            let after = dims(&grown);
+            // Ratios snap to R10, which may land a step's few percent off.
+            assert!((after[axis] / before[axis] - 1.25).abs() < 0.03, "axis {axis} grown: {after}");
+            for other in (0..3).filter(|&o| o != axis) {
+                assert!((after[other] / before[other] - 1.0).abs() < 1e-9, "axis {axis} keeps {other}: {after}");
+            }
+        }
+        let upper = |p: &Part| dims(p).w / dims(p).y;
+        let wider_top = Part { primitive: Primitive::Trapezoid { upper: 1.5, height: 0.5, length: 2.0 }, ..part };
+        assert!((upper(&wider_top) - 1.5).abs() < 1e-12 && fields(&wider_top).iter().any(|(name, _)| *name == "upper"));
     }
 
     #[test]

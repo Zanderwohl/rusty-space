@@ -239,6 +239,9 @@ fn grown(shape: Shape, h: f64) -> Shape {
         Shape::Cylinder { radius, length } => Shape::Cylinder { radius: radius + h, length: length + 2.0 * h },
         Shape::Torus { major, minor } => Shape::Torus { major, minor: minor + h },
         Shape::Frustum { length, start, end } => Shape::Frustum { length: length + 2.0 * h, start: start + h, end: end + h },
+        Shape::Trapezoid { lower, upper, height, length } => {
+            Shape::Trapezoid { lower: lower + 2.0 * h, upper: upper + 2.0 * h, height: height + 2.0 * h, length: length + 2.0 * h }
+        }
     }
 }
 
@@ -251,6 +254,7 @@ fn reach(shape: Shape) -> f64 {
         Shape::Cylinder { radius, length } => radius.hypot(0.5 * length),
         Shape::Torus { major, minor } => major + minor,
         Shape::Frustum { length, start, end } => start.max(end).hypot(0.5 * length),
+        Shape::Trapezoid { lower, upper, height, length } => 0.5 * DVec3::new(length, lower.max(upper), height).length(),
     }
 }
 

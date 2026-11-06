@@ -272,6 +272,23 @@ impl Shape {
                 if far.dot(u) > near.dot(u) { far } else { near }
             }
             Shape::Torus { major, minor } => out * major + u * minor,
+            Shape::Trapezoid { lower, upper, height, length } => {
+                let x = sign(u.x) * length / 2.0;
+                let (y, z) = (sign(u.y), height / 2.0);
+                let low = DVec2::new(y * lower / 2.0, -z);
+                let high = DVec2::new(y * upper / 2.0, z);
+                let across = DVec2::new(u.y, u.z);
+                let (a, b) = (low.dot(across), high.dot(across));
+                // Square to a slanted side, or to the top of a box, the middle of that face.
+                let point = if (a - b).abs() <= FLAT * (height + lower + upper) {
+                    (low + high) / 2.0
+                } else if a > b {
+                    low
+                } else {
+                    high
+                };
+                DVec3::new(x, point.x, point.y)
+            }
         }
     }
 
@@ -282,7 +299,7 @@ impl Shape {
             Shape::Ellipsoid { semi_axes } => semi_axes.x,
             Shape::Capsule { radius, length } => length / 2.0 + radius,
             Shape::Slab { edges, .. } => edges.x / 2.0,
-            Shape::Cylinder { length, .. } | Shape::Frustum { length, .. } => length / 2.0,
+            Shape::Cylinder { length, .. } | Shape::Frustum { length, .. } | Shape::Trapezoid { length, .. } => length / 2.0,
             Shape::Torus { minor, .. } => minor,
         }
     }
@@ -340,6 +357,22 @@ impl Shape {
                 return Exit { point: out * major + toward * minor, normal: toward };
             }
             Shape::Slab { edges, corner } => slab_exit(edges / 2.0 - corner, corner, d),
+            Shape::Trapezoid { lower, upper, height, length } => {
+                // Convex, so the ray leaves through whichever face's plane it reaches first. A
+                // slanted side is |y| = m + k z.
+                let (m, k) = ((lower + upper) / 4.0, (upper - lower) / (2.0 * height));
+                let faces = [
+                    (d.x.abs(), length / 2.0, DVec3::X * d.x.signum()),
+                    (d.z.abs(), height / 2.0, DVec3::Z * d.z.signum()),
+                    (d.y.abs() - k * d.z, m, DVec3::new(0.0, d.y.signum(), -k)),
+                ];
+                faces
+                    .into_iter()
+                    .filter(|(closing, ..)| *closing > 0.0)
+                    .map(|(closing, offset, normal)| (offset / closing, normal))
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .expect("a ray from inside a bounded solid leaves it")
+            }
         };
         Exit { point: d * s, normal: normal.normalize() }
     }
@@ -394,7 +427,7 @@ mod tests {
 
     const MIN_PART_M3: f64 = 1_000.0;
 
-    fn primitives() -> [Primitive; 6] {
+    fn primitives() -> [Primitive; 8] {
         [
             Primitive::Ellipsoid { axes: DVec3::new(3.0, 1.0, 2.0) },
             Primitive::Capsule { length: 2.0 },
@@ -402,6 +435,8 @@ mod tests {
             Primitive::Cylinder { length: 3.0 },
             Primitive::Torus { major: 3.0 },
             Primitive::Frustum { length: 2.0, taper: 0.5 },
+            Primitive::Trapezoid { upper: 0.4, height: 0.6, length: 2.5 },
+            Primitive::Trapezoid { upper: 1.5, height: 1.2, length: 0.8 },
         ]
     }
 
@@ -420,6 +455,10 @@ mod tests {
             Shape::Frustum { length, start, end } => {
                 p.x.abs() <= length / 2.0 && rho <= start + (end - start) * (p.x / length + 0.5)
             }
+            Shape::Trapezoid { lower, upper, height, length } => {
+                let half = (lower + (upper - lower) * (p.z / height + 0.5)) / 2.0;
+                p.x.abs() <= length / 2.0 && p.z.abs() <= height / 2.0 && p.y.abs() <= half
+            }
         }
     }
 
@@ -431,6 +470,7 @@ mod tests {
             Shape::Cylinder { radius, length } => radius.hypot(length / 2.0),
             Shape::Torus { major, minor } => major + minor,
             Shape::Frustum { length, start, end } => start.max(end).hypot(length / 2.0),
+            Shape::Trapezoid { lower, upper, height, length } => DVec3::new(length, lower.max(upper), height).length() / 2.0,
         }
     }
 

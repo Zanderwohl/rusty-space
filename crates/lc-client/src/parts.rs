@@ -230,7 +230,41 @@ pub(crate) fn solid(shape: &Shape) -> (Mesh, Vec3) {
             let frustum = ConicalFrustum { radius_top: f(end), radius_bottom: f(start), height: f(length) };
             (frustum.into(), Vec3::ONE)
         }
+        Shape::Trapezoid { .. } => (prism(shape), Vec3::ONE),
     }
+}
+
+/// A trapezoid's six faces, flat shaded, in the mesh's axes.
+fn prism(shape: &Shape) -> Mesh {
+    let c = shape.corners().map(|p| AXIS.inverse() * p.as_vec3());
+    // Corner `i` has x from bit 2, y from bit 0 and the top from bit 1.
+    let faces = [[0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5], [0, 2, 3, 1], [4, 5, 7, 6]];
+    let middle = c.iter().copied().sum::<Vec3>() / 8.0;
+    let (mut positions, mut normals, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for face in faces {
+        let [a, b, cc, d] = face.map(|i| c[i]);
+        let mut normal = (b - a).cross(d - a).normalize_or_zero();
+        // A wedge's top face is a line, whose normal is the edge between its sides; it has no area.
+        if normal == Vec3::ZERO {
+            continue;
+        }
+        let quad = if normal.dot((a + b + cc + d) / 4.0 - middle) < 0.0 {
+            normal = -normal;
+            [a, d, cc, b]
+        } else {
+            [a, b, cc, d]
+        };
+        let base = positions.len() as u32;
+        positions.extend(quad.map(|p| p.to_array()));
+        normals.extend([normal.to_array(); 4]);
+        uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    Mesh::new(bevy_mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(bevy_mesh::Indices::U32(indices))
 }
 
 /// A piece's transform in the ship's frame, meters.
@@ -373,6 +407,25 @@ fn sized(piece: &Piece, painted: &Painted) -> Transform {
 mod tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn a_trapezoids_mesh_is_its_faces_turned_out_and_a_wedge_has_no_top() {
+        for (upper, faces) in [(3.0, 6), (0.0, 5)] {
+            let shape = Shape::Trapezoid { lower: 6.0, upper, height: 2.0, length: 10.0 };
+            let (mesh, scale) = solid(&shape);
+            assert_eq!(scale, Vec3::ONE);
+            let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
+            let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!() };
+            assert_eq!(positions.len(), 4 * faces, "upper {upper}");
+            for (p, n) in positions.iter().zip(normals) {
+                // In the mesh's axes; back to the part's to read against its distance.
+                let part = (AXIS * Vec3::from_array(*p)).as_dvec3();
+                assert!(shape.distance(part).abs() < 1e-5, "{part} is on its surface");
+                let out = part + (AXIS * Vec3::from_array(*n)).as_dvec3() * 0.1;
+                assert!(shape.distance(out) > 0.0, "the normal at {part} points out");
+            }
+        }
+    }
 
     /// The server's word on the form becomes the player's own, and again when a step changes it.
     #[test]
