@@ -1,36 +1,23 @@
 // Azteced plate: rectangles cut from a staggered grid by snapped random splits, each panel one
-// shade and one flat normal tipped a few degrees, with chamfered trenches between. A point is
-// mapped by the box face its normal faces most, as a cube map would, with `up` the frame's
-// vertical so a side's v runs up it. Shared by hull.wgsl; aztec.wgsl is its development copy.
+// shade and one flat normal tipped a few degrees, with chamfered trenches between. Laid out in a
+// part's chart (crate::charts in lc-client): `p` is meters there, `frame` its u, its v and the
+// surface's normal, and `around` how far u and v run before they repeat, a whole number of grid
+// cells, 0 where they do not. Shared by hull.wgsl; aztec.wgsl is its development copy.
 
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
 
-struct PanelFace {
-    u: vec3<f32>,
-    v: vec3<f32>,
-    n: vec3<f32>,
-    id: u32,
+/// `x` modulo `n`, never negative.
+fn wrap(x: i32, n: i32) -> i32 {
+    return ((x % n) + n) % n;
 }
 
-/// The axis `normal` is nearest, signed.
-fn dominant(normal: vec3<f32>) -> vec3<f32> {
-    let a = abs(normal);
-    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
-    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
-    return vec3<f32>(0.0, 0.0, sign(normal.z));
-}
-
-fn panel_face(normal: vec3<f32>, up: vec3<f32>) -> PanelFace {
-    let n = dominant(normal);
-    let across = select(up, vec3<f32>(up.y, up.z, up.x), abs(dot(n, up)) > 0.9);
-    let u = normalize(cross(across, n));
-    return PanelFace(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
-}
-
-/// The face's u and v laid into the surface's tangent plane, and the surface's own normal.
-fn tangent_frame(f: PanelFace, surface: vec3<f32>) -> mat3x3<f32> {
-    let t = normalize(f.u - surface * dot(f.u, surface));
-    return mat3x3<f32>(t, cross(surface, t), surface);
+/// The index `i` of a lattice `pitch` apart, taken around `period` where there is one, so the
+/// lattice's cells either side of a seam are one.
+fn around_index(i: f32, pitch: f32, period: f32) -> u32 {
+    if (period > 0.0) {
+        return u32(wrap(i32(i), i32(round(period / pitch))));
+    }
+    return u32(i32(i));
 }
 
 struct Panel {
@@ -45,16 +32,17 @@ const SPLITS: u32 = 6u;
 /// staggered by row so the grid's lines do not run the face's length, split on a snapped random
 /// line, mostly across the longer side, until a split would leave a panel under the minimum or
 /// the hash says stop. Snapped bounds are exact, so they name the panel whichever pixel asks.
-fn panel(p: vec2<f32>, face_id: u32, grid: vec4<f32>, seed: u32) -> Panel {
+fn panel(p: vec2<f32>, face_id: u32, grid: vec4<f32>, seed: u32, around: vec2<f32>) -> Panel {
     let cell = grid.x;
     let snap = grid.z;
     let face_seed = mix_hash(face_id, seed);
     let row = floor(p.y / cell);
-    let shift = round(unit(mix_hash(face_seed, u32(i32(row)))) * cell / snap) * snap;
+    let row_id = around_index(row, cell, around.y);
+    let shift = round(unit(mix_hash(face_seed, row_id)) * cell / snap) * snap;
     let col = floor((p.x - shift) / cell);
     var lo = vec2<f32>(col * cell + shift, row * cell);
     var hi = lo + vec2<f32>(cell);
-    var id = mix_hash(mix_hash(face_seed, u32(i32(row))), u32(i32(col)));
+    var id = mix_hash(mix_hash(face_seed, row_id), around_index(col, cell, around.x));
     for (var depth = 0u; depth < SPLITS; depth++) {
         let h = pcg(id);
         let size = hi - lo;
@@ -75,7 +63,13 @@ fn panel(p: vec2<f32>, face_id: u32, grid: vec4<f32>, seed: u32) -> Panel {
         } else {
             if (p.y < cut) { hi.y = cut; } else { lo.y = cut; }
         }
-        let snapped = vec4<u32>(vec4<i32>(round(vec4<f32>(lo, hi) / snap)));
+        let bound = round(vec4<f32>(lo, hi) / snap);
+        let snapped = vec4<u32>(
+            around_index(bound.x, snap, around.x),
+            around_index(bound.y, snap, around.y),
+            around_index(bound.z, snap, around.x),
+            around_index(bound.w, snap, around.y),
+        );
         id = mix_hash(mix_hash(snapped.x ^ (snapped.y << 16u), snapped.z ^ (snapped.w << 16u)), face_seed);
     }
     return Panel(lo, hi, id);
@@ -103,20 +97,14 @@ struct Plate {
     /// What of the pixel the chamfer covers.
     wall_share: f32,
     color: vec3<f32>,
-    face: PanelFace,
     panel: Panel,
-    /// Meters on the face.
-    p: vec2<f32>,
 }
 
-/// The plate at `pos` with surface normal `surface`, `pixel` meters across. `grid` as [`panel`];
+/// The plate at `p` in a chart named `face_id`, `pixel` meters across. `grid` as [`panel`];
 /// `finish` is `(tilt_rad, brown, chamfer_m, lean_rad)`. A panel's tilt fades as the panel
 /// shrinks under a few pixels, so it does not sparkle.
-fn plate(pos: vec3<f32>, surface: vec3<f32>, up: vec3<f32>, grid: vec4<f32>, finish: vec4<f32>, pixel: f32, seed: u32) -> Plate {
-    let f = panel_face(surface, up);
-    let frame = tangent_frame(f, surface);
-    let p = vec2<f32>(dot(pos, f.u), dot(pos, f.v));
-    let cell = panel(p, f.id, grid, seed);
+fn plate(p: vec2<f32>, frame: mat3x3<f32>, face_id: u32, around: vec2<f32>, grid: vec4<f32>, finish: vec4<f32>, pixel: f32, seed: u32) -> Plate {
+    let cell = panel(p, face_id, grid, seed, around);
     let keep = 1.0 - smoothstep(0.1, 0.5, pixel / grid.y);
     let n = normalize(frame * mix(vec3<f32>(0.0, 0.0, 1.0), tipped(cell.id, finish.x), keep));
 
@@ -131,5 +119,5 @@ fn plate(pos: vec3<f32>, surface: vec3<f32>, up: vec3<f32>, grid: vec4<f32>, fin
     let wall = normalize(n * cos(finish.w) + (frame[0] * outward.x + frame[1] * outward.y) * sin(finish.w));
     let width = finish.z;
     let share = (1.0 - smoothstep(width - pixel, width + pixel, edge)) * clamp(width / pixel, 0.0, 1.0);
-    return Plate(n, wall, share, paint(cell.id, finish.y), f, cell, p);
+    return Plate(n, wall, share, paint(cell.id, finish.y), cell);
 }

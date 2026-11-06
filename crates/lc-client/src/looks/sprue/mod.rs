@@ -230,6 +230,6 @@ impl Material for SprueMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::position_and_normal(descriptor, layout)
+        super::charted(descriptor, layout)
     }
 }

@@ -1,6 +1,7 @@
 //! Azteced sheet metal: rectangular panels, each its own shade and tipped a few degrees, with
 //! chamfered trenches between, and, if asked, office windows on the sides and a roof of glass hexes
-//! on top: offices with a roof are the habitat. Fully procedural; see
+//! on top: offices with a roof are the habitat. Laid out in the part's own charts, which the hull
+//! mesher writes ([`crate::charts`]), so only its meshes draw. Fully procedural; see
 //! `assets/shaders/aztec.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -44,14 +45,10 @@ pub struct Aztec {
     pub seed: u32,
     pub windows: Option<Windows>,
     pub roof: Option<Roof>,
-    /// The mesh is an axis-aligned unit cube scaled by its transform, unrotated, which is how the
-    /// shader knows where a face ends, and so keeps windows [`Windows::face_margin_m`] off it.
-    /// Otherwise there is no margin.
-    pub unit_box: bool,
 }
 
-/// Office windows, on the sides only: decks stack along world Y. A window is placed only where it
-/// fits wholly inside a panel, clear of the chamfers.
+/// Office windows, on a part's sides only: decks stack up each chart's v. A window is placed only
+/// where it fits wholly inside a panel, clear of the chamfers.
 pub struct Windows {
     pub deck_m: f32,
     /// Window centers along a row.
@@ -60,8 +57,8 @@ pub struct Windows {
     pub sill_m: f32,
     pub width_m: f32,
     pub height_m: f32,
-    /// No window nearer a face's edge than this.
-    pub face_margin_m: f32,
+    /// No window nearer a chart's edge than this.
+    pub chart_margin_m: f32,
     /// Of a row's runs of windows, the share lit.
     pub lit: f32,
     /// A lit window's radiance, linear.
@@ -86,7 +83,7 @@ impl Default for Windows {
             sill_m: 0.9,
             width_m: 1.6,
             height_m: 1.0,
-            face_margin_m: 1.0,
+            chart_margin_m: 1.0,
             lit: 0.35,
             glow: Vec3::new(1.0, 0.82, 0.58) * 0.6,
             f0: 0.5,
@@ -98,8 +95,8 @@ impl Default for Windows {
     }
 }
 
-/// The whole top as clear glass hexes in a metal frame, a dome over a forest, lit only by what of the
-/// star and the planet comes in through it.
+/// The part's end that faces up as clear glass hexes in a metal frame, a dome over a forest, lit
+/// only by what of the star and the planet comes in through it.
 pub struct Roof {
     /// Across a hex's flats.
     pub hex_m: f32,
@@ -145,7 +142,6 @@ impl Default for Aztec {
             seed: 7,
             windows: None,
             roof: None,
-            unit_box: false,
         }
     }
 }
@@ -180,18 +176,16 @@ impl Aztec {
                 to_planet: self.to_planet.extend(self.planet_deg.to_radians()),
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
-                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, if self.unit_box { 1.0 } else { 0.0 }, 0.0),
-                deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, w.face_margin_m)),
+                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
+                deck: w.map_or(Vec4::ZERO, |w| Vec4::new(w.deck_m, w.pitch_m, w.sill_m, w.chart_margin_m)),
                 pane: w.map_or(Vec4::ZERO, |w| Vec4::new(w.width_m, w.height_m, w.f0, w.roughness)),
                 glow: w.map_or(Vec4::ZERO, |w| w.glow.extend(w.lit)),
                 day: w.map_or(Vec4::ZERO, |w| Vec4::new(w.day_glow, w.day_glass, 0.0, 0.0)),
                 room: w.map_or(Vec4::ZERO, |w| Vec4::new(w.room_m, 0.0, 0.0, 0.0)),
                 roof: self.roof.as_ref().map_or(Vec4::ZERO, |r| Vec4::new(r.hex_m, r.seam_m, r.rim_m, 0.0)),
                 sky: self.roof.as_ref().map_or(Vec4::ZERO, |r| r.sky.extend(r.scatter)),
-                outline: Vec4::ZERO,
                 forest: self.roof.as_ref().map_or(Vec4::ZERO, |r| Vec4::new(r.forest_m, r.depth_share, 0.0, 0.0)),
             },
-            outline: None,
         }
     }
 }
@@ -214,7 +208,6 @@ pub struct AztecUniform {
     room: Vec4,
     roof: Vec4,
     sky: Vec4,
-    outline: Vec4,
     forest: Vec4,
 }
 
@@ -222,22 +215,6 @@ pub struct AztecUniform {
 pub struct AztecMaterial {
     #[uniform(0, visibility(vertex, fragment))]
     uniforms: AztecUniform,
-    /// The roof's outline from above, as [`super::outline`] makes it: where a ray through the
-    /// glass meets the wall under the rim. A unit box knows its own, and without either the
-    /// ground under the glass runs on forever.
-    #[texture(1, visibility(fragment))]
-    #[sampler(2, visibility(fragment))]
-    outline: Option<Handle<Image>>,
-}
-
-impl AztecMaterial {
-    /// `bounds` is the world XZ the map spans, `(x0, z0, x1, z1)`, and `width_m` the widest
-    /// circle the outline holds, which sets how deep the forest lies.
-    pub fn set_outline(&mut self, map: Handle<Image>, bounds: Vec4, width_m: f32) {
-        self.outline = Some(map);
-        self.uniforms.outline = bounds;
-        self.uniforms.forest.z = width_m;
-    }
 }
 
 impl Material for AztecMaterial {
@@ -255,6 +232,6 @@ impl Material for AztecMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::position_and_normal(descriptor, layout)
+        super::charted(descriptor, layout)
     }
 }

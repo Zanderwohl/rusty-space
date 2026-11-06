@@ -6,19 +6,18 @@
 //!
 //! ```text
 //! cargo run -p lc-client --example mesh_void -- /tmp/forms.png
-//! cargo run -p lc-client --example mesh_void -- /tmp/strap.png --form strap --cells 32 --finish blocky
+//! cargo run -p lc-client --example mesh_void -- /tmp/strap.png --form strap --cells 32
 //! cargo run -p lc-client --example mesh_void -- /tmp/remesh.png --form cluster --remesh 256 --burst 40
 //! ```
 //!
 //! | flag | for |
 //! |---|---|
 //! | `--form <name>` | `starting`, `plate`, `spindle`, `cluster`, `saddle`, `strap`, or `all` side by side (the default) |
-//! | `--finish <smooth\|faceted\|blocky>` | the finish; smooth by default |
 //! | `--cells <n>` | a fixed resolution instead of one from pixels on screen |
 //! | `--scale <x>` | every length times this, so `--scale 100` makes a 50 km starting ship |
 //! | `--yaw <deg>` / `--pitch <deg>` | where the camera stands, about the forms |
 //! | `--zoom <x>` | the camera's distance, as a multiple of what frames everything |
-//! | `--aim <part>` | look at this part's center instead; with one form only. With `--zoom 0.3` it frames a spar's seams closely enough to see the bolts |
+//! | `--aim <part>` | look at this part's center instead; with one form only |
 //! | `--exposure <stops>` | open the exposure, in stops from `hull_void`'s, which is placed for a lit albedo of 0.3 and so clips anything lighter; `-1.5` by default |
 //! | `--sun <deg>` | the star's elevation; negative is night, where the living lights show |
 //! | `--cold` | engines not firing, so their open faces do not glow |
@@ -37,9 +36,9 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
 use lc_client::hull_mesh::{
-    ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
+    ENGINE_FLANK, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -61,7 +60,6 @@ const FOV_Y: f32 = 0.5;
 struct Args {
     path: String,
     forms: Vec<&'static str>,
-    finish: Finish,
     cells: Option<u32>,
     scale: f64,
     yaw_deg: f32,
@@ -90,16 +88,9 @@ impl Args {
             None | Some("all") => FORMS.to_vec(),
             Some(name) => vec![*FORMS.iter().find(|f| **f == name).unwrap_or_else(|| fail(&format!("--form is one of {FORMS:?} or all")))],
         };
-        let finish = match text("--finish").as_deref() {
-            None | Some("smooth") => Finish::Smooth,
-            Some("faceted") => Finish::Faceted,
-            Some("blocky") => Finish::Blocky,
-            Some(other) => fail(&format!("no finish {other}")),
-        };
         Self {
             path,
             forms,
-            finish,
             cells: value("--cells").map(|c| c as u32),
             scale: value("--scale").unwrap_or(1.0) as f64,
             yaw_deg: value("--yaw").unwrap_or(-35.0),
@@ -276,6 +267,8 @@ fn spawn(
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
         *slot = match kind {
             "drone" => LIT_WINDOW * Vec3::new(0.85, 0.92, 1.0),
+            // As the game's: twenty times a window, drawn in the racks' own green.
+            "data" => 20.0 * LIT_WINDOW * Vec3::ONE,
             "living" => LIT_WINDOW * Vec3::new(1.0, 0.8, 0.55),
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
@@ -291,7 +284,6 @@ fn spawn(
             to_star: to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-            bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             // As the game draws an engine: its grid on its open faces, its flank everywhere else.
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
@@ -300,10 +292,9 @@ fn spawn(
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
-        roof_map: None,
-        roof_outline: default(),
         pipe_tiles: None,
         pipe_light: None,
+        rack_faces: None,
     });
 
     // Side by side in slots as wide as the largest, three to a row.
@@ -338,8 +329,7 @@ fn spawn(
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
-            living_roof(),
-            HullForm { cells: args.cells, ..HullForm::form(form, balance, args.finish) },
+            HullForm { cells: args.cells, ..HullForm::form(form, balance) },
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world() * center).with_rotation(ship_to_world()),
         ));

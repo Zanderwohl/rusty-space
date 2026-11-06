@@ -26,33 +26,35 @@ looks like machinery is while it is being built.
 The client evaluates the same signed distance field that `lc_world::form` defines, so the surface
 drawn is the surface the server reasons about.
 
-- **Surface nets**, on a grid sized to the ship's pixels on screen: coarse when it is a smudge, fine
-  when it fills the view. Surface nets are smooth, cheap, and have no ambiguous cases to get wrong.
+- **Each part alone.** Every piece is meshed on its own grid and the meshes laid end to end, with
+  no fillet and nothing fused: a part sunk into another keeps its whole surface, and the depth
+  buffer draws the join. Fused into one surface, with fillets and the looks mixed across them,
+  was tried and read worse: soft where parts met, and blended where they should not be.
+- **Surface nets' topology with dual contouring's vertices**, on a grid sized to the ship's pixels
+  on screen: coarse when it is a smudge, fine when it fills the view. Each vertex goes where the
+  planes at its crossings meet, so a slab's edges and an engine's rim stay sharp.
 - Meshed **off the main thread** on Bevy's async compute pool, cached by a hash of the form and
   each part's solved scale, and swapped in when ready. A new mesh is needed only when a step
   completes. Within a step, the growing part is drawn by the construction pass below, not
   remeshed.
-- **Finish** is a per-form choice: *smooth* (surface nets as they come), *faceted* (flat normals),
-  or *blocky* (occupied cells drawn as cubes, for anyone who wants a brutalist ship). It changes
-  extraction, not the shape, so it touches nothing the server computes.
 
 As built (`lc_client::hull_mesh`): one cell per four pixels along the ship's longest side, as a
 power of two from 16 to 256, held until the ideal is more than three quarters of a doubling away.
+Each piece is meshed at that step, or finer where it is thin: at least three cells across its
+thinnest side, or a disk of an engine would vanish whole.
 Before extraction the grid is cleaned of every lattice square whose corners alternate in sign by
 turning one outside corner inside, so each cell face carries at most one segment of surface; a
 vertex per loop of crossings in a cell, not per cell, then makes the mesh closed and manifold
-whatever the form. Blocky is the same topology with each vertex moved to its cell's center, which
-is exactly the cubes' faces. A feature thinner than a cell is kept only where a sample lands in
-it: a strap on a coarse grid comes out holed or gone, never torn. The cache key is FNV-1a over a
+whatever the form. A crossing is found on the field itself by false position, since the samples'
+line misses a crease, and the vertex is the planes' least-squares meeting drawn faintly toward
+the crossings' mean and kept in its cell. A corner whose field normal turns more than about 37
+degrees from its triangle's takes the triangle's flat normal. A feature thinner than a cell is
+kept only where a sample lands in it: holed or gone, never torn. The cache key is FNV-1a over a
 canonical encoding of the form and each part's solved shape, since `Form` holds `f64`s. A
 256-cell mesh takes a few seconds in a dev build and never holds up a frame; the old mesh stays up
 until the new one lands. `cargo run -p lc-client --example mesh_void` photographs the fixtures.
 
 ![The fixture forms, meshed and drawn in the hull material](../images/mesh-forms.jpg)
-
-![Smooth, faceted and blocky, at the grid the screen asks for and at 32 cells](../images/mesh-finishes.jpg)
-
-![A saddle's bolt row, and a strap at 16, 64 and 256 cells: holed on the coarse grid, never torn](../images/mesh-seams.jpg)
 
 ![Consecutive frames across a remesh from 32 to 128 cells: the old mesh stays up until the new one lands](../images/mesh-remesh.jpg)
 
@@ -105,24 +107,20 @@ see becomes its own average — a lit window's power spread over the pixel, not 
 ### Materials by kind
 
 One texture-graph graph per kind, delivered like the planet graphs, with the region set by which
-part a point is nearest. Fillets blend between the two regions.
+part a point is on. Each part is its own mesh, so every vertex wears its own part's region alone.
 
-The mesher hands the material each vertex's weight for every region, a byte apiece, read off the
-per-part distances it already evaluates, and the shader draws the two heaviest. Weights rather
-than two indices and a share, because a triangle whose corners name different pairs cannot
-interpolate a share, and every triangle crossing the edge of a fillet is one: that was tried, and
-drew the edges as stairs. The material knows regions only as indices
+The mesher hands the material each vertex's weight for every region, a byte apiece, and the shader
+draws the two heaviest; a meshed part puts all its weight on one. The material knows regions only as indices
 into the caller's palette of graphs; which kind is which is Lightcone's. A graph's output color is
 albedo, and a layer named `lights` beside it is the lit share of each texel, which the caller
 scales by a power per region.
 
-**Which face is open is the form's, not the distance field's.** As the spar's seams are, it is
-handed per vertex: the mesher reads each engine's open face off the part (`capacity::apertures`,
+**Which face is open is the form's, not the distance field's.** It is handed per vertex: the mesher reads each engine's open face off the part (`capacity::apertures`,
 the frustum's wide end or the cylinder's end) and writes how much of the vertex lies on it and
 which face it is, a byte each. A vertex is on a face when it is on that engine's own surface, in
-the face's plane, inside its rim, and turned along the exhaust both as the engine's primitive is
-and as the hull is. The first keeps a fillet onto a neighbor off the face, the second a neighbor's
-surface passing within a cell of it. Each is eased over a cell, and the rim's inside its edge,
+the face's plane, inside its rim, and turned along the exhaust. Every part paints every face, not
+only its engine: an engine sunk into a neighbor leaves its face on the neighbor's surface, which
+draws it. Each is eased over a cell, and the rim's inside its edge,
 because the vertex on the rim is the corner and belongs to the flank as much as the face. A vertex
 off every face names the nearest, so a triangle at a rim names one face at all three corners and
 the index can be read flat. The material then draws one region, the engine's, as itself only on
@@ -137,11 +135,11 @@ client warns when it meshes one.
 |---|---|
 | storage | azteced plate: panels cut from a staggered grid by snapped splits, each its own gray or a little browner and tipped a few degrees, with chamfered seams. The mass of the ship. As built, a `plated` region of the hull material, cut in the ship's frame with its z up by `panels.wgsl`, which the aztec look's settings feed through `looks::kinds::wear`, its paint darkened and its metal dulled to sit among the hull's own textures under the hull's exposure |
 | drone | hangar doors in rows, docks lit when drones are home |
-| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Decks stack along the ship's z. Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the roof's outline is a map taken from each hull mesh by `looks::outline::hull_roof`, held in the material beside its uniforms so the ship's light can be rewritten without touching it. A refit's pieces carry no map, so their forest runs on past the rim until the refit is done |
-| engine | an ion thruster's face on the open face: a uniform grid of dark bars over blue hex cells 2 m behind it, seen through its gaps at their depth, each cell glowing at the luminance of whatever leaves through the face, deep blue at its walls and paling toward its core, and dark grid over black when nothing leaves; as built, `thruster` in the hull material, which draws it in place of the engine graph's grid. A layered sprue on its flanks: two cutout layers of mazed pipe over a plated base, lit by sodium floodlights. As built, the flank layer is `piped` in the hull material: the surface is the top layer of pipe, and the layer under it and the base are seen through its gaps at their depths by parallax, the sprue's baked tiles and lamp light sampled in the ship's frame and the star shadowed by the layers above; the tiles bake once on the async pool, and until then the flank draws its old graph, greebled machinery. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
+| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Laid out in the part's own charts (`lc_client::charts`): decks stack up each side's, and the roof is the part's end that faces the ship's z. An ellipsoid's caps and a slab's ends go across whichever of its axes runs most that way; a cylinder, capsule or frustum lying on its side takes its roof from its band's top, down to 20 degrees above level, with decks up its flanks (`shaders/charts.wgsl`). Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the walls under the rim drop from the roof chart's own edge, so no outline is taken from the mesh |
+| engine | an ion thruster's face on the open face: a uniform grid of dark bars over blue hex cells 2 m behind it, seen through its gaps at their depth, each cell glowing at the luminance of whatever leaves through the face, deep blue at its walls and paling toward its core, and dark grid over black when nothing leaves; as built, `thruster` in the hull material, which draws it in place of the engine graph's grid. A layered sprue on its flanks: two cutout layers of mazed pipe over a plated base, lit by sodium floodlights. As built, the flank layer is `piped` in the hull material: the surface is the top layer of pipe, and the layer under it and the base are seen through its gaps at their depths by parallax, the sprue's baked tiles and lamp light laid out in the engine part's own charts (`lc_client::charts`), a whole number of tiles around its axis and the star shadowed by the layers above; the tiles bake once on the async pool, and until then the flank draws its old graph, greebled machinery. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. As built, the mesher hands each vertex its signed distance to the nearest seam and meters along it, and the shader puts a head every 1.5 m, 0.8 m in from the seam. Along is the one number a distance field does not hand over. The mesher classes each seam whole, from the two primitives' gradients along it, as a ring about the spar's axis or a line along it, and measures it as meters around at the seam's mean radius or meters along. A boom's end and a rib's edge are both in meters, and a seam that climbs spreads its heads only by the cosine of its climb. Chosen per vertex, the heads shear where the choice changes |
+| spar | plated structure |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
@@ -167,8 +165,6 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 
 ![Every kind by day and by night](../images/hull-kinds.png)
 
-![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
-
 ### Looks in development
 
 `lc_client::looks` holds five ship surfaces that no part kind wears yet, each its own material
@@ -182,13 +178,11 @@ and shader rather than a graph in the hull material's palette:
   fits inside its panel, lit mostly in runs, mirror-coated, with a room traced behind each pane.
   By day a lit room is dimmed until it is hard to tell from a dark one, a cheat for daylight
   outshining it.
-- **Habitat**, offices whose whole top is a roof of clear glass hexes, 10 m across in a 0.5 m
+- **Habitat**, offices whose upward end is a roof of clear glass hexes, 10 m across in a 0.5 m
   frame and chamfered 0.5 m where it meets the sides: a dome over a forest an eighth of the roof's
   width down, at most 25 m, seen where the eye's ray meets it, so it moves against the frame.
-  Walls drop from the rim to the forest, so no ray runs on past the hull's edge: a unit box knows
-  its rectangle, and any other mesh is given a map of signed meters to its roof's outline seen from
-  above (`lc_client::looks::outline`, asked for with `RoofOutline`), taken once from the mesh by
-  clipping each triangle where its normal stops facing more up than sideways. Nothing in it glows;
+  Walls drop from the rim to the forest, so no ray runs on past the hull's edge: the roof is one of
+  the part's charts, which knows its own edge. Nothing in it glows;
   it shows only what of the star and the planet is let in, through air that scatters it back blue
   by day and red as the star sets over the roof, and that hides the forest the longer the ray's
   path, so a glancing look sees sky only. Sheets of stratus part way down lie over the forest at
@@ -204,17 +198,17 @@ and shader rather than a graph in the hull material's palette:
   flanks the sprue the same way, and
   `looks::kinds::wear` is where each kind's look is decided.
 
-They depart from the hull material on two points. The aztec plate and the sprue map by the **box face a point faces most**,
-as a cube map does, not triplanar, so a curved surface has a seam where that face changes; a box is
-where they look as meant. And they map from **world position**, not the ship's frame, with decks
-stacked along world Y: on a craft that moves or turns, the panels and decks would swim.
+They and the hull material lay every look out in the **part's own charts** (`lc_client::charts`),
+which the hull mesher writes on each vertex: a slab's faces, a round part's band about its axis and
+discs or domes at its ends, a torus's ring. A band or ring takes a whole number of each pattern's
+cells around, so nothing has a seam, and a look keeps clear of a chart's edges where it should, as
+the tubes' steel margin and the windows do. So they draw only on the mesher's meshes; obsidian, a
+3D pattern, needs no chart: it is cut on the mesh's own position, so it stays on the part.
 
 Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling boxes of each
 size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
 primitive.
 
-Open: mapping in the ship's frame, deciding which way a ship's decks stack, and giving a look to a
-kind.
 
 ## Building, as a function of time
 

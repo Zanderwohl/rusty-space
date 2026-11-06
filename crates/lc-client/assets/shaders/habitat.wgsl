@@ -3,7 +3,7 @@
 // caller's units, handed in. Shared by hull.wgsl; aztec.wgsl is its development copy.
 
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
-#import "shaders/panels.wgsl"::{Panel, PanelFace}
+#import "shaders/panels.wgsl"::{Panel, around_index}
 
 struct Window {
     cover: f32,
@@ -15,8 +15,8 @@ struct Window {
 
 /// Whether the window at `deck`, `col` is lit: mostly in runs along its row, at two lengths so
 /// runs vary, with a few dark gaps in them and a few lone windows lit outside.
-fn window_lit(face_id: u32, deck: i32, col: i32, share: f32) -> bool {
-    let row = mix_hash(face_id, u32(deck));
+fn window_lit(face_id: u32, deck: u32, col: i32, share: f32) -> bool {
+    let row = mix_hash(face_id, deck);
     let short = i32(floor((f32(col) + 97.0 * unit(pcg(row + 1u))) / 5.0));
     let long = i32(floor((f32(col) + 97.0 * unit(pcg(row + 2u))) / 11.0));
     let run = unit(mix_hash(row + 3u, u32(short))) < 0.6 * share
@@ -25,20 +25,24 @@ fn window_lit(face_id: u32, deck: i32, col: i32, share: f32) -> bool {
     return select((own < 0.06), (own > 0.12), run);
 }
 
-/// The window over `p`, meters on a side face, if one fits wholly inside its panel clear of
-/// `clear` meters; its cover is what of the pixel it fills. `deck` is `(deck_m, pitch_m, sill_m,
-/// _)` and `pane` `(width_m, height_m, ...)`.
-fn window(p: vec2<f32>, cell: Panel, face_id: u32, deck: vec4<f32>, pane: vec2<f32>, clear: f32, lit_share: f32, pixel: vec2<f32>) -> Window {
+/// The window over `p`, meters in a side's chart, if one fits wholly inside its panel clear of
+/// `clear` meters and inside `lo`..`hi`; its cover is what of the pixel it fills. `deck` is
+/// `(deck_m, pitch_m, sill_m, _)` and `pane` `(width_m, height_m, ...)`. Its row and column are
+/// taken around the chart's wrap, `around`, as [`around_index`] does.
+fn window(p: vec2<f32>, cell: Panel, face_id: u32, deck: vec4<f32>, pane: vec2<f32>, clear: f32, lo: vec2<f32>, hi: vec2<f32>, lit_share: f32, around: vec2<f32>, pixel: vec2<f32>) -> Window {
     let row = floor(p.y / deck.x);
     let col = floor(p.x / deck.y);
     let half = 0.5 * pane;
     let center = vec2<f32>((col + 0.5) * deck.y, row * deck.x + deck.z + half.y);
-    if (any(center - half < cell.lo + clear) || any(center + half > cell.hi - clear)) {
+    let fits_lo = max(cell.lo + clear, lo);
+    let fits_hi = min(cell.hi - clear, hi);
+    if (any(center - half < fits_lo) || any(center + half > fits_hi)) {
         return Window(0.0, false, 0.0, 0.0);
     }
     let inside = half - abs(p - center);
     let cover = clamp(inside / pixel + 0.5, vec2<f32>(0.0), min(vec2<f32>(1.0), 2.0 * half / pixel));
-    return Window(cover.x * cover.y, window_lit(face_id, i32(row), i32(col), lit_share), col, row);
+    let lit = window_lit(face_id, around_index(row, deck.x, around.y), i32(around_index(col, deck.y, around.x)), lit_share);
+    return Window(cover.x * cover.y, lit, col, row);
 }
 
 const DESK_TOP_M: f32 = 0.75;
@@ -48,9 +52,9 @@ const DESK_DEPTH_M: f32 = 0.8;
 /// What the eye sees through the glass at `p`, as a share of a lit window's glow: a room the
 /// window's column wide, its deck high and `depth_m` deep, traced from the glass, with no geometry
 /// behind the face at all. `e` is toward the eye.
-fn room(p: vec2<f32>, e: vec3<f32>, f: PanelFace, pane: Window, deck: vec4<f32>, depth_m: f32) -> vec3<f32> {
-    // x and y along the face, z into it.
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 1.0e-3));
+fn room(p: vec2<f32>, e: vec3<f32>, frame: mat3x3<f32>, face_id: u32, pane: Window, deck: vec4<f32>, depth_m: f32) -> vec3<f32> {
+    // x and y along the chart, z into it.
+    let d = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, frame[2]), 1.0e-3));
     let lo = vec2<f32>(pane.col * deck.y, pane.deck * deck.x);
     let hi = lo + deck.yx;
     let toward = select(lo, hi, d.xy > vec2<f32>(0.0));
@@ -62,7 +66,7 @@ fn room(p: vec2<f32>, e: vec3<f32>, f: PanelFace, pane: Window, deck: vec4<f32>,
     let t = min(min(t_side.x, t_side.y), t_back);
     let hit = vec3<f32>(p + d.xy * t, d.z * t);
 
-    let h = mix_hash(mix_hash(f.id, u32(i32(pane.deck))), u32(i32(pane.col)));
+    let h = mix_hash(mix_hash(face_id, u32(i32(pane.deck))), u32(i32(pane.col)));
     let tint = mix(vec3<f32>(0.82, 0.88, 1.0), vec3<f32>(1.0, 0.9, 0.76), unit(pcg(h)));
     let desk_y = lo.y + DESK_TOP_M;
     let t_front = DESK_FROM_M / d.z;

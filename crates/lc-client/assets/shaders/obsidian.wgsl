@@ -1,6 +1,7 @@
 // Obsidian: knapped volcanic glass, blue-gray-black, all reflection, cut by scars.wgsl's flake
-// scars on world position, so any shape takes them without a seam. Look development:
-// crates/lc-client/src/looks/obsidian.rs; hull.wgsl draws the same glass in the ship's frame.
+// scars on the mesh's own position, so any shape takes them without a seam and they stay on the
+// part as it moves. Look development: crates/lc-client/src/looks/obsidian.rs; hull.wgsl draws the
+// same glass in the ship's frame.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -20,6 +21,12 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
+    // In the mesh's own frame, where the scars are cut, and that frame's axes in the world's.
+    @location(2) local_position: vec3<f32>,
+    @location(3) local_normal: vec3<f32>,
+    @location(4) @interpolate(flat) axis_x: vec3<f32>,
+    @location(5) @interpolate(flat) axis_y: vec3<f32>,
+    @location(6) @interpolate(flat) axis_z: vec3<f32>,
 }
 
 struct ObsidianUniform {
@@ -61,6 +68,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
+    out.local_position = vertex.position;
+    out.local_normal = vertex.normal;
+    out.axis_x = normalize(mesh_functions::mesh_normal_local_to_world(vec3<f32>(1.0, 0.0, 0.0), vertex.instance_index));
+    out.axis_y = normalize(mesh_functions::mesh_normal_local_to_world(vec3<f32>(0.0, 1.0, 0.0), vertex.instance_index));
+    out.axis_z = normalize(mesh_functions::mesh_normal_local_to_world(vec3<f32>(0.0, 0.0, 1.0), vertex.instance_index));
     return out;
 }
 
@@ -74,12 +86,12 @@ fn planet_seen(r: vec3<f32>, roughness: f32) -> f32 {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
-    let p = in.world_position;
-    let e = normalize(view.world_position - p);
+    let e = normalize(view.world_position - in.world_position);
     let size = m.scar.x;
+    let p = in.local_position;
     let pixel = max(length(fwidth(p)), 1.0e-4);
-    let k = knapped(p, surface, size, m.scar.yzw, pixel, u32(m.finish.y));
-    let n = k.normal;
+    let k = knapped(p, normalize(in.local_normal), size, m.scar.yzw, pixel, u32(m.finish.y));
+    let n = normalize(in.axis_x * k.normal.x + in.axis_y * k.normal.y + in.axis_z * k.normal.z);
     let roughness = mix(0.5, m.glass.w, k.keep_fine);
 
     // A ridge is sharp: the edge itself catches a thin line of light whichever way it faces.

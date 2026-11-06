@@ -34,15 +34,19 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
     MeshVertexAttribute::new("HullRegions3", 0x4855_4C4C_0000_0004, VertexFormat::Unorm8x4),
 ];
 
-/// `(across, along)`: signed meters from the vertex to the nearest seam between two regions,
-/// positive on the lower-numbered region's side, and meters along that seam from anywhere fixed
-/// on it. What a bolted region draws its row of heads by. A vertex far from every seam writes a
-/// large `across`.
-///
-/// The side comes from the sign rather than from which region weighs more, because in the
-/// middle of a fillet the two weights differ by less than a byte.
-pub const ATTRIBUTE_HULL_SEAM: MeshVertexAttribute =
-    MeshVertexAttribute::new("HullSeam", 0x4855_4C4C_0000_0005, VertexFormat::Float32x2);
+/// `(u_m, v_m, kind, end)`: where the vertex lies on its part's own surface, in one of the part's
+/// charts, which kind of chart (0 a rectangle, 1 a disc, 2 a band wrapping in u, 3 a ring wrapping
+/// both ways, 4 a dome laid out about its pole), and 1 where the chart is one of the part's ends, 2
+/// where it is the band of a round part lying on its side, its u 0 along the part's top. A look lays its pattern in these meters, so it follows the part and keeps
+/// clear of its edges.
+pub const ATTRIBUTE_HULL_CHART: MeshVertexAttribute =
+    MeshVertexAttribute::new("HullChart", 0x4855_4C4C_0000_0008, VertexFormat::Float32x4);
+
+/// The chart's extent: `(u_lo, u_hi, v_lo, v_hi)` for a rectangle, `(radius, 0, 0, 0)` for a disc
+/// about its origin, `(u_period, 0, v_lo, v_hi)` for a band, `(u_period, v_period, 0, 0)` for a
+/// ring, `(radius, sphere_radius, 0, 0)` for a dome, its arcs measured on a sphere that size. Alike on every vertex of a chart.
+pub const ATTRIBUTE_HULL_CHART_BOUNDS: MeshVertexAttribute =
+    MeshVertexAttribute::new("HullChartBounds", 0x4855_4C4C_0000_0009, VertexFormat::Float32x4);
 
 /// A girder's `(x_m, threshold, scaffold, 0)`: meters from the joint to it, the share of its band
 /// that must have passed for it to stand, and 1 for scaffold, which stands outside the finished
@@ -131,11 +135,6 @@ pub struct HullUniform {
     pub lattice: Vec4,
     /// A girder's albedo, and its work lights in [`Self::reflected`]'s units.
     pub girder: Vec4,
-    /// A bolted region's row of heads along each seam: `(pitch_m, head_radius_m, offset_m,
-    /// albedo)`, the offset measured from the seam into the bolted region.
-    pub bolts: Vec4,
-    /// Which regions are bolted, one bit a region.
-    pub bolted: u32,
     /// Which regions are knapped glass, one bit a region: their tile gives way to
     /// [`Self::glass_finish`]'s color under flake scars, each facet lit at its own lean, with the
     /// star's highlight and a faint sky mirrored in it.
@@ -144,8 +143,9 @@ pub struct HullUniform {
     /// chamfered seams, each its own shade and lit at its own tilt.
     pub plated: u32,
     /// Which regions are habitat, one bit a region: plate with office windows on the sides, rooms
-    /// traced behind them, and over the top a roof of glass hexes on a forest. Decks stack along
-    /// the ship's z. A lit window is the region's [`Self::emitted`].
+    /// traced behind them, and on the end of its part that faces the ship's z a roof of glass hexes
+    /// on a forest. Laid out in the part's charts, decks up each side's. A lit window is the
+    /// region's [`Self::emitted`].
     pub habitat: u32,
     /// Which *layers* are a layered sprue, one bit a layer: an engine's flank, say, not its open
     /// face. The surface is the top layer of pipe, and the layer under it and the plated base are
@@ -196,6 +196,36 @@ pub struct HullUniform {
     pub thruster: Vec4,
     /// The cells' color, linear: what leaves the face is drawn at its luminance in this hue.
     pub thruster_glow: Vec4,
+    /// Which regions are server racks and which a hive of launch tubes, one bit a region each:
+    /// `(racks, tubes, 0, 0)`. Both are laid out in the part's charts.
+    pub looks: UVec4,
+    /// A rack: `(rack_m, server_m, post_m, groove_m)`, a server's width and height, a post's width,
+    /// and the groove's between servers.
+    pub rack: Vec4,
+    /// `(post, groove, tilt_rad, 0)`: how far a post's faces and a groove's walls lean at most, as
+    /// tangents, and how far a server tips.
+    pub rack_lean: Vec4,
+    /// A rack region's ends, a data hall from above: `(depth_m, aisle_m, fan_m, 0)`, a row of rack
+    /// tops, the aisle between rows, and a rack top's fan across.
+    pub rack_hall: Vec4,
+    /// A server's glass face: `(width_m, height_m, faces, day_glow)`, its extent on a server as
+    /// asked for, how many faces [`HullMaterial::rack_faces`] holds, and on a face the star lights
+    /// what of its glow is left.
+    pub rack_face: Vec4,
+    /// The servers' paint, linear, and how far each strays from it in brightness.
+    pub rack_paint: Vec4,
+    /// A lit face's hue, of luminance 1, drawn at the region's [`Self::emitted`] luminance; and its
+    /// glass's reflectance face-on.
+    pub rack_glow: Vec4,
+    /// A hive's cells: `(hex_m, bore_radius_m, tape_m, 0)`, across a cell's flats, a tube's
+    /// radius, and the danger tape around its mouth.
+    pub tube_cell: Vec4,
+    /// `(depth_m, drone_m, open, loaded)`: a tube's depth, how far down a drone's nose is, the
+    /// share of tubes open and of those the share holding a drone.
+    pub tube_depth: Vec4,
+    /// `(guide_pitch_m, 0, 0, 0)`: the guide lights' spacing down a tube, lit at the region's
+    /// [`Self::emitted`].
+    pub tube_guide: Vec4,
 }
 
 impl Default for HullUniform {
@@ -212,8 +242,6 @@ impl Default for HullUniform {
             build_widths: Vec4::ONE,
             lattice: Vec4::new(8.0, 0.35, 0.0, 0.4),
             girder: Vec4::new(0.55, 0.42, 0.22, 0.0),
-            bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
-            bolted: 0,
             glassy: 0,
             plated: 0,
             habitat: 0,
@@ -234,6 +262,16 @@ impl Default for HullUniform {
             pipes: Vec4::new(0.9, 1.9, 24.0, 0.0),
             thruster: Vec4::ZERO,
             thruster_glow: Vec4::ZERO,
+            looks: UVec4::ZERO,
+            rack: Vec4::new(6.0, 3.0, 0.5, 0.2),
+            rack_lean: Vec4::ZERO,
+            rack_hall: Vec4::new(4.0, 2.0, 2.6, 0.0),
+            rack_face: Vec4::ZERO,
+            rack_paint: Vec4::ZERO,
+            rack_glow: Vec4::ZERO,
+            tube_cell: Vec4::new(6.0, 1.8, 0.45, 0.0),
+            tube_depth: Vec4::ZERO,
+            tube_guide: Vec4::new(1.2, 0.0, 0.0, 0.0),
         }
     }
 }
@@ -249,14 +287,6 @@ pub struct HullMaterial {
     /// The same with [`Tile::Lights`]: the share of each texel that is lit.
     #[texture(3, dimension = "2d_array", visibility(fragment))]
     pub lights: Handle<Image>,
-    /// A habitat roof's outline seen from above, in the ship's frame: signed meters to its edge,
-    /// positive inside, so a ray through the glass meets a wall dropping from the rim. Taken from
-    /// the mesh, so kept apart from [`Self::uniforms`], which follow the ship's light.
-    #[texture(4, visibility(fragment))]
-    #[sampler(5, visibility(fragment))]
-    pub roof_map: Option<Handle<Image>>,
-    #[uniform(6, visibility(fragment))]
-    pub roof_outline: RoofOutline,
     /// A layered sprue's tiles, three layers to a variant, and its baked lamp light, both as its
     /// look makes them. Baked once and late, so a hull drawn before then draws its flanks as tiles.
     #[texture(7, dimension = "2d_array", visibility(fragment))]
@@ -264,14 +294,11 @@ pub struct HullMaterial {
     pub pipe_tiles: Option<Handle<Image>>,
     #[texture(9, dimension = "2d_array", visibility(fragment))]
     pub pipe_light: Option<Handle<Image>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
-pub struct RoofOutline {
-    /// The ship-frame XY the map spans, `(x0, y0, x1, y1)`; empty where there is no map.
-    pub bounds: Vec4,
-    /// `(width_m, 0, 0, 0)`: the widest circle the outline holds.
-    pub width: Vec4,
+    /// Server racks' glass faces, a face a layer, `(cover, glow, 0, 1)`, as their look bakes them.
+    /// Baked once and late, so a rack drawn before then shows no faces.
+    #[texture(10, dimension = "2d_array", visibility(fragment))]
+    #[sampler(11, visibility(fragment))]
+    pub rack_faces: Option<Handle<Image>>,
 }
 
 impl Material for HullMaterial {
@@ -313,8 +340,10 @@ impl Material for HullMaterial {
             ATTRIBUTE_HULL_REGIONS[1].at_shader_location(3),
             ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
             ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
-            ATTRIBUTE_HULL_SEAM.at_shader_location(6),
-            ATTRIBUTE_HULL_FACE.at_shader_location(7),
+            ATTRIBUTE_HULL_FACE.at_shader_location(6),
+            ATTRIBUTE_HULL_CHART.at_shader_location(7),
+            ATTRIBUTE_HULL_CHART_BOUNDS.at_shader_location(8),
+            Mesh::ATTRIBUTE_TANGENT.at_shader_location(9),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())

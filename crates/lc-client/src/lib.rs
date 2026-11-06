@@ -20,6 +20,7 @@ pub mod beauty;
 pub mod bench;
 pub mod beliefs;
 pub mod bookshelf;
+pub mod charts;
 pub mod chat;
 pub mod console;
 pub mod construction;

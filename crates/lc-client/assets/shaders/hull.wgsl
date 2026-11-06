@@ -13,10 +13,11 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
-#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate, tangent_frame}
+#import "shaders/panels.wgsl"::{Plate, around_index, plate}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
-#import "shaders/pipes.wgsl"::{tile_start, variant_layer}
+#import "shaders/charts.wgsl"::{ChartView, chart_view}
+#import "shaders/pipes.wgsl"::{PipeTiling, pipe_tiling, tile_start, variant_layer}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -31,10 +32,13 @@ struct Vertex {
     @location(3) regions_1: vec4<f32>,
     @location(4) regions_2: vec4<f32>,
     @location(5) regions_3: vec4<f32>,
-    // em_render::hull_material::ATTRIBUTE_HULL_SEAM: signed meters across to the seam, and along it.
-    @location(6) seam: vec2<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
-    @location(7) face: vec4<f32>,
+    @location(6) face: vec4<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS, and the
+    // direction the chart's u grows, in the ship's frame.
+    @location(7) chart: vec4<f32>,
+    @location(8) bounds: vec4<f32>,
+    @location(9) tangent: vec4<f32>,
 #endif
 }
 
@@ -50,13 +54,15 @@ struct VertexOutput {
     @location(4) regions_1: vec4<f32>,
     @location(5) regions_2: vec4<f32>,
     @location(6) regions_3: vec4<f32>,
-    @location(7) seam: vec2<f32>,
-    @location(8) face_share: f32,
-    @location(9) @interpolate(flat) face: u32,
+    @location(7) face_share: f32,
+    @location(8) @interpolate(flat) face: u32,
     // The camera, and the direction to the star, in the ship's frame: glass is lit where its
     // scars are cut.
-    @location(10) eye_ship: vec3<f32>,
-    @location(11) star_ship: vec3<f32>,
+    @location(9) eye_ship: vec3<f32>,
+    @location(10) star_ship: vec3<f32>,
+    @location(11) chart: vec4<f32>,
+    @location(12) @interpolate(flat) bounds: vec4<f32>,
+    @location(13) chart_tangent: vec3<f32>,
 #endif
 }
 
@@ -84,10 +90,6 @@ struct HullUniform {
     lattice: vec4<f32>,
     /// Albedo, and work lights.
     girder: vec4<f32>,
-    /// `(pitch_m, head_radius_m, offset_m, albedo)`.
-    bolts: vec4<f32>,
-    /// One bit a region.
-    bolted: u32,
     /// One bit a region: knapped glass.
     glassy: u32,
     /// One bit a region: azteced plate.
@@ -126,25 +128,38 @@ struct HullUniform {
     thruster: vec4<f32>,
     /// The cells' hue, linear.
     thruster_glow: vec4<f32>,
-}
-
-struct RoofOutline {
-    /// Ship-frame XY `roof_map` spans, `(x0, y0, x1, y1)`; empty where there is none.
-    bounds: vec4<f32>,
-    /// `(width_m, 0, 0, 0)`.
-    width: vec4<f32>,
+    /// `(racks, tubes, 0, 0)`, one bit a region each.
+    looks: vec4<u32>,
+    /// `(rack_m, server_m, post_m, groove_m)`.
+    rack: vec4<f32>,
+    /// `(post, groove, tilt_rad, 0)`.
+    rack_lean: vec4<f32>,
+    /// `(depth_m, aisle_m, fan_m, 0)`.
+    rack_hall: vec4<f32>,
+    /// `(width_m, height_m, faces, day_glow)`.
+    rack_face: vec4<f32>,
+    /// The servers' paint, and its spread in `w`.
+    rack_paint: vec4<f32>,
+    /// A lit face's hue, of luminance 1, and its glass's f0 in `w`.
+    rack_glow: vec4<f32>,
+    /// `(hex_m, bore_radius_m, tape_m, 0)`.
+    tube_cell: vec4<f32>,
+    /// `(depth_m, drone_m, open, loaded)`.
+    tube_depth: vec4<f32>,
+    /// `(guide_pitch_m, 0, 0, 0)`.
+    tube_guide: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: HullUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_tiles: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var tile_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var light_tiles: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var roof_map: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var roof_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var<uniform> roof_outline: RoofOutline;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var pipe_tiles: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var pipe_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var pipe_glow: texture_2d_array<f32>;
+/// A face a layer: `(cover, glow, 0, 1)`, row 0 at the face's top.
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var rack_faces: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var rack_sampler: sampler;
 
 /// Obsidian's index is about 1.49.
 const GLASS_F0: f32 = 0.04;
@@ -195,9 +210,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_1 = vertex.regions_1;
     out.regions_2 = vertex.regions_2;
     out.regions_3 = vertex.regions_3;
-    out.seam = vertex.seam;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
+    out.chart = vertex.chart;
+    out.bounds = vertex.bounds;
+    out.chart_tangent = vertex.tangent.xyz;
     // A ship's transform is a rotation and a uniform scale, so its inverse is the transpose over
     // the scale squared.
     let axes = mat3x3<f32>(world_from_local[0].xyz, world_from_local[1].xyz, world_from_local[2].xyz);
@@ -388,23 +405,6 @@ fn heaviest(in: VertexOutput) -> Pair {
     return Pair(first, second, max(w2, 0.0) / max(w1 + max(w2, 0.0), 1.0e-6));
 }
 
-/// How much of the fragment is a bolt head, from its seam coordinates. A row too fine to see is
-/// drawn as its share of the pixels it crosses, so it fades rather than sparkling.
-fn bolt_cover(seam: vec2<f32>) -> f32 {
-    let pitch = material.bolts.x;
-    let r = material.bolts.y;
-    let across = abs(seam.x) - material.bolts.z;
-    let along = (fract(seam.y / pitch) - 0.5) * pitch;
-    // Meters a pixel spans.
-    let w = max(fwidth(seam.x) + fwidth(seam.y), 1.0e-4);
-    let d = length(vec2<f32>(across, along));
-    let sharp = 1.0 - smoothstep(r - 0.5 * w, r + 0.5 * w, d);
-    let wide = max(w, 2.0 * r);
-    let band = 1.0 - smoothstep(0.25 * wide, 0.75 * wide, abs(across));
-    let mean = min(3.14159265 * r * r / (pitch * wide), 1.0) * band;
-    return mix(sharp, mean, smoothstep(r, 3.0 * r, w));
-}
-
 /// The layer a region is drawn with here: an open-faced region's flank off its faces. Chosen
 /// rather than blended, so the tile is sampled once; the switch falls on the face's rim, which is
 /// a crease in the hull anyway.
@@ -456,14 +456,63 @@ fn panelled(region: u32) -> bool {
     return ((material.plated >> region) & 1u) != 0u;
 }
 
-/// The ship's up, along which a side's panels stand and, where there are any, decks stack.
+/// The ship's up: a habitat's roof is the end of its part that faces it.
 const SHIP_UP: vec3<f32> = vec3<f32>(0.0, 0.0, 1.0);
+
+const RECT: u32 = 0u;
+const DISC: u32 = 1u;
+const BAND: u32 = 2u;
+const RING: u32 = 3u;
+const DOME: u32 = 4u;
+
+/// No window nearer a chart's edge than this, as looks::aztec::Windows::chart_margin_m.
+const WINDOW_MARGIN_M: f32 = 1.0;
+
+/// Where a fragment lies in its part's chart (crate::charts in lc-client), as plating and a
+/// habitat lay themselves out in it.
+struct HullChart {
+    /// Meters in the chart, stretched around a band or ring to a whole number of plate cells, which
+    /// are whole numbers of snaps, window columns and decks, so every lattice meets itself there.
+    p: vec2<f32>,
+    /// How far `p`'s u and v run before they repeat; 0 where they do not.
+    around: vec2<f32>,
+    kind: u32,
+    bounds: vec4<f32>,
+    /// u, v, and the surface's normal, in the ship's frame.
+    frame: mat3x3<f32>,
+    /// Alike either side of a seam; a rectangle, all of one direction, told apart by which way its
+    /// u runs, as a cube's faces are alike in extent.
+    id: u32,
+    end: bool,
+}
+
+fn hull_chart(in: VertexOutput, surface: vec3<f32>) -> HullChart {
+    let kind = u32(round(in.chart.z));
+    let u = normalize(in.chart_tangent - surface * dot(in.chart_tangent, surface));
+    let frame = mat3x3<f32>(u, cross(surface, u), surface);
+    var p = in.chart.xy;
+    var around = vec2<f32>(0.0);
+    let cell = material.plates.x;
+    if (kind == BAND || kind == RING) {
+        let n = max(round(in.bounds.x / cell), 1.0);
+        p.x *= n * cell / in.bounds.x;
+        around.x = n * cell;
+    }
+    if (kind == RING) {
+        let n = max(round(in.bounds.y / cell), 1.0);
+        p.y *= n * cell / in.bounds.y;
+        around.y = n * cell;
+    }
+    let facing = select(0u, u32(round(dot(u, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), kind == RECT);
+    let id = mix_hash(kind + 8u * facing, u32(in.chart.w) + 2u * bitcast<u32>(in.bounds.x));
+    return HullChart(p, around, kind, in.bounds, frame, id, in.chart.w > 0.5);
+}
 
 /// What a plated region sends toward the eye, in reflected's units: each panel's own shade lit at
 /// its own tilt, a seam's walls at theirs, the star's highlight off the metal, and a faint sky.
-fn plate_light(in: VertexOutput, pixel: f32) -> vec3<f32> {
+fn plate_light(in: VertexOutput, c: HullChart, pixel: f32) -> vec3<f32> {
     let surface = normalize(in.ship_normal);
-    let k = plate(in.ship_position, surface, SHIP_UP, material.plates, material.plate_finish, pixel, 0u);
+    let k = plate(c.p, c.frame, c.id, c.around, material.plates, material.plate_finish, pixel, 0u);
     return material.reflected.rgb * plate_lit(k, normalize(in.star_ship), normalize(in.eye_ship - in.ship_position), surface);
 }
 
@@ -558,13 +607,13 @@ fn pipe_height(k: u32) -> f32 {
     return select(select(0.0, material.pipes.x, k == 1u), material.pipes.y, k == 2u);
 }
 
-/// What of the star reaches layer `k` at tile-plane point `q`, past the cutout layers above it.
-fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32) -> f32 {
+/// What of the star reaches layer `k` at chart point `q`, past the cutout layers above it.
+fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32, tiling: PipeTiling) -> f32 {
     var through = 1.0;
     for (var above = k + 1u; above <= 2u; above++) {
         let at = q + toward.xy * (pipe_height(above) - pipe_height(k)) / toward.z;
-        let uv = at / material.pipes.z;
-        let cover = textureSampleLevel(pipe_tiles, pipe_sampler, fract(uv), variant_layer(uv, above, id), 1.0).a;
+        let uv = at / tiling.size;
+        let cover = textureSampleLevel(pipe_tiles, pipe_sampler, fract(uv), variant_layer(uv, above, id, tiling.around), 1.0).a;
         through *= 1.0 - smoothstep(0.35, 0.65, cover);
     }
     return through;
@@ -573,19 +622,14 @@ fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32) -> f32 {
 /// What a layered sprue sends toward the eye, in reflected's units. The surface is the top layer
 /// of pipe; through its gaps the layer under it and the plated base are seen at their depths, so
 /// they move against it as the eye does. Each is lit by its baked lamps in `lamp`'s color, and by
-/// the star past the layers above. `ddx` and `ddy` are the tile coordinates' derivatives, taken
-/// outside any branch.
-fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -> vec3<f32> {
-    let surface = normalize(in.ship_normal);
+/// the star past the layers above. Laid out in the part's chart: `p` is the point there, in meters,
+/// `tiling` how the tiles fit it, and `frame` its u, v and the surface's normal. `ddx` and `ddy`
+/// are the tile coordinates' derivatives, taken outside any branch.
+fn pipe_lit(in: VertexOutput, p: vec2<f32>, tiling: PipeTiling, id: f32, frame: mat3x3<f32>, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -> vec3<f32> {
     let star = normalize(in.star_ship);
     let e = normalize(in.eye_ship - in.ship_position);
-    let f = panel_face(surface, SHIP_UP);
-    let frame = tangent_frame(f, surface);
-    let id = f32(f.id);
-    let tile = material.pipes.z;
-    let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v)) + tile_start(id) * tile;
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
-    let toward = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
+    let d = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, frame[2]), 0.05));
+    let toward = vec3<f32>(dot(star, frame[0]), dot(star, frame[1]), dot(star, frame[2]));
     // Front to back, each layer over what is under it by its coverage: 0 or 1 where a texel is
     // resolved, its share where a mip averages pipe and gap, so a distant flank does not flicker
     // between layers pixel to pixel.
@@ -598,8 +642,8 @@ fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -
     for (var i = 0u; i < 3u; i++) {
         let k = 2u - i;
         let q = p + d.xy * (pipe_height(2u) - pipe_height(k)) / d.z;
-        let uv = q / tile;
-        let layer = variant_layer(uv, k, id);
+        let uv = q / tiling.size;
+        let layer = variant_layer(uv, k, id, tiling.around);
         let texel = textureSampleGrad(pipe_tiles, pipe_sampler, fract(uv), layer, ddx, ddy);
         let cover = select(mix(texel.a, PIPE_COVER, far), 1.0, k == 0u);
         if (cover > 0.0) {
@@ -610,7 +654,7 @@ fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -
             var lit = vec3<f32>(albedo * material.to_star.w);
             if (toward.z > 0.0) {
                 let spec = 0.35 * pow(max(dot(n, normalize(star + e)), 0.0), 24.0);
-                lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id));
+                lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id, tiling));
             }
             light += through * cover * (material.reflected.rgb * lit + lamp * PIPE_LAMP * (baked + 0.015 * albedo));
         }
@@ -623,34 +667,42 @@ fn habitable(region: u32) -> bool {
     return ((material.habitat >> region) & 1u) != 0u;
 }
 
-/// Signed meters from ship-frame XY `q` to the roof's outline seen from above, positive inside; far
-/// inside where no map is bound, so the ground runs on.
-fn inside_roof(q: vec2<f32>) -> f32 {
-    let span = roof_outline.bounds.zw - roof_outline.bounds.xy;
-    if (span.x <= 0.0) {
-        return 1.0e6;
+/// Signed meters from `q`, in the roof's chart, to its edge, positive inside.
+fn inside_roof(q: vec2<f32>, c: HullChart) -> f32 {
+    if (c.kind == RECT) {
+        let d = min(q - c.bounds.xz, c.bounds.yw - q);
+        return min(d.x, d.y);
     }
-    let uv = (q - roof_outline.bounds.xy) / span;
-    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
-        return -1.0;
+    if (c.kind == DISC || c.kind == DOME) {
+        return c.bounds.x - length(q);
     }
-    return textureSampleLevel(roof_map, roof_sampler, uv, 0.0).r;
+    return 1.0e6;
 }
 
-/// How far down the eye's ray through the glass meets the wall dropping from the rim, or `limit`
-/// if it reaches that depth first. Walls are vertical, so the ray's shadow on XY is a line, and the
-/// outline's distance is a safe step along it.
-fn wall_depth(pos: vec3<f32>, e: vec3<f32>, limit: f32) -> f32 {
-    let slope = -e.xy / max(e.z, 0.02);
+/// The roof chart's width: what the forest's depth is a share of.
+fn roof_width(c: HullChart) -> f32 {
+    if (c.kind == RECT) {
+        return min(c.bounds.y - c.bounds.x, c.bounds.w - c.bounds.z);
+    }
+    if (c.kind == DISC || c.kind == DOME) {
+        return 2.0 * c.bounds.x;
+    }
+    return 0.0;
+}
+
+/// How far down the eye's ray through the glass, going `d` in the roof's chart with z down, meets
+/// the wall dropping from the rim, or `limit` if it reaches that depth first. Walls drop square to
+/// the chart, so the roof's own edge is a safe step along the ray's shadow on it.
+fn wall_depth(c: HullChart, d: vec3<f32>, limit: f32) -> f32 {
+    let slope = d.xy / d.z;
     let run = max(length(slope), 1.0e-3);
     var h = 0.0;
     for (var i = 0; i < WALL_STEPS; i++) {
-        let d = inside_roof(pos.xy + slope * h);
-        // The glass itself may sit a texel outside the map's edge; only a step taken can hit.
-        if (i > 0 && d < 0.02) {
+        let inside = inside_roof(c.p + slope * h, c);
+        if (i > 0 && inside < 0.02) {
             return h;
         }
-        h += max(d, 0.05) / run;
+        h += max(inside, 0.05) / run;
         if (h >= limit) {
             return limit;
         }
@@ -663,7 +715,8 @@ fn wall_depth(pos: vec3<f32>, e: vec3<f32>, limit: f32) -> f32 {
 /// eye's ray meets it, so it moves against the frame, through air that scatters the star back blue
 /// by day and red as it sets over the roof and hides the forest the longer the ray's path; walls
 /// drop from the rim to the forest; a stratus deck part way down lies over it and shades it.
-fn under_roof(in: VertexOutput, p: vec2<f32>, f: PanelFace, surface: vec3<f32>, e: vec3<f32>, star: vec3<f32>, edge: f32) -> vec3<f32> {
+fn under_roof(c: HullChart, surface: vec3<f32>, e: vec3<f32>, star: vec3<f32>, edge: f32) -> vec3<f32> {
+    let p = c.p;
     let over = dot(star, surface);
     let day = smoothstep(-0.08, 0.25, over);
     let high = smoothstep(0.0, 0.45, over);
@@ -672,13 +725,13 @@ fn under_roof(in: VertexOutput, p: vec2<f32>, f: PanelFace, surface: vec3<f32>, 
     // The star is pi in reflected's units.
     let air = PI * material.roof_sky.w * day * mix(vec3<f32>(1.0), tint, 0.7) * rayleigh;
 
-    let width = roof_outline.width.x;
+    let width = roof_width(c);
     let floor_m = select(material.roof.w, min(material.roof.w, material.roof_shape.x * width), width > 0.0);
     let deck_m = STRATUS_SHARE * floor_m;
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.02));
+    let d = vec3<f32>(-dot(e, c.frame[0]), -dot(e, c.frame[1]), max(dot(e, c.frame[2]), 0.02));
     let sunlight = day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
-    let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
-    let depth = wall_depth(in.ship_position, e, floor_m);
+    let star_face = vec3<f32>(dot(star, c.frame[0]), dot(star, c.frame[1]), dot(star, c.frame[2]));
+    let depth = wall_depth(c, d, floor_m);
     let through = exp(-(depth / d.z) / AIR_M);
     var seen: vec3<f32>;
     if (depth < floor_m) {
@@ -703,9 +756,20 @@ fn under_roof(in: VertexOutput, p: vec2<f32>, f: PanelFace, surface: vec3<f32>, 
 
 /// What a habitat region sends toward the eye, in reflected's units: office plate on the sides with
 /// windows over traced rooms, lit by `glow` where a room's lights are on, and over the top a roof of
-/// glass hexes on a forest, chamfered where the two meet. `lead_rate` is how fast the roof's lead
-/// changes across a pixel, taken outside any branch.
-fn habitat_light(in: VertexOutput, pixel: f32, lead: f32, lead_rate: f32, glow: vec3<f32>) -> vec3<f32> {
+/// glass hexes on a forest, chamfered where the two meet. The roof is the part's end that faces
+/// the ship's up; the sides' windows keep clear of their charts' edges.
+fn habitat_light(in: VertexOutput, part: HullChart, pixel: f32, glow: vec3<f32>) -> vec3<f32> {
+    // A lying part's band seen as a roof along its top and flanks below; any other chart as it is.
+    var c = part;
+    if (in.chart.w > 1.5) {
+        let view = chart_view(in.chart, in.bounds, part.frame);
+        c.p = view.p;
+        c.kind = view.kind;
+        c.bounds = view.bounds;
+        c.frame = view.frame;
+        c.end = view.end;
+        c.around = vec2<f32>(0.0);
+    }
     let surface = normalize(in.ship_normal);
     let star = normalize(in.star_ship);
     let e = normalize(in.eye_ship - in.ship_position);
@@ -714,25 +778,39 @@ fn habitat_light(in: VertexOutput, pixel: f32, lead: f32, lead_rate: f32, glow: 
     let metal_f0 = mix(0.04, dot(metal, LUMA), material.plate_metal.y);
     var lit = vec3<f32>(0.0);
     var lamp = vec3<f32>(0.0);
-    let f = panel_face(surface, SHIP_UP);
-    let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v));
-    if (f.n.z > 0.5) {
-        let cell = hex(p, material.roof.x);
+    let roofed = c.end && surface.z > 0.0;
+    if (roofed) {
+        let cell = hex(c.p, material.roof.x);
         let frame = metal_lit(surface, star, e, lit_side, metal * (1.0 - material.plate_metal.y), metal_f0, vec3<f32>(1.0), material.plate_metal.x);
         let fresnel = ROOF_F0 + (1.0 - ROOF_F0) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
         let half_seam = 0.5 * material.roof.y;
-        var pane = (1.0 - fresnel) * under_roof(in, p, f, surface, e, star, cell.z - half_seam);
+        var pane = (1.0 - fresnel) * under_roof(c, surface, e, star, cell.z - half_seam);
         pane += vec3<f32>(PLATE_SKY * fresnel);
         if (lit_side) {
             pane += vec3<f32>(PI * glass_specular(surface, star, e, ROOF_ROUGHNESS, ROOF_F0));
         }
         lit = mix(frame, pane, smoothstep(half_seam - pixel, half_seam + pixel, cell.z));
     } else {
-        let k = plate(in.ship_position, surface, SHIP_UP, material.plates, material.plate_finish, pixel, 0u);
+        let k = plate(c.p, c.frame, c.id, c.around, material.plates, material.plate_finish, pixel, 0u);
         lit = plate_lit(k, star, e, surface);
-        // Glazing leans no more than 30 degrees off the vertical.
-        if (abs(f.n.z) < 0.9 && abs(surface.z) <= 0.5) {
-            let pane = window(k.p, k.panel, k.face.id, material.deck, material.pane.xy, material.plate_finish.z + 0.1, material.roof_shape.y, vec2<f32>(pixel));
+        // On the sides, clear of the chart's edges; glazing leans no more than 30 degrees off the
+        // vertical.
+        var lo = vec2<f32>(-1.0e9);
+        var hi = vec2<f32>(1.0e9);
+        if (c.kind == RECT) {
+            lo = c.bounds.xz + WINDOW_MARGIN_M;
+            hi = c.bounds.yw - WINDOW_MARGIN_M;
+        } else if (c.kind == BAND) {
+            lo.y = c.bounds.z + WINDOW_MARGIN_M;
+            hi.y = c.bounds.w - WINDOW_MARGIN_M;
+        } else if (c.kind == DISC || c.kind == DOME) {
+            // The square inside the disc: a lying part's end, which is a side.
+            hi = vec2<f32>(0.7071 * c.bounds.x - WINDOW_MARGIN_M);
+            lo = -hi;
+        }
+        if (!c.end && abs(surface.z) <= 0.5) {
+            let clear = material.plate_finish.z + 0.1;
+            let pane = window(c.p, k.panel, c.id, material.deck, material.pane.xy, clear, lo, hi, material.roof_shape.y, c.around, vec2<f32>(pixel));
             if (pane.cover > 0.0) {
                 let fresnel = material.pane.z + (1.0 - material.pane.z) * pow(1.0 - max(dot(k.normal, e), 0.0), 5.0);
                 var glass = vec3<f32>(PLATE_SKY * fresnel);
@@ -740,21 +818,466 @@ fn habitat_light(in: VertexOutput, pixel: f32, lead: f32, lead_rate: f32, glow: 
                     glass += vec3<f32>(PI * glass_specular(k.normal, star, e, material.pane.w, material.pane.z));
                 }
                 let on = select(0.0, 1.0, pane.lit);
-                lamp = pane.cover * (1.0 - fresnel) * on * room(k.p, e, k.face, pane, material.deck, material.deck.w);
+                lamp = pane.cover * (1.0 - fresnel) * on * room(c.p, e, c.frame, c.id, pane, material.deck, material.deck.w);
                 lit = mix(lit, glass, pane.cover);
             }
         }
     }
 
     // The chamfer where the roof meets the sides: each side of the line leans 45 degrees toward it.
-    let dist = abs(lead) * pixel * 0.7071 / max(lead_rate, 1.0e-6);
-    let side = normalize(vec3<f32>(surface.xy, 0.0) + vec3<f32>(1.0e-6, 0.0, 0.0));
-    let along = select(SHIP_UP, side, lead > 0.0);
-    let toward = normalize(along - surface * dot(along, surface));
+    // On the roof, toward its chart's edge; on a side, toward the edge of its chart that lies up.
+    var dist = 1.0e6;
+    var out = vec2<f32>(0.0);
+    if (roofed) {
+        if (c.kind == RECT) {
+            let to_edge = vec4<f32>(c.p - c.bounds.xz, c.bounds.yw - c.p);
+            dist = min(min(to_edge.x, to_edge.y), min(to_edge.z, to_edge.w));
+            out = vec2<f32>(0.0, 1.0);
+            if (dist == to_edge.x) { out = vec2<f32>(-1.0, 0.0); }
+            else if (dist == to_edge.y) { out = vec2<f32>(0.0, -1.0); }
+            else if (dist == to_edge.z) { out = vec2<f32>(1.0, 0.0); }
+        } else if (c.kind == DISC || c.kind == DOME) {
+            dist = c.bounds.x - length(c.p);
+            out = c.p / max(length(c.p), 1.0e-4);
+        }
+    } else if (c.kind == RECT || c.kind == BAND) {
+        let up = dot(c.frame[1], SHIP_UP) >= 0.0;
+        dist = select(c.p.y - c.bounds.z, c.bounds.w - c.p.y, up);
+        out = vec2<f32>(0.0, select(-1.0, 1.0, up));
+    }
+    let toward = c.frame[0] * out.x + c.frame[1] * out.y;
     let half_width = 0.5 * material.roof.z;
     let share = (1.0 - smoothstep(half_width - pixel, half_width + pixel, dist)) * clamp(half_width / pixel, 0.0, 1.0);
     let bevel = metal_lit(normalize(surface + toward), star, e, lit_side, metal * (1.0 - material.plate_metal.y), metal_f0, vec3<f32>(1.0), material.plate_metal.x);
     return material.reflected.rgb * mix(lit, bevel, share) + glow * lamp * (1.0 - share);
+}
+
+fn racked(region: u32) -> bool {
+    return ((material.looks.x >> region) & 1u) != 0u;
+}
+
+fn tubed(region: u32) -> bool {
+    return ((material.looks.y >> region) & 1u) != 0u;
+}
+
+/// What a look sends toward the eye: `lit` in reflected's units, under the star, and `lamp`, what
+/// glows, in emitted's.
+struct Lit {
+    lit: vec3<f32>,
+    lamp: vec3<f32>,
+}
+
+const RACK_METALLIC: f32 = 0.3;
+const RACK_ROUGHNESS: f32 = 0.45;
+const RACK_GLASS_ROUGHNESS: f32 = 0.1;
+
+/// Painted metal of color `base` with normal `n`, in reflected's units.
+fn painted(n: vec3<f32>, star: vec3<f32>, e: vec3<f32>, lit_side: bool, base: vec3<f32>, metallic: f32, roughness: f32) -> vec3<f32> {
+    let luma = max(dot(base, LUMA), 1.0e-3);
+    let tint = mix(vec3<f32>(1.0), base / luma, metallic);
+    return metal_lit(n, star, e, lit_side, base * (1.0 - metallic), mix(0.04, luma, metallic), tint, roughness);
+}
+
+/// A normal in a chart's frame, tipped by up to `tilt` radians, uniform over that disc.
+fn tipped_by(id: u32, tilt: f32) -> vec3<f32> {
+    let r = tilt * sqrt(unit(pcg(id + 7u)));
+    let a = 2.0 * PI * unit(pcg(id + 11u));
+    return vec3<f32>(sin(r) * cos(a), sin(r) * sin(a), cos(r));
+}
+
+/// `pitch` made to fit `period` a whole number of times, and that number; unchanged, with no
+/// count, for no period.
+fn fitted(pitch: f32, period: f32) -> vec2<f32> {
+    if (period <= 0.0) {
+        return vec2<f32>(pitch, 0.0);
+    }
+    let n = max(round(period / pitch), 1.0);
+    return vec2<f32>(period / n, n);
+}
+
+/// `x` from the nearest multiple of `pitch`.
+fn offset(x: f32, pitch: f32) -> f32 {
+    return x - pitch * round(x / pitch);
+}
+
+/// How much of a pixel `pixel` wide at `off` from a line lies in a band `half` to each side of it.
+fn cover(off: f32, half: f32, pixel: f32) -> f32 {
+    return (1.0 - smoothstep(half - pixel, half + pixel, abs(off))) * clamp(2.0 * half / pixel, 0.0, 1.0);
+}
+
+/// A lean that fades to nothing where its band is narrower than a pixel.
+fn steady(lean: f32, half: f32, pixel: f32) -> f32 {
+    return lean * clamp(half / pixel - 0.5, 0.0, 1.0);
+}
+
+fn shade_of(id: u32) -> vec3<f32> {
+    return material.rack_paint.rgb * (1.0 + material.rack_paint.w * (2.0 * unit(pcg(id + 3u)) - 1.0));
+}
+
+/// A rack region's side: servers between posts, each wearing a glass face, a groove between each
+/// and the next; `periods` are u's and v's where they wrap. `dx` and `dy` are the chart's screen
+/// derivatives, taken outside any branch. `glow` is a lit face's.
+fn rack_side(p: vec2<f32>, seed: u32, periods: vec2<f32>, frame: mat3x3<f32>, star: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glow: vec3<f32>) -> Lit {
+    let surface = frame[2];
+    let lit_side = dot(star, surface) > 0.0;
+    let across = fitted(material.rack.x, periods.x);
+    let up = fitted(material.rack.y, periods.y);
+    let size = vec2<f32>(across.x, up.x);
+    let cell = floor(p / size);
+    let id = mix_hash(mix_hash(seed, around_index(cell.x, size.x, periods.x)), around_index(cell.y, size.y, periods.y));
+    let base = shade_of(id);
+    let n = normalize(frame * tipped_by(id, material.rack_lean.z));
+    var lit = painted(n, star, e, lit_side, base, RACK_METALLIC, RACK_ROUGHNESS);
+    var lamp = vec3<f32>(0.0);
+
+    if (textureNumLayers(rack_faces) > 1u) {
+        let face = material.rack_face.xy * size / material.rack.xy;
+        let local = p - cell * size - 0.5 * (size - face);
+        let uv = vec2<f32>(local.x, face.y - local.y) / face;
+        let flip = vec2<f32>(1.0, -1.0) / face;
+        let layer = i32(pcg(id + 13u) % u32(material.rack_face.z));
+        let texel = textureSampleGrad(rack_faces, rack_sampler, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), layer, dx * flip, dy * flip);
+        let inside = select(0.0, 1.0, all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0)));
+        let glass_cover = texel.r * inside;
+        let f0 = material.rack_glow.w;
+        let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, e), 0.0), 5.0);
+        var glass = vec3<f32>(PLATE_SKY * fresnel);
+        if (lit_side) {
+            glass += vec3<f32>(PI * glass_specular(n, star, e, RACK_GLASS_ROUGHNESS, f0));
+        }
+        let day = smoothstep(-0.05, 0.2, dot(star, surface));
+        lit = mix(lit, glass, glass_cover);
+        lamp = glow * texel.g * inside * mix(1.0, material.rack_face.w, day);
+    }
+
+    // Each wall faces away from the groove's floor: the one above it down, the one below it up.
+    let gy = offset(p.y, size.y);
+    let gh = 0.5 * material.rack.w;
+    let groove = normalize(frame * vec3<f32>(0.0, -sign(gy) * steady(material.rack_lean.y, gh, pixel.y), 1.0));
+    let groove_share = cover(gy, gh, pixel.y);
+    lit = mix(lit, painted(groove, star, e, lit_side, 0.35 * base, RACK_METALLIC, RACK_ROUGHNESS), groove_share);
+    // Rounded and standing proud, so a post's face leans out toward its edges.
+    let px = offset(p.x, size.x);
+    let ph = 0.5 * material.rack.z;
+    let post = normalize(frame * vec3<f32>(clamp(px / ph, -1.0, 1.0) * steady(material.rack_lean.x, ph, pixel.x), 0.0, 1.0));
+    let post_share = cover(px, ph, pixel.x);
+    lit = mix(lit, painted(post, star, e, lit_side, 1.3 * material.rack_paint.rgb, RACK_METALLIC, RACK_ROUGHNESS), post_share);
+    return Lit(lit, lamp * (1.0 - groove_share) * (1.0 - post_share));
+}
+
+const RING_M: f32 = 0.25;
+const RING_LEAN: f32 = 0.5;
+const HUB_SHARE: f32 = 0.22;
+const AISLE_WALL_M: f32 = 0.3;
+
+/// A rack region's end: rows of rack tops along u, each a fan in every rack's width, between
+/// sunken aisles.
+fn rack_hall(p: vec2<f32>, seed: u32, frame: mat3x3<f32>, star: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>) -> vec3<f32> {
+    let surface = frame[2];
+    let lit_side = dot(star, surface) > 0.0;
+    let rack = material.rack.x;
+    let depth = material.rack_hall.x;
+    let aisle = material.rack_hall.y;
+    let pitch = depth + aisle;
+    let row = floor(p.y / pitch);
+    let across = p.y - row * pitch;
+    let id = mix_hash(mix_hash(seed, u32(i32(row))), u32(i32(floor(p.x / rack))));
+    let base = shade_of(id);
+    let fine = max(pixel.x, pixel.y);
+
+    let middle = vec2<f32>((floor(p.x / rack) + 0.5) * rack, row * pitch + 0.5 * depth);
+    var top = painted(normalize(frame * tipped_by(id, material.rack_lean.z)), star, e, lit_side, base, RACK_METALLIC, RACK_ROUGHNESS);
+    let gx = offset(p.x, rack);
+    let gh = 0.5 * material.rack.w;
+    let groove = normalize(frame * vec3<f32>(-sign(gx) * steady(material.rack_lean.y, gh, pixel.x), 0.0, 1.0));
+    top = mix(top, painted(groove, star, e, lit_side, 0.35 * base, RACK_METALLIC, RACK_ROUGHNESS), cover(gx, gh, pixel.x));
+
+    // The fan: a dark grille of rings about a hub.
+    let radius = 0.5 * material.rack_hall.z;
+    let to_fan = p - middle;
+    let d = length(to_fan);
+    let outward = select(vec2<f32>(0.0), to_fan / d, d > 1.0e-4);
+    let ring = sin(2.0 * PI * d / RING_M) * steady(RING_LEAN, 0.25 * RING_M, fine);
+    let grille = normalize(frame * vec3<f32>(outward * ring, 1.0));
+    let hub = 1.0 - smoothstep(HUB_SHARE * radius - fine, HUB_SHARE * radius + fine, d);
+    let fan = mix(
+        painted(grille, star, e, lit_side, 0.3 * material.rack_paint.rgb, RACK_METALLIC, RACK_ROUGHNESS),
+        painted(surface, star, e, lit_side, 0.8 * base, RACK_METALLIC, RACK_ROUGHNESS),
+        hub,
+    );
+    top = mix(top, fan, 1.0 - smoothstep(radius - fine, radius + fine, d));
+
+    // The aisle is sunk, its walls facing into it from the rows either side.
+    let into = across - depth;
+    let wall_v = select(-1.0, 1.0, into < 0.5 * aisle);
+    let wall_share = 1.0 - smoothstep(AISLE_WALL_M - fine, AISLE_WALL_M + fine, min(into, aisle - into));
+    let floor_light = mix(
+        painted(surface, star, e, lit_side, 0.4 * material.rack_paint.rgb, RACK_METALLIC, RACK_ROUGHNESS),
+        painted(normalize(frame * vec3<f32>(0.0, wall_v, 1.0)), star, e, lit_side, 0.6 * material.rack_paint.rgb, RACK_METALLIC, RACK_ROUGHNESS),
+        wall_share,
+    );
+    let in_aisle = smoothstep(-pixel.y, pixel.y, into) * (1.0 - smoothstep(aisle - pixel.y, aisle + pixel.y, into));
+    return mix(top, floor_light, in_aisle);
+}
+
+/// What a rack region sends toward the eye: servers on the part's sides, a data hall on its ends,
+/// laid out in its chart as `seen`. `glow` is a lit face's, in emitted's units.
+fn racks_light(in: VertexOutput, seen: ChartView, part: HullChart, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glow: vec3<f32>) -> vec3<f32> {
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    // A lying part's two flanks, alike in kind, told apart by which way along it each runs.
+    let seed = mix_hash(part.id, bitcast<u32>(seen.bounds.x));
+    var periods = vec2<f32>(0.0);
+    if (seen.kind == BAND || seen.kind == RING) {
+        periods.x = seen.bounds.x;
+    }
+    if (seen.kind == RING) {
+        periods.y = seen.bounds.y;
+    }
+    if (seen.end) {
+        return material.reflected.rgb * rack_hall(seen.p, seed, seen.frame, star, e, pixel);
+    }
+    let side = rack_side(seen.p, seed, periods, seen.frame, star, e, pixel, dx, dy, glow);
+    return material.reflected.rgb * side.lit + side.lamp;
+}
+
+const GROOVE_M: f32 = 0.12;
+const GROOVE_LEAN: f32 = 1.0;
+const LIP_M: f32 = 0.12;
+const STRIPE_M: f32 = 0.3;
+const TAPE_RED: vec3<f32> = vec3<f32>(0.6, 0.03, 0.02);
+const TAPE_WHITE: vec3<f32> = vec3<f32>(0.7, 0.7, 0.68);
+const BLADES: f32 = 6.0;
+const BLADE_SWEEP: f32 = 0.35;
+const BLADE_LEAN: f32 = 0.3;
+const TUBE_RING_PITCH_M: f32 = 1.5;
+const GUIDE_M: f32 = 0.08;
+const NOSE_SHARE: f32 = 0.75;
+/// The guide lights' hue, of luminance 1, and a drone's eye's, each drawn at the region's lamp.
+const GUIDE_HUE: vec3<f32> = vec3<f32>(0.42, 0.97, 1.21);
+const EYE_HUE: vec3<f32> = vec3<f32>(3.6, 0.29, 0.14);
+/// How much brighter than a lit window a guide light and an eye are.
+const GUIDE_GAIN: f32 = 4.0;
+const TUBE_PAINT: vec3<f32> = vec3<f32>(0.3, 0.31, 0.33);
+const SWIRL_PITCH_M: f32 = 1.2;
+const SWIRL_M: f32 = 1.0;
+const STEEL: vec3<f32> = vec3<f32>(0.56, 0.57, 0.58);
+const BRUSH_EXPONENT: f32 = 90.0;
+
+/// Out from a hex's middle square to its nearest edge.
+fn edge_out(off: vec2<f32>) -> vec2<f32> {
+    let o = abs(off);
+    if (o.x >= dot(o, vec2<f32>(0.5, 0.8660254))) {
+        return vec2<f32>(sign(off.x), 0.0);
+    }
+    return vec2<f32>(0.5 * sign(off.x), 0.8660254 * sign(off.y));
+}
+
+/// A light `radius` across at `dist`, its energy kept as it spreads to a pixel's width.
+fn spot(dist: f32, radius: f32, pixel: f32) -> f32 {
+    let r = max(radius, pixel);
+    return (1.0 - smoothstep(0.6 * r, r, dist)) * (radius * radius) / (r * r);
+}
+
+/// Where the ray from `q` along `d` meets a circle of `radius` about the axis, leaving it from
+/// inside (`exit`) or entering it from outside. A huge `t` for a ray along the axis.
+fn circle(q: vec2<f32>, d: vec2<f32>, radius: f32, exit: bool) -> f32 {
+    let a = dot(d, d);
+    let b = 2.0 * dot(q, d);
+    let c = dot(q, q) - radius * radius;
+    let disc = b * b - 4.0 * a * c;
+    if (a < 1.0e-8 || disc < 0.0) {
+        return 1.0e9;
+    }
+    let root = sqrt(disc);
+    return select((-b - root) / (2.0 * a), (-b + root) / (2.0 * a), exit);
+}
+
+/// What the eye sees down an open tube from `q`, meters from its axis on the mouth, looking along
+/// `d`, in the chart's frame with z into it. `daylight` is what spills in at the mouth, in
+/// reflected's units, and `lamp` a guide light's, in emitted's.
+fn down_tube(q: vec2<f32>, d: vec3<f32>, loaded: bool, daylight: vec3<f32>, lamp: vec3<f32>, pixel: f32) -> Lit {
+    let r = material.tube_cell.y;
+    let depth = material.tube_depth.x;
+    var t = min(circle(q, d.xy, r, true), depth / d.z);
+    var what = 0;
+    let nose_r = NOSE_SHARE * r;
+    let nose_c = vec3<f32>(0.0, 0.0, material.tube_depth.y + nose_r);
+    if (loaded) {
+        let o = vec3<f32>(q, 0.0) - nose_c;
+        let b = dot(o, d);
+        let disc = b * b - dot(d, d) * (dot(o, o) - nose_r * nose_r);
+        if (disc > 0.0) {
+            let tn = (-b - sqrt(disc)) / dot(d, d);
+            if (tn > 0.0 && tn < t && d.z * tn <= nose_c.z) {
+                t = tn;
+                what = 1;
+            }
+        }
+        let tb = circle(q, d.xy, nose_r, false);
+        if (tb > 0.0 && tb < t && d.z * tb > nose_c.z) {
+            t = tb;
+            what = 2;
+        }
+    }
+    let hit = vec3<f32>(q + d.xy * t, d.z * t);
+    let spill = daylight * exp(-hit.z / r);
+    // The guide lights' own glow on what is around them, in emitted's units.
+    let fill = lamp * 0.012;
+    if (what == 1) {
+        let n = normalize(hit - nose_c);
+        let base = vec3<f32>(0.75, 0.7, 0.6);
+        let eye = spot(length(hit.xy), 0.2 * nose_r, pixel);
+        return Lit(base * spill * max(-n.z, 0.0), base * 6.0 * fill + EYE_HUE * dot(lamp, LUMA) * eye);
+    }
+    if (what == 2) {
+        return Lit(vec3<f32>(0.12) * spill * 0.3, vec3<f32>(0.12) * fill);
+    }
+    if (hit.z >= depth - 1.0e-3) {
+        let ring = 1.0 - smoothstep(0.04, 0.08, abs(length(hit.xy) - 0.6 * r));
+        return Lit(vec3<f32>(0.06) * spill, vec3<f32>(0.06) * fill + 0.3 * lamp * ring * exp(-depth / (4.0 * r)));
+    }
+    let banded = select(1.0, 0.4, fract(hit.z / TUBE_RING_PITCH_M) < 0.08);
+    let phi = atan2(hit.y, hit.x);
+    let column = PI / 3.0;
+    let k = round((phi - 0.5 * column) / column);
+    let arc = (phi - (k + 0.5) * column) * r;
+    let pitch = material.tube_guide.x;
+    let along = hit.z - (floor(hit.z / pitch) + 0.5) * pitch;
+    let dist = length(vec2<f32>(arc, along));
+    return Lit(vec3<f32>(0.22) * banded * spill, vec3<f32>(0.22) * banded * fill + lamp * (spot(dist, GUIDE_M, pixel) + 0.025 * exp(-dist / 0.25)));
+}
+
+/// Buffed steel, in reflected's units: each point brushed about the middle of the latest swirl over
+/// it, so the star's highlight runs in arcs across the swirls; where a swirl is under a few pixels,
+/// plain steel.
+fn buffed(p: vec2<f32>, frame: mat3x3<f32>, star: vec3<f32>, e: vec3<f32>, pixel: f32) -> vec3<f32> {
+    let surface = frame[2];
+    let g = p / SWIRL_PITCH_M;
+    var middle = vec2<f32>(0.0);
+    var best = -1.0e9;
+    for (var dr = -1; dr <= 1; dr++) {
+        let row = floor(g.y) + f32(dr);
+        let shift = 0.5 * (row - 2.0 * floor(0.5 * row));
+        for (var dc = -1; dc <= 1; dc++) {
+            let col = floor(g.x - shift) + f32(dc);
+            let c = vec2<f32>(col + shift + 0.5, row + 0.5) * SWIRL_PITCH_M;
+            let order = row * 4096.0 + col;
+            if (distance(p, c) < SWIRL_M && order > best) {
+                best = order;
+                middle = c;
+            }
+        }
+    }
+    let off = p - middle;
+    let tangential = select(vec2<f32>(1.0, 0.0), vec2<f32>(-off.y, off.x) / length(off), length(off) > 1.0e-4);
+    let brush = normalize(frame * vec3<f32>(tangential, 0.0));
+    let anisotropic = 1.0 - smoothstep(0.1, 0.5, pixel / SWIRL_PITCH_M);
+    let fresnel = STEEL + (1.0 - STEEL) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
+    var light = PLATE_SKY * fresnel * (0.3 + 0.7 * max(dot(reflect(-e, surface), star), 0.0)) + STEEL * 0.03 * material.to_star.w;
+    if (dot(star, surface) > 0.0) {
+        let ndl = max(dot(surface, star), 0.0);
+        let h = normalize(star + e);
+        let along = dot(brush, h);
+        let streak = pow(max(1.0 - along * along, 0.0), 0.5 * BRUSH_EXPONENT) * (BRUSH_EXPONENT + 2.0) / (8.0 * PI);
+        let even = PI * glass_specular(surface, star, e, 0.4, dot(STEEL, LUMA)) + 0.06 * dot(fresnel, LUMA) * ndl;
+        light += mix(vec3<f32>(even), fresnel * streak * ndl * 0.25 * PI, anisotropic) + 0.03 * STEEL * ndl;
+    }
+    return light;
+}
+
+/// What a hive region sends toward the eye: hexagonal cells laid out in the part's chart, two
+/// apothems clear of its edges, the margin buffed steel, each cell a launch tube under an iris and
+/// ringed in danger tape, an open tube traced down to a drone's nose or its empty floor. `lamp` is
+/// a guide light's, in emitted's units.
+fn tubes_light(in: VertexOutput, c: HullChart, pixel: f32, lamp_color: vec3<f32>) -> vec3<f32> {
+    let star = normalize(in.star_ship);
+    let e = normalize(in.eye_ship - in.ship_position);
+    let surface = c.frame[2];
+    let lit_side = dot(star, surface) > 0.0;
+    let lamp = GUIDE_HUE * dot(lamp_color, LUMA) * GUIDE_GAIN;
+    let p = in.chart.xy;
+    let bounds = in.bounds;
+    let kind = u32(round(in.chart.z));
+
+    var w = material.tube_cell.x;
+    var around = 1;
+    if (kind == BAND || kind == RING) {
+        around = max(i32(round(bounds.x / w)), 1);
+        w = bounds.x / f32(around);
+    }
+    var squash = 1.0;
+    if (kind == RING) {
+        squash = bounds.y / (1.7320508 * w * max(round(bounds.y / (1.7320508 * w)), 1.0));
+    }
+    let h = hex(vec2<f32>(p.x, p.y / squash), w);
+    let off = vec2<f32>(h.x, h.y * squash);
+    let center = p - off;
+    var kept = true;
+    if (kind == RECT) {
+        kept = all(center >= bounds.xz + vec2<f32>(w)) && all(center <= bounds.yw - vec2<f32>(w));
+    } else if (kind == DISC || kind == DOME) {
+        kept = length(center) <= bounds.x - w;
+    } else if (kind == BAND) {
+        kept = center.y >= bounds.z + w && center.y <= bounds.w - w;
+    }
+    if (!kept) {
+        return material.reflected.rgb * buffed(p, c.frame, star, e, pixel);
+    }
+
+    let column = around_index(round(2.0 * center.x / w), 0.5 * w, select(0.0, bounds.x, kind == BAND || kind == RING));
+    let id = mix_hash(mix_hash(c.id, column), u32(i32(round(center.y * 4.0))));
+    let base = TUBE_PAINT * mix(0.92, 1.08, unit(pcg(id + 3u)));
+    var light = painted(surface, star, e, lit_side, base, RACK_METALLIC, RACK_ROUGHNESS);
+    var glowing = vec3<f32>(0.0);
+
+    let groove_half = 0.5 * GROOVE_M;
+    let groove_share = (1.0 - smoothstep(groove_half - pixel, groove_half + pixel, h.z)) * clamp(GROOVE_M / pixel, 0.0, 1.0);
+    let groove_n = normalize(c.frame * vec3<f32>(edge_out(off) * steady(GROOVE_LEAN, groove_half, pixel), 1.0));
+    light = mix(light, painted(groove_n, star, e, lit_side, 0.35 * base, RACK_METALLIC, RACK_ROUGHNESS), groove_share);
+
+    let r = material.tube_cell.y;
+    let tape = material.tube_cell.z;
+    let d = length(off);
+    if (d < r + tape + pixel) {
+        let radial = select(vec2<f32>(1.0, 0.0), off / d, d > 1.0e-4);
+        let phi = atan2(off.y, off.x);
+        let s = (phi * (r + 0.5 * tape) + (d - r)) / STRIPE_M;
+        let stripe_aa = 2.0 * pixel / STRIPE_M;
+        let white = smoothstep(0.5 - stripe_aa, 0.5 + stripe_aa, abs(fract(0.5 * s) * 2.0 - 1.0));
+        let lip = clamp(1.0 - (d - r) / LIP_M, 0.0, 1.0);
+        let tape_n = normalize(c.frame * vec3<f32>(-radial * lip * steady(1.2, 0.5 * LIP_M, pixel), 1.0));
+        // Fading into the plate as the tape narrows under a pixel, so a far hive is gray, not pink.
+        let stripes = mix(mix(TAPE_RED, TAPE_WHITE, white), base, smoothstep(0.25 * tape, tape, pixel));
+        let tape_light = painted(tape_n, star, e, lit_side, stripes, 0.0, 0.6);
+        light = mix(light, tape_light, 1.0 - smoothstep(r + tape - pixel, r + tape + pixel, d));
+
+        if (d < r + pixel) {
+            let state = unit(pcg(id + 5u));
+            let open = material.tube_depth.z;
+            let aperture = select(select(0.0, 0.5 * r, state < open + 0.12), 0.97 * r, state < open);
+            let b = BLADES * fract(phi / (2.0 * PI) + BLADE_SWEEP * (r - d) / r);
+            let t_b = fract(b);
+            let seam_aa = BLADES * pixel / (2.0 * PI * max(d, 0.1)) * 2.0;
+            let seam = smoothstep(0.0, seam_aa + 0.02, t_b) * smoothstep(0.0, seam_aa + 0.02, 1.0 - t_b);
+            let tangent = vec2<f32>(-radial.y, radial.x);
+            let blade_n = normalize(c.frame * vec3<f32>(tangent * (t_b - 0.5) * steady(BLADE_LEAN, 0.25 * r, pixel), 1.0));
+            let blades = painted(blade_n, star, e, lit_side, vec3<f32>(0.24) * mix(0.3, 1.0, seam), RACK_METALLIC, RACK_ROUGHNESS);
+            let in_mouth = 1.0 - smoothstep(r - pixel, r + pixel, d);
+            light = mix(light, blades, in_mouth);
+
+            if (d < aperture + pixel) {
+                let loaded = unit(pcg(id + 9u)) < material.tube_depth.w;
+                let into = vec3<f32>(-dot(e, c.frame[0]), -dot(e, c.frame[1]), max(dot(e, surface), 1.0e-3));
+                let daylight = vec3<f32>(PI * 0.2 * max(dot(star, surface), 0.0) + material.to_star.w);
+                let inside = down_tube(off, into, loaded, daylight, lamp, pixel);
+                let open_share = 1.0 - smoothstep(aperture - pixel, aperture + pixel, d);
+                light = mix(light, inside.lit, open_share);
+                glowing = inside.lamp * open_share;
+            }
+        }
+    }
+    return material.reflected.rgb * light + glowing;
 }
 
 @fragment
@@ -766,24 +1289,30 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let near = triplanar(in.ship_position, w, near_layer);
     let far = triplanar(in.ship_position, w, far_layer);
     // Before any discard: these take derivatives.
-    let bolt = bolt_cover(in.seam);
     let pixel = pixel_m(in.ship_position);
     // Taken here, outside any branch, for the habitat's rim chamfer.
     let up_normal = normalize(in.ship_normal);
-    let roof_lead = up_normal.z - max(abs(up_normal.x), abs(up_normal.y));
-    let roof_lead_rate = length(vec2<f32>(dpdx(roof_lead), dpdy(roof_lead)));
-    let pipe_face = panel_face(up_normal, SHIP_UP);
-    let pipe_uv = vec2<f32>(dot(in.ship_position, pipe_face.u), dot(in.ship_position, pipe_face.v)) / material.pipes.z;
+    let chart = hull_chart(in, up_normal);
+    // Racks see a lying part's band as a hall along its top and flanks below.
+    let seen = chart_view(in.chart, in.bounds, chart.frame);
+    let seen_pixel = max(fwidth(seen.p), vec2<f32>(1.0e-4));
+    let seen_dx = dpdx(seen.p);
+    let seen_dy = dpdy(seen.p);
+    // The sprue in the part's chart, a whole number of tiles around a wrap, each chart starting its
+    // tiles somewhere else; a rectangle, all of one direction, told apart by which way its u runs,
+    // as a cube's faces are alike in extent.
+    let pipe_tiles_fit = pipe_tiling(material.pipes.z, chart.kind, in.bounds);
+    let pipe_frame = chart.frame;
+    let facing = select(0.0, round(dot(chart.frame[0], vec3<f32>(1.0, 3.0, 9.0))), chart.kind == RECT);
+    let pipe_id = f32(chart.kind) * 31.0 + in.chart.w * 7.0 + facing;
+    let pipe_p = in.chart.xy + tile_start(pipe_id) * pipe_tiles_fit.size;
+    let pipe_uv = pipe_p / pipe_tiles_fit.size;
     let pipe_dx = dpdx(pipe_uv);
     let pipe_dy = dpdy(pipe_uv);
     let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
     let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
     var albedo = mix(near.albedo, far.albedo, t);
-    let side = select(max(pair.first, pair.second), min(pair.first, pair.second), in.seam.x > 0.0);
-    if (((material.bolted >> side) & 1u) != 0u) {
-        albedo = mix(albedo, vec3<f32>(material.bolts.w), bolt);
-    }
     var emitted = mix(
         near.lit * light_of(pair.first, near_layer, in),
         far.lit * light_of(pair.second, far_layer, in),
@@ -799,7 +1328,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (home > 0.0) {
         let living = select(pair.second, pair.first, habitable(pair.first));
         albedo *= 1.0 - home;
-        emitted = emitted * (1.0 - home) + home * habitat_light(in, pixel, roof_lead, roof_lead_rate, material.emitted[living].rgb);
+        emitted = emitted * (1.0 - home) + home * habitat_light(in, chart, pixel, material.emitted[living].rgb);
     }
     let thrust_share = select(0.0, 1.0 - t, thrusting(pair.first, near_layer)) + select(0.0, t, thrusting(pair.second, far_layer));
     if (thrust_share > 0.0) {
@@ -811,12 +1340,25 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (pipe_share > 0.0 && textureNumLayers(pipe_tiles) >= PIPE_LAYERS) {
         let flank = select(far_layer, near_layer, piped(near_layer));
         albedo *= 1.0 - pipe_share;
-        emitted = emitted * (1.0 - pipe_share) + pipe_share * pipe_lit(in, pipe_dx, pipe_dy, material.emitted[flank].rgb);
+        emitted = emitted * (1.0 - pipe_share) + pipe_share * pipe_lit(in, pipe_p, pipe_tiles_fit, pipe_id, pipe_frame, pipe_dx, pipe_dy, material.emitted[flank].rgb);
+    }
+    let rack_share = select(0.0, 1.0 - t, racked(pair.first)) + select(0.0, t, racked(pair.second));
+    if (rack_share > 0.0) {
+        let data = select(pair.second, pair.first, racked(pair.first));
+        let glow = material.rack_glow.rgb * dot(material.emitted[data].rgb, LUMA);
+        albedo *= 1.0 - rack_share;
+        emitted = emitted * (1.0 - rack_share) + rack_share * racks_light(in, seen, chart, seen_pixel, seen_dx, seen_dy, glow);
+    }
+    let tube_share = select(0.0, 1.0 - t, tubed(pair.first)) + select(0.0, t, tubed(pair.second));
+    if (tube_share > 0.0) {
+        let drone = select(pair.second, pair.first, tubed(pair.first));
+        albedo *= 1.0 - tube_share;
+        emitted = emitted * (1.0 - tube_share) + tube_share * tubes_light(in, chart, pixel, material.emitted[drone].rgb);
     }
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {
         albedo *= 1.0 - plate_share;
-        emitted += plate_share * plate_light(in, pixel);
+        emitted += plate_share * plate_light(in, chart, pixel);
     }
     if (material.reveal.w >= ALL_PLATED) {
         return shade(albedo, emitted, in.world_normal);

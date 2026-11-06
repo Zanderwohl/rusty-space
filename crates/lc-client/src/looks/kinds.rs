@@ -8,7 +8,8 @@ use lc_world::form::Kind;
 
 use super::aztec::{Aztec, Roof, Windows};
 use super::obsidian::Obsidian;
-use super::outline::{LivingRoof, outline_hull_roofs};
+use super::racks::{HullRacks, Racks};
+use super::tubes::Tubes;
 use super::sprue::{HEIGHTS, Sprue, TILE_M};
 use crate::hull_mesh::{ENGINE_FLANK, region};
 
@@ -19,15 +20,44 @@ const THRUSTER_DEPTH_M: f32 = 2.0;
 /// Ionized xenon's blue, linear: a cell's color at its walls.
 const XENON: Vec3 = Vec3::new(0.08, 0.3, 1.0);
 
-/// Outlines a hull's habitat roof once its mesh lands, which a hull asks for with [`living_roof`],
-/// and bakes the engine flanks' sprue once, handing it to every hull material.
+/// Bakes the engine flanks' sprue and the racks' faces once, handing them to every hull material.
 pub struct HullLooksPlugin;
 
 impl Plugin for HullLooksPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pipes>()
-            .add_systems(Startup, bake_pipes)
-            .add_systems(PostUpdate, (outline_hull_roofs, fit_pipes));
+            .init_resource::<RackFaces>()
+            .add_systems(Startup, (bake_pipes, bake_rack_faces))
+            .add_systems(PostUpdate, (fit_pipes, fit_rack_faces));
+    }
+}
+
+/// The racks' faces, baked on the async pool, so no frame waits on them.
+#[derive(Resource, Default)]
+struct RackFaces {
+    baking: Option<Task<Image>>,
+    ready: Option<Handle<Image>>,
+}
+
+fn bake_rack_faces(mut faces: ResMut<RackFaces>) {
+    faces.baking = Some(AsyncComputeTaskPool::get().spawn(async { super::racks::faces::bake() }));
+}
+
+/// Hands the racks' faces to each hull material that lacks them, once they are baked.
+fn fit_rack_faces(mut faces: ResMut<RackFaces>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<HullMaterial>>) {
+    if let Some(task) = faces.baking.as_mut()
+        && let Some(image) = check_ready(task)
+    {
+        faces.baking = None;
+        faces.ready = Some(images.add(image));
+    }
+    let Some(baked) = faces.ready.clone() else { return };
+    let lacking: Vec<AssetId<HullMaterial>> =
+        materials.iter().filter(|(_, m)| m.rack_faces.is_none()).map(|(id, _)| id).collect();
+    for id in lacking {
+        if let Some(mut material) = materials.get_mut(id) {
+            material.rack_faces = Some(baked.clone());
+        }
     }
 }
 
@@ -61,14 +91,12 @@ fn fit_pipes(mut pipes: ResMut<Pipes>, mut images: ResMut<Assets<Image>>, mut ma
     }
 }
 
-/// What a hull entity carries so its Living roof is walled in under its rim.
-pub fn living_roof() -> LivingRoof {
-    LivingRoof(region(Kind::Living))
-}
-
-/// `uniform` with the Mind knapped in obsidian, Storage in azteced plate, Living a habitat, an
-/// engine's flanks a layered sprue and its open faces an ion thruster's grid over glowing cells.
+/// `uniform` with the Mind knapped in obsidian, Storage in azteced plate, Living a habitat, Data
+/// server racks, Drone a hive of launch tubes, an engine's flanks a layered sprue and its open
+/// faces an ion thruster's grid over glowing cells.
 pub fn wear(uniform: HullUniform) -> HullUniform {
+    let HullRacks { rack, lean, hall, face, paint, glow } = Racks::default().hull_racks();
+    let (tube_cell, tube_depth, tube_guide) = Tubes::default().hull_tubes();
     let (glass, glass_finish) = Obsidian::default().hull_glass();
     let (plates, plate_finish, plate_metal) = Aztec::default().hull_plates();
     let (windows, roof) = (Windows::default(), Roof::default());
@@ -90,6 +118,16 @@ pub fn wear(uniform: HullUniform) -> HullUniform {
         pipes: Vec4::new(HEIGHTS.x, HEIGHTS.y, TILE_M, 0.0),
         thruster: Vec4::new(THRUSTER_GRID_M, THRUSTER_BAR_M, THRUSTER_CELL_M, THRUSTER_DEPTH_M),
         thruster_glow: XENON.extend(0.0),
+        looks: UVec4::new(1 << region(Kind::Data), 1 << region(Kind::Drone), 0, 0),
+        rack,
+        rack_lean: lean,
+        rack_hall: hall,
+        rack_face: face,
+        rack_paint: paint,
+        rack_glow: glow,
+        tube_cell,
+        tube_depth,
+        tube_guide,
         ..uniform
     }
 }

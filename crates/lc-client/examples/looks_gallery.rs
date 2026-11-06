@@ -1,6 +1,11 @@
-//! Every one of [`lc_client::looks`] on boxes of several sizes, with the camera circling each box
-//! in turn and gliding on to the next, forever, while the star turns on its own period: a
-//! screensaver that shows each look at every angle of light and view.
+//! Two ships wearing every look, then every one of [`lc_client::looks`] on boxes of several sizes,
+//! with the camera circling each in turn and gliding on to the next, turning to face it as it
+//! leaves, forever, while the star turns on its own period: a screensaver that shows each look at
+//! every angle of light and view.
+//!
+//! The ships are the starting form and A Frank Exchange of Views, a player's ship copied off the
+//! dev shard into `assets/forms`. They wear the game's hull material, which takes no star spin, so
+//! their star holds still where the boxes' was at the start.
 //!
 //! ```text
 //! cargo run -p lc-client --example looks_gallery
@@ -17,10 +22,10 @@
 //! | `--fullscreen` | borderless, on the current monitor |
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
 //!
-//! The right and left arrows cut to the next box or the one before, the next look at the same
-//! size, the next size's first, or the ovoid, keeping the camera's angle and the loop's clock. Escape quits.
+//! The right and left arrows cut to the next station or the one before, keeping the camera's angle and the loop's clock. Escape quits.
 
-use std::f32::consts::TAU;
+use std::f32::consts::{FRAC_PI_2, TAU};
+use std::sync::Arc;
 
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -28,14 +33,39 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
+use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS};
+use em_render::body_surface_material::BodySurfaceMaterial;
+use em_render::population_material::PopulationMaterial;
+use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
+use lc_client::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, HullSource, REGION_GRAPHS, region};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
+use lc_client::procedural::ProceduralTexturesPlugin;
+use lc_client::ship_hull::{HullPalettePlugin, Palette, request_palette};
+use lc_client::tonemap::ToneMap;
+use lc_world::fitting::Balance;
+use lc_world::form::place::{Pose, Side};
+use lc_world::form::primitive::Shape;
+use lc_world::form::sdf::{Piece, Sdf};
+use lc_world::form::{Form, Kind, PartId};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
-use lc_client::looks::outline::RoofOutline;
+use lc_client::looks::racks::{Racks, RacksMaterial};
+use lc_client::looks::tubes::{Tubes, TubesMaterial};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
 
 /// How far off a box the camera circles, in its edges.
 const STANDOFF: f32 = 2.2;
+/// The share of a glide the camera takes to turn from the box it leaves to the one it heads for.
+const TURN: f32 = 0.2;
+/// `mesh_void`'s hull exposure and lamps, which are placed for a lit albedo of 0.3.
+const LIT_WINDOW: f32 = 0.0075;
+const LIT_HULL: f32 = 0.3;
+const HULL_STOPS: f32 = -1.5;
+/// The hull graphs' unit square, meters.
+const TILE_M: f32 = 64.0;
+
+const FRANK: &str = include_str!("../assets/forms/a-frank-exchange-of-views.ron");
 
 struct Args {
     sizes: Vec<f32>,
@@ -82,7 +112,14 @@ struct Setup(Args);
 #[derive(Resource)]
 struct Stations(Vec<(Vec3, f32)>);
 
-/// Boxes the arrows have moved the loop on by.
+/// The ships' forms and where each stands, meshed once the hull palette lands.
+#[derive(Resource)]
+struct Ships {
+    waiting: Vec<(Form, Vec3)>,
+    to_star: Vec3,
+}
+
+/// Stations the arrows have moved the loop on by.
 #[derive(Resource, Default)]
 struct Skipped(i64);
 
@@ -106,12 +143,15 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(LooksPlugin)
+        .init_asset::<PopulationMaterial>()
+        .init_asset::<BodySurfaceMaterial>()
+        .init_asset::<RelativisticStarfieldMaterial>()
+        .add_plugins((LooksPlugin, ProceduralTexturesPlugin, HullMaterialPlugin, HullMeshPlugin, HullLooksPlugin, HullPalettePlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Setup(args))
         .init_resource::<Skipped>()
-        .add_systems(Startup, spawn)
-        .add_systems(Update, (skip, orbit, photograph).chain())
+        .add_systems(Startup, (spawn, request_palette))
+        .add_systems(Update, ((skip, orbit, photograph).chain(), spawn_ships))
         .run();
 }
 
@@ -119,10 +159,11 @@ fn spawn(
     mut commands: Commands,
     setup: Res<Setup>,
     mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
     mut aztecs: ResMut<Assets<AztecMaterial>>,
     mut obsidians: ResMut<Assets<ObsidianMaterial>>,
+    mut racks: ResMut<Assets<RacksMaterial>>,
+    mut tubes: ResMut<Assets<TubesMaterial>>,
 ) {
     let args = &setup.0;
     let to_star = direction(25.0, -60.0);
@@ -130,14 +171,36 @@ fn spawn(
 
     let sprue = Sprue { to_star, star_spin, ..default() };
     let sprue_layers = sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m));
-    let aztec = aztecs.add(Aztec { to_star, star_spin, unit_box: true, ..default() }.material());
-    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), unit_box: true, ..default() }.material());
-    let mut habitat = |unit_box| aztecs.add(Aztec { to_star, star_spin, unit_box, ..Aztec::habitat() }.material());
-    let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
+    let aztec = aztecs.add(Aztec { to_star, star_spin, ..default() }.material());
+    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), ..default() }.material());
+    let habitat = aztecs.add(Aztec { to_star, star_spin, ..Aztec::habitat() }.material());
     let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
+    let rack = racks.add(Racks { to_star, star_spin, ..default() }.material(&mut images));
+    let tube = tubes.add(Tubes { to_star, star_spin, ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
+    // Before the first column, the first ship farthest, so the second glides on to the boxes.
+    let ships: Vec<(Form, f32)> = [Form::starting(), frank()]
+        .into_iter()
+        .map(|form| {
+            let (lo, hi) = Sdf::new(&form, &Balance::DEFAULT).expect("the ships are valid forms").bounds();
+            // A box's edge from its diagonal, so a ship is framed as a box its size would be.
+            let size = (hi - lo).length() as f32 / 3f32.sqrt();
+            (form, size)
+        })
+        .collect();
+    let mut ship_x = vec![0.0; ships.len()];
+    let (mut x, mut beside) = (0.0, args.sizes.first().copied().unwrap_or(0.0));
+    for (k, (_, size)) in ships.iter().enumerate().rev() {
+        x -= 2.0 * STANDOFF * (beside + size);
+        ship_x[k] = x;
+        beside = *size;
+    }
+    let mut stations: Vec<(Vec3, f32)> = ships.iter().zip(&ship_x).map(|((_, size), &x)| (Vec3::new(x, 0.0, 0.0), *size)).collect();
+    commands.insert_resource(Ships { waiting: ships.into_iter().zip(&stations).map(|((form, _), s)| (form, s.0)).collect(), to_star });
+    let leftmost = ship_x.first().copied().unwrap_or(0.0);
+
     let mut columns = Vec::new();
     let mut x = 0.0;
     for (i, &size) in args.sizes.iter().enumerate() {
@@ -146,31 +209,38 @@ fn spawn(
         }
         columns.push(x);
     }
-    let rows = [0.0, 1.0, 2.0, 3.0, 4.0].map(|row| row * 3.0 * STANDOFF * largest);
-    let mut stations = Vec::new();
+    let rows = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0].map(|row| row * 3.0 * STANDOFF * largest);
+    // A box as a part, meshed, so it carries the charts a look is laid out in; its z, which its
+    // sides' charts run up, stood along Bevy's y.
+    let boxed = |edge: f32, kind: Kind| {
+        let shape = Shape::Slab { edges: glam::DVec3::splat(edge as f64), corner: 0.0 };
+        let piece = Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose::IDENTITY };
+        HullForm { source: HullSource::Pieces(Arc::from([piece])), cells: Some(32) }
+    };
+    let standing = Quat::from_rotation_x(-FRAC_PI_2);
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
             let center = Vec3::new(x, 0.0, z);
             if look == 0 {
                 for (k, layer) in sprue_layers.iter().enumerate() {
-                    let edge = size + 2.0 * Sprue::lift(k);
                     commands.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))),
+                        boxed(size + 2.0 * Sprue::lift(k), Kind::Engine),
                         MeshMaterial3d(layer.clone()),
-                        Transform::from_translation(center),
+                        Transform::from_translation(center).with_rotation(standing),
                     ));
                 }
             } else if look == 4 {
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(size, size, size))),
-                    MeshMaterial3d(obsidian.clone()),
-                    Transform::from_translation(center),
-                ));
+                commands.spawn((boxed(size, Kind::Mind), MeshMaterial3d(obsidian.clone()), Transform::from_translation(center).with_rotation(standing)));
+            } else if look == 5 {
+                commands.spawn((boxed(size, Kind::Data), MeshMaterial3d(rack.clone()), Transform::from_translation(center).with_rotation(standing)));
+            } else if look == 6 {
+                commands.spawn((boxed(size, Kind::Drone), MeshMaterial3d(tube.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else {
+                let kind = [Kind::Storage, Kind::Living, Kind::Living][look - 1];
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-                    MeshMaterial3d([&aztec, &offices, &habitat_box][look - 1].clone()),
-                    Transform::from_translation(center).with_scale(Vec3::splat(size)),
+                    boxed(size, kind),
+                    MeshMaterial3d([&aztec, &offices, &habitat][look - 1].clone()),
+                    Transform::from_translation(center).with_rotation(standing),
                 ));
             }
             stations.push((center, size));
@@ -178,12 +248,15 @@ fn spawn(
     }
     // Past the last column, in the middle of the rows, its long axis along x.
     let length = args.ovoid;
-    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[4]);
+    let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[6]);
+    // Long along x, short along its z, which stands along Bevy's y: its caps go about the axis
+    // that runs most up, so the top one is the roof.
+    let semi_axes = glam::DVec3::new(0.5, 0.25, 0.1) * length as f64;
+    let ovoid = Piece { part: PartId(0), side: Side::Original, kind: Kind::Living, shape: Shape::Ellipsoid { semi_axes }, pose: Pose::IDENTITY };
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
-        MeshMaterial3d(habitat_ovoid),
-        RoofOutline,
-        Transform::from_translation(ovoid_at).with_scale(Vec3::new(0.5, 0.1, 0.25) * length),
+        HullForm { source: HullSource::Pieces(Arc::from([ovoid])), cells: Some(128) },
+        MeshMaterial3d(habitat),
+        Transform::from_translation(ovoid_at).with_rotation(standing),
     ));
     stations.push((ovoid_at, 0.6 * length));
     commands.insert_resource(Stations(stations));
@@ -193,13 +266,74 @@ fn spawn(
         Projection::Perspective(PerspectiveProjection {
             fov: 40f32.to_radians(),
             near: 0.1,
-            far: 10.0 * (ovoid_at.x + rows[4] + length),
+            far: 10.0 * (ovoid_at.x - leftmost + rows[6] + length),
             ..default()
         }),
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
     ));
+}
+
+fn frank() -> Form {
+    let preset: lc_proto::Preset = ron::from_str(FRANK).expect("assets/forms holds a preset");
+    Form::from(&preset.form)
+}
+
+/// The ships, under the game's hull material, once its palette has baked.
+fn spawn_ships(
+    mut commands: Commands,
+    mut ships: ResMut<Ships>,
+    palette: Res<Palette>,
+    mut materials: ResMut<Assets<HullMaterial>>,
+) {
+    if ships.waiting.is_empty() {
+        return;
+    }
+    let Some((albedo, lights)) = palette.ready() else { return };
+    let mut emitted = [Vec4::ZERO; REGIONS];
+    for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
+        *slot = match kind {
+            "drone" => LIT_WINDOW * Vec3::new(0.85, 0.92, 1.0),
+            // As the game's: twenty times a window, drawn in the racks' own green.
+            "data" => 20.0 * LIT_WINDOW * Vec3::ONE,
+            "living" => LIT_WINDOW * Vec3::new(1.0, 0.8, 0.55),
+            "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
+            "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
+            "bay" => LIT_WINDOW * Vec3::new(1.0, 0.92, 0.8),
+            "engine_flank" => LIT_WINDOW * Vec3::new(1.0, 0.72, 0.2),
+            _ => Vec3::ZERO,
+        }
+        .extend(0.0);
+    }
+    let material = materials.add(HullMaterial {
+        uniforms: wear(HullUniform {
+            // Enough fill to see an unlit side against the black.
+            to_star: ships.to_star.extend(0.08),
+            exposure: Vec4::new(LIT_HULL * 2f32.powf(-HULL_STOPS), ToneMap::default().surface_stops, 0.0, 0.0),
+            detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
+            emitted,
+            open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
+            faces: [(8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0)).extend(0.0); FACES],
+            ..default()
+        }),
+        albedo,
+        lights,
+        pipe_tiles: None,
+        pipe_light: None,
+        rack_faces: None,
+    });
+    // From the ship's frame, z up, to Bevy's, y up.
+    let ship_to_world = Quat::from_rotation_x(-FRAC_PI_2);
+    for (form, at) in ships.waiting.drain(..) {
+        let (lo, hi) = Sdf::new(&form, &Balance::DEFAULT).expect("checked at startup").bounds();
+        let center = ((lo + hi) / 2.0).as_vec3();
+        commands.spawn((
+            HullForm::form(form, Balance::DEFAULT),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(at - ship_to_world * center).with_rotation(ship_to_world),
+        ));
+    }
 }
 
 fn skip(keys: Res<ButtonInput<KeyCode>>, mut skipped: ResMut<Skipped>, mut exit: MessageWriter<AppExit>) {
@@ -238,8 +372,13 @@ fn orbit(
     // Off a whole number of turns, so the pitch's swing does not line up with the stations.
     let pitch = (15.0 + 30.0 * (TAU * t / (2.7 * segment)).sin()).to_radians();
     let eye = target + dist * Vec3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos());
+    // Looking at `target` mid-glide is looking at the empty space between boxes.
+    let turn = (into_glide / TURN).min(1.0);
+    let turn = turn * turn * (3.0 - 2.0 * turn);
+    let ahead = Transform::from_translation(eye).looking_at(target, Vec3::Y).rotation;
+    let onward = Transform::from_translation(eye).looking_at(to.0, Vec3::Y).rotation;
     for mut transform in &mut cameras {
-        *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+        *transform = Transform::from_translation(eye).with_rotation(ahead.slerp(onward, turn));
     }
 }
 

@@ -11,7 +11,9 @@
 //! | `--volume <m3>` | every piece's volume, so they are alike in size; 60 000 by default |
 //! | `--cells <n>` | the mesher's grid across each piece; 128 by default |
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
-//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian` or `sprue` |
+//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian`, `sprue`, `racks` or `tubes` |
+//! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus` or `frustum` |
+//! | `--lying` | every part on its side, its axis along the ship's x, rather than standing |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--frames <n>` | frames after every mesh lands |
 
@@ -29,13 +31,14 @@ use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, RE
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use glam::{DMat3, DVec3};
-use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
-use lc_client::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullSource, REGION_GRAPHS, region};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
+use lc_client::hull_mesh::{HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullSource, REGION_GRAPHS, region};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::LooksPlugin;
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
-use lc_client::looks::outline::RoofOutline;
+use lc_client::looks::racks::{Racks, RacksMaterial};
+use lc_client::looks::tubes::{Tubes, TubesMaterial};
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape as Target2d, Target, placeholder};
 use lc_client::tonemap::ToneMap;
 use lc_world::form::place::{Pose, Side};
@@ -63,7 +66,7 @@ const KINDS: [Kind; 8] = [
     Kind::Bay,
 ];
 
-const LOOKS: [&str; 5] = ["aztec", "offices", "habitat", "obsidian", "sprue"];
+const LOOKS: [&str; 7] = ["aztec", "offices", "habitat", "obsidian", "sprue", "racks", "tubes"];
 
 /// Each primitive in a proportion that shows it, its axis standing up.
 const PRIMITIVES: [Primitive; 6] = [
@@ -74,6 +77,8 @@ const PRIMITIVES: [Primitive; 6] = [
     Primitive::Torus { major: 3.0 },
     Primitive::Frustum { length: 2.0, taper: 0.5 },
 ];
+
+const PRIMITIVE_NAMES: [&str; 6] = ["ellipsoid", "capsule", "slab", "cylinder", "torus", "frustum"];
 
 #[derive(Clone, Copy)]
 enum Column {
@@ -93,6 +98,7 @@ impl Column {
 struct Args {
     path: String,
     columns: Vec<Column>,
+    primitives: Vec<Primitive>,
     volume: f64,
     cells: u32,
     yaw_deg: f32,
@@ -100,6 +106,7 @@ struct Args {
     zoom: f32,
     sun_deg: f32,
     frames: u32,
+    lying: bool,
 }
 
 impl Args {
@@ -117,9 +124,17 @@ impl Args {
             None => all,
             Some(name) => vec![*all.iter().find(|c| c.name() == name).unwrap_or_else(|| fail(&format!("no column {name}")))],
         };
+        let primitives = match text("--primitive") {
+            None => PRIMITIVES.to_vec(),
+            Some(name) => {
+                let k = PRIMITIVE_NAMES.iter().position(|p| *p == name).unwrap_or_else(|| fail(&format!("--primitive is one of {PRIMITIVE_NAMES:?}")));
+                vec![PRIMITIVES[k]]
+            }
+        };
         Self {
             path,
             columns,
+            primitives,
             volume: value("--volume").unwrap_or(6.0e4) as f64,
             cells: value("--cells").unwrap_or(128.0) as u32,
             yaw_deg: value("--yaw").unwrap_or(-25.0),
@@ -127,6 +142,7 @@ impl Args {
             zoom: value("--zoom").unwrap_or(1.0),
             sun_deg: value("--sun").unwrap_or(35.0),
             frames: value("--frames").unwrap_or(10.0) as u32,
+            lying: args.iter().any(|a| a == "--lying"),
         }
     }
 }
@@ -238,8 +254,9 @@ fn reach(shape: Shape) -> f64 {
     }
 }
 
-fn piece(kind: Kind, shape: Shape) -> Piece {
-    Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose { position: DVec3::ZERO, rotation: STANDING } }
+fn piece(kind: Kind, shape: Shape, lying: bool) -> Piece {
+    let rotation = if lying { DMat3::IDENTITY } else { STANDING };
+    Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose { position: DVec3::ZERO, rotation } }
 }
 
 fn camera_direction(args: &Args) -> Vec3 {
@@ -257,6 +274,8 @@ fn spawn(
     mut aztecs: ResMut<Assets<AztecMaterial>>,
     mut obsidians: ResMut<Assets<ObsidianMaterial>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
+    mut tubes: ResMut<Assets<TubesMaterial>>,
+    mut racks: ResMut<Assets<RacksMaterial>>,
     mut exit: MessageWriter<AppExit>,
     mut waited: Local<u32>,
 ) {
@@ -285,6 +304,8 @@ fn spawn(
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
         *slot = match kind {
             "drone" => LIT_WINDOW * Vec3::new(0.85, 0.92, 1.0),
+            // As the game's: twenty times a window, drawn in the racks' own green.
+            "data" => 20.0 * LIT_WINDOW * Vec3::ONE,
             "living" => LIT_WINDOW * Vec3::new(1.0, 0.8, 0.55),
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
@@ -299,21 +320,21 @@ fn spawn(
             to_star: to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(1.5), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-            bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             ..default()
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
-        roof_map: None,
-        roof_outline: default(),
         pipe_tiles: None,
         pipe_light: None,
+        rack_faces: None,
     });
     let aztec = aztecs.add(Aztec { to_star, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());
     let habitat = aztecs.add(Aztec { to_star, ..Aztec::habitat() }.material());
     let obsidian = obsidians.add(Obsidian { to_star, ..default() }.material());
+    let tube = tubes.add(Tubes { to_star, ..default() }.material());
+    let rack = racks.add(Racks { to_star, ..default() }.material(&mut images));
     let sprue_layers = if args.columns.iter().any(|c| matches!(c, Column::Look("sprue"))) {
         let sprue = Sprue { to_star, ..default() };
         Some(sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m)))
@@ -321,7 +342,7 @@ fn spawn(
         None
     };
 
-    let shapes: Vec<Shape> = PRIMITIVES.iter().map(|p| p.at(p.scale(args.volume))).collect();
+    let shapes: Vec<Shape> = args.primitives.iter().map(|p| p.at(p.scale(args.volume))).collect();
     let slot = 2.4 * shapes.iter().copied().map(reach).fold(0.0, f64::max) as f32;
     // On the plane square to the view, so every slot is seen alike.
     let right = Vec3::Y.cross(toward).normalize();
@@ -332,13 +353,12 @@ fn spawn(
             let at = right * (c as f32 - (columns - 1.0) / 2.0) * slot + up * ((rows - 1.0) / 2.0 - r as f32) * slot;
             let transform = Transform::from_translation(at).with_rotation(ship_to_world());
             let form = |kind: Kind, shape: Shape| HullForm {
-                source: HullSource::Pieces(Arc::from([piece(kind, shape)])),
-                finish: Finish::Smooth,
+                source: HullSource::Pieces(Arc::from([piece(kind, shape, args.lying)])),
                 cells: Some(args.cells),
             };
             match *column {
                 Column::Kind(kind) => {
-                    commands.spawn((form(kind, shape), MeshMaterial3d(hull.clone()), transform, living_roof()));
+                    commands.spawn((form(kind, shape), MeshMaterial3d(hull.clone()), transform));
                 }
                 Column::Look("sprue") => {
                     let layers = sprue_layers.as_ref().expect("made when a column is the sprue");
@@ -350,16 +370,19 @@ fn spawn(
                 Column::Look("obsidian") => {
                     commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(obsidian.clone()), transform));
                 }
+                Column::Look("racks") => {
+                    commands.spawn((form(Kind::Data, shape), MeshMaterial3d(rack.clone()), transform));
+                }
+                Column::Look("tubes") => {
+                    commands.spawn((form(Kind::Drone, shape), MeshMaterial3d(tube.clone()), transform));
+                }
                 Column::Look(look) => {
                     let material = match look {
                         "offices" => offices.clone(),
                         "habitat" => habitat.clone(),
                         _ => aztec.clone(),
                     };
-                    let piece = commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform)).id();
-                    if look == "habitat" {
-                        commands.entity(piece).insert(RoofOutline);
-                    }
+                    commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform));
                 }
             }
         }

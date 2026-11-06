@@ -1,12 +1,13 @@
-//! Surface nets over any signed distance field: a closed, manifold mesh of where it is zero.
-//! `hull_mesh` paints what it makes of a form, or of bare pieces.
+//! Surface nets' topology over any signed distance field, with each vertex placed by dual
+//! contouring: a closed, manifold mesh of where it is zero, sharp where the field creases.
+//! `hull_mesh` paints what it makes of each piece.
 //!
 //! **Manifold by construction.** Before extraction the grid is cleaned of every lattice square
 //! whose corners alternate in sign, by turning one of its outside corners inside. Every cell
 //! face then carries at most one segment of surface, so the crossings in a cell form simple
 //! loops, and a vertex a loop (not a cell) leaves every edge shared by exactly two triangles
-//! and every vertex with one fan of them. The blocky finish is the same topology with its
-//! vertices moved, so it is closed the same way.
+//! and every vertex with one fan of them. Each vertex stays in its cell, so where it goes in
+//! the cell never changes that.
 //!
 //! A feature thinner than a cell, like a strap on a coarse grid, is kept only where a sample
 //! lands in it. It may vanish or be holed; diagonal neighbors are joined rather than split, and
@@ -14,7 +15,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use glam::DVec3;
+use glam::{DMat3, DVec3};
 use lc_world::form::sdf::Sdf;
 
 /// A signed distance in meters, negative inside, and Lipschitz 1: the grid skips a block on the
@@ -294,14 +295,17 @@ fn loops(inside: [bool; 8]) -> ([u8; 12], u8) {
     (id, count)
 }
 
-/// Surface nets: a vertex at the mean of each loop's crossings, and a quad around each lattice
-/// edge that crosses, joining the vertices of the four cells around it.
-///
-/// `blocky` puts each vertex at its cell's center instead. The quad around a lattice edge is then
-/// the face between the cubes about the edge's two samples, so this is the occupied samples as
-/// cubes, with the loops keeping two cubes that meet only at a corner from sharing a vertex.
-pub(crate) fn nets(grid: &Grid, blocky: bool) -> Surface {
+/// How hard [`sharp`] draws a vertex toward the mean, against planes of unit weight. Along a
+/// crease, or across a flat patch, the planes leave the vertex free and this alone places it.
+const PULL: f64 = 0.05;
+
+/// A vertex a loop of crossings, and a quad around each lattice edge that crosses, joining the
+/// vertices of the four cells around it. Each vertex is where the planes at its loop's crossings
+/// meet, each square to `field`'s gradient there, which puts it on the crease it straddles.
+pub(crate) fn nets(grid: &Grid, field: &dyn Field) -> Surface {
     let mut surface = Surface { vertices: Vec::new(), triangles: Vec::new() };
+    let mut crossings: Vec<(u8, DVec3)> = Vec::new();
+    let mut scratch = Vec::new();
     let mut cells: HashMap<usize, [u32; 12]> = HashMap::new();
     let mut active = Vec::new();
     let is_base = |i: &[usize; 3]| (0..3).all(|a| i[a] + 1 < grid.n[a]);
@@ -319,19 +323,26 @@ pub(crate) fn nets(grid: &Grid, blocky: bool) -> Surface {
         let corner = |c: usize| [base[0] + (c & 1), base[1] + (c >> 1 & 1), base[2] + (c >> 2)];
         let (id, count) = loops(inside);
         let mut sums = vec![(DVec3::ZERO, 0.0); count as usize];
+        crossings.clear();
         for (e, &(a, b)) in EDGES.iter().enumerate() {
             if id[e] == NO_LOOP {
                 continue;
             }
             let (va, vb) = (grid.value(corner(a)) as f64, grid.value(corner(b)) as f64);
-            let t = va / (va - vb);
-            let p = grid.position(corner(a)).lerp(grid.position(corner(b)), t);
+            let (pa, pb) = (grid.position(corner(a)), grid.position(corner(b)));
+            // A crease bends the field along the edge, so the samples' line misses the surface, and
+            // a plane taken there leans: the crossing is found on the field itself.
+            let p = crossing(field, pa, pb, va, vb, &mut scratch);
             let sum = &mut sums[id[e] as usize];
             *sum = (sum.0 + p, sum.1 + 1.0);
+            crossings.push((id[e], p));
         }
         let first = surface.vertices.len() as u32;
-        let center = grid.position(base) + DVec3::splat(0.5 * grid.step);
-        surface.vertices.extend(sums.iter().map(|(p, n)| if blocky { center } else { *p / *n }));
+        let lo = grid.position(base);
+        for (l, (sum, n)) in sums.iter().enumerate() {
+            let mine = crossings.iter().filter(|(i, _)| *i as usize == l).map(|&(_, p)| p);
+            surface.vertices.push(sharp(field, mine, *sum / *n, lo, grid.step, &mut scratch));
+        }
         cells.insert(at, id.map(|l| if l == NO_LOOP { u32::MAX } else { first + l as u32 }));
         active.push(base);
     }
@@ -360,6 +371,65 @@ pub(crate) fn nets(grid: &Grid, blocky: bool) -> Surface {
     }
     surface
 }
+
+/// Where the field crosses zero between `pa` and `pb`, whose distances are `va` and `vb` of opposite
+/// signs, by false position with the Illinois halving so one stuck end cannot stall it.
+fn crossing(field: &dyn Field, pa: DVec3, pb: DVec3, va: f64, vb: f64, scratch: &mut Vec<f64>) -> DVec3 {
+    let (mut lo, mut hi, mut dlo, mut dhi) = (0.0, 1.0, va, vb);
+    let mut t = va / (va - vb);
+    let mut side = 0;
+    for _ in 0..CROSSING_STEPS {
+        let d = field.distance(pa.lerp(pb, t), scratch);
+        if d == 0.0 {
+            break;
+        }
+        if (d > 0.0) == (dlo > 0.0) {
+            (lo, dlo) = (t, d);
+            if side == -1 {
+                dhi *= 0.5;
+            }
+            side = -1;
+        } else {
+            (hi, dhi) = (t, d);
+            if side == 1 {
+                dlo *= 0.5;
+            }
+            side = 1;
+        }
+        t = lo + (hi - lo) * dlo / (dlo - dhi);
+    }
+    pa.lerp(pb, t)
+}
+
+/// False-position steps a crossing takes: enough for a millionth of a cell on a box's edge.
+const CROSSING_STEPS: usize = 8;
+
+/// The least-squares meeting of the planes at `crossings`, drawn toward `mean` by [`PULL`] and
+/// kept in the cell at `lo`.
+fn sharp(field: &dyn Field, crossings: impl Iterator<Item = DVec3>, mean: DVec3, lo: DVec3, step: f64, scratch: &mut Vec<f64>) -> DVec3 {
+    // Narrow, so a crossing beside a crease takes its own side's plane rather than the bisector.
+    let h = 1.0e-3 * step;
+    // About the mean, which keeps the sums well scaled.
+    let (mut ata, mut atb) = (DMat3::ZERO, DVec3::ZERO);
+    for p in crossings {
+        let mut d = |q: DVec3| field.distance(q, scratch);
+        let g = DVec3::from_array([0, 1, 2].map(|a| d(p + AXES[a] * h) - d(p - AXES[a] * h)));
+        let Some(n) = g.try_normalize() else { continue };
+        ata += DMat3::from_cols(n * n.x, n * n.y, n * n.z);
+        atb += n * n.dot(p - mean);
+    }
+    // Symmetric and at least PULL on its diagonal, so invertible.
+    let damped = (ata + DMat3::from_diagonal(DVec3::splat(PULL))).inverse();
+    // Each pass pulls toward the last, not the mean: what the planes fix converges on their meeting
+    // as PULL^passes, and what they leave free barely leaves the mean.
+    let mut x = DVec3::ZERO;
+    for _ in 0..SHARP_PASSES {
+        x += damped * (atb - ata * x);
+    }
+    (mean + x).clamp(lo, lo + DVec3::splat(step))
+}
+
+const SHARP_PASSES: usize = 4;
 
 /// Normals from the field's gradient, by central differences a tenth of a cell wide. Where the
 /// gradient vanishes, at a crease the field is flat across, the triangles' own.
@@ -393,3 +463,43 @@ pub(crate) fn gradients(field: &impl Field, surface: &Surface, step: f64) -> Vec
     normals
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Cuboid {
+        half: DVec3,
+    }
+
+    impl Field for Cuboid {
+        fn distance(&self, p: DVec3, _: &mut Vec<f64>) -> f64 {
+            let q = p.abs() - self.half;
+            q.max(DVec3::ZERO).length() + q.max_element().min(0.0)
+        }
+
+        // Loose and uneven, so no face lies on the lattice.
+        fn bounds(&self) -> (DVec3, DVec3) {
+            let pad = self.half * DVec3::new(0.13, 0.29, 0.41);
+            (-self.half - pad, self.half + pad)
+        }
+    }
+
+    /// The farthest any of the box's corners is from its nearest vertex, in cells.
+    fn corner_miss() -> f64 {
+        let cuboid = Cuboid { half: DVec3::new(10.0, 7.7, 5.3) };
+        let grid = Grid::sample(&cuboid, 16);
+        let surface = nets(&grid, &cuboid);
+        (0..8)
+            .map(|c| {
+                let corner = cuboid.half * DVec3::from_array([0, 1, 2].map(|a| if c >> a & 1 == 1 { 1.0 } else { -1.0 }));
+                surface.vertices.iter().map(|v| v.distance(corner)).fold(f64::INFINITY, f64::min) / grid.step
+            })
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn sharp_vertices_sit_on_a_box_corners() {
+        let miss = corner_miss();
+        assert!(miss < 0.01, "a vertex misses a corner by {miss} cells");
+    }
+}

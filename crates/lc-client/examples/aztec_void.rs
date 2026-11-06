@@ -18,7 +18,7 @@
 //! | `--tilt <deg>` | how far a panel's normal may tip off the face's; 5 by default |
 //! | `--brown <share>` | of panels a little browner; 0.2 by default |
 //! | `--roughness <x>` / `--metallic <x>` | the finish, shared by every panel |
-//! | `--windows` | office windows on the sides, in decks along Y |
+//! | `--windows` | office windows on the sides, in decks up the box |
 //! | `--habitat` | the windows, and a roof of glass hexes on top |
 //! | `--exposure <stops>` | open the exposure |
 //! | `--seed <n>` | the layout |
@@ -31,7 +31,14 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
+use std::sync::Arc;
+
+use lc_client::hull_mesh::{HullForm, HullMeshPlugin, HullSource};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Roof, Windows};
+use lc_world::form::place::{Pose, Side};
+use lc_world::form::primitive::Shape;
+use lc_world::form::sdf::Piece;
+use lc_world::form::{Kind, PartId};
 use lc_client::looks::{LooksPlugin, direction};
 
 struct Args {
@@ -135,7 +142,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(LooksPlugin)
+        .add_plugins((LooksPlugin, HullMeshPlugin))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Setup(args))
         .add_systems(Startup, spawn)
@@ -149,7 +156,6 @@ struct Setup(Args);
 fn spawn(
     mut commands: Commands,
     setup: Res<Setup>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<AztecMaterial>>,
 ) {
     let args = &setup.0;
@@ -174,14 +180,17 @@ fn spawn(
             seed: args.seed,
             windows: (args.windows || args.habitat).then(Windows::default),
             roof: args.habitat.then(Roof::default),
-            unit_box: true,
         }
         .material(),
     );
+    // A part, meshed, so it carries the charts the look is laid out in; its z, which its sides'
+    // charts run up, stood along Bevy's y.
+    let shape = Shape::Slab { edges: glam::DVec3::splat(args.size as f64), corner: 0.0 };
+    let piece = Piece { part: PartId(0), side: Side::Original, kind: Kind::Storage, shape, pose: Pose::IDENTITY };
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        HullForm { source: HullSource::Pieces(Arc::from([piece])), cells: Some(32) },
         MeshMaterial3d(material),
-        Transform::from_scale(Vec3::splat(args.size)),
+        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));
 
     commands.spawn((

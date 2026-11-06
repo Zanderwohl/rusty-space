@@ -1,15 +1,18 @@
 //! Ship surfaces in look development: no part kind draws one yet.
 //!
-//! Each maps a box face in its own frame, and a curved mesh by the face each point faces most, as
-//! a cube map would; a box is where they look as meant. Each turns its star about world Y at its
+//! The sprue, racks and tubes are laid out in a part's own charts ([`crate::charts`]), so they
+//! draw only on the hull mesher's meshes, and fit any primitive. The aztec and obsidian still map
+//! a box face in its own frame, and a curved mesh by the face each point faces most, as a cube map
+//! would; a box is where they look as meant. Each turns its star about world Y at its
 //! own rate from `globals.time`, never from a uniform written each frame; a rate whose period
 //! divides an hour turns seamlessly through the hourly wrap of that clock.
 
 pub mod aztec;
 pub mod kinds;
 pub mod obsidian;
-pub mod outline;
+pub mod racks;
 pub mod sprue;
+pub mod tubes;
 
 use bevy::prelude::*;
 
@@ -21,8 +24,9 @@ impl Plugin for LooksPlugin {
             MaterialPlugin::<aztec::AztecMaterial>::default(),
             MaterialPlugin::<sprue::SprueMaterial>::default(),
             MaterialPlugin::<obsidian::ObsidianMaterial>::default(),
-        ))
-        .add_systems(PostUpdate, outline::outline_roofs.after(bevy::transform::TransformSystems::Propagate));
+            MaterialPlugin::<racks::RacksMaterial>::default(),
+            MaterialPlugin::<tubes::TubesMaterial>::default(),
+        ));
     }
 }
 
@@ -45,6 +49,24 @@ fn position_and_normal(
     let vertex_layout = layout.0.get_layout(&[
         Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
         Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+    ])?;
+    descriptor.vertex.buffers = vec![vertex_layout];
+    Ok(())
+}
+
+/// Position, normal, and the part's own chart, its bounds and tangent: for a look laid out in a
+/// part's charts, which only the hull mesher's meshes carry. See [`crate::charts`].
+fn charted(
+    descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+    layout: &bevy_mesh::MeshVertexBufferLayoutRef,
+) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+    use em_render::hull_material::{ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS};
+    let vertex_layout = layout.0.get_layout(&[
+        Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+        Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+        ATTRIBUTE_HULL_CHART.at_shader_location(2),
+        ATTRIBUTE_HULL_CHART_BOUNDS.at_shader_location(3),
+        Mesh::ATTRIBUTE_TANGENT.at_shader_location(4),
     ])?;
     descriptor.vertex.buffers = vec![vertex_layout];
     Ok(())

@@ -30,7 +30,7 @@ use lc_world::form::{Form, PartId};
 use crate::construction::{Frame, Refit, Sweep};
 use lc_world::refit::rounds::Phase;
 use crate::hull::lighting;
-use crate::hull_mesh::{Finish, HullForm, HullMeshState, HullSource, Union, form_hash};
+use crate::hull_mesh::{HullForm, HullMeshState, HullSource, Union, form_hash};
 use crate::session::Session;
 use crate::ship_hull::{Palette, RealHulls, ShipHull};
 use crate::surface_nets::Field;
@@ -337,7 +337,7 @@ fn spawn(
     materials: &mut Assets<HullMaterial>,
 ) -> Entity {
     let mut material = |uniforms: HullUniform| {
-        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None })
+        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None })
     };
     let (frame, balance) = (&b.frame, &b.balance);
     let standing = standing(frame, balance);
@@ -374,7 +374,7 @@ fn spawn(
     let root = commands.spawn((Transform::IDENTITY, Visibility::Hidden)).id();
     let mut hull = |source: HullSource, drawn: Drawn, material: Handle<HullMaterial>, at: Transform| {
         commands.spawn((
-            HullForm { source, finish: Finish::Smooth, cells: None },
+            HullForm { source, cells: None },
             MeshMaterial3d(material),
             at,
             NoFrustumCulling,

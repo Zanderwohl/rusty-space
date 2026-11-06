@@ -32,10 +32,10 @@ use glam::DVec3;
 use lc_proto::ShipId;
 use lc_world::fitting::Balance;
 use lc_world::form::sdf::{Piece, Sdf};
-use lc_world::form::{Form, Kind, SparMode};
+use lc_world::form::{Form, Kind};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
-use crate::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
+use crate::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
 use crate::procedural::{Bakes, Shape, Target, placeholder};
 use crate::session::Session;
 use crate::system::UNIT_M;
@@ -53,6 +53,9 @@ const ROLLS_KEPT: usize = 64;
 pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
     match kind {
         "drone" => Some((300.0, 5000.0)),
+        // The racks' faces: screens and status lights, brighter than a window. Drawn in their own
+        // green, at this luminance.
+        "data" => Some((6000.0, 6500.0)),
         "living" => Some((300.0, 3000.0)),
         "mind" => Some((90.0, 9000.0)),
         "bay" => Some((300.0, 4000.0)),
@@ -66,12 +69,19 @@ pub struct ShipHullPlugin;
 
 impl Plugin for ShipHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin))
-            .init_resource::<Palette>()
+        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin, HullPalettePlugin))
             .init_resource::<Rolls>()
             .init_resource::<RealHulls>()
-            .add_systems(Update, request_palette.run_if(in_state(crate::app::AppState::InGame)))
-            .add_systems(Last, take_texels);
+            .add_systems(Update, request_palette.run_if(in_state(crate::app::AppState::InGame)));
+    }
+}
+
+/// The [`Palette`], baked once something runs [`request_palette`].
+pub struct HullPalettePlugin;
+
+impl Plugin for HullPalettePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Palette>().add_systems(Last, take_texels);
     }
 }
 
@@ -100,7 +110,7 @@ impl Palette {
     }
 }
 
-fn request_palette(
+pub fn request_palette(
     mut palette: ResMut<Palette>,
     assets: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
@@ -178,7 +188,6 @@ pub(crate) fn finished(
         glow: base.emitted,
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-        bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
         emitted,
         open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
         faces: lit_faces,
@@ -406,10 +415,10 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None });
                         commands
                             .entity(hull.mesh)
-                            .insert((HullForm { source, finish: Finish::Smooth, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
+                            .insert((HullForm { source, cells: None }, MeshMaterial3d(material)));
                     }
                 }
             }
