@@ -187,8 +187,8 @@ const BAY_RIB_DEPTH_M: f32 = 1.2;
 const BAY_DECK_M: f32 = 0.8;
 const BAY_PAD_M: f32 = 0.25;
 const BAY_FLOOD_INSET_M: f32 = 0.6;
+const BAY_FLOOD_SPREAD: f32 = 0.3;
 const BAY_FLOOD_DROP_M: f32 = 0.3;
-const BAY_FLOOD_HEAD_M: f32 = 0.5;
 const BAY_RUNWAY_SHARE: f32 = 0.5;
 const BAY_STRIP_RISE_M: f32 = 0.08;
 const BAY_VACANT: f32 = 0.3;
@@ -198,9 +198,10 @@ const BAY_FLOOD_LAMP: u32 = 2u;
 const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.766, 0.906);
 /// What the lamps give a surface, as multiples of the bay region's lamp, which is a lit window's
 /// 300 cd/m²: a flood's in square meters, as it falls off with distance squared, and a strip's in
-/// meters, as a line does. A floodlit yard's 2000 lux on what a flood is aimed at about 12 m off is
-/// 2000 / π / 300 ≈ 2 lamps, so 2 × 12² ≈ 300; a strip lights the far wall of a shaft 40 m across
-/// at about half a lamp.
+/// meters, as a line does. A floodlit yard's 2000 lux on what a flood is aimed at is 2000 / π / 300
+/// ≈ 2 lamps; a card is about 9 m off its floods and turned 45 degrees from them, so 2 × 9² / 0.7 ≈
+/// 230, rounded up for a pair that overlap less than fully. A strip lights the far wall of a shaft
+/// 40 m across at about half a lamp.
 const BAY_FLOOD_GAIN: f32 = 300.0;
 const BAY_RUNWAY_GAIN: f32 = 12.0;
 /// The lamps themselves, seen: far brighter than what they light.
@@ -285,11 +286,12 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     let ceiling = select(floor_z + level_m - BAY_DECK_M, tall, level + 1.0 >= levels);
     let x0 = back + span * pitch + 0.5 * BAY_RIB_DEPTH_M;
     let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
-    let head_y = side * (edge + 0.5 * BAY_FLOOD_HEAD_M);
-    let aimed_at = vec3<f32>(0.5 * (x0 + x1), side * (wide - 0.5 * reach), floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
+    let middle_y = side * (wide - 0.5 * reach);
+    let aimed_at = vec3<f32>(0.5 * (x0 + x1), middle_y, floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
     var floods = 0.0;
     for (var k = 0u; k < 2u; k++) {
-        let head = vec3<f32>(select(x0 + BAY_FLOOD_INSET_M, x1 - BAY_FLOOD_INSET_M, k == 1u), head_y, ceiling - BAY_FLOOD_DROP_M);
+        let spread = select(-BAY_FLOOD_SPREAD, BAY_FLOOD_SPREAD, k == 1u) * reach;
+        let head = vec3<f32>(x1 - BAY_FLOOD_INSET_M, middle_y + spread, ceiling - BAY_FLOOD_DROP_M);
         let aim = normalize(aimed_at - head);
         let off = p - head;
         let d = length(off);

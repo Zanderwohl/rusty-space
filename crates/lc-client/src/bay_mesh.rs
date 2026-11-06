@@ -52,8 +52,11 @@ const MAX_LEVELS: usize = 16;
 const MAX_PANELS: usize = 24;
 /// The share of berths left empty.
 const VACANT: f32 = 0.3;
-/// Each berth's floods hang under its ceiling at its front edge, in from each rib.
+/// Each berth's two floods hang under its ceiling in from the rib on its mouth's side, either side
+/// of its middle by this share of the deck's reach, and light the face its card turns to the mouth
+/// from about 45 degrees.
 const FLOOD_INSET_M: f64 = 0.6;
+const FLOOD_SPREAD: f64 = 0.3;
 const FLOOD_DROP_M: f64 = 0.3;
 const FLOOD_HEAD_M: f64 = 0.5;
 /// The runway strips lie down the shaft at this share of the way from its middle to the decks.
@@ -494,9 +497,8 @@ impl Builder<'_> {
                     }
                     self.cuboid(DVec3::new(x, y, floor + PAD_M / 2.0), axes, DVec3::new(size / 2.0, size / 2.0, PAD_M / 2.0), pad);
                     self.lamp = Lamp::Flood;
-                    let edge = side * (hold.wide - hold.reach + FLOOD_HEAD_M / 2.0);
-                    for at in [x0 + FLOOD_INSET_M, x1 - FLOOD_INSET_M] {
-                        let head = DVec3::new(at, edge, ceiling - FLOOD_DROP_M);
+                    for spread in [-FLOOD_SPREAD, FLOOD_SPREAD] {
+                        let head = DVec3::new(x1 - FLOOD_INSET_M, y + spread * hold.reach, ceiling - FLOOD_DROP_M);
                         self.cuboid(head, axes, DVec3::splat(FLOOD_HEAD_M / 2.0), pad);
                     }
                     self.lamp = Lamp::None;
@@ -721,8 +723,8 @@ mod tests {
             ("BAY_DECK_M", DECK_M),
             ("BAY_PAD_M", PAD_M),
             ("BAY_FLOOD_INSET_M", FLOOD_INSET_M),
+            ("BAY_FLOOD_SPREAD", FLOOD_SPREAD),
             ("BAY_FLOOD_DROP_M", FLOOD_DROP_M),
-            ("BAY_FLOOD_HEAD_M", FLOOD_HEAD_M),
             ("BAY_RUNWAY_SHARE", RUNWAY_SHARE),
             ("BAY_STRIP_RISE_M", STRIP_RISE_M),
             ("BAY_VACANT", VACANT as f64),
