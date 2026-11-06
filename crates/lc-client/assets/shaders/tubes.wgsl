@@ -378,7 +378,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let s = (phi * (r + 0.5 * tape) + (d - r)) / STRIPE_M;
         let stripe_aa = 2.0 * pixel / STRIPE_M;
         let white = smoothstep(0.5 - stripe_aa, 0.5 + stripe_aa, abs(fract(0.5 * s) * 2.0 - 1.0));
-        let tape_color = mix(TAPE_RED, TAPE_WHITE, white);
+        // Fading into the plate as the tape narrows under a pixel, so a far hive is gray, not pink.
+        let tape_color = mix(mix(TAPE_RED, TAPE_WHITE, white), base, smoothstep(0.25 * tape, tape, pixel));
         let lip = clamp(1.0 - (d - r) / LIP_M, 0.0, 1.0);
         let tape_n = normalize(frame * vec3<f32>(-radial * lip * steady(1.2, 0.5 * LIP_M, pixel), 1.0));
         let tape_light = lit(tape_n, e, surface, tape_color);

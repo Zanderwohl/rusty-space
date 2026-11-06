@@ -1258,7 +1258,9 @@ fn tubes_light(in: VertexOutput, c: HullChart, pixel: f32, lamp_color: vec3<f32>
         let white = smoothstep(0.5 - stripe_aa, 0.5 + stripe_aa, abs(fract(0.5 * s) * 2.0 - 1.0));
         let lip = clamp(1.0 - (d - r) / LIP_M, 0.0, 1.0);
         let tape_n = normalize(c.frame * vec3<f32>(-radial * lip * steady(1.2, 0.5 * LIP_M, pixel), 1.0));
-        let tape_light = painted(tape_n, star, e, lit_side, mix(TAPE_RED, TAPE_WHITE, white), 0.0, 0.6);
+        // Fading into the plate as the tape narrows under a pixel, so a far hive is gray, not pink.
+        let stripes = mix(mix(TAPE_RED, TAPE_WHITE, white), base, smoothstep(0.25 * tape, tape, pixel));
+        let tape_light = painted(tape_n, star, e, lit_side, stripes, 0.0, 0.6);
         light = mix(light, tape_light, 1.0 - smoothstep(r + tape - pixel, r + tape + pixel, d));
 
         if (d < r + pixel) {
