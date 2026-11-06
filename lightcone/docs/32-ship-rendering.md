@@ -226,11 +226,26 @@ storage's aztec plate in the part's own charts, and the mouth a rim as thick as 
 
 Up is whichever of the part's y and z runs most along the ship's z. Pitches stretch past 48 ribs
 and 16 levels, so a kilometers-long bay stays thousands of triangles, not millions. The slab's
-rounded corners are not drawn. The hull material casts no shadow, so the hold is shaded in the
-mesh: a vertex's share of the star falls from all at the mouth to none as far in as the mouth is
-across, carried as the third byte of `ATTRIBUTE_HULL_FACE`, which the region graphs and the aztec
-plate honor. The light is the same whichever way the star lies; beyond that depth only the bay
-graph's own lamps show. Photographed by `parts_void --only bay --primitive slab --lying`.
+rounded corners are not drawn. The star reaches into the hold only through the mouth, by the hull's
+shadow map (§Shadows), so the ribs stripe the floor and a berth out of the light is lit only by the
+bay graph's own lamps. Photographed by `parts_void --only bay --primitive slab --lying`.
+
+### Shadows
+
+A hull shadows itself from its star: a part sunk into another, a boom across the hull behind it,
+the inside of a bay. As built (`lc_client::hull_shadow`): each hull at least 128 pixels long, or
+pinned as a void pins it, has a 2048-texel depth map of its own mesh seen from the star, fit to the
+sphere about its mesh's bounds in the ship's frame and meters, and keeps it until it falls under
+32 pixels. Every map is drawn afresh each frame by a pass in the root render graph ahead of every
+camera, so it is the same for all of them and never lags a turn.
+
+Not Bevy's directional shadows: those are cascades fit to each camera's frustum in render units of
+an astronomical unit, where a ship is a billionth of one across. The hull material builds the map's
+frame from its own star direction and the sphere in `HullUniform::shadow`, as the pass does, so the
+two agree on every texel; it compares the four nearest, pushed out along the normal a texel and a
+half, and scales every direct term of the star by what reaches, its highlights included. The sky
+mirrored in a surface and the night fill are not shadowed. A map is 16 MB; only the few hulls near
+enough to show it have one. Construction meshes are not shadowed yet.
 
 ## Building, as a function of time
 
