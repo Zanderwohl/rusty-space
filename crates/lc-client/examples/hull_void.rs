@@ -30,14 +30,16 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::WindowResolution;
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{
-    ATTRIBUTE_HULL_FACE, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile,
+    ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS, ATTRIBUTE_HULL_FACE, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile,
     face_attribute, insert_region_weights, region_weights, tile_array,
 };
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
+use lc_client::charts::{lay_out, tangent};
 use lc_client::hull_mesh::REGION_GRAPHS;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape, Target, placeholder};
 use lc_client::tonemap::ToneMap;
+use lc_world::form::primitive::Shape as PartShape;
 
 /// The palette in the order the mesher numbers regions.
 const KINDS: [&str; REGION_GRAPHS.len()] = REGION_GRAPHS;
@@ -352,6 +354,8 @@ fn sphere(radius: f32, center: usize) -> Mesh {
     // Eighty segments an edge of the icosahedron, some 6.5 m on the small sphere: `ico(n)`
     // splits each edge into n + 1.
     let mut mesh = Sphere::new(radius).mesh().ico(79).expect("79 is the most ico allows");
+    // A vertex a corner, so each triangle can be laid out whole in its own chart.
+    mesh.duplicate_vertices();
     let seeds = seeds(center);
     let fillet = FILLET * radius;
     let positions = mesh
@@ -376,8 +380,23 @@ fn sphere(radius: f32, center: usize) -> Mesh {
         })
         .collect();
     let faces = vec![face_attribute(0.0, None); regions.len()];
+    // Charted as a part would be: a sphere is a capsule of no length, two domes about its poles.
+    let ball = PartShape::Capsule { radius: radius as f64, length: 0.0 };
+    let (mut charts, mut bounds, mut tangents) = (Vec::new(), Vec::new(), Vec::new());
+    for corners in positions.chunks_exact(3) {
+        let at = [0, 1, 2].map(|k| Vec3::from(corners[k]).as_dvec3());
+        let (chart, laid) = lay_out(&ball, at);
+        for (k, (here, _)) in laid.iter().enumerate() {
+            charts.push([here.uv.x as f32, here.uv.y as f32, here.kind as u8 as f32, if here.end { 1.0 } else { 0.0 }]);
+            bounds.push(here.bounds.map(|x| x as f32));
+            tangents.push(tangent(&ball, chart, at[k], 1.0e-3).as_vec3().extend(1.0).to_array());
+        }
+    }
     insert_region_weights(&mut mesh, &regions);
     mesh.insert_attribute(ATTRIBUTE_HULL_FACE, bevy_mesh::VertexAttributeValues::Unorm8x4(faces));
+    mesh.insert_attribute(ATTRIBUTE_HULL_CHART, charts);
+    mesh.insert_attribute(ATTRIBUTE_HULL_CHART_BOUNDS, bounds);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
     mesh
 }
 

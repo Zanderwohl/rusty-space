@@ -310,6 +310,9 @@ impl Material for HullMaterial {
             ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
             ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
             ATTRIBUTE_HULL_FACE.at_shader_location(6),
+            ATTRIBUTE_HULL_CHART.at_shader_location(7),
+            ATTRIBUTE_HULL_CHART_BOUNDS.at_shader_location(8),
+            Mesh::ATTRIBUTE_TANGENT.at_shader_location(9),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())

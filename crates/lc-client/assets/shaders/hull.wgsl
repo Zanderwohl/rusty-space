@@ -13,10 +13,10 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
-#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate, tangent_frame}
+#import "shaders/panels.wgsl"::{Plate, PanelFace, panel_face, plate}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
-#import "shaders/pipes.wgsl"::{tile_start, variant_layer}
+#import "shaders/pipes.wgsl"::{PipeTiling, pipe_tiling, tile_start, variant_layer}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -33,6 +33,11 @@ struct Vertex {
     @location(5) regions_3: vec4<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
     @location(6) face: vec4<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS, and the
+    // direction the chart's u grows, in the ship's frame.
+    @location(7) chart: vec4<f32>,
+    @location(8) bounds: vec4<f32>,
+    @location(9) tangent: vec4<f32>,
 #endif
 }
 
@@ -54,6 +59,9 @@ struct VertexOutput {
     // scars are cut.
     @location(9) eye_ship: vec3<f32>,
     @location(10) star_ship: vec3<f32>,
+    @location(11) chart: vec4<f32>,
+    @location(12) @interpolate(flat) bounds: vec4<f32>,
+    @location(13) chart_tangent: vec3<f32>,
 #endif
 }
 
@@ -190,6 +198,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_3 = vertex.regions_3;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
+    out.chart = vertex.chart;
+    out.bounds = vertex.bounds;
+    out.chart_tangent = vertex.tangent.xyz;
     // A ship's transform is a rotation and a uniform scale, so its inverse is the transpose over
     // the scale squared.
     let axes = mat3x3<f32>(world_from_local[0].xyz, world_from_local[1].xyz, world_from_local[2].xyz);
@@ -533,13 +544,13 @@ fn pipe_height(k: u32) -> f32 {
     return select(select(0.0, material.pipes.x, k == 1u), material.pipes.y, k == 2u);
 }
 
-/// What of the star reaches layer `k` at tile-plane point `q`, past the cutout layers above it.
-fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32) -> f32 {
+/// What of the star reaches layer `k` at chart point `q`, past the cutout layers above it.
+fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32, tiling: PipeTiling) -> f32 {
     var through = 1.0;
     for (var above = k + 1u; above <= 2u; above++) {
         let at = q + toward.xy * (pipe_height(above) - pipe_height(k)) / toward.z;
-        let uv = at / material.pipes.z;
-        let cover = textureSampleLevel(pipe_tiles, pipe_sampler, fract(uv), variant_layer(uv, above, id), 1.0).a;
+        let uv = at / tiling.size;
+        let cover = textureSampleLevel(pipe_tiles, pipe_sampler, fract(uv), variant_layer(uv, above, id, tiling.around), 1.0).a;
         through *= 1.0 - smoothstep(0.35, 0.65, cover);
     }
     return through;
@@ -548,19 +559,14 @@ fn pipe_starlit(q: vec2<f32>, k: u32, toward: vec3<f32>, id: f32) -> f32 {
 /// What a layered sprue sends toward the eye, in reflected's units. The surface is the top layer
 /// of pipe; through its gaps the layer under it and the plated base are seen at their depths, so
 /// they move against it as the eye does. Each is lit by its baked lamps in `lamp`'s color, and by
-/// the star past the layers above. `ddx` and `ddy` are the tile coordinates' derivatives, taken
-/// outside any branch.
-fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -> vec3<f32> {
-    let surface = normalize(in.ship_normal);
+/// the star past the layers above. Laid out in the part's chart: `p` is the point there, in meters,
+/// `tiling` how the tiles fit it, and `frame` its u, v and the surface's normal. `ddx` and `ddy`
+/// are the tile coordinates' derivatives, taken outside any branch.
+fn pipe_lit(in: VertexOutput, p: vec2<f32>, tiling: PipeTiling, id: f32, frame: mat3x3<f32>, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -> vec3<f32> {
     let star = normalize(in.star_ship);
     let e = normalize(in.eye_ship - in.ship_position);
-    let f = panel_face(surface, SHIP_UP);
-    let frame = tangent_frame(f, surface);
-    let id = f32(f.id);
-    let tile = material.pipes.z;
-    let p = vec2<f32>(dot(in.ship_position, f.u), dot(in.ship_position, f.v)) + tile_start(id) * tile;
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.05));
-    let toward = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
+    let d = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, frame[2]), 0.05));
+    let toward = vec3<f32>(dot(star, frame[0]), dot(star, frame[1]), dot(star, frame[2]));
     // Front to back, each layer over what is under it by its coverage: 0 or 1 where a texel is
     // resolved, its share where a mip averages pipe and gap, so a distant flank does not flicker
     // between layers pixel to pixel.
@@ -573,8 +579,8 @@ fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -
     for (var i = 0u; i < 3u; i++) {
         let k = 2u - i;
         let q = p + d.xy * (pipe_height(2u) - pipe_height(k)) / d.z;
-        let uv = q / tile;
-        let layer = variant_layer(uv, k, id);
+        let uv = q / tiling.size;
+        let layer = variant_layer(uv, k, id, tiling.around);
         let texel = textureSampleGrad(pipe_tiles, pipe_sampler, fract(uv), layer, ddx, ddy);
         let cover = select(mix(texel.a, PIPE_COVER, far), 1.0, k == 0u);
         if (cover > 0.0) {
@@ -585,7 +591,7 @@ fn pipe_lit(in: VertexOutput, ddx: vec2<f32>, ddy: vec2<f32>, lamp: vec3<f32>) -
             var lit = vec3<f32>(albedo * material.to_star.w);
             if (toward.z > 0.0) {
                 let spec = 0.35 * pow(max(dot(n, normalize(star + e)), 0.0), 24.0);
-                lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id));
+                lit += vec3<f32>((albedo + spec) * max(dot(n, star), 0.0) * pipe_starlit(q, k, toward, id, tiling));
             }
             light += through * cover * (material.reflected.rgb * lit + lamp * PIPE_LAMP * (baked + 0.015 * albedo));
         }
@@ -746,8 +752,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let up_normal = normalize(in.ship_normal);
     let roof_lead = up_normal.z - max(abs(up_normal.x), abs(up_normal.y));
     let roof_lead_rate = length(vec2<f32>(dpdx(roof_lead), dpdy(roof_lead)));
-    let pipe_face = panel_face(up_normal, SHIP_UP);
-    let pipe_uv = vec2<f32>(dot(in.ship_position, pipe_face.u), dot(in.ship_position, pipe_face.v)) / material.pipes.z;
+    // The sprue in the part's chart, a whole number of tiles around a wrap, each chart starting its
+    // tiles somewhere else; a rectangle, all of one direction, told apart by which way its u runs,
+    // as a cube's faces are alike in extent.
+    let chart_kind = u32(round(in.chart.z));
+    let pipe_tiles_fit = pipe_tiling(material.pipes.z, chart_kind, in.bounds);
+    let chart_u = normalize(in.chart_tangent - up_normal * dot(in.chart_tangent, up_normal));
+    let pipe_frame = mat3x3<f32>(chart_u, cross(up_normal, chart_u), up_normal);
+    let facing = select(0.0, round(dot(chart_u, vec3<f32>(1.0, 3.0, 9.0))), chart_kind == 0u);
+    let pipe_id = f32(chart_kind) * 31.0 + in.chart.w * 7.0 + facing;
+    let pipe_p = in.chart.xy + tile_start(pipe_id) * pipe_tiles_fit.size;
+    let pipe_uv = pipe_p / pipe_tiles_fit.size;
     let pipe_dx = dpdx(pipe_uv);
     let pipe_dy = dpdy(pipe_uv);
     let lines = lattice_lines(in.ship_position, in.ship_normal, pixel);
@@ -781,7 +796,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (pipe_share > 0.0 && textureNumLayers(pipe_tiles) >= PIPE_LAYERS) {
         let flank = select(far_layer, near_layer, piped(near_layer));
         albedo *= 1.0 - pipe_share;
-        emitted = emitted * (1.0 - pipe_share) + pipe_share * pipe_lit(in, pipe_dx, pipe_dy, material.emitted[flank].rgb);
+        emitted = emitted * (1.0 - pipe_share) + pipe_share * pipe_lit(in, pipe_p, pipe_tiles_fit, pipe_id, pipe_frame, pipe_dx, pipe_dy, material.emitted[flank].rgb);
     }
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {

@@ -18,14 +18,14 @@ use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use em_render::hull_material::{ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS, ATTRIBUTE_HULL_FACE, face_attribute, insert_region_weights, region_weights};
-use glam::{DVec2, DVec3};
+use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::{Aperture, apertures};
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
-use crate::charts::{chart_at, chart_of, tangent, unwrapped};
+use crate::charts::{lay_out, tangent};
 use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
 /// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
@@ -379,14 +379,11 @@ fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DV
     for t in &surface.triangles {
         let [a, b, c] = t.map(|i| surface.vertices[i as usize]);
         let flat = (b - a).cross(c - a).normalize_or_zero();
-        let chart = chart_of(&piece.shape, pose.to_local((a + b + c) / 3.0));
-        let laid = t.map(|v| chart_at(&piece.shape, chart, pose.to_local(surface.vertices[v as usize])));
-        let periods = laid[0].periods();
+        let (chart, laid) = lay_out(&piece.shape, [a, b, c].map(|p| pose.to_local(p)));
         for (k, &v) in t.iter().enumerate() {
-            let here = laid[k];
-            let uv = DVec2::new(unwrapped(here.uv.x, laid[0].uv.x, periods.x), unwrapped(here.uv.y, laid[0].uv.y, periods.y));
-            let turns = |x: f64, raw: f64, period: f64| if period > 0.0 { ((x - raw) / period).round() as i32 } else { 0 };
-            let key = (v, chart, turns(uv.x, here.uv.x, periods.x), turns(uv.y, here.uv.y, periods.y));
+            let (here, turns) = laid[k];
+            let uv = here.uv;
+            let key = (v, chart, turns[0], turns[1]);
             let smooth = normals[v as usize];
             let creased = flat != DVec3::ZERO && smooth.dot(flat) < CREASE_COS;
             let mut push = |normal: DVec3| {

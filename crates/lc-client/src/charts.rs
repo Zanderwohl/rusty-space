@@ -183,6 +183,25 @@ fn dome(uv: DVec2, radius: f64, sphere: f64) -> ChartPoint {
     ChartPoint { uv, kind: ChartKind::Dome, bounds: [radius, sphere, 0.0, 0.0], end: true }
 }
 
+/// A triangle's corners, in the part's frame, laid out whole in the chart its middle is in, so a
+/// pattern never smears across one: the chart, and each corner's point there unwrapped to within
+/// half a period of the first's across a seam, with how many periods that took each way, which
+/// tells a corner on one side of a seam from the same corner on the other.
+pub fn lay_out(shape: &Shape, corners: [DVec3; 3]) -> (u8, [(ChartPoint, [i32; 2]); 3]) {
+    let chart = chart_of(shape, (corners[0] + corners[1] + corners[2]) / 3.0);
+    let laid = corners.map(|p| chart_at(shape, chart, p));
+    let (first, periods) = (laid[0].uv, laid[0].periods());
+    let turns = |x: f64, near: f64, period: f64| if period > 0.0 { ((near - x) / period).round() as i32 } else { 0 };
+    (
+        chart,
+        laid.map(|mut here| {
+            let k = [turns(here.uv.x, first.x, periods.x), turns(here.uv.y, first.y, periods.y)];
+            here.uv += DVec2::new(k[0] as f64 * periods.x, k[1] as f64 * periods.y);
+            (here, k)
+        }),
+    )
+}
+
 /// `x` less whole periods, to within half of one of `near`; as is for no period.
 pub fn unwrapped(x: f64, near: f64, period: f64) -> f64 {
     if period > 0.0 { x - period * ((x - near) / period).round() } else { x }
