@@ -11,7 +11,8 @@
 //! | `--volume <m3>` | every piece's volume, so they are alike in size; 60 000 by default |
 //! | `--cells <n>` | the mesher's grid across each piece; 128 by default |
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
-//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian` or `sprue` |
+//! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian`, `sprue` or `tubes` |
+//! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus` or `frustum` |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--frames <n>` | frames after every mesh lands |
 
@@ -35,6 +36,7 @@ use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::LooksPlugin;
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
+use lc_client::looks::tubes::{Tubes, TubesMaterial};
 use lc_client::looks::outline::RoofOutline;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape as Target2d, Target, placeholder};
 use lc_client::tonemap::ToneMap;
@@ -63,7 +65,7 @@ const KINDS: [Kind; 8] = [
     Kind::Bay,
 ];
 
-const LOOKS: [&str; 5] = ["aztec", "offices", "habitat", "obsidian", "sprue"];
+const LOOKS: [&str; 6] = ["aztec", "offices", "habitat", "obsidian", "sprue", "tubes"];
 
 /// Each primitive in a proportion that shows it, its axis standing up.
 const PRIMITIVES: [Primitive; 6] = [
@@ -74,6 +76,8 @@ const PRIMITIVES: [Primitive; 6] = [
     Primitive::Torus { major: 3.0 },
     Primitive::Frustum { length: 2.0, taper: 0.5 },
 ];
+
+const PRIMITIVE_NAMES: [&str; 6] = ["ellipsoid", "capsule", "slab", "cylinder", "torus", "frustum"];
 
 #[derive(Clone, Copy)]
 enum Column {
@@ -93,6 +97,7 @@ impl Column {
 struct Args {
     path: String,
     columns: Vec<Column>,
+    primitives: Vec<Primitive>,
     volume: f64,
     cells: u32,
     yaw_deg: f32,
@@ -117,9 +122,17 @@ impl Args {
             None => all,
             Some(name) => vec![*all.iter().find(|c| c.name() == name).unwrap_or_else(|| fail(&format!("no column {name}")))],
         };
+        let primitives = match text("--primitive") {
+            None => PRIMITIVES.to_vec(),
+            Some(name) => {
+                let k = PRIMITIVE_NAMES.iter().position(|p| *p == name).unwrap_or_else(|| fail(&format!("--primitive is one of {PRIMITIVE_NAMES:?}")));
+                vec![PRIMITIVES[k]]
+            }
+        };
         Self {
             path,
             columns,
+            primitives,
             volume: value("--volume").unwrap_or(6.0e4) as f64,
             cells: value("--cells").unwrap_or(128.0) as u32,
             yaw_deg: value("--yaw").unwrap_or(-25.0),
@@ -257,6 +270,7 @@ fn spawn(
     mut aztecs: ResMut<Assets<AztecMaterial>>,
     mut obsidians: ResMut<Assets<ObsidianMaterial>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
+    mut tubes: ResMut<Assets<TubesMaterial>>,
     mut exit: MessageWriter<AppExit>,
     mut waited: Local<u32>,
 ) {
@@ -313,6 +327,7 @@ fn spawn(
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());
     let habitat = aztecs.add(Aztec { to_star, ..Aztec::habitat() }.material());
     let obsidian = obsidians.add(Obsidian { to_star, ..default() }.material());
+    let tube = tubes.add(Tubes { to_star, ..default() }.material());
     let sprue_layers = if args.columns.iter().any(|c| matches!(c, Column::Look("sprue"))) {
         let sprue = Sprue { to_star, ..default() };
         Some(sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m)))
@@ -320,7 +335,7 @@ fn spawn(
         None
     };
 
-    let shapes: Vec<Shape> = PRIMITIVES.iter().map(|p| p.at(p.scale(args.volume))).collect();
+    let shapes: Vec<Shape> = args.primitives.iter().map(|p| p.at(p.scale(args.volume))).collect();
     let slot = 2.4 * shapes.iter().copied().map(reach).fold(0.0, f64::max) as f32;
     // On the plane square to the view, so every slot is seen alike.
     let right = Vec3::Y.cross(toward).normalize();
@@ -347,6 +362,9 @@ fn spawn(
                 }
                 Column::Look("obsidian") => {
                     commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(obsidian.clone()), transform));
+                }
+                Column::Look("tubes") => {
+                    commands.spawn((form(Kind::Drone, shape), MeshMaterial3d(tube.clone()), transform));
                 }
                 Column::Look(look) => {
                     let material = match look {

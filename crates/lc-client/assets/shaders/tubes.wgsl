@@ -1,8 +1,8 @@
 // Launch tubes in a hive. Hexagonal cells, a groove between them, each with a tube at its middle
 // ringed in red and white danger tape and closed by a six-bladed iris, shut, half open or open. An
 // open tube is traced: the view ray meets its wall, ringed and lit by guide lights running down it,
-// or a drone's nose, or the empty floor. A margin two apothems wide around each face is bare plate,
-// so no cell is cut by an edge. Each face is mapped in its own frame (u, v, n), meters. Look
+// or a drone's nose, or the empty floor. On a box, a margin two apothems wide around each face is
+// buffed steel, turned in overlapping swirls, so no cell is cut by an edge. Each face is mapped in its own frame (u, v, n), meters. Look
 // development: crates/lc-client/src/looks/tubes.rs.
 
 #import bevy_pbr::{
@@ -46,7 +46,8 @@ struct TubesUniform {
     to_planet: vec4<f32>,
     planet_color: vec4<f32>,
     ambient: vec4<f32>,
-    /// `(exposure, seed, 0, 0)`.
+    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is an axis-aligned unit cube
+    /// scaled by its transform, which is how a face's edges, and so its margin, are known.
     finish: vec4<f32>,
 }
 
@@ -69,6 +70,13 @@ const GUIDE_M: f32 = 0.08;
 /// How far a drone's nose is across, as a share of the bore.
 const NOSE_SHARE: f32 = 0.75;
 const EYE: vec3<f32> = vec3<f32>(1.0, 0.08, 0.04) * 2.0;
+/// Buffed steel: swirls this far apart, each this wide, laid in rows, each over the last.
+const SWIRL_PITCH_M: f32 = 1.2;
+const SWIRL_M: f32 = 1.0;
+const STEEL: vec3<f32> = vec3<f32>(0.56, 0.57, 0.58);
+/// How tight the highlight along the brushing is, and what steel mirrors of the sky.
+const BRUSH_EXPONENT: f32 = 90.0;
+const SKY: vec3<f32> = vec3<f32>(0.02, 0.025, 0.035);
 
 /// The star, turned about world Y at `to_star.w` rad/s.
 fn turned(to_star: vec4<f32>) -> vec3<f32> {
@@ -268,6 +276,49 @@ fn down_tube(q: vec2<f32>, d: vec3<f32>, loaded: bool, daylight: vec3<f32>, pixe
     return c;
 }
 
+/// Buffed steel: each point brushed around the middle of the latest swirl over it, so the star's
+/// highlight runs in arcs across the swirls. Where a swirl is under a few pixels, plain steel.
+fn buffed(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: f32) -> vec3<f32> {
+    let g = p / SWIRL_PITCH_M;
+    var middle = vec2<f32>(0.0);
+    var best = -1.0e9;
+    for (var dr = -1; dr <= 1; dr++) {
+        let row = floor(g.y) + f32(dr);
+        let shift = 0.5 * (row - 2.0 * floor(0.5 * row));
+        for (var dc = -1; dc <= 1; dc++) {
+            let col = floor(g.x - shift) + f32(dc);
+            let c = vec2<f32>(col + shift + 0.5, row + 0.5) * SWIRL_PITCH_M;
+            let order = row * 4096.0 + col;
+            if (distance(p, c) < SWIRL_M && order > best) {
+                best = order;
+                middle = c;
+            }
+        }
+    }
+    let off = p - middle;
+    let brush = normalize(frame * vec3<f32>(select(vec2<f32>(1.0, 0.0), vec2<f32>(-off.y, off.x) / length(off), length(off) > 1.0e-4), 0.0));
+    // The finest rings of the turning, a shade apart, gone before they alias.
+    let rings = 1.0 + 0.04 * sin(2.0 * PI * length(off) / 0.03) * (1.0 - smoothstep(0.004, 0.012, pixel));
+    let anisotropic = 1.0 - smoothstep(0.1, 0.5, pixel / SWIRL_PITCH_M);
+
+    let star = turned(m.to_star);
+    let n = surface;
+    let r = reflect(-e, n);
+    let fresnel = STEEL + (1.0 - STEEL) * pow(1.0 - max(dot(n, e), 0.0), 5.0);
+    var radiance = SKY * fresnel * mix(0.4, 1.0, 0.5 + 0.5 * r.y);
+    radiance += m.planet_color.rgb * fresnel * planet_seen(r, 0.35);
+    if (dot(star, surface) > 0.0) {
+        let ndl = max(dot(n, star), 0.0);
+        let h = normalize(star + e);
+        let along = dot(brush, h);
+        let streak = pow(max(1.0 - along * along, 0.0), 0.5 * BRUSH_EXPONENT) * (BRUSH_EXPONENT + 2.0) / (8.0 * PI);
+        // Unresolved, the swirls' streaks average to a sheen over the whole face.
+        let even = specular(n, star, e, STEEL, 0.4) + 0.06 * fresnel * ndl;
+        radiance += m.star_color.rgb * (mix(even, fresnel * streak * ndl * 0.25, anisotropic) + 0.03 * STEEL * ndl);
+    }
+    return radiance * rings;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
@@ -285,9 +336,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let box_at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
     let box_half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
     // Two apothems, a cell's width, between a kept cell's middle and the edge.
-    let kept = all(abs(center - box_at) <= box_half - vec2<f32>(w));
+    let kept = m.finish.z < 0.5 || all(abs(center - box_at) <= box_half - vec2<f32>(w));
     if (!kept) {
-        return vec4<f32>(lit(surface, e, surface, 0.9 * m.paint.rgb) * m.finish.x, 1.0);
+        return vec4<f32>(buffed(p, frame, surface, e, pixel) * m.finish.x, 1.0);
     }
 
     let seed = mix_hash(u32(m.finish.y), f.id);

@@ -1,8 +1,8 @@
 //! Launch tubes in a hive: hexagonal cells, each with a tube at its middle under an iris, open or
 //! shut, ringed in danger tape. An open tube is drawn by tracing the view into it: its walls ringed
 //! and lit by guide lights running down it, and a drone's nose at the bottom or the empty floor.
-//! No cell is cut by a face's edge: a margin two apothems wide is bare plate. Fully procedural; see
-//! `assets/shaders/tubes.wgsl`.
+//! On a box no cell is cut by a face's edge: a margin two apothems wide is buffed steel. Fully
+//! procedural; see `assets/shaders/tubes.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -42,6 +42,9 @@ pub struct Tubes {
     pub exposure_stops: f32,
     /// Below 2^24: it reaches the shader as an f32.
     pub seed: u32,
+    /// The mesh is an axis-aligned unit cube scaled by its transform, unrotated, which is how the
+    /// shader knows where a face ends, and so where its margin is. Otherwise there is none.
+    pub unit_box: bool,
 }
 
 impl Default for Tubes {
@@ -67,6 +70,7 @@ impl Default for Tubes {
             planet: 0.12,
             exposure_stops: 0.0,
             seed: 5,
+            unit_box: false,
         }
     }
 }
@@ -85,7 +89,7 @@ impl Tubes {
                 to_planet: self.to_planet.extend(self.planet_deg.to_radians()),
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
-                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
+                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, if self.unit_box { 1.0 } else { 0.0 }, 0.0),
             },
         }
     }
@@ -106,8 +110,6 @@ pub struct TubesUniform {
     finish: Vec4,
 }
 
-/// The mesh must be an axis-aligned unit cube scaled by its transform, unrotated: that is how the
-/// shader knows where a face ends.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct TubesMaterial {
     #[uniform(0, visibility(vertex, fragment))]
