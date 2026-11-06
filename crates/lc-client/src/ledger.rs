@@ -8,7 +8,7 @@
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::Capacities;
 use lc_world::form::Form;
-use lc_world::refit::rounds::{Change, Phase, Plan, Step};
+use lc_world::refit::rounds::{Change, Phase, Plan, Step, Work};
 
 use crate::draft::Draft;
 
@@ -31,11 +31,12 @@ impl Budget {
     pub fn of(plan: &Plan, balance: &Balance) -> Self {
         let round = plan.round();
         let steps = plan.steps();
-        let dismantling = |s: &&Step| s.change.phase() == Phase::Dismantle;
+        let dismantling = |s: &&Step| s.change.work() == Work::Dismantle;
         let returned_j: f64 = steps.iter().filter(dismantling).map(|s| s.gross_j).sum();
-        let spent_j = steps.iter().filter(|s| s.change.phase() == Phase::Build).map(|s| s.gross_j).sum();
-        let peak_j = round.stored_j + steps.iter().filter(dismantling).map(|s| s.stored_j - s.spilled_j).sum::<f64>();
-        let dismantled_s = steps.iter().filter(dismantling).map(Step::ends_s).fold(0.0, f64::max);
+        let spent_j = steps.iter().filter(|s| s.change.work() == Work::Build).map(|s| s.gross_j).sum();
+        let by_dismantled = |s: &&Step| s.phase <= Phase::Dismantle;
+        let peak_j = round.stored_j + steps.iter().filter(by_dismantled).map(|s| s.stored_j - s.spilled_j).sum::<f64>();
+        let dismantled_s = steps.iter().filter(by_dismantled).map(Step::ends_s).fold(0.0, f64::max);
         let peak_form = plan.at(round.start_s + dismantled_s).form;
         Self {
             available_j: round.stored_j + balance.recovery * returned_j,
@@ -65,7 +66,7 @@ pub struct StepRow {
     pub vented_j: f64,
 }
 
-/// All three phases, in order, each with its steps, empty or not.
+/// Every phase, in order, each with its steps, empty or not.
 pub fn phases(plan: &Plan, now_s: f64) -> Vec<(Phase, Vec<StepRow>)> {
     let progress = plan.at(now_s);
     let state = |i: usize| match progress.current {
@@ -74,14 +75,14 @@ pub fn phases(plan: &Plan, now_s: f64) -> Vec<(Phase, Vec<StepRow>)> {
         // Past the round's end `at` finishes every step.
         _ => StepState::Waiting,
     };
-    [Phase::Dismantle, Phase::Move, Phase::Build]
+    [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build]
         .into_iter()
         .map(|phase| {
             let rows = plan
                 .steps()
                 .iter()
                 .enumerate()
-                .filter(|(_, s)| s.change.phase() == phase)
+                .filter(|(_, s)| s.phase == phase)
                 .map(|(i, s)| StepRow {
                     what: step_name(s),
                     state: state(i),
@@ -97,6 +98,7 @@ pub fn phases(plan: &Plan, now_s: f64) -> Vec<(Phase, Vec<StepRow>)> {
 
 pub fn phase_name(phase: Phase) -> &'static str {
     match phase {
+        Phase::Prepare => "prepare",
         Phase::Dismantle => "dismantle",
         Phase::Move => "move",
         Phase::Build => "build",
@@ -270,10 +272,10 @@ mod tests {
     fn the_budget_balances_what_is_taken_apart_against_what_is_built() {
         let p = plan();
         let budget = Budget::of(&p, &B);
-        let gross = |phase| p.steps().iter().filter(|s| s.change.phase() == phase).map(|s| s.gross_j).sum::<f64>();
-        assert!(gross(Phase::Dismantle) > 0.0 && gross(Phase::Build) > 0.0, "premise: both phases work");
-        assert_eq!(budget.spent_j, gross(Phase::Build));
-        assert!((budget.available_j - (p.round().stored_j + 0.95 * gross(Phase::Dismantle))).abs() < 1.0);
+        let gross = |work| p.steps().iter().filter(|s| s.change.work() == work).map(|s| s.gross_j).sum::<f64>();
+        assert!(gross(Work::Dismantle) > 0.0 && gross(Work::Build) > 0.0, "premise: both phases work");
+        assert_eq!(budget.spent_j, gross(Work::Build));
+        assert!((budget.available_j - (p.round().stored_j + 0.95 * gross(Work::Dismantle))).abs() < 1.0);
         // Storage began full, so nothing the dismantle returns fits and all of it vents.
         assert!((budget.peak_j - p.round().stored_j.min(budget.peak_capacity_j)).abs() < 1.0, "{budget:?}");
         assert!(budget.vented_j > 0.0, "a full store has no room for the return");
@@ -285,17 +287,18 @@ mod tests {
         let p = plan();
         let start = p.round().start_s;
         let before = phases(&p, start);
-        assert_eq!(before.iter().map(|(ph, _)| *ph).collect::<Vec<_>>(), [Phase::Dismantle, Phase::Move, Phase::Build]);
+        assert_eq!(before.iter().map(|(ph, _)| *ph).collect::<Vec<_>>(), [Phase::Prepare, Phase::Dismantle, Phase::Move, Phase::Build]);
+        assert!(before[0].1.is_empty(), "a bay is not built first");
         assert!(before.iter().flat_map(|(_, r)| r).all(|r| r.state == StepState::Waiting));
-        assert_eq!(before[0].1[0].what, format!("take apart data {}", before_data()));
+        assert_eq!(before[1].1[0].what, format!("take apart data {}", before_data()));
 
         let first = &p.steps()[0];
         let midway = phases(&p, start + first.begins_s + 0.5 * first.duration_s);
-        assert_eq!(midway[0].1[0].state, StepState::Working(0.5));
+        assert_eq!(midway[1].1[0].state, StepState::Working(0.5));
 
         let built = phases(&p, start + p.duration_s());
         assert!(built.iter().flat_map(|(_, r)| r).all(|r| r.state == StepState::Done), "{built:?}");
-        let build = &built[2].1;
+        let build = &built[3].1;
         assert!(build.iter().any(|r| r.what.starts_with("build bay") && r.stored_j < 0.0), "a build is paid from storage: {build:?}");
     }
 

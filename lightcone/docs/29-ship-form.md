@@ -330,15 +330,21 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 ## Refits
 
 A refit takes the ship from its form to a target form. It is one **round** of edits, and a round runs
-in three phases, strictly in order:
+in four phases, strictly in order:
 
-1. **Dismantle.** Every part that shrinks, disappears or is being rebuilt gives up what it loses.
+1. **Prepare.** Storage and drones that grow or are new are built first, each if what is stored as
+   the round begins still pays for it, so what the dismantle phase returns has room and a drone
+   replaced has its successor standing. A part that grows does so where it stands and moves in the
+   move phase. A new one must hang from a part the round does not take apart whole, and come with
+   the copies the target gives it. The rest wait for the build phase.
+2. **Dismantle.** Every part that shrinks, disappears or is being rebuilt gives up what it loses.
    Drones go last. Each return is 95% of the mass-energy removed and lands in storage **if there is
    room**, where "room" means capacity left after this phase's own storage losses. **What does not fit
    is vented into the field as heat**, a burst at the end of the step that frees it. A return that
    finds the room already filled by starlight is heat as it arrives instead ([30](30-the-field.md#the-inputs)).
-2. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
-3. **Build.** Every part that grows, is new or is being rebuilt is built, drones first. Each takes its
+3. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
+4. **Build.** Every part that grows, is new or is being rebuilt and was not built in the prepare
+   phase is built, drones first. Each takes its
    added mass-energy, structure included, from storage.
 
 | change to a part | phase | energy | time |
@@ -370,8 +376,8 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 
 - **Within a phase, parts go in id order**, drones apart as above, and moves by depth in the tree
   the round began with.
-- **A move carries what hung from the part when the round began**, as much of it as the dismantle
-  phase left, weighted by each part's work factor. A part both rebuilt and moved still moves,
+- **A move carries what hung from the part when the round began**, and what the prepare phase hung
+  from it, as much of it as the dismantle phase left, weighted by each part's work factor. A part both rebuilt and moved still moves,
   carrying its children, and is rebuilt in its new place.
 - **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
   step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
@@ -383,7 +389,8 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
   What the builds still have to take is held out of free storage, as a burn's commitment is, so
   the drain runs out before a build does.
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
-  are removed, replaced by new parts or rebuilt, since the build phase would begin with none.
+  are removed, replaced by new parts storage cannot pay for up front, or rebuilt, since the build
+  phase would begin with none.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 - **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
   part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
@@ -393,11 +400,12 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 ### Why strict phases
 
 The planner could interleave dismantles and builds so that energy in transit never piles up. It does
-not, because the strict order is predictable, and because it makes one rule do a lot of work:
+not, beyond building storage and drones first, because the strict order is predictable, and because it makes one rule do a lot of work:
 **energy in transit has to be stored somewhere.** A large transformation in one round vents the
 difference into the field, which may kill the ship. Done properly it takes rounds:
 
-1. Take the old section apart, and grow storage to hold what comes back.
+1. Take the old section apart, and grow storage to hold what comes back, which the prepare phase
+   builds before anything is taken apart.
 2. Spend that storage on the new section.
 3. If you like, shrink the extra storage away again.
 
@@ -544,7 +552,7 @@ Check any that do not before it lands. The editor's camera must also never be th
 or `bevy_egui` gives it the primary context.
 
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
-three phases, progress, and Cancel.
+four phases, progress, and Cancel.
 
 ### Apply and the ledger
 
@@ -907,7 +915,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: four phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
 | `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |

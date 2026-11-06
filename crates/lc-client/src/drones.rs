@@ -24,7 +24,7 @@ use lc_proto::ShipId;
 use lc_world::fitting::Balance;
 use lc_world::form::Kind;
 use lc_world::form::sdf::Piece;
-use lc_world::refit::rounds::{Phase, Plan};
+use lc_world::refit::rounds::{Work, Plan};
 use lc_world::seen::Underway;
 
 use crate::construction::{Clock, Look, Refit, Working};
@@ -117,7 +117,7 @@ pub fn docks(pieces: &[Piece]) -> Vec<DVec3> {
 /// first point not finished to the first not begun. `None` on a move, or before the front leaves
 /// the joint.
 pub fn frontier(working: &Working) -> Option<(f64, f64)> {
-    if working.change.phase() == Phase::Move {
+    if working.change.work() == Work::Move {
         return None;
     }
     let lo = first(|d| working.look(d) != Look::FINISHED);
@@ -152,7 +152,7 @@ pub fn targets(working: &Working) -> Vec<DVec3> {
     if copies == 0 {
         return Vec::new();
     }
-    if working.change.phase() == Phase::Move {
+    if working.change.work() == Work::Move {
         return (0..MAX_TARGETS)
             .map(|k| {
                 let piece = &working.outer[k % copies];
@@ -324,8 +324,8 @@ pub fn traffic(pieces: &[Piece], working: Option<(&Working, f64)>) -> Traffic {
     let edge_s = step_s * working.fraction.min(1.0 - working.fraction);
     let ramp = smoothstep((edge_s / ramp_s).clamp(0.0, 1.0));
     let copies = working.outer.len() as f64;
-    match working.change.phase() {
-        Phase::Move => Traffic {
+    match working.change.work() {
+        Work::Move => Traffic {
             working: SWARMING * ramp,
             dwell: SWARM_DWELL,
             hover_m: 2.0 * HOVER * reach,
@@ -337,7 +337,7 @@ pub fn traffic(pieces: &[Piece], working: Option<(&Working, f64)>) -> Traffic {
             let band = frontier(working).map_or(0.0, |(lo, hi)| hi - lo);
             Traffic {
                 working: WORKING * ramp,
-                carrying: if phase == Phase::Dismantle { 1.0 } else { 0.0 },
+                carrying: if phase == Work::Dismantle { 1.0 } else { 0.0 },
                 hover_m: HOVER * reach,
                 haze_m: spacing(4.0 * reach * reach * band.max(0.05) * copies, WORKING),
                 targets,
@@ -781,7 +781,7 @@ mod tests {
             assert_eq!(traffic_at(0.0).working, 0.0, "{:?} busy as it starts", s.change);
             assert!(traffic_at(0.5).working > 0.5, "{:?} idle halfway", s.change);
             assert!(traffic_at(1.0 - 1e-9).working < 1e-3, "{:?} busy as it ends", s.change);
-            assert_eq!(traffic_at(0.5).carrying > 0.0, s.change.phase() == Phase::Dismantle, "{:?}", s.change);
+            assert_eq!(traffic_at(0.5).carrying > 0.0, s.change.work() == Work::Dismantle, "{:?}", s.change);
         }
     }
 

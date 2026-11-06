@@ -435,7 +435,7 @@ no drone flies before a step starts or after it ends.
 
 The drones' clock is the round's while it loops or runs in the game. `--refit-at` freezes the construction but not the
 traffic, so a burst of one step moves; `--rate 0` freezes both. Four consecutive frames of the
-dismantle at `--refit-at 0.1 --rate 3`, each mote a little further along:
+dismantle at `--refit-at 0.55 --rate 3`, each mote a little further along:
 
 ![burst frame 0](../images/drones-burst-0.jpg) ![burst frame 1](../images/drones-burst-1.jpg)
 ![burst frame 2](../images/drones-burst-2.jpg) ![burst frame 3](../images/drones-burst-3.jpg)
