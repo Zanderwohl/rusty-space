@@ -365,7 +365,10 @@ impl Draft {
         }
         let host_m3 = host.shape(balance.min_part_m3).volume();
         let volume_m3 = snap::volume((host_m3 * ADDED_SHARE).max(balance.min_part_m3), balance.min_part_m3, false);
-        let id = PartId(self.form.parts.iter().map(|p| p.id.0).max().map_or(0, |m| m + 1));
+        // A ship part of its kind the draft has dropped lends its id, so the round reshapes and
+        // moves it rather than taking it apart and building this.
+        let dropped = self.ship.parts.iter().filter(|s| s.kind == kind && self.part(s.id).is_none()).map(|s| s.id).min();
+        let id = dropped.unwrap_or_else(|| PartId(self.form.parts.iter().chain(&self.ship.parts).map(|p| p.id.0).max().map_or(0, |m| m + 1)));
         let placement = Placement {
             parent,
             mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF },
@@ -730,6 +733,23 @@ mod tests {
 
     fn ids(parts: &[Part]) -> Vec<u16> {
         parts.iter().map(|p| p.id.0).collect()
+    }
+
+    #[test]
+    fn a_part_added_takes_the_id_of_one_of_its_kind_the_draft_dropped() {
+        let mut draft = Draft::new(Form::reference());
+        let data = draft.form.parts.iter().find(|p| p.kind == Kind::Data).unwrap().id;
+        let storage = draft.form.parts.iter().find(|p| p.kind == Kind::Storage).unwrap().id;
+        let removal = draft.remove(data).unwrap();
+        draft.apply(&removal, &B).unwrap();
+        let added = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::Y, &B).unwrap();
+        assert_eq!(added.part, data, "the dropped data core lends its id");
+        draft.apply(&added, &B).unwrap();
+        let another = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::NEG_Y, &B).unwrap();
+        let highest = draft.ship.parts.iter().chain(&draft.form.parts).map(|p| p.id.0).max().unwrap();
+        assert_eq!(another.part, PartId(highest + 1), "once it is taken, a fresh one");
+        let engine = draft.add(storage, Kind::Engine, PRIMITIVES[5], DVec3::NEG_X, &B).unwrap();
+        assert_ne!(engine.part, data, "never a part of another kind's");
     }
 
     #[test]

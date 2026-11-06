@@ -361,6 +361,45 @@ fn prepare(
     Ok((later, prepared))
 }
 
+/// `target` with its parts renumbered so that one the ship lacks takes the id of a ship part of
+/// its kind the target has dropped, or holds as another kind, the largest of each first. A part is
+/// known by its id, so a store dropped here and a store added there would otherwise be taken apart
+/// and built again, where a reshape and a move do the same for the 5% loss on the difference. A
+/// part left on an id another takes moves to a fresh one. An arrangement dropped onto a ship is
+/// matched to it so; the planner itself never renumbers, so the ship it leaves is the target it
+/// was given.
+pub fn matched(from: &Form, mut target: Form) -> Form {
+    let by_volume = |a: &&Part, b: &&Part| b.volume_m3.total_cmp(&a.volume_m3).then(a.id.cmp(&b.id));
+    let kept = |id: PartId, kind: Kind| from.parts.iter().any(|f| f.id == id && f.kind == kind);
+    let held = |id: PartId, kind: Kind| target.parts.iter().any(|t| t.id == id && t.kind == kind);
+    let mut open: Vec<&Part> = from.parts.iter().filter(|f| f.kind != Kind::Mind && !held(f.id, f.kind)).collect();
+    let mut new: Vec<&Part> = target.parts.iter().filter(|t| t.kind != Kind::Mind && !kept(t.id, t.kind)).collect();
+    open.sort_by(by_volume);
+    new.sort_by(by_volume);
+    let mut renamed: HashMap<PartId, PartId> = HashMap::new();
+    for t in new {
+        if let Some(i) = open.iter().position(|f| f.kind == t.kind) {
+            renamed.insert(t.id, open.remove(i).id);
+        }
+    }
+    let taken: BTreeSet<PartId> = renamed.values().copied().collect();
+    let mut fresh = from.parts.iter().chain(&target.parts).map(|p| p.id.0).max().map_or(0, |m| m + 1);
+    for t in &target.parts {
+        if !renamed.contains_key(&t.id) && taken.contains(&t.id) {
+            renamed.insert(t.id, PartId(fresh));
+            fresh += 1;
+        }
+    }
+    let to = |id: PartId| renamed.get(&id).copied().unwrap_or(id);
+    for part in &mut target.parts {
+        part.id = to(part.id);
+        if let Some(placement) = &mut part.placement {
+            placement.parent = to(placement.parent);
+        }
+    }
+    target
+}
+
 impl Plan {
     fn new(round: Round, balance: &Balance) -> Result<Self, Refusal> {
         // Walked as a tree below, and it is the ship as it stands, so never a client's.
@@ -1141,6 +1180,49 @@ mod tests {
         let replaced = adding(&without(&from, &[2]), &[part(8, Kind::Drone, ROD, 1.0, 1)]);
         let short = 0.5 * energy(&get(&replaced, 8));
         assert_eq!(solve(&from, &replaced, short).unwrap_err(), Refusal::NoDrones { part: PartId(8) });
+    }
+
+    #[test]
+    fn a_part_dropped_and_one_of_its_kind_added_are_matched_into_a_reshape_and_a_move() {
+        let from = ship();
+        let store = get(&from, 1);
+        let mut moved = part(9, Kind::Storage, Primitive::Capsule { length: 1.0 }, 1.0, 2);
+        moved.volume_m3 = store.volume_m3 * 0.8;
+        // Its children hang from the new id, and follow it.
+        let target = adding(&without(&from, &[1]), &[moved]);
+        let target = Form {
+            parts: target
+                .parts
+                .iter()
+                .map(|p| match p.placement {
+                    Some(mut place) if place.parent == PartId(1) => {
+                        place.parent = if p.id == PartId(2) { PartId(0) } else { PartId(9) };
+                        Part { placement: Some(place), ..*p }
+                    }
+                    _ => *p,
+                })
+                .collect(),
+        };
+        assert_eq!(target.validate(), Ok(()));
+        // Room for what either way gives back.
+        let stored = capacity(&from) / 3.0;
+        let raw = solve(&from, &target, stored).unwrap();
+        assert!(changes(&raw).contains(&(1, Change::Remove)) && changes(&raw).contains(&(9, Change::Add)));
+
+        let paired = matched(&from, target.clone());
+        assert_eq!(paired.validate(), Ok(()));
+        assert!(paired.parts.iter().all(|p| p.id != PartId(9)), "the new store took the old one's id");
+        assert!(paired.parts.iter().filter(|p| p.id != PartId(1)).filter_map(|p| p.placement).all(|p| p.parent != PartId(9)));
+        let plan = solve(&from, &paired, stored).unwrap();
+        assert_eq!((plan.vented_j(), raw.vented_j()), (0.0, 0.0));
+        let mut done = changes(&plan);
+        done.sort_by_key(|c| c.0);
+        assert!(done.iter().filter(|c| c.0 == 1).map(|c| c.1).eq([Change::Shrink, Change::Move]), "{done:?}");
+        // Taking the store apart and building it again loses 5% of the whole new one besides.
+        let new_store = energy(&get(&paired, 1));
+        assert!((raw.net_j() - plan.net_j() - 0.05 * new_store).abs() < 1e-9 * new_store, "{} against {}", raw.net_j(), plan.net_j());
+        assert!(plan.duration_s() < 0.5 * raw.duration_s(), "{} against {}", plan.duration_s(), raw.duration_s());
+        assert_eq!(matched(&from, paired.clone()), paired, "matching twice changes nothing");
     }
 
     #[test]

@@ -391,6 +391,15 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
   are removed, replaced by new parts storage cannot pay for up front, or rebuilt, since the build
   phase would begin with none.
+- **The planner knows a part by its id and never renumbers**, so the ship it leaves is the target
+  it was given. A store dropped in one place and a store added in another is a dismantle and a
+  build. The editor gives ids so that it is a reshape and a move instead, for the 5% loss on the
+  difference rather than on the whole new part: a part added takes the id of a ship part of its kind
+  the draft has dropped, the lowest first, and a preset applied, as a layout or a design, is
+  renumbered by `rounds::matched`, which pairs each part the ship lacks with a ship part of its kind
+  that the preset drops or holds as another kind, largest with largest. A part left on an id
+  another takes moves to a fresh one. Anything a drag and the axis handles could do, this does, at
+  their price.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 - **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
   part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
@@ -718,7 +727,7 @@ the ship.
 | mount | a button | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
 | spar mode | a button | saddle or strap. A change of kind, so the spar is rebuilt: the cut changes, the charged volume does not |
 | mirror | a button | for the subtree |
-| add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above |
+| add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above. It takes the id of a ship part of its kind the draft has dropped, so the round reshapes and moves that part (§Refits) |
 | delete | a button, `Delete`, or a drop on the palette | the part and its subtree. Refused for the Mind. The last drones may go: a draft may pass through none on the way to a design, and Apply refuses a target with too few |
 
 A line drags by its point nearest the pointer's ray and the ring by where the ray meets its plane, so
