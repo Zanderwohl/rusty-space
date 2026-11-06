@@ -17,11 +17,14 @@
 //! | `--sun <deg>` | the star's elevation |
 //! | `--exposure <stops>` | open the exposure this many stops, as the game's flag does, and take the game's night fill, 0.3% of the star rather than 8%: a bay's lamps by night |
 //! | `--frames <n>` | frames after every mesh lands |
+//! | `--stay` | keep the window open to look around, as the game does: right-drag or the arrows orbit, the wheel or `=` and `-` zoom, `]` and `[` open and close the exposure half a stop, `\` puts it back, `P` photographs to the path |
 
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 use bevy::camera::Hdr;
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -112,6 +115,7 @@ struct Args {
     exposure_stops: f32,
     frames: u32,
     lying: bool,
+    stay: bool,
 }
 
 impl Args {
@@ -149,6 +153,7 @@ impl Args {
             exposure_stops: value("--exposure").unwrap_or(0.0),
             frames: value("--frames").unwrap_or(10.0) as u32,
             lying: args.iter().any(|a| a == "--lying"),
+            stay: args.iter().any(|a| a == "--stay"),
         }
     }
 }
@@ -196,7 +201,7 @@ fn main() {
         })
         .add_systems(Startup, request_tiles)
         .add_systems(Update, spawn.before(HullMeshSystems))
-        .add_systems(Update, photograph.after(HullMeshSystems))
+        .add_systems(Update, (photograph.after(HullMeshSystems), (orbit, expose)))
         .add_systems(Last, take_texels)
         .run();
 }
@@ -405,20 +410,116 @@ fn spawn(
     let distance = args.zoom * half / (0.5 * FOV_Y).tan();
     commands.spawn((
         Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { fov: FOV_Y, near: distance * 0.01, far: distance * 4.0, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: FOV_Y, near: distance * 0.01, far: distance * 40.0, ..default() }),
         Hdr,
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
         Transform::from_translation(toward * distance).looking_at(Vec3::ZERO, Vec3::Y),
+        Orbit { yaw: args.yaw_deg.to_radians(), pitch: args.pitch_deg.to_radians(), distance, stops: args.exposure_stops },
     ));
+}
+
+/// The camera's place about the grid, and the exposure, which `--stay` lets a hand move.
+#[derive(Component)]
+struct Orbit {
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    stops: f32,
+}
+
+/// As the game's look and zoom: `lc_client::input`'s sensitivity, its wheel notch and its keys.
+const ORBIT_KEYS_RAD_S: f32 = 1.5;
+const ZOOM_PER_NOTCH: f32 = 1.15;
+const EXPOSURE_STEP: f32 = 0.5;
+
+fn orbit(
+    scene: Res<Scene>,
+    keys: Res<ButtonInput<KeyCode>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
+    scroll: Res<AccumulatedMouseScroll>,
+    time: Res<Time>,
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    mut camera: Query<(&mut Orbit, &mut Transform)>,
+) {
+    if !scene.args.stay {
+        return;
+    }
+    let Ok((mut orbit, mut transform)) = camera.single_mut() else { return };
+    let look = lc_client::input::LOOK_BUTTON;
+    if buttons.just_pressed(look) || buttons.just_released(look) {
+        let grab = buttons.pressed(look);
+        cursor.grab_mode = if grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
+        cursor.visible = !grab;
+    }
+    let mut turn = Vec2::ZERO;
+    if buttons.pressed(look) {
+        let (yaw, pitch) = lc_client::input::look_from(motion.delta);
+        turn += Vec2::new(yaw as f32, pitch as f32);
+    }
+    for (key, way) in [(KeyCode::ArrowLeft, Vec2::X), (KeyCode::ArrowRight, -Vec2::X), (KeyCode::ArrowUp, Vec2::Y), (KeyCode::ArrowDown, -Vec2::Y)] {
+        if keys.pressed(key) {
+            turn += way * ORBIT_KEYS_RAD_S * time.delta_secs();
+        }
+    }
+    let notches = match scroll.unit {
+        MouseScrollUnit::Line => scroll.delta.y,
+        MouseScrollUnit::Pixel => scroll.delta.y / lc_client::input::WHEEL_PIXELS_PER_NOTCH,
+    } + f32::from(keys.just_pressed(KeyCode::Equal)) - f32::from(keys.just_pressed(KeyCode::Minus));
+    if turn == Vec2::ZERO && notches == 0.0 {
+        return;
+    }
+    orbit.yaw += turn.x;
+    orbit.pitch = (orbit.pitch - turn.y).clamp(-1.55, 1.55);
+    orbit.distance /= ZOOM_PER_NOTCH.powf(notches);
+    let toward = Vec3::new(orbit.yaw.sin() * orbit.pitch.cos(), orbit.pitch.sin(), orbit.yaw.cos() * orbit.pitch.cos());
+    *transform = Transform::from_translation(toward * orbit.distance).looking_at(Vec3::ZERO, Vec3::Y);
+}
+
+/// Opens or closes every hull material's exposure, taking the game's night fill whenever it is
+/// open, as `--exposure` does. Written only on a key.
+fn expose(
+    scene: Res<Scene>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut camera: Query<&mut Orbit>,
+    mut hulls: ResMut<Assets<HullMaterial>>,
+) {
+    let Ok(mut orbit) = camera.single_mut() else { return };
+    let stops = if keys.just_pressed(KeyCode::BracketRight) {
+        orbit.stops + EXPOSURE_STEP
+    } else if keys.just_pressed(KeyCode::BracketLeft) {
+        orbit.stops - EXPOSURE_STEP
+    } else if keys.just_pressed(KeyCode::Backslash) {
+        scene.args.exposure_stops
+    } else {
+        return;
+    };
+    orbit.stops = stops;
+    info!("parts_void: exposure {stops:+.1} stops");
+    let ids: Vec<_> = hulls.ids().collect();
+    for id in ids {
+        if let Some(mut hull) = hulls.get_mut(id) {
+            hull.uniforms.exposure.x = LIT_HULL * 2f32.powf(1.5 - stops);
+            hull.uniforms.to_star.w = if stops > 0.0 { GAME_NIGHT } else { 0.08 };
+        }
+    }
 }
 
 fn photograph(
     mut commands: Commands,
     mut scene: ResMut<Scene>,
     pieces: Query<&HullMeshState>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    if scene.args.stay {
+        if keys.just_pressed(KeyCode::KeyP) {
+            info!("parts_void: photographed to {}", scene.args.path);
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(scene.args.path.clone()));
+        }
+        return;
+    }
     let all_current = !pieces.is_empty() && pieces.iter().all(|s| s.current());
     let Some(frames) = scene.drawn.map(|n| n + 1).or(all_current.then_some(0)) else { return };
     scene.drawn = Some(frames);
