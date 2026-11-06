@@ -80,7 +80,8 @@ pub const BAYS: usize = 4;
 /// A bay's hold, for the lamps the hull material draws in it: the transform into the bay's frame
 /// (x out of its mouth, z its up) as three rows, `(half_x, back, wide, tall)` meters, and
 /// `(spans, levels, reach_m, seed)`. A vertex names its bay in [`ATTRIBUTE_HULL_FACE`]'s third
-/// byte, one past its index, and what lamp it is in the fourth. All zero is no bay.
+/// byte, one past its index, and in the fourth what it is to the lamps: a lamp, or an occupant the
+/// shader paints. All zero is no bay.
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
 pub struct HullBay {
     pub to_bay: [Vec4; 3],

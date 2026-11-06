@@ -64,12 +64,14 @@ const RUNWAY_SHARE: f64 = 0.5;
 const STRIP_M: f64 = 0.3;
 const STRIP_RISE_M: f64 = 0.08;
 
-/// What a vertex is, for the lamps: [`HullBay`]'s fourth byte.
+/// What a vertex is, for the lamps: [`HullBay`]'s fourth byte. An occupant is painted by the
+/// shader, a hue a berth.
 #[derive(Clone, Copy)]
 enum Lamp {
     None = 0,
     Runway = 1,
     Flood = 2,
+    Occupant = 3,
 }
 const DISC_SIDES: usize = 20;
 
@@ -511,7 +513,9 @@ impl Builder<'_> {
                     let outline = Outline::ALL[(roll.next() * Outline::ALL.len() as f64) as usize % Outline::ALL.len()];
                     let points = outline.points(width, height, &mut roll);
                     let base = DVec2::new(y, floor + PAD_M + height / 2.0);
+                    self.lamp = Lamp::Occupant;
                     self.card(x, &points.iter().map(|p| *p + base).collect::<Vec<_>>(), card);
+                    self.lamp = Lamp::None;
                 }
             }
         }
@@ -736,6 +740,9 @@ mod tests {
             assert_eq!(text.parse::<f32>().unwrap(), value as f32, "{name}");
         }
         assert!(wgsl.contains(&format!("const BAYS: u32 = {}u;", BAYS)));
+        for (name, lamp) in [("BAY_RUNWAY_LAMP", Lamp::Runway), ("BAY_FLOOD_LAMP", Lamp::Flood), ("BAY_OCCUPANT", Lamp::Occupant)] {
+            assert!(wgsl.contains(&format!("const {name}: u32 = {}u;", lamp as u8)), "{name}");
+        }
     }
 
     /// The formula in `hash.wgsl`, worked out apart from this port, so a slip in either shows.

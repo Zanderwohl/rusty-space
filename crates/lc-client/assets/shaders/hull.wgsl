@@ -194,8 +194,18 @@ const BAY_STRIP_RISE_M: f32 = 0.08;
 const BAY_VACANT: f32 = 0.3;
 const BAY_RUNWAY_LAMP: u32 = 1u;
 const BAY_FLOOD_LAMP: u32 = 2u;
-/// A flood's beam: full inside 25 degrees off its aim, gone past 40, so 50 to 80 degrees across.
-const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.766, 0.906);
+const BAY_OCCUPANT: u32 = 3u;
+/// An occupant's paint, in OKLCH: a cargo ship's enamel over steel, a little darker than the hull's
+/// own gray plate, one lightness and chroma for every hue so no color reads lighter than another,
+/// and less metal than bare plate so its highlight stays white.
+const OCCUPANT_LIGHTNESS: f32 = 0.52;
+const OCCUPANT_CHROMA: f32 = 0.14;
+const OCCUPANT_METALLIC: f32 = 0.1;
+/// The middle of panels.wgsl's grays, which a painted panel's own shade is taken against.
+const PANEL_GRAY: f32 = 0.41;
+/// A flood's beam: full inside 30 degrees off its aim, gone past 45, so 60 to 90 degrees across:
+/// wide enough to take in a card as tall as its berth from under the ceiling.
+const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.707, 0.866);
 /// What the lamps give a surface, as multiples of the bay region's lamp, which is a lit window's
 /// 300 cd/m²: a flood's in square meters, as it falls off with distance squared, and a strip's in
 /// meters, as a line does. A floodlit yard's 2000 lux on what a flood is aimed at is 2000 / π / 300
@@ -219,7 +229,50 @@ struct BayLight {
     light: vec3<f32>,
     /// What glows on its own.
     glow: vec3<f32>,
+    /// An occupant's paint, linear, and 1 in `w`; all zero elsewhere.
+    paint: vec4<f32>,
+    /// Inside the hold, which sees no sky.
+    inside: bool,
 }
+
+/// OKLCH to linear sRGB, by Björn Ottosson's OKLab matrices, with the chroma drawn in until the
+/// color is inside sRGB, so a hue out of gamut keeps its lightness rather than clipping a channel.
+fn oklch(lightness: f32, chroma: f32, hue: f32) -> vec3<f32> {
+    var c = chroma;
+    var rgb = vec3<f32>(lightness);
+    for (var k = 0; k < 8; k++) {
+        let a = c * cos(hue);
+        let b = c * sin(hue);
+        let l = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3.0);
+        let m = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3.0);
+        let s = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3.0);
+        rgb = vec3<f32>(
+            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+        );
+        if (all(rgb >= vec3<f32>(0.0)) && all(rgb <= vec3<f32>(1.0))) {
+            break;
+        }
+        c *= 0.8;
+    }
+    return clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+/// An occupied berth's paint: a hue of its own, from the same seed and index as its occupancy.
+fn occupant_paint(seed: u32, index: u32) -> vec3<f32> {
+    let hue = 6.2831853 * unit(mix_hash(seed ^ 0x5bd1e995u, index));
+    return oklch(OCCUPANT_LIGHTNESS, OCCUPANT_CHROMA, hue);
+}
+
+/// The occupant paint of the fragment being drawn, if it is one, as bay_light found it. Set before
+/// the plate is lit, which reads it.
+var<private> occupant: vec4<f32> = vec4<f32>(0.0);
+
+/// The share of the sky a plate mirrors: none inside a bay's hold, which is closed but for its
+/// mouth, a small share of what a surface in it sees. Set with `occupant`.
+var<private> sky_share: f32 = 1.0;
+const BAY_SKY: f32 = 0.05;
 
 /// As lc_client::bay_mesh::occupied.
 fn bay_occupied(seed: u32, index: u32) -> bool {
@@ -230,7 +283,7 @@ fn bay_occupied(seed: u32, index: u32) -> bool {
 /// lit, and a berth's floods light only that berth, which is how the decks and ribs hold the light
 /// in: no lamp casts a shadow.
 fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
-    var out = BayLight(vec3<f32>(0.0), vec3<f32>(0.0));
+    var out = BayLight(vec3<f32>(0.0), vec3<f32>(0.0), vec4<f32>(0.0), false);
     if (tag.x == 0u || tag.x > BAYS) {
         return out;
     }
@@ -253,6 +306,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     if (abs(p.y) > wide + slack || abs(p.z) > tall + slack || p.x < back - slack || p.x > mouth + slack) {
         return out;
     }
+    out.inside = true;
     let lamp = material.emitted[BAY_REGION].rgb;
     out.light += lamp * BAY_BOUNCE;
 
@@ -292,7 +346,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     let x0 = back + span * pitch + 0.5 * BAY_RIB_DEPTH_M;
     let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
     let middle_y = side * (wide - 0.5 * reach);
-    let aimed_at = vec3<f32>(0.5 * (x0 + x1), middle_y, floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
+    let aimed_at = vec3<f32>(0.5 * (x0 + x1), middle_y, floor_z + BAY_PAD_M + 0.5 * (ceiling - floor_z - BAY_PAD_M));
     var floods = 0.0;
     for (var k = 0u; k < 2u; k++) {
         let spread = select(-BAY_FLOOD_SPREAD, BAY_FLOOD_SPREAD, k == 1u) * reach;
@@ -307,6 +361,9 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     out.light += lamp * BAY_FLOOD_GAIN * floods;
     if (tag.y == BAY_FLOOD_LAMP) {
         out.glow += lamp * BAY_FLOOD_FIXTURE;
+    }
+    if (tag.y == BAY_OCCUPANT) {
+        out.paint = vec4<f32>(occupant_paint(seed, index), 1.0);
     }
     return out;
 }
@@ -711,8 +768,10 @@ fn plate_light(in: VertexOutput, c: HullChart, pixel: f32) -> vec3<f32> {
 fn plate_lit(k: Plate, star: vec3<f32>, e: vec3<f32>, surface: vec3<f32>) -> vec3<f32> {
     let lit_side = dot(star, surface) > 0.0;
     let roughness = material.plate_metal.x;
-    let metallic = material.plate_metal.y;
-    let color = k.color * material.plate_metal.z;
+    // Painted, a panel keeps its own shade as a lightness on the paint.
+    let is_painted = occupant.w > 0.0;
+    let metallic = select(material.plate_metal.y, OCCUPANT_METALLIC, is_painted);
+    let color = select(k.color * material.plate_metal.z, occupant.rgb * dot(k.color, LUMA) / PANEL_GRAY, is_painted);
     let albedo = color * (1.0 - metallic);
     let luma = max(dot(color, LUMA), 1.0e-3);
     let f0 = mix(0.04, luma, metallic);
@@ -730,7 +789,7 @@ fn metal_lit(n: vec3<f32>, star: vec3<f32>, e: vec3<f32>, lit_side: bool, albedo
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, e), 0.0), 5.0);
     let r = reflect(-e, n);
     var here = albedo * max(facing, material.to_star.w);
-    here += tint * PLATE_SKY * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0));
+    here += tint * PLATE_SKY * sky_share * fresnel * (0.3 + 0.7 * max(dot(r, star), 0.0));
     if (lit_side) {
         here += tint * PI * star_specular(n, star, e, roughness, f0);
     }
@@ -1548,13 +1607,15 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         albedo *= 1.0 - tube_share;
         emitted = emitted * (1.0 - tube_share) + tube_share * tubes_light(in, chart, pixel, material.emitted[drone].rgb);
     }
+    let lamps = bay_light(in.bay, in.ship_position, normalize(in.ship_normal));
+    occupant = lamps.paint;
+    sky_share = select(1.0, BAY_SKY, lamps.inside);
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {
         albedo *= 1.0 - plate_share;
         emitted += plate_share * plate_light(in, chart, pixel);
     }
-    let lamps = bay_light(in.bay, in.ship_position, normalize(in.ship_normal));
-    emitted += lamp_albedo * lamps.light + lamps.glow;
+    emitted += select(lamp_albedo, lamps.paint.rgb, lamps.paint.w > 0.0) * lamps.light + lamps.glow;
     if (material.reveal.w >= ALL_PLATED) {
         return shade(albedo, emitted, in.world_normal);
     }
