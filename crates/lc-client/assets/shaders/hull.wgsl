@@ -32,7 +32,7 @@ struct Vertex {
     @location(3) regions_1: vec4<f32>,
     @location(4) regions_2: vec4<f32>,
     @location(5) regions_3: vec4<f32>,
-    // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
+    // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, shadow, 0).
     @location(6) face: vec4<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS, and the
     // direction the chart's u grows, in the ship's frame.
@@ -63,6 +63,7 @@ struct VertexOutput {
     @location(11) chart: vec4<f32>,
     @location(12) @interpolate(flat) bounds: vec4<f32>,
     @location(13) chart_tangent: vec3<f32>,
+    @location(14) shadow: f32,
 #endif
 }
 
@@ -212,6 +213,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_3 = vertex.regions_3;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
+    out.shadow = vertex.face.z;
     out.chart = vertex.chart;
     out.bounds = vertex.bounds;
     out.chart_tangent = vertex.tangent.xyz;
@@ -234,10 +236,10 @@ fn band(front: f32, width: f32, x: f32) -> f32 {
     return clamp((front - x) / max(width, 1.0e-6), 0.0, 1.0);
 }
 
-/// Lit albedo plus what glows, through the exposure.
-fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>) -> vec4<f32> {
+/// Lit albedo plus what glows, through the exposure. `sun` is the share of the star that reaches.
+fn shade(albedo: vec3<f32>, emitted: vec3<f32>, world_normal: vec3<f32>, sun: f32) -> vec4<f32> {
     let to_star = normalize(material.to_star.xyz);
-    let lambert = max(dot(normalize(world_normal), to_star), 0.0);
+    let lambert = sun * max(dot(normalize(world_normal), to_star), 0.0);
     let light = max(lambert, material.to_star.w);
     let linear = material.reflected.rgb * albedo * light + emitted + material.glow.rgb;
 
@@ -269,7 +271,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if (material.reveal.w >= ALL_PLATED || standing <= in.girder.y) {
         discard;
     }
-    return shade(material.girder.rgb, girder_light(), in.world_normal);
+    return shade(material.girder.rgb, girder_light(), in.world_normal, 1.0);
 }
 #else
 
@@ -1283,6 +1285,7 @@ fn tubes_light(in: VertexOutput, c: HullChart, pixel: f32, lamp_color: vec3<f32>
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pair = heaviest(in);
+    let sun = 1.0 - clamp(in.shadow, 0.0, 1.0);
     let w = planes(in.ship_normal);
     let near_layer = layer_of(pair.first, in.face_share);
     let far_layer = layer_of(pair.second, in.face_share);
@@ -1358,10 +1361,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let plate_share = select(0.0, 1.0 - t, panelled(pair.first)) + select(0.0, t, panelled(pair.second));
     if (plate_share > 0.0) {
         albedo *= 1.0 - plate_share;
-        emitted += plate_share * plate_light(in, chart, pixel);
+        // Its sky and star alike, down to about what the night fill would leave.
+        emitted += plate_share * plate_light(in, chart, pixel) * mix(material.to_star.w, 1.0, sun);
     }
     if (material.reveal.w >= ALL_PLATED) {
-        return shade(albedo, emitted, in.world_normal);
+        return shade(albedo, emitted, in.world_normal, sun);
     }
 
     let x = swept(in.ship_position);
@@ -1374,7 +1378,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         if (!plated_here) {
             discard;
         }
-        return shade(albedo, emitted, in.world_normal);
+        return shade(albedo, emitted, in.world_normal, sun);
     }
 
     // No girder mesh: the lattice is drawn here, in place of plating not yet up and over plating
@@ -1401,6 +1405,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let closed_albedo = mix(albedo, girder, over);
     let open_emitted = girder_light() * open;
     let closed_emitted = mix(emitted, girder_light(), over);
-    return shade(mix(open_albedo, closed_albedo, plating), mix(open_emitted, closed_emitted, plating), in.world_normal);
+    return shade(mix(open_albedo, closed_albedo, plating), mix(open_emitted, closed_emitted, plating), in.world_normal, sun);
 }
 #endif

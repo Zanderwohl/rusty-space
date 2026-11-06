@@ -54,9 +54,11 @@ pub const ATTRIBUTE_HULL_CHART_BOUNDS: MeshVertexAttribute =
 pub const ATTRIBUTE_HULL_GIRDER: MeshVertexAttribute =
     MeshVertexAttribute::new("HullGirder", 0x4855_4C4C_0000_0006, VertexFormat::Float32x4);
 
-/// `(share, face, 0, 0)`: how much of the vertex lies on an open face, and that face's index into
-/// [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so a
-/// triangle at a face's rim names one face at all three corners. The index is read flat.
+/// `(share, face, shadow, 0)`: how much of the vertex lies on an open face, and that face's index
+/// into [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so
+/// a triangle at a face's rim names one face at all three corners. The index is read flat.
+/// `shadow` is the share of the star the vertex is hidden from, as deep inside a bay; the region
+/// graphs and the aztec plate honor it, and the night fill is left.
 pub const ATTRIBUTE_HULL_FACE: MeshVertexAttribute =
     MeshVertexAttribute::new("HullFace", 0x4855_4C4C_0000_0007, VertexFormat::Unorm8x4);
 

@@ -126,7 +126,7 @@ pub fn mesh_form(form: &Form, balance: &Balance, cells: u32) -> Result<HullBuffe
 }
 
 /// Each piece on its own grid, at the step of `cells` along the longest side of all of them, or
-/// finer where a piece is thin. Every piece paints every face in `faces`: an engine sunk into a
+/// finer where a piece is thin; a slab bay is built by [`crate::bay_mesh`] instead. Every piece paints every face in `faces`: an engine sunk into a
 /// neighbor leaves its face on the neighbor's surface, which must draw it. Empty for no pieces.
 pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuffers {
     let mut out = HullBuffers::default();
@@ -136,6 +136,10 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuff
     let step = extent(Union::new(pieces).bounds) / cells.max(1) as f64;
     let (mut scratch, mut aside) = (Vec::new(), Vec::new());
     for piece in pieces {
+        if crate::bay_mesh::takes(piece) {
+            crate::bay_mesh::mesh(piece, &mut out);
+            continue;
+        }
         let alone = Union::new(std::slice::from_ref(piece));
         let grid = Grid::sample(&alone, piece_cells(piece, extent(alone.bounds), step));
         let surface = nets(&grid, &alone);
