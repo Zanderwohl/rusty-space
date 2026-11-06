@@ -27,8 +27,7 @@ impl Plugin for LooksPlugin {
             MaterialPlugin::<obsidian::ObsidianMaterial>::default(),
             MaterialPlugin::<racks::RacksMaterial>::default(),
             MaterialPlugin::<tubes::TubesMaterial>::default(),
-        ))
-        .add_systems(PostUpdate, outline::outline_roofs.after(bevy::transform::TransformSystems::Propagate));
+        ));
     }
 }
 

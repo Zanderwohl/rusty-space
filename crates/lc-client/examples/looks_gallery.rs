@@ -51,7 +51,6 @@ use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::racks::{Racks, RacksMaterial};
 use lc_client::looks::tubes::{Tubes, TubesMaterial};
-use lc_client::looks::outline::RoofOutline;
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::{LooksPlugin, direction, spin};
 
@@ -173,10 +172,9 @@ fn spawn(
 
     let sprue = Sprue { to_star, star_spin, ..default() };
     let sprue_layers = sprue.materials(&sprue.bake(), &mut images).map(|m| sprues.add(m));
-    let aztec = aztecs.add(Aztec { to_star, star_spin, unit_box: true, ..default() }.material());
-    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), unit_box: true, ..default() }.material());
-    let mut habitat = |unit_box| aztecs.add(Aztec { to_star, star_spin, unit_box, ..Aztec::habitat() }.material());
-    let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
+    let aztec = aztecs.add(Aztec { to_star, star_spin, ..default() }.material());
+    let offices = aztecs.add(Aztec { to_star, star_spin, windows: Some(Windows::default()), ..default() }.material());
+    let habitat = aztecs.add(Aztec { to_star, star_spin, ..Aztec::habitat() }.material());
     let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
     let rack = racks.add(Racks { to_star, star_spin, ..default() }.material(&mut images));
     let tube = tubes.add(Tubes { to_star, star_spin, ..default() }.material());
@@ -243,10 +241,11 @@ fn spawn(
             } else if look == 6 {
                 commands.spawn((boxed(size, Kind::Drone), MeshMaterial3d(tube.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else {
+                let kind = [Kind::Storage, Kind::Living, Kind::Living][look - 1];
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-                    MeshMaterial3d([&aztec, &offices, &habitat_box][look - 1].clone()),
-                    Transform::from_translation(center).with_scale(Vec3::splat(size)),
+                    boxed(size, kind),
+                    MeshMaterial3d([&aztec, &offices, &habitat][look - 1].clone()),
+                    Transform::from_translation(center).with_rotation(standing),
                 ));
             }
             stations.push((center, size));
@@ -255,11 +254,13 @@ fn spawn(
     // Past the last column, in the middle of the rows, its long axis along x.
     let length = args.ovoid;
     let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[6]);
+    // Its own x, which its caps are about, stood up: the top cap is the roof.
+    let semi_axes = glam::DVec3::new(0.1, 0.5, 0.25) * length as f64;
+    let ovoid = Piece { part: PartId(0), side: Side::Original, kind: Kind::Living, shape: Shape::Ellipsoid { semi_axes }, pose: Pose::IDENTITY };
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(128, 64))),
-        MeshMaterial3d(habitat_ovoid),
-        RoofOutline,
-        Transform::from_translation(ovoid_at).with_scale(Vec3::new(0.5, 0.1, 0.25) * length),
+        HullForm { source: HullSource::Pieces(Arc::from([ovoid])), cells: Some(128) },
+        MeshMaterial3d(habitat),
+        Transform::from_translation(ovoid_at).with_rotation(Quat::from_rotation_z(FRAC_PI_2)),
     ));
     stations.push((ovoid_at, 0.6 * length));
     commands.insert_resource(Stations(stations));

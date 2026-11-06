@@ -1,9 +1,10 @@
 // Azteced sheet metal: rectangles cut from a staggered grid by random splits, each panel one
 // color and one flat normal tipped a few degrees, so panels catch the light one by one. Fully
-// procedural, so nothing repeats. Each face is mapped in its own frame (u, v, n), meters, and a
-// curved mesh by the face each point faces most. Decks stack along world Y, so on a side v is up,
-// and windows, when there are any, are only on the sides, in rows level at the same heights all
-// round; a roof, when there is one, is the whole top. Look development: crates/lc-client/src/looks/aztec.rs.
+// procedural, so nothing repeats. Laid out in the part's own charts (crate::charts in lc-client),
+// a whole number of grid cells around a band or ring. Decks stack up a chart's v, and windows, when
+// there are any, are only on a part's sides, clear of each chart's edges; a roof, when there is
+// one, is the part's end that faces up, the well under its glass walled by that end's edge. Look
+// development: crates/lc-client/src/looks/aztec.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -15,14 +16,19 @@ struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS.
+    @location(2) chart: vec4<f32>,
+    @location(3) bounds: vec4<f32>,
+    @location(4) tangent: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
-    @location(2) box_center: vec3<f32>,
-    @location(3) box_half: vec3<f32>,
+    @location(2) chart: vec4<f32>,
+    @location(3) @interpolate(flat) bounds: vec4<f32>,
+    @location(4) world_tangent: vec3<f32>,
 }
 
 struct AztecUniform {
@@ -39,10 +45,9 @@ struct AztecUniform {
     to_planet: vec4<f32>,
     planet_color: vec4<f32>,
     ambient: vec4<f32>,
-    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is an axis-aligned unit
-    /// cube scaled by its transform, which is how a face's edges are known.
+    /// `(exposure, seed, 0, 0)`.
     finish: vec4<f32>,
-    /// `(deck_m, pitch_m, sill_m, face_margin_m)`: no windows where `deck_m` is 0.
+    /// `(deck_m, pitch_m, sill_m, chart_margin_m)`: no windows where `deck_m` is 0.
     deck: vec4<f32>,
     /// `(width_m, height_m, f0, roughness)`.
     pane: vec4<f32>,
@@ -58,16 +63,24 @@ struct AztecUniform {
     roof: vec4<f32>,
     /// The air under the roof's color by day, and the share of the star it scatters back up in `w`.
     sky: vec4<f32>,
-    /// The world XZ `outline_map` spans, `(x0, z0, x1, z1)`; empty where there is none.
-    outline: vec4<f32>,
-    /// `(most_m, share, width_m, 0)`: the forest lies `share` of the roof's width down, and no
-    /// deeper than `most_m`. `width_m` is the outline's, 0 where there is none.
+    /// `(most_m, share, 0, 0)`: the forest lies `share` of the roof's width down, and no deeper
+    /// than `most_m`.
     forest: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: AztecUniform;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var outline_map: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var outline_sampler: sampler;
+
+const RECT: u32 = 0u;
+const DISC: u32 = 1u;
+const BAND: u32 = 2u;
+const RING: u32 = 3u;
+const DOME: u32 = 4u;
+
+/// The fragment's chart: its kind, its bounds, and how far its u and v run around before they
+/// repeat, fitted to a whole number of grid cells; 0 where they do not.
+var<private> chart_kind: u32;
+var<private> chart_bounds: vec4<f32>;
+var<private> around: vec2<f32>;
 
 const PI: f32 = 3.14159265;
 const SPLITS: u32 = 6u;
@@ -101,40 +114,24 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
-    // An axis-aligned unit cube, where `unit_box` says so: the transform's scale is the box.
-    out.box_center = world_from_local[3].xyz;
-    out.box_half = 0.5 * vec3<f32>(length(world_from_local[0].xyz), length(world_from_local[1].xyz), length(world_from_local[2].xyz));
+    out.chart = vertex.chart;
+    out.bounds = vertex.bounds;
+    out.world_tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, vertex.tangent, vertex.instance_index).xyz;
     return out;
 }
 
-struct Face {
-    u: vec3<f32>,
-    v: vec3<f32>,
-    n: vec3<f32>,
-    id: u32,
+/// `x` modulo `n`, never negative.
+fn wrap(x: i32, n: i32) -> i32 {
+    return ((x % n) + n) % n;
 }
 
-/// The axis `normal` is nearest, signed: a curved surface is mapped by the box face it faces most,
-/// as a cube map would.
-fn dominant(normal: vec3<f32>) -> vec3<f32> {
-    let a = abs(normal);
-    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
-    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
-    return vec3<f32>(0.0, 0.0, sign(normal.z));
-}
-
-/// The face's u and v laid into the surface's tangent plane, and the surface's own normal: what a
-/// normal in the face's frame is turned by. The face's own frame on a flat face.
-fn tangent_frame(f: Face, surface: vec3<f32>) -> mat3x3<f32> {
-    let t = normalize(f.u - surface * dot(f.u, surface));
-    return mat3x3<f32>(t, cross(surface, t), surface);
-}
-
-fn face(normal: vec3<f32>) -> Face {
-    let n = dominant(normal);
-    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.9);
-    let u = normalize(cross(up, n));
-    return Face(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
+/// The index `i` of a lattice `pitch` apart, taken around `period` where there is one, so the
+/// lattice's cells either side of a seam are one.
+fn around_index(i: f32, pitch: f32, period: f32) -> u32 {
+    if (period > 0.0) {
+        return u32(wrap(i32(i), i32(round(period / pitch))));
+    }
+    return u32(i32(i));
 }
 
 fn pcg(x: u32) -> u32 {
@@ -151,9 +148,10 @@ fn unit(h: u32) -> f32 {
     return f32(h >> 8u) / 16777216.0;
 }
 
-/// Grid snapped coordinates are exact, so a panel's bounds name it whichever pixel asks.
-fn snapped_id(x: f32) -> u32 {
-    return u32(i32(round(x / m.grid.z)));
+/// Grid snapped coordinates are exact, so a panel's bounds name it whichever pixel asks, and on
+/// either side of a seam.
+fn snapped_id(x: f32, period: f32) -> u32 {
+    return around_index(round(x / m.grid.z), m.grid.z, period);
 }
 
 struct Panel {
@@ -170,11 +168,12 @@ fn panel(p: vec2<f32>, face_id: u32) -> Panel {
     let snap = m.grid.z;
     let seed = mix_hash(face_id, u32(m.finish.y));
     let row = floor(p.y / cell);
-    let shift = round(unit(mix_hash(seed, u32(i32(row)))) * cell / snap) * snap;
+    let row_id = around_index(row, cell, around.y);
+    let shift = round(unit(mix_hash(seed, row_id)) * cell / snap) * snap;
     let col = floor((p.x - shift) / cell);
     var lo = vec2<f32>(col * cell + shift, row * cell);
     var hi = lo + vec2<f32>(cell);
-    var id = mix_hash(mix_hash(seed, u32(i32(row))), u32(i32(col)));
+    var id = mix_hash(mix_hash(seed, row_id), around_index(col, cell, around.x));
     for (var depth = 0u; depth < SPLITS; depth++) {
         let h = pcg(id);
         let size = hi - lo;
@@ -195,7 +194,9 @@ fn panel(p: vec2<f32>, face_id: u32) -> Panel {
         } else {
             if (p.y < cut) { hi.y = cut; } else { lo.y = cut; }
         }
-        id = mix_hash(mix_hash(snapped_id(lo.x) ^ (snapped_id(lo.y) << 16u), snapped_id(hi.x) ^ (snapped_id(hi.y) << 16u)), seed);
+        let a = snapped_id(lo.x, around.x) ^ (snapped_id(lo.y, around.y) << 16u);
+        let b = snapped_id(hi.x, around.x) ^ (snapped_id(hi.y, around.y) << 16u);
+        id = mix_hash(mix_hash(a, b), seed);
     }
     return Panel(lo, hi, id);
 }
@@ -271,8 +272,10 @@ struct Window {
 
 /// Whether the window at `deck`, `col` is lit: mostly in runs along its row, at two lengths so
 /// runs vary, with a few dark gaps in them and a few lone windows lit outside.
-fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
-    let row = mix_hash(mix_hash(face_id, u32(m.finish.y)), u32(deck));
+fn window_lit(face_id: u32, deck_at: f32, col_at: f32) -> bool {
+    let deck = around_index(deck_at, m.deck.x, around.y);
+    let col = i32(around_index(col_at, m.deck.y, around.x));
+    let row = mix_hash(mix_hash(face_id, u32(m.finish.y)), deck);
     let share = m.glow.w;
     let short = i32(floor((f32(col) + 97.0 * unit(pcg(row + 1u))) / 5.0));
     let long = i32(floor((f32(col) + 97.0 * unit(pcg(row + 2u))) / 11.0));
@@ -283,11 +286,20 @@ fn window_lit(face_id: u32, deck: i32, col: i32) -> bool {
 }
 
 /// The window over `p`, if one fits wholly inside its panel clear of the chamfers and inside its
-/// face clear of the margin; its cover is what of the pixel it fills.
-fn window(p: vec2<f32>, cell: Panel, f: Face, surface: vec3<f32>, face_lo: vec2<f32>, face_hi: vec2<f32>, pixel: vec2<f32>) -> Window {
+/// chart clear of the margin; its cover is what of the pixel it fills. On a part's sides only.
+fn window(p: vec2<f32>, cell: Panel, face_id: u32, end: bool, surface: vec3<f32>, pixel: vec2<f32>) -> Window {
     // Glazing leans no more than 30 degrees off the vertical.
-    if (m.deck.x <= 0.0 || abs(f.n.y) > 0.9 || abs(surface.y) > 0.5) {
+    if (m.deck.x <= 0.0 || end || abs(surface.y) > 0.5) {
         return Window(0.0, false, 0.0, 0.0);
+    }
+    var chart_lo = vec2<f32>(-1.0e9);
+    var chart_hi = vec2<f32>(1.0e9);
+    if (chart_kind == RECT) {
+        chart_lo = chart_bounds.xz;
+        chart_hi = chart_bounds.yw;
+    } else if (chart_kind == BAND) {
+        chart_lo.y = chart_bounds.z;
+        chart_hi.y = chart_bounds.w;
     }
     let deck = floor(p.y / m.deck.x);
     let col = floor(p.x / m.deck.y);
@@ -296,24 +308,22 @@ fn window(p: vec2<f32>, cell: Panel, f: Face, surface: vec3<f32>, face_lo: vec2<
     let clear = m.chamfer.x + 0.1;
     var lo = cell.lo + clear;
     var hi = cell.hi - clear;
-    if (m.finish.z > 0.5) {
-        lo = max(lo, face_lo + m.deck.w);
-        hi = min(hi, face_hi - m.deck.w);
-    }
+    lo = max(lo, chart_lo + m.deck.w);
+    hi = min(hi, chart_hi - m.deck.w);
     if (any(center - half < lo) || any(center + half > hi)) {
         return Window(0.0, false, 0.0, 0.0);
     }
     let inside = half - abs(p - center);
     let cover = clamp(inside / pixel + 0.5, vec2<f32>(0.0), min(vec2<f32>(1.0), 2.0 * half / pixel));
-    return Window(cover.x * cover.y, window_lit(f.id, i32(deck), i32(col)), col, deck);
+    return Window(cover.x * cover.y, window_lit(face_id, deck, col), col, deck);
 }
 
 /// What the eye sees through the glass at `p`, as a share of a lit window's glow: a room the
 /// window's column wide, its deck high and `room_m` deep, traced from the glass, with no geometry
 /// behind the face at all. Interior mapping.
-fn room(p: vec2<f32>, e: vec3<f32>, f: Face, pane: Window) -> vec3<f32> {
-    // x and y along the face, z into it.
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 1.0e-3));
+fn room(p: vec2<f32>, e: vec3<f32>, frame: mat3x3<f32>, face_id: u32, pane: Window) -> vec3<f32> {
+    // x and y along the chart, z into it.
+    let d = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, frame[2]), 1.0e-3));
     let lo = vec2<f32>(pane.col * m.deck.y, pane.deck * m.deck.x);
     let hi = lo + m.deck.yx;
     let toward = select(lo, hi, d.xy > vec2<f32>(0.0));
@@ -325,7 +335,7 @@ fn room(p: vec2<f32>, e: vec3<f32>, f: Face, pane: Window) -> vec3<f32> {
     let t = min(min(t_side.x, t_side.y), t_back);
     let hit = vec3<f32>(p + d.xy * t, d.z * t);
 
-    let h = mix_hash(mix_hash(f.id, u32(i32(pane.deck))), u32(i32(pane.col)));
+    let h = mix_hash(mix_hash(face_id, u32(i32(pane.deck))), u32(i32(pane.col)));
     let tint = mix(vec3<f32>(0.82, 0.88, 1.0), vec3<f32>(1.0, 0.9, 0.76), unit(pcg(h)));
 
     // A desk the room's width, its front `DESK_FROM_M` back from the glass: the ray meets its front
@@ -453,45 +463,31 @@ fn stratus(q: vec2<f32>) -> f32 {
     return smoothstep(0.5, 0.72, fbm);
 }
 
-/// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
-/// glass. A forest [`forest_depth`] down is seen where the eye's ray meets it, so it moves against
-/// the frame as the eye does, through air that scatters the light back blue by day and red as the
-/// star sets over the roof; the longer the ray's path, the more air hides the forest, so a glancing
-/// look sees sky only. Walls drop from the rim to the forest, so a ray never runs on past the hull's
-/// edge. A stratus deck `STRATUS_SHARE` of the way down lies over the forest, and shades it
-/// where the star's light passes through it on the way down. Nothing by night.
-/// Signed meters from world XZ `q` to the roof's outline seen from above, positive inside: a unit
-/// box's own rectangle, or `outline_map`. Far inside where neither is known, so the ground runs on.
-fn inside_outline(q: vec2<f32>, in: VertexOutput) -> f32 {
-    if (m.finish.z > 0.5) {
-        let d = in.box_half.xz - abs(q - in.box_center.xz);
+/// Signed meters from `q`, in the roof's chart, to its edge, positive inside.
+fn inside_roof(q: vec2<f32>) -> f32 {
+    if (chart_kind == RECT) {
+        let d = min(q - chart_bounds.xz, chart_bounds.yw - q);
         return min(d.x, d.y);
     }
-    let span = m.outline.zw - m.outline.xy;
-    if (span.x <= 0.0) {
-        return 1.0e6;
+    if (chart_kind == DISC || chart_kind == DOME) {
+        return chart_bounds.x - length(q);
     }
-    let uv = (q - m.outline.xy) / span;
-    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
-        return -1.0;
-    }
-    return textureSampleLevel(outline_map, outline_sampler, uv, 0.0).r;
+    return 1.0e6;
 }
 
-/// How far down the eye's ray through the glass meets the wall dropping from the rim, or `limit`
-/// if it reaches that depth first. Walls are vertical, so the ray's shadow on XZ is a line, and
-/// the outline's distance is a safe step along it.
-fn wall_depth(world: vec3<f32>, e: vec3<f32>, limit: f32, in: VertexOutput) -> f32 {
-    let slope = -e.xz / max(e.y, 0.02);
+/// How far down the eye's ray through the glass, going `d` in the roof's chart with z down, meets
+/// the wall dropping from the rim, or `limit` if it reaches that depth first. Walls drop square to
+/// the chart, so the roof's own edge is a safe step along the ray's shadow on it.
+fn wall_depth(p: vec2<f32>, d: vec3<f32>, limit: f32) -> f32 {
+    let slope = d.xy / d.z;
     let run = max(length(slope), 1.0e-3);
     var h = 0.0;
     for (var i = 0; i < WALL_STEPS; i++) {
-        let d = inside_outline(world.xz + slope * h, in);
-        // The glass itself may sit a texel outside the map's edge; only a step taken can hit.
-        if (i > 0 && d < 0.02) {
+        let inside = inside_roof(p + slope * h);
+        if (i > 0 && inside < 0.02) {
             return h;
         }
-        h += max(d, 0.05) / run;
+        h += max(inside, 0.05) / run;
         if (h >= limit) {
             return limit;
         }
@@ -500,11 +496,13 @@ fn wall_depth(world: vec3<f32>, e: vec3<f32>, limit: f32, in: VertexOutput) -> f
 }
 
 /// How deep the forest lies under this roof: a share of its width, so a small roof is not a deep
-/// well, up to a most. A unit box's width is its own; a mesh's, its outline's.
-fn forest_depth(in: VertexOutput) -> f32 {
-    var width = m.forest.z;
-    if (m.finish.z > 0.5) {
-        width = 2.0 * min(in.box_half.x, in.box_half.z);
+/// well, up to a most.
+fn forest_depth() -> f32 {
+    var width = 0.0;
+    if (chart_kind == RECT) {
+        width = min(chart_bounds.y - chart_bounds.x, chart_bounds.w - chart_bounds.z);
+    } else if (chart_kind == DISC || chart_kind == DOME) {
+        width = 2.0 * chart_bounds.x;
     }
     if (width <= 0.0) {
         return m.forest.x;
@@ -512,7 +510,14 @@ fn forest_depth(in: VertexOutput) -> f32 {
     return min(m.forest.x, m.forest.y * width);
 }
 
-fn sky_below(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
+/// What a roof pane shows: no light of its own, only the star's and the planet's let in through the
+/// glass. A forest [`forest_depth`] down is seen where the eye's ray meets it, so it moves against
+/// the frame as the eye does, through air that scatters the light back blue by day and red as the
+/// star sets over the roof; the longer the ray's path, the more air hides the forest, so a glancing
+/// look sees sky only. Walls drop from the rim to the forest, so a ray never runs on past the hull's
+/// edge. A stratus deck `STRATUS_SHARE` of the way down lies over the forest, and shades it
+/// where the star's light passes through it on the way down. Nothing by night.
+fn sky_below(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, edge: f32) -> vec3<f32> {
     let star = turned(m.to_star);
     let over = dot(star, surface);
     let day = smoothstep(-0.08, 0.25, over);
@@ -521,12 +526,12 @@ fn sky_below(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec
     let rayleigh = 0.75 * (1.0 + pow(dot(-star, e), 2.0));
     let air = m.star_color.rgb * m.sky.w * day * mix(vec3<f32>(1.0), tint, 0.7) * rayleigh;
 
-    let d = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 0.02));
+    let d = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, frame[2]), 0.02));
     let sunlight = m.star_color.rgb * day * mix(vec3<f32>(1.0, 0.6, 0.35), vec3<f32>(1.0), high);
-    let star_face = vec3<f32>(dot(star, f.u), dot(star, f.v), dot(star, f.n));
-    let floor_m = forest_depth(in);
+    let star_face = vec3<f32>(dot(star, frame[0]), dot(star, frame[1]), dot(star, frame[2]));
+    let floor_m = forest_depth();
     let deck_m = STRATUS_SHARE * floor_m;
-    let depth = wall_depth(in.world_position, e, floor_m, in);
+    let depth = wall_depth(p, d, floor_m);
     let path = depth / d.z;
     let through = exp(-path / AIR_M);
     var seen: vec3<f32>;
@@ -561,37 +566,31 @@ struct Rim {
 }
 
 /// The chamfer where the roof meets the sides, `roof.z` across: each side of the line leans 45°
-/// toward it, so at a box's edge the two strips are one bevel, and on a curved hull a groove.
-fn rim(in: VertexOutput, f: Face, surface: vec3<f32>, p: vec2<f32>) -> Rim {
-    let up = vec3<f32>(0.0, 1.0, 0.0);
+/// toward it, so at a box's edge the two strips are one bevel, and on a curved hull a groove. On
+/// the roof, toward its chart's edge; on a side, toward its chart's top.
+fn rim(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, roofed: bool, pixel: f32) -> Rim {
     var dist = 1.0e6;
-    var toward = up;
-    if (m.finish.z > 0.5) {
-        if (f.n.y > 0.5) {
-            let at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
-            let half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
-            let to_edge = vec4<f32>(p - (at - half), (at + half) - p);
+    var out = vec2<f32>(0.0);
+    if (roofed) {
+        if (chart_kind == RECT) {
+            let to_edge = vec4<f32>(p - chart_bounds.xz, chart_bounds.yw - p);
             dist = min(min(to_edge.x, to_edge.y), min(to_edge.z, to_edge.w));
-            var out = vec2<f32>(0.0, 1.0);
+            out = vec2<f32>(0.0, 1.0);
             if (dist == to_edge.x) { out = vec2<f32>(-1.0, 0.0); }
             else if (dist == to_edge.y) { out = vec2<f32>(0.0, -1.0); }
             else if (dist == to_edge.z) { out = vec2<f32>(1.0, 0.0); }
-            toward = f.u * out.x + f.v * out.y;
-        } else if (abs(f.n.y) < 0.5) {
-            dist = in.box_center.y + in.box_half.y - in.world_position.y;
+        } else if (chart_kind == DISC || chart_kind == DOME) {
+            dist = chart_bounds.x - length(p);
+            out = p / max(length(p), 1.0e-4);
         }
-    } else {
-        // How far the roof's face is from winning, over how fast that changes a meter.
-        let lead = surface.y - max(abs(surface.x), abs(surface.z));
-        let per_pixel = length(vec2<f32>(dpdx(lead), dpdy(lead)));
-        let pixel_m = max(length(fwidth(in.world_position)) * 0.7071, 1.0e-4);
-        dist = abs(lead) * pixel_m / max(per_pixel, 1.0e-6);
-        let side = vec3<f32>(surface.x, 0.0, surface.z) + vec3<f32>(1.0e-6, 0.0, 0.0);
-        let along = select(up, normalize(side), lead > 0.0);
-        toward = normalize(along - surface * dot(along, surface));
+    } else if (chart_kind == RECT || chart_kind == BAND) {
+        // The chart's top is whichever v edge lies up.
+        let up = dot(frame[1], vec3<f32>(0.0, 1.0, 0.0)) >= 0.0;
+        dist = select(p.y - chart_bounds.z, chart_bounds.w - p.y, up);
+        out = vec2<f32>(0.0, select(-1.0, 1.0, up));
     }
+    let toward = frame[0] * out.x + frame[1] * out.y;
     let half_width = 0.5 * m.roof.z;
-    let pixel = max(length(fwidth(p)), 1.0e-4);
     let share = (1.0 - smoothstep(half_width - pixel, half_width + pixel, dist)) * clamp(half_width / pixel, 0.0, 1.0);
     return Rim(share, normalize(surface * 0.7071 + toward * 0.7071));
 }
@@ -604,15 +603,15 @@ fn roof_metal(n: vec3<f32>, e: vec3<f32>, surface: vec3<f32>) -> vec3<f32> {
 }
 
 /// The top's roof: clear glass hexes in a metal frame, the glass over [`sky_below`].
-fn roof(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
+fn roof(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>) -> vec3<f32> {
     let cell = hex(p, m.roof.x);
-    let frame = roof_metal(surface, e, surface);
+    let metal = roof_metal(surface, e, surface);
 
     let f0 = vec3<f32>(0.04);
     let roughness = 0.05;
     let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(surface, e), 0.0), 5.0);
     let half_seam = 0.5 * m.roof.y;
-    var pane = (1.0 - fresnel) * sky_below(in, p, f, surface, e, cell.z - half_seam);
+    var pane = (1.0 - fresnel) * sky_below(p, frame, surface, e, cell.z - half_seam);
     let star = turned(m.to_star);
     if (dot(star, surface) > 0.0) {
         pane += m.star_color.rgb * specular(surface, star, e, f0, roughness);
@@ -621,25 +620,49 @@ fn roof(in: VertexOutput, p: vec2<f32>, f: Face, surface: vec3<f32>, e: vec3<f32
 
     let pixel = max(length(fwidth(p)), 1.0e-4);
     let glass = smoothstep(half_seam - pixel, half_seam + pixel, cell.z);
-    return mix(frame, pane, glass);
+    return mix(metal, pane, glass);
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
-    let f = face(surface);
-    let frame = tangent_frame(f, surface);
-    let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
+    let along = normalize(in.world_tangent - surface * dot(in.world_tangent, surface));
+    let frame = mat3x3<f32>(along, cross(surface, along), surface);
+    chart_kind = u32(round(in.chart.z));
+    chart_bounds = in.bounds;
+    let end = in.chart.w > 0.5;
+    // Around a band or ring, stretched to a whole number of grid cells, which are whole numbers of
+    // snaps, window columns and decks, so every lattice meets itself at the seam.
+    var p = in.chart.xy;
+    let cell_m = m.grid.x;
+    if (chart_kind == BAND || chart_kind == RING) {
+        let n = max(round(chart_bounds.x / cell_m), 1.0);
+        p.x *= n * cell_m / chart_bounds.x;
+        around.x = n * cell_m;
+    }
+    if (chart_kind == RING) {
+        let n = max(round(chart_bounds.y / cell_m), 1.0);
+        p.y *= n * cell_m / chart_bounds.y;
+        around.y = n * cell_m;
+    }
+    let pixel = max(length(fwidth(p)), 1.0e-4);
+    let pixels = max(fwidth(p), vec2<f32>(1.0e-4));
     let e = normalize(view.world_position - in.world_position);
+    // Each chart its own panels, and a rectangle, all of one direction, told apart by which way
+    // its u runs: a cube's faces are alike in extent.
+    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), chart_kind == RECT);
+    let face_id = mix_hash(chart_kind + 8u * facing, u32(in.chart.w) + 2u * bitcast<u32>(chart_bounds.x));
+    // The roof is the end that faces up.
+    let roofed = m.roof.x > 0.0 && end && surface.y > 0.0;
     var edged = Rim(0.0, surface);
     if (m.roof.x > 0.0) {
-        edged = rim(in, f, surface, p);
+        edged = rim(p, frame, surface, roofed, pixel);
     }
     let bevel = roof_metal(edged.normal, e, surface);
-    if (m.roof.x > 0.0 && f.n.y > 0.5) {
-        return vec4<f32>(mix(roof(in, p, f, surface, e), bevel, edged.share) * m.finish.x, 1.0);
+    if (roofed) {
+        return vec4<f32>(mix(roof(p, frame, surface, e), bevel, edged.share) * m.finish.x, 1.0);
     }
-    let cell = panel(p, f.id);
+    let cell = panel(p, face_id);
 
     let n = normalize(frame * tipped(cell.id));
     let base = paint(cell.id);
@@ -660,20 +683,17 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let wall = normalize(n * cos(lean) + (frame[0] * outward.x + frame[1] * outward.y) * sin(lean));
 
     // Where a pixel spans the wall, its share of the pixel stands in for it.
-    let pixel = max(length(fwidth(p)), 1.0e-4);
     let width = m.chamfer.x;
     let share = (1.0 - smoothstep(width - pixel, width + pixel, edge)) * clamp(width / pixel, 0.0, 1.0);
 
     let flat_light = lit(n, e, surface, albedo, f0, roughness);
     let wall_light = lit(wall, e, surface, albedo, f0, roughness);
     let plate = mix(flat_light, wall_light, share);
-    let box_at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
-    let box_half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
-    let pane = window(p, cell, f, surface, box_at - box_half, box_at + box_half, max(fwidth(p), vec2<f32>(1.0e-4)));
+    let pane = window(p, cell, face_id, end, surface, pixels);
     var radiance = plate;
     if (pane.cover > 0.0) {
         let lights = select(m.ambient.rgb * 0.2, m.glow.rgb, pane.lit);
-        radiance = mix(plate, glass(n, e, surface, lights * room(p, e, f, pane)), pane.cover);
+        radiance = mix(plate, glass(n, e, surface, lights * room(p, e, frame, face_id, pane)), pane.cover);
     }
     return vec4<f32>(mix(radiance, bevel, edged.share) * m.finish.x, 1.0);
 }

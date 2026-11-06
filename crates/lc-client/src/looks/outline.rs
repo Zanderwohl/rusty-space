@@ -1,11 +1,12 @@
-//! A roof's outline seen from above, as a map of signed meters to its edge, so a habitat's shader
-//! can stop a ray through the glass at a wall dropping from the rim, whatever the hull's shape.
+//! A hull's habitat roof outline seen from above, as a map of signed meters to its edge, so the
+//! hull material can stop a ray through the glass at a wall dropping from the rim, whatever the
+//! hull's shape.
 //!
-//! The roof is where the normal faces more up than sideways, as `aztec.wgsl` draws it from the
-//! normal it interpolates, so each triangle is clipped where that changes sign between its
-//! corners; its shadow straight down is the outline. A look's is taken once in world space, with Y
-//! up, so the entity must not move after; a hull's in the ship's frame, with z up, where the roof is
-//! also only where its region leads, so it follows the hull wherever it goes.
+//! The roof is where the normal faces more up than sideways and the habitat's region leads, as
+//! `hull.wgsl` draws it from what it interpolates, so each triangle is clipped where either
+//! changes sign between its corners; its shadow straight down is the outline. It is taken in the
+//! ship's frame, with z up, so it follows the hull wherever it goes. The looks need none: a roof
+//! there is one of a part's charts, which knows its own edge.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -15,46 +16,15 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use em_render::hull_material::{ATTRIBUTE_HULL_REGIONS, HullMaterial, RoofOutline as HullRoofOutline};
 
-use super::aztec::AztecMaterial;
-
 /// Texels along the outline's longer side.
 const TEXELS: usize = 256;
 
 /// Empty texels around the outline, so the map's edge is never the roof's.
 const MARGIN: usize = 4;
 
-/// Derive this entity's roof outline from its mesh, once the mesh is there, and give it a copy of
-/// its aztec material carrying it.
-#[derive(Component)]
-pub struct RoofOutline;
-
 /// The mesh the outline was taken from; a new mesh is outlined again.
 #[derive(Component)]
 pub struct Outlined(AssetId<Mesh>);
-
-/// In `PostUpdate`, after transforms propagate, so a mesh spawned this frame is where it will be.
-pub fn outline_roofs(
-    mut commands: Commands,
-    roofs: Query<(Entity, &Mesh3d, &MeshMaterial3d<AztecMaterial>, &GlobalTransform, Option<&Outlined>), With<RoofOutline>>,
-    meshes: Res<Assets<Mesh>>,
-    mut materials: ResMut<Assets<AztecMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    for (entity, mesh, material, transform, outlined) in &roofs {
-        if outlined.is_some_and(|o| o.0 == mesh.0.id()) {
-            continue;
-        }
-        let (Some(shape), Some(base)) = (meshes.get(&mesh.0), materials.get(&material.0)) else { continue };
-        let mut base = base.clone();
-        let Some((image, bounds, width)) = outline(shape, transform) else {
-            warn!("looks: a roof outline was asked of a mesh with no roof");
-            commands.entity(entity).insert(Outlined(mesh.0.id()));
-            continue;
-        };
-        base.set_outline(images.add(image), bounds, width);
-        commands.entity(entity).insert((MeshMaterial3d(materials.add(base)), Outlined(mesh.0.id())));
-    }
-}
 
 /// Derive this hull's habitat roof outline from its mesh, once the mesh is there, and give it a
 /// copy of its hull material carrying it.
@@ -87,8 +57,8 @@ pub fn outline_hull_roofs(
     }
 }
 
-/// [`outline`] for a hull's habitat roof, in the ship's frame with z up: where the normal faces more
-/// up than sideways and `region` leads the others.
+/// A hull's habitat roof outline, in the ship's frame with z up: where the normal faces more up than
+/// sideways and `region` leads the others.
 pub fn hull_roof(mesh: &Mesh, region: u32) -> Option<(Image, Vec4, f32)> {
     let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
     let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { return None };
@@ -144,27 +114,9 @@ fn triangles(mesh: &Mesh, vertices: usize) -> Vec<[usize; 3]> {
     }
 }
 
-/// The map, R16Float signed meters, positive inside; the world XZ it spans as `(x0, z0, x1, z1)`;
-/// and the widest circle it holds, meters across. `None` where no triangle is roof.
-pub fn outline(mesh: &Mesh, transform: &GlobalTransform) -> Option<(Image, Vec4, f32)> {
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
-    let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { return None };
-    let affine = transform.affine();
-    let normal_matrix = affine.matrix3.inverse().transpose();
-    let at: Vec<Vec2> = positions.iter().map(|p| affine.transform_point3(Vec3::from(*p)).xz()).collect();
-    // Positive on the roof. Linear across a triangle only roughly, as the shader's own test is.
-    let lead: Vec<f32> = normals
-        .iter()
-        .map(|n| {
-            let n = (normal_matrix * Vec3::from(*n)).normalize_or_zero();
-            n.y - n.x.abs().max(n.z.abs())
-        })
-        .collect();
-    let roofed: Vec<[Vec2; 3]> = triangles(mesh, positions.len()).iter().flat_map(|t| clipped(t.map(|i| (at[i], lead[i])))).collect();
-    rasterized(&roofed)
-}
-
-/// The signed-distance map of the union of `roofed`, as [`outline`] returns it.
+/// The signed-distance map of the union of `roofed`: R16Float signed meters, positive inside; the
+/// XY it spans as `(x0, y0, x1, y1)`; and the widest circle it holds, meters across. `None` where
+/// nothing is roof.
 fn rasterized(roofed: &[[Vec2; 3]]) -> Option<(Image, Vec4, f32)> {
     if roofed.is_empty() {
         return None;
@@ -221,22 +173,6 @@ fn rasterized(roofed: &[[Vec2; 3]]) -> Option<(Image, Vec4, f32)> {
         ..default()
     });
     Some((image, Vec4::new(lo.x, lo.y, hi.x, hi.y), width))
-}
-
-/// The part of a triangle where `lead` is positive, as up to two triangles.
-fn clipped(corners: [(Vec2, f32); 3]) -> Vec<[Vec2; 3]> {
-    let mut kept = Vec::with_capacity(4);
-    for i in 0..3 {
-        let (a, la) = corners[i];
-        let (b, lb) = corners[(i + 1) % 3];
-        if la > 0.0 {
-            kept.push(a);
-        }
-        if (la > 0.0) != (lb > 0.0) {
-            kept.push(a.lerp(b, la / (la - lb)));
-        }
-    }
-    (1..kept.len().saturating_sub(1)).map(|i| [kept[0], kept[i], kept[i + 1]]).collect()
 }
 
 /// Each texel's distance in texels to the nearest whose `inside` is `target`: Felzenszwalb and
@@ -301,25 +237,5 @@ mod tests {
         let inside = [false, false, true, false, false, false];
         let d = distance(&inside, 6, 1, true);
         assert_eq!(d, vec![2.0, 1.0, 0.0, 1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn a_unit_sphere_is_a_disc_from_above() {
-        let mesh = Sphere::new(1.0).mesh().uv(64, 32);
-        let (image, bounds, width) = outline(&mesh, &GlobalTransform::IDENTITY).expect("a sphere has a top");
-        // The roof stops where the normal is 45 degrees from up: a disc of radius sin 45.
-        let r = std::f32::consts::FRAC_1_SQRT_2;
-        let (w, h) = (image.width() as usize, image.height() as usize);
-        let value = |x: f32, z: f32| {
-            let u = ((x - bounds.x) / (bounds.z - bounds.x) * w as f32) as usize;
-            let v = ((z - bounds.y) / (bounds.w - bounds.y) * h as f32) as usize;
-            let i = 2 * (v * w + u);
-            let data = image.data.as_ref().expect("made on the CPU");
-            half::f16::from_le_bytes([data[i], data[i + 1]]).to_f32()
-        };
-        assert!((value(0.0, 0.0) - r).abs() < 0.03, "center: {}", value(0.0, 0.0));
-        assert!(value(r - 0.05, 0.0).abs() < 0.05);
-        assert!(value(r + 0.02, 0.0) < 0.0);
-        assert!((width - 2.0 * r).abs() < 0.06, "width: {width}");
     }
 }

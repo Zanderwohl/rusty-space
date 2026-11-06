@@ -38,7 +38,6 @@ use lc_client::looks::LooksPlugin;
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::racks::{Racks, RacksMaterial};
 use lc_client::looks::tubes::{Tubes, TubesMaterial};
-use lc_client::looks::outline::RoofOutline;
 use lc_client::procedural::{Bakes, ProceduralTexturesPlugin, Shape as Target2d, Target, placeholder};
 use lc_client::tonemap::ToneMap;
 use lc_world::form::place::{Pose, Side};
@@ -378,10 +377,7 @@ fn spawn(
                         "habitat" => habitat.clone(),
                         _ => aztec.clone(),
                     };
-                    let piece = commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform)).id();
-                    if look == "habitat" {
-                        commands.entity(piece).insert(RoofOutline);
-                    }
+                    commands.spawn((form(Kind::Storage, shape), MeshMaterial3d(material), transform));
                 }
             }
         }
