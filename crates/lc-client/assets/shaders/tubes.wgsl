@@ -1,8 +1,9 @@
 // Launch tubes in a hive. Hexagonal cells, a groove between them, each with a tube at its middle
 // ringed in red and white danger tape and closed by a six-bladed iris, shut, half open or open. An
 // open tube is traced: the view ray meets its wall, ringed and lit by guide lights running down it,
-// or a drone's nose, or the empty floor. On a box, a margin two apothems wide around each face is
-// buffed steel, turned in overlapping swirls, so no cell is cut by an edge. Each face is mapped in its own frame (u, v, n), meters. Look
+// or a drone's nose, or the empty floor. Laid out in the part's own charts (crate::charts in
+// lc-client): a margin two apothems wide inside each chart's edge is buffed steel, turned in
+// overlapping swirls, so no cell is cut, and a band or ring takes a whole number of cells around. Look
 // development: crates/lc-client/src/looks/tubes.rs.
 
 #import bevy_pbr::{
@@ -16,14 +17,19 @@ struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS.
+    @location(2) chart: vec4<f32>,
+    @location(3) bounds: vec4<f32>,
+    @location(4) tangent: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
-    @location(2) box_center: vec3<f32>,
-    @location(3) box_half: vec3<f32>,
+    @location(2) chart: vec4<f32>,
+    @location(3) @interpolate(flat) bounds: vec4<f32>,
+    @location(4) world_tangent: vec3<f32>,
 }
 
 struct TubesUniform {
@@ -46,8 +52,7 @@ struct TubesUniform {
     to_planet: vec4<f32>,
     planet_color: vec4<f32>,
     ambient: vec4<f32>,
-    /// `(exposure, seed, unit_box, 0)`: `unit_box` is 1 where the mesh is an axis-aligned unit cube
-    /// scaled by its transform, which is how a face's edges, and so its margin, are known.
+    /// `(exposure, seed, 0, 0)`.
     finish: vec4<f32>,
 }
 
@@ -93,36 +98,20 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
-    // An axis-aligned unit cube: the transform's scale is the box.
-    out.box_center = world_from_local[3].xyz;
-    out.box_half = 0.5 * vec3<f32>(length(world_from_local[0].xyz), length(world_from_local[1].xyz), length(world_from_local[2].xyz));
+    out.chart = vertex.chart;
+    out.bounds = vertex.bounds;
+    out.world_tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, vertex.tangent, vertex.instance_index).xyz;
     return out;
 }
 
-struct Face {
-    u: vec3<f32>,
-    v: vec3<f32>,
-    n: vec3<f32>,
-    id: u32,
-}
+const RECT: u32 = 0u;
+const DISC: u32 = 1u;
+const BAND: u32 = 2u;
+const RING: u32 = 3u;
 
-fn dominant(normal: vec3<f32>) -> vec3<f32> {
-    let a = abs(normal);
-    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
-    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
-    return vec3<f32>(0.0, 0.0, sign(normal.z));
-}
-
-fn face(normal: vec3<f32>) -> Face {
-    let n = dominant(normal);
-    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.9);
-    let u = normalize(cross(up, n));
-    return Face(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
-}
-
-fn tangent_frame(f: Face, surface: vec3<f32>) -> mat3x3<f32> {
-    let t = normalize(f.u - surface * dot(f.u, surface));
-    return mat3x3<f32>(t, cross(surface, t), surface);
+/// `x` modulo `n`, never negative.
+fn wrap(x: i32, n: i32) -> i32 {
+    return ((x % n) + n) % n;
 }
 
 /// `p` less its hex's center, flats `w` apart across u, and meters in from the hex's edge.
@@ -322,27 +311,51 @@ fn buffed(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pi
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
-    let f = face(surface);
-    let frame = tangent_frame(f, surface);
-    let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
+    let along = normalize(in.world_tangent - surface * dot(in.world_tangent, surface));
+    let frame = mat3x3<f32>(along, cross(surface, along), surface);
+    let p = in.chart.xy;
+    let kind = u32(round(in.chart.z));
+    let bounds = in.bounds;
     let e = normalize(view.world_position - in.world_position);
     let pixel = max(length(fwidth(p)), 1.0e-4);
     let star = turned(m.to_star);
 
-    let w = m.cell.x;
-    let h = hex(p, w);
-    let off = h.xy;
+    // Around a band or ring, a whole number of cells; down a ring's tube, a whole number of pairs of
+    // rows, stretching the cells a little that way.
+    var w = m.cell.x;
+    var across = 1;
+    if (kind == BAND || kind == RING) {
+        across = max(i32(round(bounds.x / w)), 1);
+        w = bounds.x / f32(across);
+    }
+    var squash = 1.0;
+    if (kind == RING) {
+        let pairs = max(round(bounds.y / (1.7320508 * w)), 1.0);
+        squash = bounds.y / (1.7320508 * w * pairs);
+    }
+    let h = hex(vec2<f32>(p.x, p.y / squash), w);
+    let off = vec2<f32>(h.x, h.y * squash);
     let center = p - off;
-    let box_at = vec2<f32>(dot(in.box_center, f.u), dot(in.box_center, f.v));
-    let box_half = vec2<f32>(dot(abs(f.u), in.box_half), dot(abs(f.v), in.box_half));
-    // Two apothems, a cell's width, between a kept cell's middle and the edge.
-    let kept = m.finish.z < 0.5 || all(abs(center - box_at) <= box_half - vec2<f32>(w));
+    // Two apothems, a cell's width, between a kept cell's middle and the chart's edge.
+    var kept = true;
+    if (kind == RECT) {
+        kept = all(center >= bounds.xz + vec2<f32>(w)) && all(center <= bounds.yw - vec2<f32>(w));
+    } else if (kind == DISC) {
+        kept = length(center) <= bounds.x - w;
+    } else if (kind == BAND) {
+        kept = center.y >= bounds.z + w && center.y <= bounds.w - w;
+    }
     if (!kept) {
         return vec4<f32>(buffed(p, frame, surface, e, pixel) * m.finish.x, 1.0);
     }
 
-    let seed = mix_hash(u32(m.finish.y), f.id);
-    let id = mix_hash(mix_hash(seed, u32(i32(round(center.x * 4.0)))), u32(i32(round(center.y * 4.0))));
+    // Named by its column, taken around a band or ring, so the cells either side of a seam agree.
+    var column = i32(round(2.0 * center.x / w));
+    if (kind == BAND || kind == RING) {
+        column = wrap(column, 2 * across);
+    }
+    let seed = mix_hash(u32(m.finish.y), kind + 7u * u32(i32(round(bounds.x))));
+    let id = mix_hash(mix_hash(seed, u32(column)), u32(i32(round(center.y * 4.0))));
     let base = m.paint.rgb * mix(0.92, 1.08, unit(pcg(id + 3u)));
     var radiance = lit(surface, e, surface, base);
 
@@ -386,7 +399,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
             if (d < aperture + pixel) {
                 let loaded = unit(pcg(id + 9u)) < m.tube.w;
-                let into = vec3<f32>(-dot(e, f.u), -dot(e, f.v), max(dot(e, f.n), 1.0e-3));
+                let into = vec3<f32>(-dot(e, frame[0]), -dot(e, frame[1]), max(dot(e, surface), 1.0e-3));
                 let daylight = m.star_color.rgb * max(dot(star, surface), 0.0) * 0.2 + m.ambient.rgb;
                 let inside = down_tube(off, into, loaded, daylight, pixel);
                 radiance = mix(radiance, inside, 1.0 - smoothstep(aperture - pixel, aperture + pixel, d));

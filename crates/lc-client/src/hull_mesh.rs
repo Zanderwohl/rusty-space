@@ -17,14 +17,15 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use em_render::hull_material::{ATTRIBUTE_HULL_FACE, face_attribute, insert_region_weights, region_weights};
-use glam::DVec3;
+use em_render::hull_material::{ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS, ATTRIBUTE_HULL_FACE, face_attribute, insert_region_weights, region_weights};
+use glam::{DVec2, DVec3};
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::{Aperture, apertures};
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
+use crate::charts::{chart_at, chart_of, tangent, unwrapped};
 use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
 /// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
@@ -90,6 +91,11 @@ pub struct HullBuffers {
     pub regions: Vec<[[u8; 4]; 4]>,
     /// [`ATTRIBUTE_HULL_FACE`]'s, indexing [`apertures`].
     pub faces: Vec<[u8; 4]>,
+    /// [`ATTRIBUTE_HULL_CHART`]'s and [`ATTRIBUTE_HULL_CHART_BOUNDS`]'s; see [`crate::charts`].
+    pub charts: Vec<[f32; 4]>,
+    pub chart_bounds: Vec<[f32; 4]>,
+    /// The direction the chart's u grows, in the frame the positions are in; `w` is 1.
+    pub tangents: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
 }
 
@@ -100,6 +106,9 @@ impl HullBuffers {
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         insert_region_weights(&mut mesh, &self.regions);
         mesh.insert_attribute(ATTRIBUTE_HULL_FACE, VertexAttributeValues::Unorm8x4(self.faces));
+        mesh.insert_attribute(ATTRIBUTE_HULL_CHART, self.charts);
+        mesh.insert_attribute(ATTRIBUTE_HULL_CHART_BOUNDS, self.chart_bounds);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, self.tangents);
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
@@ -146,7 +155,7 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuff
             })
             .collect();
         let r = region(piece.kind);
-        append(&mut out, &surface, &normals, region_weights(r, r, 0.0), &painted);
+        append(&mut out, piece, &surface, &normals, region_weights(r, r, 0.0), &painted);
     }
     out
 }
@@ -357,24 +366,42 @@ impl Field for Union<'_> {
     }
 }
 
-/// Appends the surface with its vertices shared, but for a corner on a crease, which gets a vertex
-/// of its own with its triangle's flat normal.
-fn append(out: &mut HullBuffers, surface: &Surface, normals: &[DVec3], regions: [[u8; 4]; 4], faces: &[[u8; 4]]) {
-    let mut shared: HashMap<u32, u32> = HashMap::new();
+/// Appends `piece`'s surface with its vertices shared, but for a corner on a crease, which gets a
+/// vertex of its own with its triangle's flat normal. Each triangle is laid out whole in the chart
+/// its middle is in, its corners unwrapped to within half a period of its first across a band's or
+/// ring's seam, so a pattern never runs backwards across it; a corner shared between charts, or
+/// between sides of a seam, is a vertex in each.
+fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DVec3], regions: [[u8; 4]; 4], faces: &[[u8; 4]]) {
+    let mut shared: HashMap<(u32, u8, i32, i32), u32> = HashMap::new();
+    let pose = piece.pose;
+    // Fine against any part: a millimeter in a part a few meters across.
+    let h = 1.0e-4 * piece.shape.least_dimension().max(1.0);
     for t in &surface.triangles {
         let [a, b, c] = t.map(|i| surface.vertices[i as usize]);
         let flat = (b - a).cross(c - a).normalize_or_zero();
-        for &v in t {
+        let chart = chart_of(&piece.shape, pose.to_local((a + b + c) / 3.0));
+        let laid = t.map(|v| chart_at(&piece.shape, chart, pose.to_local(surface.vertices[v as usize])));
+        let periods = laid[0].periods();
+        for (k, &v) in t.iter().enumerate() {
+            let here = laid[k];
+            let uv = DVec2::new(unwrapped(here.uv.x, laid[0].uv.x, periods.x), unwrapped(here.uv.y, laid[0].uv.y, periods.y));
+            let turns = |x: f64, raw: f64, period: f64| if period > 0.0 { ((x - raw) / period).round() as i32 } else { 0 };
+            let key = (v, chart, turns(uv.x, here.uv.x, periods.x), turns(uv.y, here.uv.y, periods.y));
             let smooth = normals[v as usize];
             let creased = flat != DVec3::ZERO && smooth.dot(flat) < CREASE_COS;
             let mut push = |normal: DVec3| {
-                out.positions.push(surface.vertices[v as usize].as_vec3().to_array());
+                let p = surface.vertices[v as usize];
+                let along = pose.rotation * tangent(&piece.shape, chart, pose.to_local(p), h);
+                out.positions.push(p.as_vec3().to_array());
                 out.normals.push(normal.as_vec3().to_array());
                 out.regions.push(regions);
                 out.faces.push(faces[v as usize]);
+                out.charts.push([uv.x as f32, uv.y as f32, here.kind as u8 as f32, 0.0]);
+                out.chart_bounds.push(here.bounds.map(|x| x as f32));
+                out.tangents.push(along.as_vec3().extend(1.0).to_array());
                 out.positions.len() as u32 - 1
             };
-            let index = if creased { push(flat) } else { *shared.entry(v).or_insert_with(|| push(smooth)) };
+            let index = if creased { push(flat) } else { *shared.entry(key).or_insert_with(|| push(smooth)) };
             out.indices.push(index);
         }
     }
@@ -833,7 +860,7 @@ mod tests {
         let b = mesh_form(&Builtin::Cluster.form(), &B, 32).unwrap();
         let n = b.positions.len();
         assert!(n > 0 && b.indices.len() % 3 == 0);
-        assert_eq!((b.normals.len(), b.regions.len(), b.faces.len()), (n, n, n));
+        assert_eq!((b.normals.len(), b.regions.len(), b.faces.len(), b.charts.len(), b.chart_bounds.len(), b.tangents.len()), (n, n, n, n, n, n));
         assert!(b.indices.iter().all(|&i| (i as usize) < n));
         let against = b
             .indices

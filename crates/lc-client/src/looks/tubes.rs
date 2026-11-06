@@ -1,8 +1,10 @@
 //! Launch tubes in a hive: hexagonal cells, each with a tube at its middle under an iris, open or
 //! shut, ringed in danger tape. An open tube is drawn by tracing the view into it: its walls ringed
 //! and lit by guide lights running down it, and a drone's nose at the bottom or the empty floor.
-//! On a box no cell is cut by a face's edge: a margin two apothems wide is buffed steel. Fully
-//! procedural; see `assets/shaders/tubes.wgsl`.
+//! Laid out in the part's own charts, which the hull mesher writes ([`crate::charts`]), so a mesh
+//! from anything else will not draw: no cell is cut by a chart's edge, a margin two apothems wide
+//! being buffed steel, and a band takes a whole number of cells around. Fully procedural; see
+//! `assets/shaders/tubes.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -11,6 +13,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 use bevy_mesh::MeshVertexBufferLayoutRef;
+use em_render::hull_material::{ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS};
 
 pub struct Tubes {
     /// A cell across its flats: two apothems.
@@ -42,9 +45,6 @@ pub struct Tubes {
     pub exposure_stops: f32,
     /// Below 2^24: it reaches the shader as an f32.
     pub seed: u32,
-    /// The mesh is an axis-aligned unit cube scaled by its transform, unrotated, which is how the
-    /// shader knows where a face ends, and so where its margin is. Otherwise there is none.
-    pub unit_box: bool,
 }
 
 impl Default for Tubes {
@@ -70,7 +70,6 @@ impl Default for Tubes {
             planet: 0.12,
             exposure_stops: 0.0,
             seed: 5,
-            unit_box: false,
         }
     }
 }
@@ -89,7 +88,7 @@ impl Tubes {
                 to_planet: self.to_planet.extend(self.planet_deg.to_radians()),
                 planet_color: (Vec3::new(0.55, 0.7, 1.0) * self.planet).extend(0.0),
                 ambient: Vec3::splat(0.004).extend(0.0),
-                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, if self.unit_box { 1.0 } else { 0.0 }, 0.0),
+                finish: Vec4::new(2f32.powf(self.exposure_stops), self.seed as f32, 0.0, 0.0),
             },
         }
     }
@@ -131,6 +130,14 @@ impl Material for TubesMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::position_and_normal(descriptor, layout)
+        let vertex_layout = layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            ATTRIBUTE_HULL_CHART.at_shader_location(2),
+            ATTRIBUTE_HULL_CHART_BOUNDS.at_shader_location(3),
+            Mesh::ATTRIBUTE_TANGENT.at_shader_location(4),
+        ])?;
+        descriptor.vertex.buffers = vec![vertex_layout];
+        Ok(())
     }
 }

@@ -25,6 +25,7 @@
 //! The right and left arrows cut to the next station or the one before, keeping the camera's angle and the loop's clock. Escape quits.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
+use std::sync::Arc;
 
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -36,14 +37,16 @@ use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUnif
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use lc_client::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, REGION_GRAPHS, region};
+use lc_client::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, HullSource, REGION_GRAPHS, region};
 use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
 use lc_client::procedural::ProceduralTexturesPlugin;
 use lc_client::ship_hull::{HullPalettePlugin, Palette, request_palette};
 use lc_client::tonemap::ToneMap;
 use lc_world::fitting::Balance;
-use lc_world::form::sdf::Sdf;
-use lc_world::form::{Form, Kind};
+use lc_world::form::place::{Pose, Side};
+use lc_world::form::primitive::Shape;
+use lc_world::form::sdf::{Piece, Sdf};
+use lc_world::form::{Form, Kind, PartId};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::racks::{Racks, RacksMaterial};
@@ -176,7 +179,7 @@ fn spawn(
     let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
     let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
     let rack = racks.add(Racks { to_star, star_spin, ..default() }.material(&mut images));
-    let tube = tubes.add(Tubes { to_star, star_spin, unit_box: true, ..default() }.material());
+    let tube = tubes.add(Tubes { to_star, star_spin, ..default() }.material());
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);
@@ -235,11 +238,13 @@ fn spawn(
                     Transform::from_translation(center),
                 ));
             } else if look == 6 {
-                // A unit cube scaled, which is how the tubes know where a face ends.
+                // A part, meshed, so it carries the charts the tubes are laid out in.
+                let edges = glam::DVec3::splat(size as f64);
+                let piece = Piece { part: PartId(0), side: Side::Original, kind: Kind::Drone, shape: Shape::Slab { edges, corner: 0.0 }, pose: Pose::IDENTITY };
                 commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                    HullForm { source: HullSource::Pieces(Arc::from([piece])), cells: Some(32) },
                     MeshMaterial3d(tube.clone()),
-                    Transform::from_translation(center).with_scale(Vec3::splat(size)),
+                    Transform::from_translation(center),
                 ));
             } else {
                 commands.spawn((
