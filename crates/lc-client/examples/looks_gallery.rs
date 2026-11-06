@@ -159,7 +159,6 @@ fn spawn(
     mut commands: Commands,
     setup: Res<Setup>,
     mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut sprues: ResMut<Assets<SprueMaterial>>,
     mut aztecs: ResMut<Assets<AztecMaterial>>,
     mut obsidians: ResMut<Assets<ObsidianMaterial>>,
@@ -231,11 +230,7 @@ fn spawn(
                     ));
                 }
             } else if look == 4 {
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(size, size, size))),
-                    MeshMaterial3d(obsidian.clone()),
-                    Transform::from_translation(center),
-                ));
+                commands.spawn((boxed(size, Kind::Mind), MeshMaterial3d(obsidian.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else if look == 5 {
                 commands.spawn((boxed(size, Kind::Data), MeshMaterial3d(rack.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else if look == 6 {

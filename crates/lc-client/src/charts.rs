@@ -13,7 +13,9 @@
 //! - a torus, one [`ChartKind::Ring`], wrapping both ways.
 //!
 //! Every primitive's axis is its own x, and a chart's u cross its v is the surface's outward
-//! normal. A look that treats a part's ends apart from its sides, as a roof, reads
+//! normal. A round part lying on its side, its axis nearer level than upright, has no end facing
+//! up: its band is marked [`ChartPoint::lying`], with its u measured from the line along its top,
+//! so a look that wants a roof takes one from the band's upper part, and its ends are sides. A look that treats a part's ends apart from its sides, as a roof, reads
 //! [`ChartPoint::end`]. Round charts use mean radii: a frustum's band is stretched around toward its wide end
 //! and pinched toward its narrow, and an ellipsoid's band as its sections are not circles.
 
@@ -48,6 +50,8 @@ pub struct ChartPoint {
     pub bounds: [f64; 4],
     /// One of the part's ends rather than its side.
     pub end: bool,
+    /// The band of a round part lying on its side, its u 0 along the part's top.
+    pub lying: bool,
 }
 
 impl ChartPoint {
@@ -67,35 +71,57 @@ fn around(p: DVec3) -> f64 {
 }
 
 /// A point in the plane across the axis, laid out with u cross v along `+x` at the far end and
-/// `-x` at the near, so either end's chart faces out.
-fn across(p: DVec3, far: bool) -> DVec2 {
-    DVec2::new(if far { p.y } else { -p.y }, p.z)
+/// `-x` at the near, so either end's chart faces out. On a lying part, whose +y is up, v runs up.
+fn across(p: DVec3, far: bool, lying: bool) -> DVec2 {
+    match (lying, far) {
+        (false, _) => DVec2::new(if far { p.y } else { -p.y }, p.z),
+        (true, true) => DVec2::new(-p.z, p.y),
+        (true, false) => DVec2::new(p.z, p.y),
+    }
+}
+
+/// Upright enough that a round part's end is its roof: its axis within 60 degrees of up.
+const STANDING_COS: f64 = 0.5;
+
+/// A part's shape as its charts are laid out, the turn into that frame, and whether it lies on its
+/// side; see [`oriented`].
+#[derive(Clone, Copy, Debug)]
+pub struct Oriented {
+    pub shape: Shape,
+    pub turn: DMat3,
+    pub lying: bool,
 }
 
 /// `shape` turned so its charts' axis is the one they are laid out about, and the turn from the
 /// part's frame into that shape's: evaluate the charts at `turn * p`, and carry a tangent back by
-/// its transpose. A round primitive's axis is its own x, its ends its own. An ellipsoid and a slab
-/// have no axis that must be theirs, so theirs is whichever runs most along `up`, in the part's
-/// frame: an ellipsoid's caps go about it, and a slab's ends are across it with its sides' v up it.
-/// So a habitat's roof is its top, and decks stand up, however the part is turned. The turn is a
-/// cyclic permutation of the axes, so it keeps a chart right-handed.
-pub fn oriented(shape: &Shape, up: DVec3) -> (Shape, DMat3) {
+/// its transpose. A round primitive's axis is its own x, its ends its own; lying on its side it is
+/// turned about that axis to put its +y up, its band's u then 0 along its top. An ellipsoid and a
+/// slab have no axis that must be theirs, so theirs is whichever runs most along `up`, in the
+/// part's frame: an ellipsoid's caps go about it, and a slab's ends are across it with its sides' v
+/// up it. So a habitat's roof is its top, and decks stand up, however the part is turned. Each turn
+/// is a rotation, so it keeps a chart right-handed.
+pub fn oriented(shape: &Shape, up: DVec3) -> Oriented {
+    let up = up.normalize_or_zero();
     let row = |i: usize| DVec3::from_array(std::array::from_fn(|k| if k == i { 1.0 } else { 0.0 }));
     let a = up.abs().max_position();
+    let (b, c) = ((a + 1) % 3, (a + 2) % 3);
     match *shape {
         // Its axis is x.
-        Shape::Ellipsoid { semi_axes } => {
-            let (b, c) = ((a + 1) % 3, (a + 2) % 3);
-            let turn = DMat3::from_cols(row(a), row(b), row(c)).transpose();
-            (Shape::Ellipsoid { semi_axes: DVec3::new(semi_axes[a], semi_axes[b], semi_axes[c]) }, turn)
-        }
+        Shape::Ellipsoid { semi_axes } => Oriented {
+            shape: Shape::Ellipsoid { semi_axes: DVec3::new(semi_axes[a], semi_axes[b], semi_axes[c]) },
+            turn: DMat3::from_cols(row(a), row(b), row(c)).transpose(),
+            lying: false,
+        },
         // Its axis is z.
-        Shape::Slab { edges, corner } => {
-            let (b, c) = ((a + 1) % 3, (a + 2) % 3);
-            let turn = DMat3::from_cols(row(b), row(c), row(a)).transpose();
-            (Shape::Slab { edges: DVec3::new(edges[b], edges[c], edges[a]), corner }, turn)
+        Shape::Slab { edges, corner } => Oriented {
+            shape: Shape::Slab { edges: DVec3::new(edges[b], edges[c], edges[a]), corner },
+            turn: DMat3::from_cols(row(b), row(c), row(a)).transpose(),
+            lying: false,
+        },
+        Shape::Cylinder { .. } | Shape::Capsule { .. } | Shape::Frustum { .. } if up.x.abs() < STANDING_COS => {
+            Oriented { shape: *shape, turn: DMat3::from_rotation_x(-up.z.atan2(up.y)), lying: true }
         }
-        _ => (*shape, DMat3::IDENTITY),
+        _ => Oriented { shape: *shape, turn: DMat3::IDENTITY, lying: false },
     }
 }
 
@@ -127,11 +153,22 @@ pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
     }
 }
 
-/// Where `p`, in the part's frame, lies in chart `chart` of `shape`. Any chart answers for any
-/// point, so a triangle can be laid out whole in one chart.
-pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
+/// Where `p`, in the part's frame, lies in chart `chart` of `shape`, `lying` on its side as
+/// [`oriented`] says. Any chart answers for any point, so a triangle can be laid out whole in one
+/// chart.
+pub fn chart_at(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
+    let mut point = laid(shape, chart, p, lying);
+    if lying {
+        point.lying = point.kind == ChartKind::Band;
+        point.end = false;
+    }
+    point
+}
+
+fn laid(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
     let theta = around(p);
     let far = chart == 2;
+    let across = |p: DVec3, far: bool| across(p, far, lying);
     match *shape {
         Shape::Slab { edges, .. } => {
             let axis = (chart / 2) as usize;
@@ -148,6 +185,7 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
                 kind: ChartKind::Rect,
                 bounds: [-half[b], half[b], -half[c], half[c]],
                 end: axis == 2,
+                lying: false,
             }
         }
         Shape::Cylinder { radius, length } => match chart {
@@ -195,30 +233,31 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
                 kind: ChartKind::Ring,
                 bounds: [TAU * major, TAU * minor, 0.0, 0.0],
                 end: false,
+                lying: false,
             }
         }
     }
 }
 
 fn band(theta: f64, radius: f64, v: f64, half: f64) -> ChartPoint {
-    ChartPoint { uv: DVec2::new(theta * radius, v), kind: ChartKind::Band, bounds: [TAU * radius, 0.0, -half, half], end: false }
+    ChartPoint { uv: DVec2::new(theta * radius, v), kind: ChartKind::Band, bounds: [TAU * radius, 0.0, -half, half], end: false, lying: false }
 }
 
 fn disc(uv: DVec2, radius: f64) -> ChartPoint {
-    ChartPoint { uv, kind: ChartKind::Disc, bounds: [radius, 0.0, 0.0, 0.0], end: true }
+    ChartPoint { uv, kind: ChartKind::Disc, bounds: [radius, 0.0, 0.0, 0.0], end: true, lying: false }
 }
 
 fn dome(uv: DVec2, radius: f64, sphere: f64) -> ChartPoint {
-    ChartPoint { uv, kind: ChartKind::Dome, bounds: [radius, sphere, 0.0, 0.0], end: true }
+    ChartPoint { uv, kind: ChartKind::Dome, bounds: [radius, sphere, 0.0, 0.0], end: true, lying: false }
 }
 
 /// A triangle's corners, in the part's frame, laid out whole in the chart its middle is in, so a
 /// pattern never smears across one: the chart, and each corner's point there unwrapped to within
 /// half a period of the first's across a seam, with how many periods that took each way, which
 /// tells a corner on one side of a seam from the same corner on the other.
-pub fn lay_out(shape: &Shape, corners: [DVec3; 3]) -> (u8, [(ChartPoint, [i32; 2]); 3]) {
+pub fn lay_out(shape: &Shape, corners: [DVec3; 3], lying: bool) -> (u8, [(ChartPoint, [i32; 2]); 3]) {
     let chart = chart_of(shape, (corners[0] + corners[1] + corners[2]) / 3.0);
-    let laid = corners.map(|p| chart_at(shape, chart, p));
+    let laid = corners.map(|p| chart_at(shape, chart, p, lying));
     let (first, periods) = (laid[0].uv, laid[0].periods());
     let turns = |x: f64, near: f64, period: f64| if period > 0.0 { ((near - x) / period).round() as i32 } else { 0 };
     (
@@ -238,13 +277,13 @@ pub fn unwrapped(x: f64, near: f64, period: f64) -> f64 {
 
 /// The direction u grows along the surface at `p`, in the part's frame: u's gradient laid into the
 /// plane square to the surface's.
-pub fn tangent(shape: &Shape, chart: u8, p: DVec3, h: f64) -> DVec3 {
+pub fn tangent(shape: &Shape, chart: u8, p: DVec3, h: f64, lying: bool) -> DVec3 {
     let axes = [DVec3::X, DVec3::Y, DVec3::Z];
-    let here = chart_at(shape, chart, p);
+    let here = chart_at(shape, chart, p, lying);
     let period = here.periods().x;
     let du = DVec3::from_array(axes.map(|a| {
-        let ahead = unwrapped(chart_at(shape, chart, p + a * h).uv.x, here.uv.x, period);
-        let behind = unwrapped(chart_at(shape, chart, p - a * h).uv.x, here.uv.x, period);
+        let ahead = unwrapped(chart_at(shape, chart, p + a * h, lying).uv.x, here.uv.x, period);
+        let behind = unwrapped(chart_at(shape, chart, p - a * h, lying).uv.x, here.uv.x, period);
         ahead - behind
     }));
     let n = DVec3::from_array(axes.map(|a| shape.distance(p + a * h) - shape.distance(p - a * h))).normalize_or_zero();
@@ -293,14 +332,14 @@ mod tests {
     /// Every chart is right-handed: u, then v, then out.
     #[test]
     fn u_cross_v_is_outward() {
-        for shape in shapes() {
+        for (shape, lying) in shapes().into_iter().flat_map(|s| [(s, false), (s, true)]) {
             for p in surface(&shape) {
                 let chart = chart_of(&shape, p);
                 let h = 1e-4;
-                let t = tangent(&shape, chart, p, h);
-                let here = chart_at(&shape, chart, p);
+                let t = tangent(&shape, chart, p, h, lying);
+                let here = chart_at(&shape, chart, p, lying);
                 let periods = here.periods();
-                let v = |q: DVec3| unwrapped(chart_at(&shape, chart, q).uv.y, here.uv.y, periods.y);
+                let v = |q: DVec3| unwrapped(chart_at(&shape, chart, q, lying).uv.y, here.uv.y, periods.y);
                 let dv = DVec3::from_array([DVec3::X, DVec3::Y, DVec3::Z].map(|a| v(p + a * h) - v(p - a * h)));
                 let n = DVec3::from_array([DVec3::X, DVec3::Y, DVec3::Z].map(|a| shape.distance(p + a * h) - shape.distance(p - a * h)));
                 if dv.length() > 1e-9 {
@@ -317,9 +356,9 @@ mod tests {
         for shape in &shapes()[..2] {
             for p in surface(shape) {
                 let chart = chart_of(shape, p);
-                let t = tangent(shape, chart, p, 1e-4);
-                let here = chart_at(shape, chart, p);
-                let ahead = chart_at(shape, chart, p + t * 0.01);
+                let t = tangent(shape, chart, p, 1e-4, false);
+                let here = chart_at(shape, chart, p, false);
+                let ahead = chart_at(shape, chart, p + t * 0.01, false);
                 let du = unwrapped(ahead.uv.x, here.uv.x, here.periods().x) - here.uv.x;
                 assert!((du / 0.01 - 1.0).abs() < 0.02, "{shape:?} chart {chart}: {} m a meter", du / 0.01);
             }
@@ -331,8 +370,8 @@ mod tests {
     #[test]
     fn an_ellipsoid_is_capped_about_the_axis_most_up() {
         let lying = Shape::Ellipsoid { semi_axes: DVec3::new(50.0, 25.0, 10.0) };
-        let (shape, turn) = oriented(&lying, DVec3::Z);
-        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p);
+        let Oriented { shape, turn, .. } = oriented(&lying, DVec3::Z);
+        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p, false);
         assert!(chart(DVec3::new(0.0, 0.0, 10.0)).end, "its top is a cap");
         assert!(chart(DVec3::new(0.0, 0.0, -10.0)).end, "its bottom is a cap");
         assert!(!chart(DVec3::new(50.0, 0.0, 0.0)).end, "its tip is on the band");
@@ -344,18 +383,38 @@ mod tests {
     fn a_slab_takes_its_ends_across_the_axis_most_up() {
         let flat = Shape::Slab { edges: DVec3::new(0.25, 6.3, 12.5), corner: 0.0 };
         let up = DVec3::new(0.8, 0.0, 0.6);
-        let (shape, turn) = oriented(&flat, up);
-        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p);
+        let Oriented { shape, turn, .. } = oriented(&flat, up);
+        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p, false);
         assert!(chart(DVec3::new(0.125, 1.0, 2.0)).end, "its broad face is an end");
         assert!(!chart(DVec3::new(0.0, 0.0, 6.25)).end, "its narrow edge is a side");
         assert!(turn.determinant() > 0.0, "a turn, not a reflection");
     }
 
+    /// A cylinder lying along the ship's x: its band's u is 0 along its top and its ends are sides,
+    /// their v running up.
+    #[test]
+    fn a_lying_cylinder_measures_its_band_from_its_top() {
+        let tube = Shape::Cylinder { radius: 8.0, length: 30.0 };
+        let o = oriented(&tube, DVec3::new(0.0, 0.6, 0.8));
+        assert!(o.lying);
+        let at = |p: DVec3| {
+            let q = o.turn * p;
+            chart_at(&o.shape, chart_of(&o.shape, q), q, true)
+        };
+        let top = at(DVec3::new(0.0, 0.6, 0.8) * 8.0);
+        assert!(top.lying && top.uv.x.abs() < 1e-9, "{top:?}");
+        let end = at(DVec3::new(15.0, 0.0, 0.0));
+        assert!(!end.end && !end.lying);
+        let higher = at(DVec3::new(15.0, 0.6, 0.8));
+        assert!(higher.uv.y > end.uv.y, "an end's v runs up");
+        assert!(!oriented(&tube, DVec3::X).lying, "standing, it is not");
+    }
+
     #[test]
     fn a_band_wraps_once_around() {
         let shape = Shape::Cylinder { radius: 8.0, length: 30.0 };
-        let a = chart_at(&shape, 0, DVec3::new(0.0, -8.0, 1e-9));
-        let b = chart_at(&shape, 0, DVec3::new(0.0, -8.0, -1e-9));
+        let a = chart_at(&shape, 0, DVec3::new(0.0, -8.0, 1e-9), false);
+        let b = chart_at(&shape, 0, DVec3::new(0.0, -8.0, -1e-9), false);
         assert!((unwrapped(a.uv.x, b.uv.x, a.periods().x) - b.uv.x).abs() < 1e-6);
         assert!((a.periods().x - TAU * 8.0).abs() < 1e-9);
     }

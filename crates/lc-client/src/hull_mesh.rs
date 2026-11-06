@@ -25,7 +25,7 @@ use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
-use crate::charts::{lay_out, oriented, tangent};
+use crate::charts::{Oriented, lay_out, oriented, tangent};
 use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
 /// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
@@ -374,14 +374,14 @@ impl Field for Union<'_> {
 fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DVec3], regions: [[u8; 4]; 4], faces: &[[u8; 4]]) {
     let mut shared: HashMap<(u32, u8, i32, i32), u32> = HashMap::new();
     let pose = piece.pose;
-    let (shape, turn) = oriented(&piece.shape, pose.rotation.transpose() * DVec3::Z);
+    let Oriented { shape, turn, lying } = oriented(&piece.shape, pose.rotation.transpose() * DVec3::Z);
     let local = |p: DVec3| turn * pose.to_local(p);
     // Fine against any part: a millimeter in a part a few meters across.
     let h = 1.0e-4 * piece.shape.least_dimension().max(1.0);
     for t in &surface.triangles {
         let [a, b, c] = t.map(|i| surface.vertices[i as usize]);
         let flat = (b - a).cross(c - a).normalize_or_zero();
-        let (chart, laid) = lay_out(&shape, [a, b, c].map(local));
+        let (chart, laid) = lay_out(&shape, [a, b, c].map(local), lying);
         for (k, &v) in t.iter().enumerate() {
             let (here, turns) = laid[k];
             let uv = here.uv;
@@ -390,12 +390,13 @@ fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DV
             let creased = flat != DVec3::ZERO && smooth.dot(flat) < CREASE_COS;
             let mut push = |normal: DVec3| {
                 let p = surface.vertices[v as usize];
-                let along = pose.rotation * turn.transpose() * tangent(&shape, chart, local(p), h);
+                let along = pose.rotation * turn.transpose() * tangent(&shape, chart, local(p), h, lying);
                 out.positions.push(p.as_vec3().to_array());
                 out.normals.push(normal.as_vec3().to_array());
                 out.regions.push(regions);
                 out.faces.push(faces[v as usize]);
-                out.charts.push([uv.x as f32, uv.y as f32, here.kind as u8 as f32, if here.end { 1.0 } else { 0.0 }]);
+                // `end` 1, a lying part's band 2, any other side 0.
+                out.charts.push([uv.x as f32, uv.y as f32, here.kind as u8 as f32, if here.end { 1.0 } else if here.lying { 2.0 } else { 0.0 }]);
                 out.chart_bounds.push(here.bounds.map(|x| x as f32));
                 out.tangents.push(along.as_vec3().extend(1.0).to_array());
                 out.positions.len() as u32 - 1

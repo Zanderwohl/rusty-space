@@ -135,7 +135,7 @@ client warns when it meshes one.
 |---|---|
 | storage | azteced plate: panels cut from a staggered grid by snapped splits, each its own gray or a little browner and tipped a few degrees, with chamfered seams. The mass of the ship. As built, a `plated` region of the hull material, cut in the ship's frame with its z up by `panels.wgsl`, which the aztec look's settings feed through `looks::kinds::wear`, its paint darkened and its metal dulled to sit among the hull's own textures under the hull's exposure |
 | drone | hangar doors in rows, docks lit when drones are home |
-| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Laid out in the part's own charts (`lc_client::charts`): decks stack up each side's, and the roof is the part's end that faces the ship's z, an ellipsoid's caps going about whichever of its axes runs most that way. Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the walls under the rim drop from the roof chart's own edge, so no outline is taken from the mesh |
+| living | a habitat: office plate on the sides with windows over traced rooms, lit in runs by the kind's lamp, and over the top a roof of glass hexes on a forest under stratus, walled in under its rim and chamfered where it meets the sides. Laid out in the part's own charts (`lc_client::charts`): decks stack up each side's, and the roof is the part's end that faces the ship's z. An ellipsoid's caps and a slab's ends go across whichever of its axes runs most that way; a cylinder, capsule or frustum lying on its side takes its roof from its band's top, down to 20 degrees above level, with decks up its flanks (`shaders/charts.wgsl`). Lit windows are the brightest thing on a night side. As built, a `habitat` region of the hull material, with `habitat.wgsl` and `panels.wgsl`; the walls under the rim drop from the roof chart's own edge, so no outline is taken from the mesh |
 | engine | an ion thruster's face on the open face: a uniform grid of dark bars over blue hex cells 2 m behind it, seen through its gaps at their depth, each cell glowing at the luminance of whatever leaves through the face, deep blue at its walls and paling toward its core, and dark grid over black when nothing leaves; as built, `thruster` in the hull material, which draws it in place of the engine graph's grid. A layered sprue on its flanks: two cutout layers of mazed pipe over a plated base, lit by sodium floodlights. As built, the flank layer is `piped` in the hull material: the surface is the top layer of pipe, and the layer under it and the base are seen through its gaps at their depths by parallax, the sprue's baked tiles and lamp light laid out in the engine part's own charts (`lc_client::charts`), a whole number of tiles around its axis and the star shadowed by the layers above; the tiles bake once on the async pool, and until then the flank draws its old graph, greebled machinery. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
@@ -203,14 +203,12 @@ which the hull mesher writes on each vertex: a slab's faces, a round part's band
 discs or domes at its ends, a torus's ring. A band or ring takes a whole number of each pattern's
 cells around, so nothing has a seam, and a look keeps clear of a chart's edges where it should, as
 the tubes' steel margin and the windows do. So they draw only on the mesher's meshes; obsidian, a
-3D pattern, needs no chart.
+3D pattern, needs no chart: it is cut on the mesh's own position, so it stays on the part.
 
 Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling boxes of each
 size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
 primitive.
 
-Open: decks stack up a part's own z, which is the ship's only while the part stands upright in
-it.
 
 ## Building, as a function of time
 

@@ -16,6 +16,7 @@
 #import "shaders/panels.wgsl"::{Plate, plate}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
+#import "shaders/charts.wgsl"::{chart_view}
 #import "shaders/pipes.wgsl"::{PipeTiling, pipe_tiling, tile_start, variant_layer}
 
 struct Vertex {
@@ -734,7 +735,18 @@ fn under_roof(c: HullChart, surface: vec3<f32>, e: vec3<f32>, star: vec3<f32>, e
 /// windows over traced rooms, lit by `glow` where a room's lights are on, and over the top a roof of
 /// glass hexes on a forest, chamfered where the two meet. The roof is the part's end that faces
 /// the ship's up; the sides' windows keep clear of their charts' edges.
-fn habitat_light(in: VertexOutput, c: HullChart, pixel: f32, glow: vec3<f32>) -> vec3<f32> {
+fn habitat_light(in: VertexOutput, part: HullChart, pixel: f32, glow: vec3<f32>) -> vec3<f32> {
+    // A lying part's band seen as a roof along its top and flanks below; any other chart as it is.
+    var c = part;
+    if (in.chart.w > 1.5) {
+        let view = chart_view(in.chart, in.bounds, part.frame);
+        c.p = view.p;
+        c.kind = view.kind;
+        c.bounds = view.bounds;
+        c.frame = view.frame;
+        c.end = view.end;
+        c.around = vec2<f32>(0.0);
+    }
     let surface = normalize(in.ship_normal);
     let star = normalize(in.star_ship);
     let e = normalize(in.eye_ship - in.ship_position);
@@ -768,6 +780,10 @@ fn habitat_light(in: VertexOutput, c: HullChart, pixel: f32, glow: vec3<f32>) ->
         } else if (c.kind == BAND) {
             lo.y = c.bounds.z + WINDOW_MARGIN_M;
             hi.y = c.bounds.w - WINDOW_MARGIN_M;
+        } else if (c.kind == DISC || c.kind == DOME) {
+            // The square inside the disc: a lying part's end, which is a side.
+            hi = vec2<f32>(0.7071 * c.bounds.x - WINDOW_MARGIN_M);
+            lo = -hi;
         }
         if (!c.end && abs(surface.z) <= 0.5) {
             let clear = material.plate_finish.z + 0.1;

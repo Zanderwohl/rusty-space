@@ -11,6 +11,7 @@
     mesh_view_bindings::{globals, view},
     view_transformations::position_world_to_clip,
 }
+#import "shaders/charts.wgsl"::{chart_view}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -300,6 +301,10 @@ fn window(p: vec2<f32>, cell: Panel, face_id: u32, end: bool, surface: vec3<f32>
     } else if (chart_kind == BAND) {
         chart_lo.y = chart_bounds.z;
         chart_hi.y = chart_bounds.w;
+    } else if (chart_kind == DISC || chart_kind == DOME) {
+        // The square inside the disc: a lying part's end, which is a side.
+        chart_hi = vec2<f32>(0.7071 * chart_bounds.x);
+        chart_lo = -chart_hi;
     }
     let deck = floor(p.y / m.deck.x);
     let col = floor(p.x / m.deck.y);
@@ -627,13 +632,23 @@ fn roof(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>) -> v
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
     let along = normalize(in.world_tangent - surface * dot(in.world_tangent, surface));
-    let frame = mat3x3<f32>(along, cross(surface, along), surface);
+    // Offices and a habitat see a lying part's band as a roof along its top and flanks below, so
+    // their decks stand level; bare plate keeps the band whole.
+    var frame = mat3x3<f32>(along, cross(surface, along), surface);
     chart_kind = u32(round(in.chart.z));
     chart_bounds = in.bounds;
-    let end = in.chart.w > 0.5;
+    var end = in.chart.w > 0.5;
+    var p = in.chart.xy;
+    if (in.chart.w > 1.5 && (m.deck.x > 0.0 || m.roof.x > 0.0)) {
+        let seen = chart_view(in.chart, in.bounds, frame);
+        p = seen.p;
+        chart_kind = seen.kind;
+        chart_bounds = seen.bounds;
+        frame = seen.frame;
+        end = seen.end;
+    }
     // Around a band or ring, stretched to a whole number of grid cells, which are whole numbers of
     // snaps, window columns and decks, so every lattice meets itself at the seam.
-    var p = in.chart.xy;
     let cell_m = m.grid.x;
     if (chart_kind == BAND || chart_kind == RING) {
         let n = max(round(chart_bounds.x / cell_m), 1.0);
@@ -650,7 +665,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let e = normalize(view.world_position - in.world_position);
     // Each chart its own panels, and a rectangle, all of one direction, told apart by which way
     // its u runs: a cube's faces are alike in extent.
-    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), chart_kind == RECT);
+    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), u32(round(in.chart.z)) == RECT);
     let face_id = mix_hash(chart_kind + 8u * facing, u32(in.chart.w) + 2u * bitcast<u32>(chart_bounds.x));
     // The roof is the end that faces up.
     let roofed = m.roof.x > 0.0 && end && surface.y > 0.0;

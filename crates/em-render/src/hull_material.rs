@@ -36,7 +36,8 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
 
 /// `(u_m, v_m, kind, end)`: where the vertex lies on its part's own surface, in one of the part's
 /// charts, which kind of chart (0 a rectangle, 1 a disc, 2 a band wrapping in u, 3 a ring wrapping
-/// both ways, 4 a dome laid out about its pole), and 1 where the chart is one of the part's ends. A look lays its pattern in these meters, so it follows the part and keeps
+/// both ways, 4 a dome laid out about its pole), and 1 where the chart is one of the part's ends, 2
+/// where it is the band of a round part lying on its side, its u 0 along the part's top. A look lays its pattern in these meters, so it follows the part and keeps
 /// clear of its edges.
 pub const ATTRIBUTE_HULL_CHART: MeshVertexAttribute =
     MeshVertexAttribute::new("HullChart", 0x4855_4C4C_0000_0008, VertexFormat::Float32x4);

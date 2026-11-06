@@ -383,11 +383,11 @@ fn sphere(radius: f32, center: usize) -> Mesh {
     let (mut charts, mut bounds, mut tangents) = (Vec::new(), Vec::new(), Vec::new());
     for corners in positions.chunks_exact(3) {
         let at = [0, 1, 2].map(|k| Vec3::from(corners[k]).as_dvec3());
-        let (chart, laid) = lay_out(&ball, at);
+        let (chart, laid) = lay_out(&ball, at, false);
         for (k, (here, _)) in laid.iter().enumerate() {
             charts.push([here.uv.x as f32, here.uv.y as f32, here.kind as u8 as f32, if here.end { 1.0 } else { 0.0 }]);
             bounds.push(here.bounds.map(|x| x as f32));
-            tangents.push(tangent(&ball, chart, at[k], 1.0e-3).as_vec3().extend(1.0).to_array());
+            tangents.push(tangent(&ball, chart, at[k], 1.0e-3, false).as_vec3().extend(1.0).to_array());
         }
     }
     insert_region_weights(&mut mesh, &regions);

@@ -12,6 +12,7 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/hash.wgsl"::{pcg, mix_hash, unit}
+#import "shaders/charts.wgsl"::{chart_view}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -296,26 +297,28 @@ fn hall(p: vec2<f32>, seed: u32, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
     let along = normalize(in.world_tangent - surface * dot(in.world_tangent, surface));
-    let frame = mat3x3<f32>(along, cross(surface, along), surface);
-    let p = in.chart.xy;
-    let kind = u32(round(in.chart.z));
+    // A lying part's band seen as a hall along its top and racks standing up its flanks.
+    let seen = chart_view(in.chart, in.bounds, mat3x3<f32>(along, cross(surface, along), surface));
+    let frame = seen.frame;
+    let p = seen.p;
+    let kind = seen.kind;
     let e = normalize(view.world_position - in.world_position);
     let pixel = max(fwidth(p), vec2<f32>(1.0e-4));
     let dx = dpdx(p);
     let dy = dpdy(p);
     // Each chart its own servers, told apart by its extent, and a rectangle, all of one direction,
     // by which way its u runs: a cube's faces are alike in extent.
-    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), kind == 0u);
-    let seed = mix_hash(mix_hash(u32(m.finish.y), kind + 8u * facing), bitcast<u32>(in.bounds.x + 2.0 * in.bounds.w) ^ u32(in.chart.w));
+    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), u32(round(in.chart.z)) == 0u);
+    let seed = mix_hash(mix_hash(u32(m.finish.y), kind + 8u * facing), bitcast<u32>(seen.bounds.x + 2.0 * seen.bounds.w) ^ u32(in.chart.w));
     var periods = vec2<f32>(0.0);
     if (kind == BAND || kind == RING) {
-        periods.x = in.bounds.x;
+        periods.x = seen.bounds.x;
     }
     if (kind == RING) {
-        periods.y = in.bounds.y;
+        periods.y = seen.bounds.y;
     }
     var radiance: vec3<f32>;
-    if (in.chart.w > 0.5) {
+    if (seen.end) {
         radiance = hall(p, seed, frame, surface, e, pixel);
     } else {
         radiance = side(p, seed, periods, frame, surface, e, pixel, dx, dy);

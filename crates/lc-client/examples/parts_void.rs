@@ -13,6 +13,7 @@
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
 //! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian`, `sprue`, `racks` or `tubes` |
 //! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus` or `frustum` |
+//! | `--lying` | every part on its side, its axis along the ship's x, rather than standing |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--frames <n>` | frames after every mesh lands |
 
@@ -105,6 +106,7 @@ struct Args {
     zoom: f32,
     sun_deg: f32,
     frames: u32,
+    lying: bool,
 }
 
 impl Args {
@@ -140,6 +142,7 @@ impl Args {
             zoom: value("--zoom").unwrap_or(1.0),
             sun_deg: value("--sun").unwrap_or(35.0),
             frames: value("--frames").unwrap_or(10.0) as u32,
+            lying: args.iter().any(|a| a == "--lying"),
         }
     }
 }
@@ -251,8 +254,9 @@ fn reach(shape: Shape) -> f64 {
     }
 }
 
-fn piece(kind: Kind, shape: Shape) -> Piece {
-    Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose { position: DVec3::ZERO, rotation: STANDING } }
+fn piece(kind: Kind, shape: Shape, lying: bool) -> Piece {
+    let rotation = if lying { DMat3::IDENTITY } else { STANDING };
+    Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose { position: DVec3::ZERO, rotation } }
 }
 
 fn camera_direction(args: &Args) -> Vec3 {
@@ -346,7 +350,7 @@ fn spawn(
             let at = right * (c as f32 - (columns - 1.0) / 2.0) * slot + up * ((rows - 1.0) / 2.0 - r as f32) * slot;
             let transform = Transform::from_translation(at).with_rotation(ship_to_world());
             let form = |kind: Kind, shape: Shape| HullForm {
-                source: HullSource::Pieces(Arc::from([piece(kind, shape)])),
+                source: HullSource::Pieces(Arc::from([piece(kind, shape, args.lying)])),
                 cells: Some(args.cells),
             };
             match *column {
