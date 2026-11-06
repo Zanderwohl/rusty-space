@@ -1006,6 +1006,6 @@ mod tests {
         assert_eq!(field.shade, lc_proto::Shade::Black);
         let sent = lc_proto::Fitting::from(&fitting);
         assert_eq!(Fitting::from_wire(&sent, Some(&field)), fitting);
-        assert_eq!(Fitting::from(&sent).heat_j, fitting.hull().capacities.drain_w * b.field_tau_s);
+        assert_eq!(Fitting::from_wire(&sent, None).heat_j, fitting.hull().capacities.drain_w * b.field_tau_s);
     }
 }

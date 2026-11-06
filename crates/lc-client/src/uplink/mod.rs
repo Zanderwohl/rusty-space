@@ -111,6 +111,8 @@ pub struct Uplink {
     drives: std::collections::HashMap<ShipId, Vec<DriveAt>>,
     /// The last account the server stated, re-applied with the placement for the same reason.
     pub fitting: Option<lc_proto::Fitting>,
+    /// The field stated with it. Without it a re-applied account comes back at idle heat.
+    pub field: Option<lc_proto::Field>,
     /// What the server solved from the ship's form with that account. See [`crate::parts::adopt_fitted`].
     pub hull: Option<lc_proto::Hull>,
     /// Every conversation this ship is in. See [`crate::chat`].
@@ -156,7 +158,7 @@ impl Uplink {
         session.restore(&(&placement.ship).into());
         session.remote = true;
         if let Some(fitting) = &self.fitting {
-            session.ship.fit(Some(fitting.into()));
+            session.ship.fit(Some(lc_world::fitting::Fitting::from_wire(fitting, self.field.as_ref())));
         }
     }
 
@@ -298,6 +300,7 @@ fn fold(
             if uplink.joined().is_some_and(|joined| joined.ship_id == ship_id) {
                 game.0.ship.fit(Some(lc_world::fitting::Fitting::from_wire(&fitting, field.as_ref())));
                 uplink.fitting = Some(fitting);
+                uplink.field = field;
                 uplink.hull = Some(hull);
             }
         }
@@ -456,6 +459,25 @@ mod tests {
         assert_eq!(ship.fitting(), Some(&hot));
         let motion = &ship.motion;
         assert_eq!(ship.fitting().unwrap().mass_kg_at(motion, 0.0), hot.mass_kg_at(motion, 0.0));
+    }
+
+    /// A reload: the welcome and its `Fitted` arrive while the sky loads, then the session is
+    /// replaced and placed again. The field comes back as stated, not at idle heat.
+    #[test]
+    fn a_placed_session_keeps_the_stated_heat() {
+        use lc_world::fitting::{Account, Balance, Fitting};
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome(0));
+        let b = Balance::DEFAULT;
+        let full = Fitting::full(lc_world::form::Form::reference(), b, 0.0);
+        let hot = Fitting::from_account(&Account { heat_j: 0.5 * full.field().heat_max_j(), ..full.account() }, b);
+        let fitted = Outbound::Fitted { ship_id: ShipId(7), fitting: (&hot).into(), hull: (&hot).into(), field: Some((&hot).into()) };
+        fold(&mut uplink, &mut game, &mut ui, fitted);
+        let stated = crate::field::own_state(&game.0).kelvin;
+        game.0.ship.fit(None);
+        uplink.place(&mut game.0);
+        assert_eq!(game.0.ship.fitting(), Some(&hot));
+        assert_eq!(crate::field::own_state(&game.0).kelvin, stated);
     }
 
     /// 31 §Client: the map draws this ship's beams and those landing on it, and nothing else. Another
