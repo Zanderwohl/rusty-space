@@ -1,15 +1,15 @@
-//! A form's hull as a mesh: surface nets over `lc_world::form::sdf`, in the ship's frame in
-//! meters, carrying the region weights and seam coordinates `em_render::hull_material` reads.
-//! See `lightcone/docs/32-ship-rendering.md` §From distance field to mesh.
+//! A form's hull as a mesh: each piece on its own grid, by [`crate::surface_nets`] with vertices
+//! placed by dual contouring, and the pieces' meshes laid end to end. Nothing is filleted or
+//! fused: a piece sunk into another keeps its whole surface, and where they cross the depth buffer
+//! draws the join. In the ship's frame in meters, carrying the region weights and open faces
+//! `em_render::hull_material` reads. See `lightcone/docs/32-ship-rendering.md` §From distance
+//! field to mesh.
 //!
 //! [`mesh_form`] is the pure core, form and resolution in and buffers out. [`HullMeshPlugin`] runs
 //! it on the async compute pool, caches the meshes by [`form_hash`], and swaps each into its
 //! entity when it lands, so a remesh never holds up a frame.
-//!
-//! The grid and its extraction are [`crate::surface_nets`]'s, which says why the mesh is closed.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::f64::consts::TAU;
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
@@ -25,7 +25,7 @@ use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, FormError, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 
-use crate::surface_nets::{AXES, Field, Grid, Place, Surface, gradients, nets};
+use crate::surface_nets::{AXES, Field, Grid, Surface, gradients, nets};
 
 /// The palette's order: layer `i` is drawn with `textures/hull/{REGION_GRAPHS[i]}.tgraph`. Each
 /// kind's region is its own layer, and the engine is drawn with [`ENGINE_FLANK`] off its open
@@ -74,43 +74,17 @@ pub fn pixels_across(extent_m: f32, distance_m: f32, fov_y: f32, height_px: f32)
     extent_m / (2.0 * distance * (0.5 * fov_y).tan()) * height_px
 }
 
-/// How a hull is drawn. Changes extraction, never the shape: every finish reads the same
-/// cleaned samples.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Finish {
-    /// Surface nets as they come, with normals from the field's gradient.
-    #[default]
-    Smooth,
-    /// The same triangles with flat normals.
-    Faceted,
-    /// Each inside sample drawn as a cube a cell across.
-    Blocky,
-}
-
-/// What happens where two parts meet.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Joins {
-    /// Filleted by each placement's blend, and the regions mixed across the fillet or a cell.
-    #[default]
-    Blended,
-    /// The bare union, every blend taken as zero, each vertex wearing only its nearest part, and
-    /// creases kept: vertices placed by dual contouring, and shaded flat where they turn.
-    Hard,
-}
-
-impl Joins {
-    fn place<'a>(self, finish: Finish, field: &'a dyn Field) -> Place<'a> {
-        match (finish, self) {
-            (Finish::Blocky, _) => Place::Center,
-            (_, Joins::Blended) => Place::Mean,
-            (_, Joins::Hard) => Place::Sharp(field),
-        }
-    }
-}
-
-/// Under [`Joins::Hard`], a triangle corner whose field normal is farther than about 37 degrees
-/// from the triangle's own takes the triangle's: the corner is on a crease.
+/// A triangle corner whose field normal is farther than about 37 degrees from the triangle's own
+/// takes the triangle's: the corner is on a crease.
 const CREASE_COS: f64 = 0.8;
+
+/// Cells across a piece's thinnest dimension, at the least: a piece thinner than a cell would
+/// vanish whole.
+const THINNEST_CELLS: f64 = 3.0;
+
+/// [`ATTRIBUTE_HULL_SEAM`]'s `across` on every vertex: large enough that the shader's derivative
+/// of it spreads any bolt to nothing.
+const SEAM_FAR: f32 = 1.0e4;
 
 /// Mesh buffers in the ship's frame, meters.
 #[derive(Clone, Debug, Default)]
@@ -123,8 +97,6 @@ pub struct HullBuffers {
     /// [`ATTRIBUTE_HULL_FACE`]'s, indexing [`apertures`].
     pub faces: Vec<[u8; 4]>,
     pub indices: Vec<u32>,
-    /// Meters between samples.
-    pub step: f64,
 }
 
 impl HullBuffers {
@@ -140,29 +112,59 @@ impl HullBuffers {
     }
 }
 
-/// `cells` along the longest side of the form's bounds.
-pub fn mesh_form(form: &Form, balance: &Balance, cells: u32, finish: Finish, joins: Joins) -> Result<HullBuffers, FormError> {
-    let unblended;
-    let form = match joins {
-        Joins::Blended => form,
-        Joins::Hard => {
-            let mut bare = form.clone();
-            for placement in bare.parts.iter_mut().filter_map(|p| p.placement.as_mut()) {
-                placement.blend = 0.0;
-            }
-            unblended = bare;
-            &unblended
-        }
-    };
+/// [`mesh_pieces`] over the form's pieces, painting its engines' open faces.
+pub fn mesh_form(form: &Form, balance: &Balance, cells: u32) -> Result<HullBuffers, FormError> {
     let sdf = Sdf::new(form, balance)?;
-    let grid = Grid::sample(&sdf, cells);
-    let surface = nets(&grid, joins.place(finish, &sdf));
-    let paint = Paint::new(&sdf, form, balance, grid.step, joins);
-    let mut scratch = Vec::new();
-    let mut painted: Vec<Painted> = surface.vertices.iter().map(|&p| paint.at(p, &mut scratch)).collect();
-    along_seams(&mut painted);
-    let normals = (finish == Finish::Smooth).then(|| gradients(&sdf, &surface, grid.step));
-    Ok(buffers(&surface, &painted, normals.as_deref(), grid.step, joins))
+    let faces = apertures(form, balance).unwrap_or_default();
+    if faces.len() > em_render::hull_material::FACES {
+        bevy::log::warn!("{} engine faces: the grid is drawn on the first {}", faces.len(), em_render::hull_material::FACES);
+    }
+    Ok(mesh_pieces(sdf.pieces(), cells, &faces))
+}
+
+/// Each piece on its own grid, at the step of `cells` along the longest side of all of them, or
+/// finer where a piece is thin. Every piece paints every face in `faces`: an engine sunk into a
+/// neighbor leaves its face on the neighbor's surface, which must draw it. Empty for no pieces.
+pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuffers {
+    let mut out = HullBuffers::default();
+    if pieces.is_empty() {
+        return out;
+    }
+    let step = extent(Union::new(pieces).bounds) / cells.max(1) as f64;
+    let (mut scratch, mut aside) = (Vec::new(), Vec::new());
+    for piece in pieces {
+        let alone = Union::new(std::slice::from_ref(piece));
+        let grid = Grid::sample(&alone, piece_cells(piece, extent(alone.bounds), step));
+        let surface = nets(&grid, &alone);
+        let normals = gradients(&alone, &surface, grid.step);
+        let painted: Vec<[u8; 4]> = surface
+            .vertices
+            .iter()
+            .map(|&p| {
+                let distance = alone.distance(p, &mut scratch);
+                open_face(
+                    p,
+                    faces.iter().enumerate().map(|(face, aperture)| {
+                        let near = face_near(aperture, p, distance, grid.step);
+                        let mut own = || gradient(&mut |q| alone.distance(q, &mut aside), p, grid.step);
+                        (face, aperture, if near > 0.0 { near * turned(own(), aperture) } else { 0.0 })
+                    }),
+                )
+            })
+            .collect();
+        let r = region(piece.kind);
+        append(&mut out, &surface, &normals, region_weights(r, r, 0.0), &painted);
+    }
+    out
+}
+
+fn extent((min, max): (DVec3, DVec3)) -> f64 {
+    (max - min).max_element()
+}
+
+fn piece_cells(piece: &Piece, extent_m: f64, step: f64) -> u32 {
+    let thin = THINNEST_CELLS * extent_m / piece.shape.least_dimension().max(f64::MIN_POSITIVE);
+    (extent_m / step).max(thin).ceil().clamp(MIN_CELLS as f64, MAX_CELLS as f64) as u32
 }
 
 /// FNV-1a over a canonical encoding of the form, each part's solved shape, and what of
@@ -222,11 +224,9 @@ pub fn pieces_hash(pieces: &[Piece]) -> u64 {
     h.0
 }
 
-fn mesh_key(form: u64, cells: u32, finish: Finish, joins: Joins) -> u64 {
+fn mesh_key(form: u64, cells: u32) -> u64 {
     let mut h = Fnv(form);
     h.u64(cells as u64);
-    h.u64(finish as u64);
-    h.u64(joins as u64);
     h.0
 }
 
@@ -282,179 +282,6 @@ impl Fnv {
     }
 }
 
-/// What a vertex carries to the material.
-#[derive(Clone, Copy, Debug)]
-struct Painted {
-    regions: [[u8; 4]; 4],
-    face: [u8; 4],
-    across: f32,
-    along: f64,
-    /// The spar whose seam `along` is measured about, the vertex's angle about its axis, and
-    /// what `along` gains a radian, to unwrap the angle where a triangle straddles its cut.
-    about: Option<(usize, f64, f64)>,
-    seam: Option<SeamAt>,
-}
-
-/// Where a vertex is about the spar whose seam is nearest, in the spar's frame.
-#[derive(Clone, Copy, Debug)]
-struct SeamAt {
-    spar: usize,
-    neighbor: usize,
-    theta: f64,
-    rho: f64,
-    x: f64,
-    /// How far the seam runs around the axis and along it here, as the parts of a unit tangent.
-    /// Only where the vertex is within reach of the seam.
-    runs: Option<(f64, f64)>,
-}
-
-/// Classes each seam, a spar and the neighbor it meets, as a ring about the spar's axis or a
-/// line along it, by which way it runs on the whole, and writes `along` as meters around or
-/// along for all of it. Chosen per vertex it would shear the heads where the choice changes, and
-/// weights that vary would add their own slope, times tens of meters, to `along`. A seam off its
-/// class spreads its heads by the cosine of how far it strays.
-///
-/// A ring's radius is one for the seam, its vertices' mean: the angle reaches π, so a tenth of a
-/// meter between two neighbors' own radii would put a third of a meter between their `along`s.
-fn along_seams(painted: &mut [Painted]) {
-    #[derive(Default)]
-    struct Total {
-        around: f64,
-        axial: f64,
-        rho: f64,
-        n: f64,
-    }
-    let mut totals: HashMap<(usize, usize), Total> = HashMap::new();
-    for seam in painted.iter().filter_map(|p| p.seam) {
-        if let Some((around, axial)) = seam.runs {
-            let total = totals.entry((seam.spar, seam.neighbor)).or_default();
-            total.around += around;
-            total.axial += axial;
-            total.rho += seam.rho;
-            total.n += 1.0;
-        }
-    }
-    for paint in painted.iter_mut() {
-        let Some(seam) = paint.seam else { continue };
-        (paint.along, paint.about) = match totals.get(&(seam.spar, seam.neighbor)) {
-            Some(t) if t.axial > t.around => (seam.x, None),
-            Some(t) => {
-                let rho = t.rho / t.n;
-                (seam.theta * rho, Some((seam.spar, seam.theta, rho)))
-            }
-            None => (seam.theta * seam.rho, Some((seam.spar, seam.theta, seam.rho))),
-        };
-    }
-}
-
-/// Past this from every seam, `across` is written as [`SEAM_FAR`] with its sign kept.
-const SEAM_REACH_M: f64 = 4.0;
-
-/// Large enough that the shader's derivative of it spreads any bolt to nothing. Signed as the
-/// vertex's side, so it never crosses zero away from a seam, where a row would be drawn.
-const SEAM_FAR: f64 = 1.0e4;
-
-/// Reads region weights and seams off the per-part distances.
-struct Paint<'a> {
-    sdf: &'a Sdf,
-    region: Vec<u32>,
-    /// Per piece, meters: the largest fillet at any of its joints.
-    fillet: Vec<f64>,
-    spars: Vec<usize>,
-    /// Each engine's piece and its open face, in [`apertures`]' order.
-    faces: Vec<(usize, Aperture)>,
-    step: f64,
-    joins: Joins,
-}
-
-impl<'a> Paint<'a> {
-    fn new(sdf: &'a Sdf, form: &Form, balance: &Balance, step: f64, joins: Joins) -> Self {
-        let pieces = sdf.pieces();
-        let parts: HashMap<PartId, &Part> = form.parts.iter().map(|p| (p.id, p)).collect();
-        let least = |id: PartId| parts[&id].shape(balance.min_part_m3).least_dimension();
-        let is_spar = |id: PartId| matches!(parts[&id].kind, Kind::Spar(_));
-        let mut by_part: HashMap<PartId, f64> = HashMap::new();
-        for part in &form.parts {
-            let Some(placement) = part.placement else { continue };
-            if is_spar(part.id) || is_spar(placement.parent) || placement.blend <= 0.0 {
-                continue;
-            }
-            // As `Sdf::new` sizes a blend.
-            let radius = placement.blend * least(part.id).min(least(placement.parent));
-            for id in [part.id, placement.parent] {
-                let r = by_part.entry(id).or_insert(0.0);
-                *r = r.max(radius);
-            }
-        }
-        Paint {
-            sdf,
-            region: pieces.iter().map(|p| region(p.kind)).collect(),
-            fillet: pieces.iter().map(|p| by_part.get(&p.part).copied().unwrap_or(0.0)).collect(),
-            spars: (0..pieces.len()).filter(|&i| matches!(pieces[i].kind, Kind::Spar(_))).collect(),
-            faces: engine_faces(pieces, form, balance),
-            step,
-            joins,
-        }
-    }
-
-    fn at(&self, p: DVec3, distances: &mut Vec<f64>) -> Painted {
-        distances.clear();
-        distances.extend((0..self.region.len()).map(|i| self.sdf.piece_distance(i, p)));
-        let regions = self.regions(distances);
-        let face = self.open_face(p, distances);
-        let Some((spar, (neighbor, off))) =
-            self.spars.iter().filter_map(|&s| Some((s, self.sdf.seam(s, p)?))).min_by(|a, b| a.1.1.total_cmp(&b.1.1))
-        else {
-            return Painted { regions, face, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None };
-        };
-        let on_spar = distances[spar] <= distances[neighbor];
-        let (mine, theirs) = if on_spar { (spar, neighbor) } else { (neighbor, spar) };
-        // Positive on the lower-numbered region's side; between two spars, the nearer spar's.
-        let positive = self.region[mine] < self.region[theirs] || (self.region[mine] == self.region[theirs] && on_spar);
-        let sign = if positive { 1.0 } else { -1.0 };
-        let near = off <= SEAM_REACH_M.max(2.0 * self.step);
-        let across = sign * if near { off } else { SEAM_FAR };
-        let pose = self.sdf.pieces()[spar].pose;
-        let local = pose.to_local(p);
-        let (theta, rho) = (local.z.atan2(local.y), local.y.hypot(local.z));
-        let h = 1e-3 * self.step;
-        let grad = |i: usize| {
-            DVec3::from_array([0, 1, 2].map(|a| self.sdf.primitive(i, p + AXES[a] * h) - self.sdf.primitive(i, p - AXES[a] * h)))
-        };
-        let runs = near
-            .then(|| (pose.rotation.transpose() * grad(spar).cross(grad(neighbor))).try_normalize())
-            .flatten()
-            .filter(|_| rho > 0.0)
-            .map(|t| (t.dot(DVec3::new(0.0, -local.z, local.y) / rho).abs(), t.x.abs()));
-        let seam = SeamAt { spar, neighbor, theta, rho, x: local.x, runs };
-        Painted { regions, face, across: across as f32, along: 0.0, about: None, seam: Some(seam) }
-    }
-
-    fn open_face(&self, p: DVec3, distances: &[f64]) -> [u8; 4] {
-        open_face(p, self.faces.iter().enumerate().map(|(face, (piece, aperture))| (face, aperture, self.face_share(*piece, aperture, p, distances[*piece]))))
-    }
-
-    /// [`face_near`], and turned along the exhaust both as the piece is and as the hull is: the
-    /// piece's own gradient keeps a fillet onto a neighbor off the face, and the hull's keeps off a
-    /// neighbor's surface that passes within a cell of the face.
-    fn face_share(&self, piece: usize, aperture: &Aperture, p: DVec3, distance: f64) -> f64 {
-        let near = face_near(aperture, p, distance, self.step);
-        if near <= 0.0 {
-            return 0.0;
-        }
-        let own = gradient(&mut |q| self.sdf.primitive(piece, q), p, self.step);
-        let hull = gradient(&mut |q| self.sdf.distance(q), p, self.step);
-        near * turned(own, aperture) * turned(hull, aperture)
-    }
-
-    /// The nearest region and the next, blended across the fillet between them, or across a
-    /// cell where they meet hard so the edge is not a stair of whole triangles.
-    fn regions(&self, distances: &[f64]) -> [[u8; 4]; 4] {
-        let step = if self.joins == Joins::Hard { 0.0 } else { self.step };
-        blended(distances, &self.region, &self.fillet, step)
-    }
-}
-
 /// The open face `p` lies most on, and how much, from each face's index, aperture and share at
 /// `p`. Off every face, the nearest face's center names one at no share.
 fn open_face<'a>(p: DVec3, faces: impl Iterator<Item = (usize, &'a Aperture, f64)>) -> [u8; 4] {
@@ -488,6 +315,7 @@ fn face_near(aperture: &Aperture, p: DVec3, distance: f64, step: f64) -> f64 {
     on * plane * rim
 }
 
+/// Turned along the exhaust, so a piece's side passing through the face's plane is not drawn as it.
 fn turned(gradient: DVec3, aperture: &Aperture) -> f64 {
     smoothstep(0.5, 0.9, gradient.dot(aperture.out))
 }
@@ -497,59 +325,12 @@ fn gradient(f: &mut dyn FnMut(DVec3) -> f64, p: DVec3, step: f64) -> DVec3 {
     DVec3::from_array([0, 1, 2].map(|a| f(p + AXES[a] * h) - f(p - AXES[a] * h))).normalize_or_zero()
 }
 
-/// Each piece of `form` its own [`HullSource::Apart`], each holding every open face: an engine sunk
-/// into a neighbor leaves its face on the neighbor's surface, which must draw it.
-pub fn apart(form: &Form, balance: &Balance) -> Result<Vec<HullSource>, FormError> {
-    let sdf = Sdf::new(form, balance)?;
-    let faces: Arc<[Aperture]> = engine_faces(sdf.pieces(), form, balance).into_iter().map(|(_, a)| a).collect();
-    Ok(sdf.pieces().iter().map(|&piece| HullSource::Apart(piece, faces.clone())).collect())
-}
-
-/// Each engine piece with its face. `Sdf::new` and [`apertures`] both walk `Form::place`, so the
-/// engines come in one order.
-fn engine_faces(pieces: &[Piece], form: &Form, balance: &Balance) -> Vec<(usize, Aperture)> {
-    let engines: Vec<usize> = (0..pieces.len()).filter(|&i| pieces[i].kind == Kind::Engine).collect();
-    let faces = apertures(form, balance).unwrap_or_default();
-    debug_assert_eq!(engines.len(), faces.len(), "an engine piece without its face");
-    if faces.len() > em_render::hull_material::FACES {
-        bevy::log::warn!("{} engine faces: the grid is drawn on the first {}", faces.len(), em_render::hull_material::FACES);
-    }
-    engines.into_iter().zip(faces).collect()
-}
-
 fn smoothstep(lo: f64, hi: f64, x: f64) -> f64 {
     let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The nearest region to a point and the next, from each piece's distance, `fillet` meters wide
-/// where two pieces are blended and a cell `step` wide where they meet hard. With neither, the
-/// nearest alone.
-fn blended(distances: &[f64], region: &[u32], fillet: &[f64], step: f64) -> [[u8; 4]; 4] {
-    let mut best = [(f64::INFINITY, usize::MAX); REGION_GRAPHS.len()];
-    for (i, &d) in distances.iter().enumerate() {
-        let slot = &mut best[region[i] as usize];
-        if d < slot.0 {
-            *slot = (d, i);
-        }
-    }
-    let mut order: Vec<usize> = (0..best.len()).filter(|&r| best[r].1 != usize::MAX).collect();
-    order.sort_by(|&a, &b| best[a].0.total_cmp(&best[b].0));
-    let first = order[0];
-    let Some(&second) = order.get(1) else { return region_weights(first as u32, first as u32, 0.0) };
-    let (d1, i1) = best[first];
-    let (d2, i2) = best[second];
-    let width = step.max(fillet[i1].min(fillet[i2]));
-    if width <= 0.0 {
-        return region_weights(first as u32, first as u32, 0.0);
-    }
-    let x = ((d2 - d1) / width).clamp(0.0, 1.0);
-    let share = 0.5 * (1.0 - x * x * (3.0 - 2.0 * x));
-    region_weights(first as u32, second as u32, share as f32)
-}
-
-/// Copies drawn as the union of their bare shapes: no blend, and a spar uncut. For what a refit
-/// step is working on, which stands apart from the form until the step is done.
+/// Copies drawn as the union of their bare shapes: no blend, and a spar uncut.
 pub struct Union<'a> {
     pieces: &'a [Piece],
     inverse: Vec<glam::DMat3>,
@@ -583,97 +364,33 @@ impl Field for Union<'_> {
     }
 }
 
-/// [`mesh_form`] for bare copies, in the frame their poses are in. Empty for no pieces. `openings`
-/// are the open faces drawn, each a piece's index, the face's index and its aperture.
-pub fn mesh_pieces(pieces: &[Piece], cells: u32, finish: Finish, joins: Joins, openings: &[(usize, usize, Aperture)]) -> HullBuffers {
-    if pieces.is_empty() {
-        return HullBuffers::default();
-    }
-    let union = Union::new(pieces);
-    let grid = Grid::sample(&union, cells);
-    let surface = nets(&grid, joins.place(finish, &union));
-    let region: Vec<u32> = pieces.iter().map(|p| region(p.kind)).collect();
-    let fillet = vec![0.0; pieces.len()];
-    let (mut scratch, mut aside) = (Vec::new(), Vec::new());
-    let painted: Vec<Painted> = surface
-        .vertices
-        .iter()
-        .map(|&p| {
-            union.each(p, &mut scratch);
-            let step = if joins == Joins::Hard { 0.0 } else { grid.step };
-            let regions = blended(&scratch, &region, &fillet, step);
-            let face = open_face(
-                p,
-                openings.iter().map(|(piece, face, aperture)| {
-                    let near = face_near(aperture, p, scratch[*piece], grid.step);
-                    let mut own = || gradient(&mut |q| union.distance(q, &mut aside), p, grid.step);
-                    (*face, aperture, if near > 0.0 { near * turned(own(), aperture) } else { 0.0 })
-                }),
-            );
-            Painted { regions, face, across: SEAM_FAR as f32, along: 0.0, about: None, seam: None }
-        })
-        .collect();
-    let normals = (finish == Finish::Smooth).then(|| gradients(&union, &surface, grid.step));
-    buffers(&surface, &painted, normals.as_deref(), grid.step, joins)
-}
-
-/// Lays the surface out as buffers. Shared vertices stay shared where `normals` is given;
-/// otherwise each triangle gets its own three with its flat normal. Under [`Joins::Hard`] a corner
-/// on a crease gets its own too, with the flat normal. A triangle straddling the
-/// cut of a seam's angle takes copies of its corners on one side with a turn added, so `along`
-/// never runs backwards across one triangle.
-fn buffers(surface: &Surface, painted: &[Painted], normals: Option<&[DVec3]>, step: f64, joins: Joins) -> HullBuffers {
-    let mut out = HullBuffers { step, ..default() };
-    let mut shared: HashMap<(u32, bool), u32> = HashMap::new();
+/// Appends the surface with its vertices shared, but for a corner on a crease, which gets a vertex
+/// of its own with its triangle's flat normal.
+fn append(out: &mut HullBuffers, surface: &Surface, normals: &[DVec3], regions: [[u8; 4]; 4], faces: &[[u8; 4]]) {
+    let mut shared: HashMap<u32, u32> = HashMap::new();
     for t in &surface.triangles {
-        let about = t.map(|i| painted[i as usize].about);
-        let unwrap = match about {
-            [Some((s, a, _)), Some((s2, b, _)), Some((s3, c, _))] if s == s2 && s == s3 => {
-                a.max(b).max(c) - a.min(b).min(c) > std::f64::consts::PI
-            }
-            _ => false,
-        };
         let [a, b, c] = t.map(|i| surface.vertices[i as usize]);
         let flat = (b - a).cross(c - a).normalize_or_zero();
         for &v in t {
-            let paint = painted[v as usize];
-            let wrapped = unwrap && paint.about.is_some_and(|(_, theta, _)| theta < 0.0);
-            let creased = joins == Joins::Hard
-                && flat != DVec3::ZERO
-                && normals.is_some_and(|n| n[v as usize].dot(flat) < CREASE_COS);
-            let push = |out: &mut HullBuffers| {
-                let along = paint.along + if wrapped { TAU * paint.about.map_or(0.0, |a| a.2) } else { 0.0 };
+            let smooth = normals[v as usize];
+            let creased = flat != DVec3::ZERO && smooth.dot(flat) < CREASE_COS;
+            let mut push = |normal: DVec3| {
                 out.positions.push(surface.vertices[v as usize].as_vec3().to_array());
-                let normal = match normals {
-                    Some(n) if !creased => n[v as usize],
-                    _ => flat,
-                };
                 out.normals.push(normal.as_vec3().to_array());
-                out.regions.push(paint.regions);
-                out.seams.push([paint.across, along as f32]);
-                out.faces.push(paint.face);
+                out.regions.push(regions);
+                out.seams.push([SEAM_FAR, 0.0]);
+                out.faces.push(faces[v as usize]);
                 out.positions.len() as u32 - 1
             };
-            let index = match normals {
-                Some(_) if !creased => match shared.get(&(v, wrapped)) {
-                    Some(&i) => i,
-                    None => {
-                        let i = push(&mut out);
-                        shared.insert((v, wrapped), i);
-                        i
-                    }
-                },
-                _ => push(&mut out),
-            };
+            let index = if creased { push(flat) } else { *shared.entry(v).or_insert_with(|| push(smooth)) };
             out.indices.push(index);
         }
     }
-    out
 }
 
 /// A storage sphere with one spar. [`SparMode::Saddle`]: a boom off it with an engine ball on
-/// its end, embedded at both joints so there is something to cut. [`SparMode::Strap`]: a band
-/// around its equator, a torus whose tube straddles the surface. For tests and the void.
+/// its end, embedded at both joints. [`SparMode::Strap`]: a band around its equator, a torus
+/// whose tube straddles the surface. For tests and the void.
 pub fn spar_fixture(mode: SparMode) -> Form {
     let balance = Balance::DEFAULT;
     let hang = |id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: u16, mount: Mount| {
@@ -706,27 +423,21 @@ pub fn spar_fixture(mode: SparMode) -> Form {
 #[require(HullPixels, HullMeshState)]
 pub struct HullForm {
     pub source: HullSource,
-    pub finish: Finish,
     /// A fixed resolution instead of one from [`HullPixels`].
     pub cells: Option<u32>,
-    /// Pieces are a union already, unblended; only their regions' mixing changes.
-    pub joins: Joins,
 }
 
 impl HullForm {
-    pub fn form(form: Form, balance: Balance, finish: Finish) -> Self {
-        HullForm { source: HullSource::Form(Arc::new(form), balance), finish, cells: None, joins: Joins::Blended }
+    pub fn form(form: Form, balance: Balance) -> Self {
+        HullForm { source: HullSource::Form(Arc::new(form), balance), cells: None }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum HullSource {
     Form(Arc<Form>, Balance),
-    /// Through [`mesh_pieces`].
+    /// Through [`mesh_pieces`], with no open faces.
     Pieces(Arc<[Piece]>),
-    /// One piece alone, and the form's open faces in order, drawn where they lie on it. See
-    /// [`apart`].
-    Apart(Piece, Arc<[Aperture]>),
 }
 
 impl HullSource {
@@ -734,57 +445,24 @@ impl HullSource {
         match self {
             HullSource::Form(form, balance) => form_hash(form, balance),
             HullSource::Pieces(pieces) => pieces_hash(pieces),
-            HullSource::Apart(piece, faces) => {
-                let mut h = Fnv(pieces_hash(&[*piece]));
-                for a in faces.iter() {
-                    for x in a.center.to_array().into_iter().chain(a.out.to_array()).chain([a.radius_m]) {
-                        h.f64(x);
-                    }
-                }
-                h.0
-            }
         }
     }
 
     fn extent_m(&self) -> f64 {
-        let (min, max) = match self {
-            HullSource::Form(form, balance) => match Sdf::new(form, balance) {
-                Ok(sdf) => sdf.bounds(),
-                Err(_) => return 0.0,
-            },
-            HullSource::Pieces(pieces) if pieces.is_empty() => return 0.0,
-            HullSource::Pieces(pieces) => Union::new(pieces).bounds,
-            HullSource::Apart(piece, _) => Union::new(&[*piece]).bounds,
-        };
-        (max - min).max_element()
-    }
-
-    /// The fewest cells it is meshed at, whatever it spans on screen: a piece apart thinner than a
-    /// cell would vanish whole, where in a form it is one feature of a hull meshed finer.
-    fn least_cells(&self, extent_m: f64) -> u32 {
         match self {
-            HullSource::Apart(piece, _) => {
-                let wanted = (THINNEST_CELLS * extent_m / piece.shape.least_dimension().max(f64::MIN_POSITIVE)).ceil();
-                (wanted.min(MAX_CELLS as f64) as u32).next_power_of_two().clamp(MIN_CELLS, MAX_CELLS)
-            }
-            _ => MIN_CELLS,
+            HullSource::Form(form, balance) => Sdf::new(form, balance).map_or(0.0, |sdf| extent(Union::new(sdf.pieces()).bounds)),
+            HullSource::Pieces(pieces) if pieces.is_empty() => 0.0,
+            HullSource::Pieces(pieces) => extent(Union::new(pieces).bounds),
         }
     }
 
-    fn mesh(&self, cells: u32, finish: Finish, joins: Joins) -> Result<HullBuffers, FormError> {
+    fn mesh(&self, cells: u32) -> Result<HullBuffers, FormError> {
         match self {
-            HullSource::Form(form, balance) => mesh_form(form, balance, cells, finish, joins),
-            HullSource::Pieces(pieces) => Ok(mesh_pieces(pieces, cells, finish, joins, &[])),
-            HullSource::Apart(piece, faces) => {
-                let openings: Vec<_> = faces.iter().enumerate().map(|(index, &aperture)| (0, index, aperture)).collect();
-                Ok(mesh_pieces(&[*piece], cells, finish, joins, &openings))
-            }
+            HullSource::Form(form, balance) => mesh_form(form, balance, cells),
+            HullSource::Pieces(pieces) => Ok(mesh_pieces(pieces, cells, &[])),
         }
     }
 }
-
-/// Cells across a piece apart's thinnest dimension, at the least.
-const THINNEST_CELLS: f64 = 3.0;
 
 /// Pixels the hull spans on screen along its longest side, written by [`measure`].
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -872,8 +550,8 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
             state.form = hull.source.hash();
             state.extent_m = hull.source.extent_m();
         }
-        let cells = hull.cells.unwrap_or_else(|| cells_for(pixels.0, state.cells).max(hull.source.least_cells(state.extent_m)));
-        let key = mesh_key(state.form, cells, hull.finish, hull.joins);
+        let cells = hull.cells.unwrap_or_else(|| cells_for(pixels.0, state.cells));
+        let key = mesh_key(state.form, cells);
         if state.wanted == Some(key) {
             continue;
         }
@@ -882,13 +560,13 @@ fn want(mut meshes: ResMut<HullMeshes>, mut hulls: Query<(Ref<HullForm>, &HullPi
         if meshes.ready.contains_key(&key) || meshes.pending.contains_key(&key) {
             continue;
         }
-        let (source, finish, joins) = (hull.source.clone(), hull.finish, hull.joins);
+        let source = hull.source.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
             let started = bevy::platform::time::Instant::now();
-            match source.mesh(cells, finish, joins) {
+            match source.mesh(cells) {
                 Ok(buffers) => {
                     let (vertices, ms) = (buffers.positions.len(), started.elapsed().as_secs_f64() * 1e3);
-                    debug!("hull_mesh: {cells} cells {finish:?}, {vertices} vertices in {ms:.0} ms");
+                    debug!("hull_mesh: {cells} cells, {vertices} vertices in {ms:.0} ms");
                     Some(buffers.into_mesh())
                 }
                 Err(error) => {
@@ -957,13 +635,15 @@ mod tests {
 
     const B: Balance = Balance::DEFAULT;
 
-    fn surface(form: &Form, cells: u32, finish: Finish) -> (Surface, Sdf, f64) {
-        let sdf = Sdf::new(form, &B).unwrap();
-        let grid = Grid::sample(&sdf, cells);
-        let step = grid.step;
-        let place = if finish == Finish::Blocky { Place::Center } else { Place::Mean };
-        let surface = nets(&grid, place);
-        (surface, sdf, step)
+    fn pieces(form: &Form) -> Vec<Piece> {
+        Sdf::new(form, &B).unwrap().pieces().to_vec()
+    }
+
+    /// One piece's surface, as [`mesh_pieces`] extracts it, and the grid's step.
+    fn surface(piece: &Piece, cells: u32) -> (Surface, f64) {
+        let alone = Union::new(std::slice::from_ref(piece));
+        let grid = Grid::sample(&alone, cells);
+        (nets(&grid, &alone), grid.step)
     }
 
     /// Closed, manifold and consistently wound: every edge is used once in each direction.
@@ -1036,14 +716,17 @@ mod tests {
         Part::mind(PartId(0), B.min_part_m3)
     }
 
-    fn alone(primitive: Primitive, volume_m3: f64) -> Form {
+    /// `primitive` around the Mind, and the piece it makes.
+    fn alone(primitive: Primitive, volume_m3: f64) -> (Form, Piece) {
         let placement =
             Placement { parent: PartId(0), mount: Mount::Enclosing, twist: 0.0, tilt: glam::DVec2::ZERO, blend: 0.0, mirror: false };
         let part = Part { id: PartId(1), kind: Kind::Storage, primitive, volume_m3, placement: Some(placement) };
-        Form { parts: vec![mind(), part] }
+        let form = Form { parts: vec![mind(), part] };
+        let piece = *pieces(&form).iter().find(|p| p.part == PartId(1)).unwrap();
+        (form, piece)
     }
 
-    /// Each primitive around the Mind, and how many handles it has.
+    /// Each primitive, and how many handles it has.
     fn primitives() -> Vec<(Primitive, i64)> {
         vec![
             (Primitive::Ellipsoid { axes: DVec3::new(3.0, 1.0, 2.0) }, 0),
@@ -1061,73 +744,78 @@ mod tests {
 
     const RESOLUTIONS: [u32; 3] = [16, 40, 96];
 
-    /// Faceted is Smooth's triangles with other normals, so two topologies cover the three finishes.
     #[test]
-    fn every_primitive_is_closed_at_three_resolutions_in_both_topologies() {
+    fn every_primitive_is_closed_at_three_resolutions() {
         for (primitive, handles) in primitives() {
-            let form = alone(primitive, 5.0e5);
-            let truth = form.parts[1].shape(B.min_part_m3).volume();
+            let (_, piece) = alone(primitive, 5.0e5);
+            let field = Union::new(std::slice::from_ref(&piece));
+            let truth = piece.shape.volume();
             for cells in RESOLUTIONS {
-                for finish in [Finish::Smooth, Finish::Blocky] {
-                    let what = format!("{primitive:?} at {cells} {finish:?}");
-                    let (s, sdf, step) = surface(&form, cells, finish);
-                    let (chi, pieces) = check_closed(&s, &what);
-                    // Pieces that are all spheres but one torus: no holes, and none made.
-                    assert_eq!(chi, 2 * pieces - 2 * handles, "{what}: χ {chi} over {pieces} pieces");
-                    let v = volume(&s);
-                    assert!(v > 0.0, "{what}: wound inward, {v}");
-                    if cells == 96 && finish == Finish::Smooth {
-                        // The Mind is inside everything but the torus, whose hole it sits in.
-                        let mind = if handles == 1 { B.min_part_m3 } else { 0.0 };
-                        assert!((v / (truth + mind) - 1.0).abs() < 0.03, "{what}: {v} against {truth}");
-                    }
-                    if finish == Finish::Smooth {
-                        let bound = 2.0 * 3f64.sqrt() * step;
-                        for &p in &s.vertices {
-                            assert!(sdf.distance(p).abs() <= bound, "{what}: {p} is {} off", sdf.distance(p));
-                        }
-                    }
+                let what = format!("{primitive:?} at {cells}");
+                let (s, step) = surface(&piece, cells);
+                let (chi, pieces) = check_closed(&s, &what);
+                assert_eq!(chi, 2 * pieces - 2 * handles, "{what}: χ {chi} over {pieces} pieces");
+                let v = volume(&s);
+                assert!(v > 0.0, "{what}: wound inward, {v}");
+                if cells == 96 {
+                    assert!((v / truth - 1.0).abs() < 0.03, "{what}: {v} against {truth}");
+                }
+                let bound = 2.0 * 3f64.sqrt() * step;
+                for &p in &s.vertices {
+                    let d = field.distance(p, &mut Vec::new());
+                    assert!(d.abs() <= bound, "{what}: {p} is {d} off");
                 }
             }
         }
     }
 
     #[test]
-    fn spar_saddle_and_strap_are_closed_at_three_resolutions() {
-        for mode in [SparMode::Saddle, SparMode::Strap] {
-            let form = spar_fixture(mode);
-            for cells in RESOLUTIONS {
-                for finish in [Finish::Smooth, Finish::Blocky] {
-                    let what = format!("{mode:?} at {cells} {finish:?}");
-                    let (s, _, _) = surface(&form, cells, finish);
-                    let (chi, pieces) = check_closed(&s, &what);
-                    assert_eq!(chi, 2 * pieces, "{what}: χ {chi} over {pieces} pieces");
+    fn every_piece_of_the_spar_fixtures_and_presets_is_closed() {
+        let forms = [spar_fixture(SparMode::Saddle), spar_fixture(SparMode::Strap), Form::reference(), Form::starting()]
+            .into_iter()
+            .chain(Builtin::ALL.map(Builtin::form));
+        for (k, form) in forms.enumerate() {
+            for piece in pieces(&form) {
+                for cells in [16, 64] {
+                    let (s, _) = surface(&piece, cells);
+                    check_closed(&s, &format!("form {k}, {:?} at {cells}", piece.kind));
                 }
             }
         }
     }
 
     /// A strap about two meters deep on a grid of about seven: kept where a sample lands in it
-    /// and nowhere else, and closed either way.
+    /// and nowhere else, and closed either way. [`mesh_pieces`] meshes it finer, so it stays whole.
     #[test]
     fn a_strap_thinner_than_a_cell_is_holed_not_broken() {
         let form = spar_fixture(SparMode::Strap);
+        let strap = *pieces(&form).iter().find(|p| matches!(p.kind, Kind::Spar(_))).unwrap();
         let r = form.parts[1].shape(B.min_part_m3).reach();
         let depth = B.spar_thickness * 2.0 * r;
-        for finish in [Finish::Smooth, Finish::Blocky] {
-            let (s, _, step) = surface(&form, 16, finish);
-            assert!(step > 3.0 * depth, "{step} against {depth}");
-            let (chi, pieces) = check_closed(&s, "coarse strap");
-            assert_eq!(chi, 2 * pieces);
+        let (s, step) = surface(&strap, 16);
+        assert!(step > 3.0 * depth, "{step} against {depth}");
+        check_closed(&s, "coarse strap");
+        let alone = Union::new(std::slice::from_ref(&strap));
+        assert!(piece_cells(&strap, extent(alone.bounds), extent(alone.bounds) / 16.0) > 16, "meshed at the step it vanishes at");
+    }
+
+    #[test]
+    fn a_thin_piece_is_meshed_fine_enough_to_stay() {
+        // A disk of an engine, thinner than a cell of 16 across its width.
+        let mut form = Form::starting();
+        let engine = form.parts.iter_mut().find(|p| p.kind == Kind::Engine).unwrap();
+        engine.primitive = Primitive::Cylinder { length: 0.1 };
+        for piece in pieces(&form) {
+            assert!(!mesh_pieces(&[piece], MIN_CELLS, &[]).positions.is_empty(), "a {:?} vanished", piece.kind);
         }
     }
 
-    /// The bell's wide end is lit whole, and nothing turned away from it: not its flanks, not
-    /// another part.
+    /// The bell's wide end is lit whole, and nothing turned away from it is. Half the radius in, as
+    /// the rim eases over a cell and the starting ship's faces are four cells across at 96.
     #[test]
     fn the_open_face_is_the_engines_wide_end_and_nothing_else() {
-        for form in [Form::reference(), Builtin::Plate.form()] {
-            let b = mesh_form(&form, &B, 96, Finish::Smooth, Joins::Blended).unwrap();
+        for form in [Form::reference(), Form::starting(), Builtin::Plate.form()] {
+            let b = mesh_form(&form, &B, 96).unwrap();
             let faces = apertures(&form, &B).unwrap();
             let (mut on, mut away) = (0, 0);
             for ((p, n), face) in b.positions.iter().zip(&b.normals).zip(&b.faces) {
@@ -1135,7 +823,7 @@ mod tests {
                 let a = faces[face[1] as usize];
                 let off = p - a.center;
                 let along = off.dot(a.out);
-                if along.abs() < 0.5 * b.step && (off - a.out * along).length() < a.radius_m - 2.0 * b.step {
+                if along.abs() < 1e-3 * a.radius_m && (off - a.out * along).length() < 0.5 * a.radius_m && n.dot(a.out) > 0.99 {
                     assert_eq!(face[0], 255, "{p} is on the face and not lit whole");
                     on += 1;
                 }
@@ -1149,13 +837,45 @@ mod tests {
     }
 
     #[test]
-    fn the_presets_are_closed() {
-        let forms = [Form::reference()].into_iter().chain(Builtin::ALL.map(Builtin::form));
-        for (k, form) in forms.enumerate() {
-            for finish in [Finish::Smooth, Finish::Blocky] {
-                let (s, ..) = surface(&form, 64, finish);
-                check_closed(&s, &format!("preset {k} {finish:?}"));
-            }
+    fn buffers_carry_every_attribute_and_face_their_normals() {
+        let b = mesh_form(&Builtin::Cluster.form(), &B, 32).unwrap();
+        let n = b.positions.len();
+        assert!(n > 0 && b.indices.len() % 3 == 0);
+        assert_eq!((b.normals.len(), b.regions.len(), b.seams.len(), b.faces.len()), (n, n, n, n));
+        assert!(b.indices.iter().all(|&i| (i as usize) < n));
+        let against = b
+            .indices
+            .chunks(3)
+            .filter(|t| {
+                let [p, q, r] = [0, 1, 2].map(|k| Vec3::from(b.positions[t[k] as usize]));
+                let face = (q - p).cross(r - p);
+                t.iter().any(|&i| face.dot(Vec3::from(b.normals[i as usize])) < -1e-3 * face.length())
+            })
+            .count();
+        assert!(against <= b.indices.len() / 3 / 100, "{against} triangles face against their normals");
+    }
+
+    #[test]
+    fn each_vertex_wears_one_region_and_every_piece_is_drawn() {
+        let form = Form::starting();
+        let b = mesh_form(&form, &B, 32).unwrap();
+        let mut seen = HashSet::new();
+        for weights in &b.regions {
+            let on: Vec<usize> = (0..16).filter(|&r| weights[r / 4][r % 4] > 0).collect();
+            assert_eq!(on.len(), 1, "{weights:?}");
+            seen.insert(on[0] as u32);
+        }
+        let wanted: HashSet<u32> = pieces(&form).iter().map(|p| region(p.kind)).collect();
+        assert_eq!(seen, wanted);
+    }
+
+    #[test]
+    fn a_sphere_and_a_strap_are_closed_at_the_finest_grid() {
+        let (_, sphere) = alone(Primitive::Capsule { length: 0.0 }, 5.0e5);
+        let strap = *pieces(&spar_fixture(SparMode::Strap)).iter().find(|p| matches!(p.kind, Kind::Spar(_))).unwrap();
+        for piece in [sphere, strap] {
+            let (s, _) = surface(&piece, MAX_CELLS);
+            check_closed(&s, "at MAX_CELLS");
         }
     }
 
@@ -1163,132 +883,16 @@ mod tests {
     #[test]
     fn a_fifty_kilometer_hull_is_closed_and_placed_to_the_centimeter() {
         let radius: f64 = 25_000.0;
-        let form = alone(Primitive::Capsule { length: 0.0 }, 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3));
-        let (s, sdf, step) = surface(&form, 64, Finish::Smooth);
+        let (_, piece) = alone(Primitive::Capsule { length: 0.0 }, 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3));
+        let field = Union::new(std::slice::from_ref(&piece));
+        let (s, step) = surface(&piece, 64);
         let (chi, pieces) = check_closed(&s, "50 km");
         assert_eq!((chi, pieces), (2, 1));
         for &p in &s.vertices {
             let rounded = p.as_vec3().as_dvec3();
             assert!((rounded - p).length() < 0.01, "{p}");
-            assert!(sdf.distance(rounded).abs() < step, "{p}");
+            assert!(field.distance(rounded, &mut Vec::new()).abs() < step, "{p}");
         }
-    }
-
-    #[test]
-    fn buffers_keep_the_surface_and_carry_every_attribute() {
-        let form = Builtin::Cluster.form();
-        for finish in [Finish::Smooth, Finish::Faceted, Finish::Blocky] {
-            let b = mesh_form(&form, &B, 32, finish, Joins::Blended).unwrap();
-            let n = b.positions.len();
-            assert!(n > 0 && b.indices.len() % 3 == 0);
-            assert_eq!((b.normals.len(), b.regions.len(), b.seams.len()), (n, n, n));
-            assert!(b.indices.iter().all(|&i| (i as usize) < n));
-            // Flat normals are their face's; a gradient disagrees with its face only at a crease.
-            let against = b
-                .indices
-                .chunks(3)
-                .filter(|t| {
-                    let [p, q, r] = [0, 1, 2].map(|k| Vec3::from(b.positions[t[k] as usize]));
-                    let face = (q - p).cross(r - p);
-                    t.iter().any(|&i| face.dot(Vec3::from(b.normals[i as usize])) < -1e-3 * face.length())
-                })
-                .count();
-            let allowed = if finish == Finish::Smooth { b.indices.len() / 3 / 100 } else { 0 };
-            assert!(against <= allowed, "{finish:?}: {against} triangles face against their normals");
-        }
-    }
-
-    #[test]
-    fn regions_follow_the_nearest_part_and_seams_ring_the_spars() {
-        let form = spar_fixture(SparMode::Saddle);
-        let sdf = Sdf::new(&form, &B).unwrap();
-        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
-        let mut near_seam = 0;
-        for k in 0..b.positions.len() {
-            let p = Vec3::from(b.positions[k]).as_dvec3();
-            let (piece, _) = sdf.nearest(p);
-            let weights = b.regions[k];
-            let heaviest = (0..16).max_by_key(|&r| weights[r / 4][r % 4]).unwrap();
-            let own = weights[heaviest / 4][heaviest % 4];
-            // In a fillet two regions weigh about the same; outside one the nearest is heaviest.
-            if own > 200 {
-                assert_eq!(heaviest as u32, region(piece.kind), "at {p}");
-            }
-            let [across, _] = b.seams[k];
-            if across.abs() < 1.0 {
-                near_seam += 1;
-            }
-            assert!(across.abs() <= SEAM_REACH_M.max(2.0 * b.step) as f32 || across.abs() == SEAM_FAR as f32);
-        }
-        assert!(near_seam > 20, "{near_seam}");
-    }
-
-    #[test]
-    fn a_seams_along_does_not_run_backwards_across_a_triangle() {
-        let form = spar_fixture(SparMode::Saddle);
-        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
-        let spar = Sdf::new(&form, &B).unwrap().pieces()[2];
-        let rho = match spar.shape {
-            lc_world::form::primitive::Shape::Cylinder { radius, .. } => radius,
-            other => panic!("{other:?}"),
-        };
-        for t in b.indices.chunks(3) {
-            let seams = [0, 1, 2].map(|k| b.seams[t[k] as usize]);
-            if seams.iter().all(|s| s[0].abs() < 1.0) {
-                let along = seams.map(|s| s[1]);
-                let spread = along.iter().copied().fold(f32::MIN, f32::max) - along.iter().copied().fold(f32::MAX, f32::min);
-                assert!((spread as f64) < rho, "a triangle spans {spread} m of seam");
-            }
-        }
-    }
-
-    #[test]
-    fn a_sphere_and_a_strap_are_closed_at_the_finest_grid() {
-        for form in [alone(Primitive::Capsule { length: 0.0 }, 5.0e5), spar_fixture(SparMode::Strap)] {
-            let (s, ..) = surface(&form, MAX_CELLS, Finish::Smooth);
-            let (chi, pieces) = check_closed(&s, "at MAX_CELLS");
-            assert_eq!(chi, 2 * pieces);
-        }
-    }
-
-    /// The saddle's boom tilted, so its end meets the hull obliquely and each seam climbs on one
-    /// side of the boom and dips on the other.
-    fn tilted_boom() -> Form {
-        let mut form = spar_fixture(SparMode::Saddle);
-        form.parts[2].placement.as_mut().unwrap().tilt = glam::DVec2::new(0.45, 0.3);
-        form
-    }
-
-    /// Along a seam, `along` advances a meter a meter whichever way the seam runs.
-    #[test]
-    fn along_is_meters_along_a_seam_that_climbs() {
-        let form = tilted_boom();
-        let sdf = Sdf::new(&form, &B).unwrap();
-        let b = mesh_form(&form, &B, 128, Finish::Smooth, Joins::Blended).unwrap();
-        let spar = 2;
-        let h = 1e-4;
-        let grad = |i: usize, p: DVec3| DVec3::from_array([0, 1, 2].map(|a| sdf.primitive(i, p + AXES[a] * h) - sdf.primitive(i, p - AXES[a] * h)));
-        let mut checked = 0;
-        for t in b.indices.chunks(3) {
-            for k in 0..3 {
-                let (i, j) = (t[k] as usize, t[(k + 1) % 3] as usize);
-                if b.seams[i][0].abs() > 1.5 || b.seams[j][0].abs() > 1.5 {
-                    continue;
-                }
-                let (p, q) = (Vec3::from(b.positions[i]).as_dvec3(), Vec3::from(b.positions[j]).as_dvec3());
-                let mid = (p + q) / 2.0;
-                let Some((neighbor, _)) = sdf.seam(spar, mid) else { continue };
-                let Some(tangent) = grad(spar, mid).cross(grad(neighbor, mid)).try_normalize() else { continue };
-                let edge = q - p;
-                if edge.normalize().dot(tangent).abs() < 0.95 {
-                    continue;
-                }
-                let ratio = ((b.seams[j][1] - b.seams[i][1]) as f64).abs() / edge.length();
-                assert!((0.7..=1.3).contains(&ratio), "{ratio} m of along a meter at {mid}");
-                checked += 1;
-            }
-        }
-        assert!(checked > 50, "{checked}");
     }
 
     fn headless() -> App {
@@ -1309,7 +913,7 @@ mod tests {
     }
 
     fn hull(form: Form, cells: u32) -> HullForm {
-        HullForm { cells: Some(cells), ..HullForm::form(form, B, Finish::Smooth) }
+        HullForm { cells: Some(cells), ..HullForm::form(form, B) }
     }
 
     fn shown(world: &World, e: Entity) -> Option<Handle<Mesh>> {
@@ -1355,7 +959,7 @@ mod tests {
         let mut app = headless();
         let crowd: Vec<Entity> = (0..CACHED + 1)
             .map(|k| {
-                let form = alone(Primitive::Capsule { length: 0.0 }, 5.0e5 * (1.0 + k as f64 / 100.0));
+                let (form, _) = alone(Primitive::Capsule { length: 0.0 }, 5.0e5 * (1.0 + k as f64 / 100.0));
                 app.world_mut().spawn(hull(form, 16)).id()
             })
             .collect();
@@ -1399,42 +1003,21 @@ mod tests {
         assert!(pixels_across(500.0, 1000.0, 1.0, 720.0) > pixels_across(500.0, 2000.0, 1.0, 720.0));
     }
 
+    /// Zero everywhere: no gradient for a plane, so each vertex is its loop's mean.
+    struct Level;
+
+    impl Field for Level {
+        fn distance(&self, _: DVec3, _: &mut Vec<f64>) -> f64 {
+            0.0
+        }
+
+        fn bounds(&self) -> (DVec3, DVec3) {
+            (DVec3::ZERO, DVec3::splat(3.0))
+        }
+    }
+
     /// Break the cleaning on purpose: without it, alternating squares survive and the mesh has
     /// edges with four faces.
-    #[test]
-    fn engines_apart_keep_their_open_faces() {
-        let sources = apart(&Form::starting(), &B).unwrap();
-        let engines: Vec<&HullSource> = sources.iter().filter(|s| matches!(s, HullSource::Apart(p, _) if p.kind == Kind::Engine)).collect();
-        assert_eq!(engines.len(), 4, "the starting form's engines");
-        for engine in engines {
-            let b = engine.mesh(48, Finish::Smooth, Joins::Hard).unwrap();
-            assert!(b.faces.iter().any(|f| f[0] > 200), "an engine meshed apart drew no open face");
-        }
-    }
-
-    #[test]
-    fn a_thin_piece_apart_is_meshed_fine_enough_to_stay() {
-        // A disk of an engine, thinner than a cell of 16 across its width.
-        let mut form = Form::starting();
-        let engine = form.parts.iter_mut().find(|p| p.kind == Kind::Engine).unwrap();
-        engine.primitive = Primitive::Cylinder { length: 0.1 };
-        for source in apart(&form, &B).unwrap() {
-            let cells = source.least_cells(source.extent_m());
-            assert!(!source.mesh(cells, Finish::Smooth, Joins::Hard).unwrap().positions.is_empty(), "a piece vanished at {cells} cells");
-        }
-    }
-
-    #[test]
-    fn hard_joins_mesh_closed() {
-        for form in [Form::starting(), Builtin::Cluster.form(), spar_fixture(SparMode::Saddle)] {
-            for cells in [16, 64] {
-                let sdf = Sdf::new(&form, &B).unwrap();
-                let s = nets(&Grid::sample(&sdf, cells), Place::Sharp(&sdf));
-                check_closed(&s, &format!("sharp at {cells}"));
-            }
-        }
-    }
-
     #[test]
     fn without_cleaning_a_checkerboard_is_not_manifold() {
         let mut grid = Grid { origin: DVec3::ZERO, step: 1.0, n: [4, 4, 4], values: vec![1.0; 64], near: vec![[0, 0, 0]] };
@@ -1443,14 +1026,12 @@ mod tests {
             grid.values[k] = -1.0;
         }
         let dirty = std::panic::catch_unwind(|| {
-            let s = nets(&grid, Place::Mean);
+            let s = nets(&grid, &Level);
             check_closed(&s, "dirty");
         });
         assert!(dirty.is_err(), "an uncleaned checkerboard came out closed");
         grid.clean();
-        let s = nets(&grid, Place::Mean);
+        let s = nets(&grid, &Level);
         assert_eq!(check_closed(&s, "clean"), (2, 1));
-        let s = nets(&grid, Place::Center);
-        assert_eq!(check_closed(&s, "clean voxels"), (2, 1));
     }
 }

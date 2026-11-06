@@ -30,7 +30,7 @@ use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use glam::{DMat3, DVec3};
 use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
-use lc_client::hull_mesh::{Finish, HullForm, HullMeshPlugin, HullMeshState, Joins, HullMeshSystems, HullSource, REGION_GRAPHS, region};
+use lc_client::hull_mesh::{HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullSource, REGION_GRAPHS, region};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
 use lc_client::looks::LooksPlugin;
@@ -333,9 +333,7 @@ fn spawn(
             let transform = Transform::from_translation(at).with_rotation(ship_to_world());
             let form = |kind: Kind, shape: Shape| HullForm {
                 source: HullSource::Pieces(Arc::from([piece(kind, shape)])),
-                finish: Finish::Smooth,
                 cells: Some(args.cells),
-                joins: Joins::Blended,
             };
             match *column {
                 Column::Kind(kind) => {

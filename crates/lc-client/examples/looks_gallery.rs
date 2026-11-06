@@ -19,8 +19,6 @@
 //! | `--star-period <s>` | seconds for the star to turn once about the vertical; 120 by default, and best a divisor of an hour, when the shader's clock wraps. 0 holds it still |
 //! | `--speed <x>` | the camera's clock against the wall's |
 //! | `--time <s>` | where on the camera's clock to start. The star keeps its own |
-//! | `--apart` | each of the ships' parts its own mesh, overlapping its neighbors rather than fused with them |
-//! | `--hard` | the ships' parts meet as their bare union, no fillet and no mixing of their looks |
 //! | `--fullscreen` | borderless, on the current monitor |
 //! | `--shot <path>` / `--frames <n>` | photograph after `n` frames, 60 by default, and quit |
 //!
@@ -38,7 +36,7 @@ use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUnif
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use lc_client::hull_mesh::{ENGINE_FLANK, Finish, HullForm, HullMeshPlugin, Joins, REGION_GRAPHS, region};
+use lc_client::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, REGION_GRAPHS, region};
 use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
 use lc_client::procedural::ProceduralTexturesPlugin;
 use lc_client::ship_hull::{HullPalettePlugin, Palette, request_palette};
@@ -74,8 +72,6 @@ struct Args {
     speed: f32,
     time: f32,
     fullscreen: bool,
-    hard: bool,
-    apart: bool,
     shot: Option<String>,
     frames: u32,
 }
@@ -99,8 +95,6 @@ impl Args {
             speed: value("--speed").unwrap_or(1.0),
             time: value("--time").unwrap_or(0.0),
             fullscreen: args.iter().any(|a| a == "--fullscreen"),
-            hard: args.iter().any(|a| a == "--hard"),
-            apart: args.iter().any(|a| a == "--apart"),
             shot: raw("--shot"),
             frames: value("--frames").unwrap_or(60.0) as u32,
         }
@@ -119,8 +113,6 @@ struct Stations(Vec<(Vec3, f32)>);
 struct Ships {
     waiting: Vec<(Form, Vec3)>,
     to_star: Vec3,
-    joins: Joins,
-    apart: bool,
 }
 
 /// Stations the arrows have moved the loop on by.
@@ -200,7 +192,7 @@ fn spawn(
         beside = *size;
     }
     let mut stations: Vec<(Vec3, f32)> = ships.iter().zip(&ship_x).map(|((_, size), &x)| (Vec3::new(x, 0.0, 0.0), *size)).collect();
-    commands.insert_resource(Ships { waiting: ships.into_iter().zip(&stations).map(|((form, _), s)| (form, s.0)).collect(), to_star, joins: if args.hard { Joins::Hard } else { Joins::Blended }, apart: args.apart });
+    commands.insert_resource(Ships { waiting: ships.into_iter().zip(&stations).map(|((form, _), s)| (form, s.0)).collect(), to_star });
     let leftmost = ship_x.first().copied().unwrap_or(0.0);
 
     let mut columns = Vec::new();
@@ -300,7 +292,7 @@ fn spawn_ships(
             // Enough fill to see an unlit side against the black.
             to_star: ships.to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-HULL_STOPS), ToneMap::default().surface_stops, 0.0, 0.0),
-            detail: Vec4::new(TILE_M, if ships.joins == Joins::Hard { 1.0 } else { 0.0 }, 0.0, 0.0),
+            detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
@@ -316,24 +308,15 @@ fn spawn_ships(
     });
     // From the ship's frame, z up, to Bevy's, y up.
     let ship_to_world = Quat::from_rotation_x(-FRAC_PI_2);
-    let (joins, apart) = (ships.joins, ships.apart);
     for (form, at) in ships.waiting.drain(..) {
-        let sdf = Sdf::new(&form, &Balance::DEFAULT).expect("checked at startup");
-        let (lo, hi) = sdf.bounds();
-        let transform = Transform::from_translation(at - ship_to_world * ((lo + hi) / 2.0).as_vec3()).with_rotation(ship_to_world);
-        // A piece is meshed in the ship's frame, so every piece shares the ship's transform.
-        let hulls: Vec<HullForm> = if apart {
-            lc_client::hull_mesh::apart(&form, &Balance::DEFAULT)
-                .expect("checked at startup")
-                .into_iter()
-                .map(|source| HullForm { source, finish: Finish::Smooth, cells: None, joins })
-                .collect()
-        } else {
-            vec![HullForm { joins, ..HullForm::form(form, Balance::DEFAULT, Finish::Smooth) }]
-        };
-        for hull in hulls {
-            commands.spawn((living_roof(), hull, MeshMaterial3d(material.clone()), transform));
-        }
+        let (lo, hi) = Sdf::new(&form, &Balance::DEFAULT).expect("checked at startup").bounds();
+        let center = ((lo + hi) / 2.0).as_vec3();
+        commands.spawn((
+            living_roof(),
+            HullForm::form(form, Balance::DEFAULT),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(at - ship_to_world * center).with_rotation(ship_to_world),
+        ));
     }
 }
 

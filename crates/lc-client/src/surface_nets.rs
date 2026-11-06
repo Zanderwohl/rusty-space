@@ -1,12 +1,13 @@
-//! Surface nets over any signed distance field: a closed, manifold mesh of where it is zero.
-//! `hull_mesh` paints what it makes of a form, or of bare pieces.
+//! Surface nets' topology over any signed distance field, with each vertex placed by dual
+//! contouring: a closed, manifold mesh of where it is zero, sharp where the field creases.
+//! `hull_mesh` paints what it makes of each piece.
 //!
 //! **Manifold by construction.** Before extraction the grid is cleaned of every lattice square
 //! whose corners alternate in sign, by turning one of its outside corners inside. Every cell
 //! face then carries at most one segment of surface, so the crossings in a cell form simple
 //! loops, and a vertex a loop (not a cell) leaves every edge shared by exactly two triangles
-//! and every vertex with one fan of them. The blocky finish is the same topology with its
-//! vertices moved, so it is closed the same way.
+//! and every vertex with one fan of them. Each vertex stays in its cell, so where it goes in
+//! the cell never changes that.
 //!
 //! A feature thinner than a cell, like a strap on a coarse grid, is kept only where a sample
 //! lands in it. It may vanish or be holed; diagonal neighbors are joined rather than split, and
@@ -294,27 +295,14 @@ fn loops(inside: [bool; 8]) -> ([u8; 12], u8) {
     (id, count)
 }
 
-/// Where a loop's vertex goes. Every choice keeps it in its cell, so the topology is the same.
-#[derive(Clone, Copy)]
-pub(crate) enum Place<'a> {
-    /// The mean of the loop's crossings: surface nets, which bevels a crease a cell wide.
-    Mean,
-    /// The cell's center. The quad around a lattice edge is then the face between the cubes about
-    /// the edge's two samples, so this is the occupied samples as cubes, with the loops keeping
-    /// two cubes that meet only at a corner from sharing a vertex.
-    Center,
-    /// Where the planes at the crossings meet, each square to the field's gradient there: dual
-    /// contouring, which puts a vertex on the crease it straddles.
-    Sharp(&'a dyn Field),
-}
-
-/// How hard [`Place::Sharp`] draws a vertex toward the mean, against planes of unit weight. Along a
+/// How hard [`sharp`] draws a vertex toward the mean, against planes of unit weight. Along a
 /// crease, or across a flat patch, the planes leave the vertex free and this alone places it.
 const PULL: f64 = 0.05;
 
 /// A vertex a loop of crossings, and a quad around each lattice edge that crosses, joining the
-/// vertices of the four cells around it.
-pub(crate) fn nets(grid: &Grid, place: Place) -> Surface {
+/// vertices of the four cells around it. Each vertex is where the planes at its loop's crossings
+/// meet, each square to `field`'s gradient there, which puts it on the crease it straddles.
+pub(crate) fn nets(grid: &Grid, field: &dyn Field) -> Surface {
     let mut surface = Surface { vertices: Vec::new(), triangles: Vec::new() };
     let mut crossings: Vec<(u8, DVec3)> = Vec::new();
     let mut scratch = Vec::new();
@@ -342,12 +330,9 @@ pub(crate) fn nets(grid: &Grid, place: Place) -> Surface {
             }
             let (va, vb) = (grid.value(corner(a)) as f64, grid.value(corner(b)) as f64);
             let (pa, pb) = (grid.position(corner(a)), grid.position(corner(b)));
-            let p = match place {
-                // A crease bends the field along the edge, so the samples' line misses the surface,
-                // and a plane taken there leans: the crossing is found on the field itself.
-                Place::Sharp(field) => crossing(field, pa, pb, va, vb, &mut scratch),
-                _ => pa.lerp(pb, va / (va - vb)),
-            };
+            // A crease bends the field along the edge, so the samples' line misses the surface, and
+            // a plane taken there leans: the crossing is found on the field itself.
+            let p = crossing(field, pa, pb, va, vb, &mut scratch);
             let sum = &mut sums[id[e] as usize];
             *sum = (sum.0 + p, sum.1 + 1.0);
             crossings.push((id[e], p));
@@ -355,15 +340,8 @@ pub(crate) fn nets(grid: &Grid, place: Place) -> Surface {
         let first = surface.vertices.len() as u32;
         let lo = grid.position(base);
         for (l, (sum, n)) in sums.iter().enumerate() {
-            let mean = *sum / *n;
-            surface.vertices.push(match place {
-                Place::Mean => mean,
-                Place::Center => lo + DVec3::splat(0.5 * grid.step),
-                Place::Sharp(field) => {
-                    let mine = crossings.iter().filter(|(i, _)| *i as usize == l).map(|&(_, p)| p);
-                    sharp(field, mine, mean, lo, grid.step, &mut scratch)
-                }
-            });
+            let mine = crossings.iter().filter(|(i, _)| *i as usize == l).map(|&(_, p)| p);
+            surface.vertices.push(sharp(field, mine, *sum / *n, lo, grid.step, &mut scratch));
         }
         cells.insert(at, id.map(|l| if l == NO_LOOP { u32::MAX } else { first + l as u32 }));
         active.push(base);
@@ -485,7 +463,6 @@ pub(crate) fn gradients(field: &impl Field, surface: &Surface, step: f64) -> Vec
     normals
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,10 +485,10 @@ mod tests {
     }
 
     /// The farthest any of the box's corners is from its nearest vertex, in cells.
-    fn corner_miss(place: impl Fn(&Cuboid) -> Place) -> f64 {
+    fn corner_miss() -> f64 {
         let cuboid = Cuboid { half: DVec3::new(10.0, 7.7, 5.3) };
         let grid = Grid::sample(&cuboid, 16);
-        let surface = nets(&grid, place(&cuboid));
+        let surface = nets(&grid, &cuboid);
         (0..8)
             .map(|c| {
                 let corner = cuboid.half * DVec3::from_array([0, 1, 2].map(|a| if c >> a & 1 == 1 { 1.0 } else { -1.0 }));
@@ -522,8 +499,7 @@ mod tests {
 
     #[test]
     fn sharp_vertices_sit_on_a_box_corners() {
-        let (sharp, mean) = (corner_miss(|c| Place::Sharp(c)), corner_miss(|_| Place::Mean));
-        assert!(sharp < 0.01, "a sharp vertex misses a corner by {sharp} cells");
-        assert!(mean > 0.1, "surface nets met every corner within {mean} cells, so this proves nothing");
+        let miss = corner_miss();
+        assert!(miss < 0.01, "a vertex misses a corner by {miss} cells");
     }
 }
