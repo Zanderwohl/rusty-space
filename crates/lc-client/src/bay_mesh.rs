@@ -77,14 +77,17 @@ const RUNWAY_SHARE: f64 = 0.5;
 const STRIP_M: f64 = 0.3;
 const STRIP_RISE_M: f64 = 0.08;
 
-/// What a vertex is, for the lamps: [`HullBay`]'s fourth byte. An occupant is painted by the
-/// shader, a hue a berth.
+/// What a vertex is, to the shader: [`HullBay`]'s fourth byte. An occupant is painted, a hue a
+/// berth; a bracket's steel is a shade darker than the hold's and a rib's girders darker again, so
+/// the layers stand apart.
 #[derive(Clone, Copy)]
 enum Lamp {
     None = 0,
     Runway = 1,
     Flood = 2,
     Occupant = 3,
+    Bracket = 4,
+    Girder = 5,
 }
 const DISC_SIDES: usize = 20;
 
@@ -120,10 +123,14 @@ pub fn mesh(piece: &Piece, slot: Option<usize>, out: &mut HullBuffers) {
         lamp: Lamp::None,
     };
     b.shell(&hold);
+    b.lamp = Lamp::Girder;
     b.ribs(&hold);
+    b.lamp = Lamp::None;
     b.decks(&hold);
     b.runway(&hold);
+    b.lamp = Lamp::Bracket;
     b.buttresses(&hold);
+    b.lamp = Lamp::None;
     b.berths(&hold, seed(piece));
 }
 
@@ -855,7 +862,16 @@ mod tests {
             assert_eq!(text.parse::<f32>().unwrap(), value as f32, "{name}");
         }
         assert!(wgsl.contains(&format!("const BAYS: u32 = {}u;", BAYS)));
-        for (name, lamp) in [("BAY_RUNWAY_LAMP", Lamp::Runway), ("BAY_FLOOD_LAMP", Lamp::Flood), ("BAY_OCCUPANT", Lamp::Occupant)] {
+        let roles = [
+            ("BAY_RUNWAY_LAMP", Lamp::Runway),
+            ("BAY_FLOOD_LAMP", Lamp::Flood),
+            ("BAY_OCCUPANT", Lamp::Occupant),
+            ("BAY_BRACKET", Lamp::Bracket),
+            ("BAY_GIRDER", Lamp::Girder),
+        ];
+        let sodium = crate::looks::sprue::SODIUM;
+        assert!(wgsl.contains(&format!("const BAY_SODIUM: vec3<f32> = vec3<f32>({:?}, {:?}, {:?});", sodium.x, sodium.y, sodium.z)));
+        for (name, lamp) in roles {
             assert!(wgsl.contains(&format!("const {name}: u32 = {}u;", lamp as u8)), "{name}");
         }
     }

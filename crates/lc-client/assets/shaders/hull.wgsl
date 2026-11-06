@@ -195,6 +195,14 @@ const BAY_VACANT: f32 = 0.3;
 const BAY_RUNWAY_LAMP: u32 = 1u;
 const BAY_FLOOD_LAMP: u32 = 2u;
 const BAY_OCCUPANT: u32 = 3u;
+const BAY_BRACKET: u32 = 4u;
+const BAY_GIRDER: u32 = 5u;
+/// The hold's steel under a bracket and under a rib's girders, linear: a shade darker and darker
+/// again, the hue kept, so the layers stand apart.
+const BAY_BRACKET_SHADE: f32 = 0.75;
+const BAY_GIRDER_SHADE: f32 = 0.55;
+/// A flood is high-pressure sodium, as looks::sprue::SODIUM, at the luminance of the hold's lamp.
+const BAY_SODIUM: vec3<f32> = vec3<f32>(1.0, 0.72, 0.2);
 /// An occupant's paint, in OKLCH: a cargo ship's enamel over steel, a little darker than the hull's
 /// own gray plate, one lightness and chroma for every hue so no color reads lighter than another,
 /// and less metal than bare plate so its highlight stays white.
@@ -278,6 +286,25 @@ var<private> occupant: vec4<f32> = vec4<f32>(0.0);
 var<private> sky_share: f32 = 1.0;
 const BAY_SKY: f32 = 0.05;
 
+/// What one flood head gives, as a share of a sound sodium lamp in each channel: as
+/// looks::sprue::bake::defect, a few percent off by batch, some greener or pinker, some failing dim
+/// and red, a few dead.
+fn flood_tint(seed: u32, index: u32, head: u32) -> vec3<f32> {
+    let h = mix_hash(seed ^ 0x27d4eb2du, index * 2u + head);
+    let batch = vec3<f32>(mix(0.96, 1.04, unit(pcg(h + 1u))), mix(0.95, 1.05, unit(pcg(h + 2u))), mix(0.92, 1.08, unit(pcg(h + 3u))));
+    let r = unit(pcg(h + 4u));
+    if (r < 0.03) {
+        return vec3<f32>(0.0);
+    } else if (r < 0.11) {
+        return batch * vec3<f32>(1.0, 0.62, 0.42) * mix(0.12, 0.5, unit(pcg(h + 5u)));
+    } else if (r < 0.17) {
+        return batch * vec3<f32>(0.86, 1.06, 0.78);
+    } else if (r < 0.22) {
+        return batch * vec3<f32>(1.06, 0.84, 1.02);
+    }
+    return batch;
+}
+
 /// As lc_client::bay_mesh::occupied.
 fn bay_occupied(seed: u32, index: u32) -> bool {
     return unit(mix_hash(seed, index)) >= BAY_VACANT;
@@ -351,7 +378,9 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
     let middle_y = side * (wide - 0.5 * reach);
     let aimed_at = vec3<f32>(0.5 * (x0 + x1), middle_y, floor_z + BAY_PAD_M + 0.5 * (ceiling - floor_z - BAY_PAD_M));
-    var floods = 0.0;
+    let sodium = dot(lamp, LUMA) * BAY_SODIUM / dot(BAY_SODIUM, LUMA);
+    var floods = vec3<f32>(0.0);
+    var nearest = vec2<f32>(1.0e30, 0.0);
     for (var k = 0u; k < 2u; k++) {
         let spread = select(-BAY_FLOOD_SPREAD, BAY_FLOOD_SPREAD, k == 1u) * reach;
         let head = vec3<f32>(x1 - BAY_FLOOD_INSET_M, middle_y + spread, ceiling - BAY_FLOOD_DROP_M);
@@ -360,11 +389,15 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
         let d = length(off);
         let from_head = off / max(d, 1.0e-3);
         let cone = smoothstep(BAY_FLOOD_COS.x, BAY_FLOOD_COS.y, dot(from_head, aim));
-        floods += cone * max(dot(n, -from_head), 0.0) / max(d * d, 1.0);
+        let tint = flood_tint(seed, index, k);
+        floods += tint * cone * max(dot(n, -from_head), 0.0) / max(d * d, 1.0);
+        if (d < nearest.x) {
+            nearest = vec2<f32>(d, f32(k));
+        }
     }
-    out.light += lamp * BAY_FLOOD_GAIN * floods;
+    out.light += sodium * BAY_FLOOD_GAIN * floods;
     if (tag.y == BAY_FLOOD_LAMP) {
-        out.glow += lamp * BAY_FLOOD_FIXTURE;
+        out.glow += sodium * flood_tint(seed, index, u32(nearest.y)) * BAY_FLOOD_FIXTURE;
     }
     if (tag.y == BAY_OCCUPANT) {
         out.paint = vec4<f32>(occupant_paint(seed, index), 1.0);
@@ -1568,6 +1601,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = pair.share;
     var albedo = mix(near.albedo, far.albedo, t);
     // Before any look takes it over: what a bay's lamps light, which have no look of their own.
+    // A bracket's and a girder's steel, darker than the hold's.
+    let darker = select(1.0, select(BAY_BRACKET_SHADE, BAY_GIRDER_SHADE, in.bay.y == BAY_GIRDER), in.bay.x > 0u && (in.bay.y == BAY_BRACKET || in.bay.y == BAY_GIRDER));
+    albedo *= darker;
     let lamp_albedo = albedo;
     var emitted = mix(
         near.lit * light_of(pair.first, near_layer, in),
