@@ -139,28 +139,17 @@ impl Sprue {
                 tiles::maze(texels, TILE_M, &CAPILLARY, capillary, edges, &mut rng).surface(false),
             ]
         };
-        let shaped: Vec<Vec<Surface>> = std::thread::scope(|scope| {
-            let making: Vec<_> = (0..VARIANTS).map(|v| scope.spawn(move || shape(v))).collect();
-            making.into_iter().map(|m| m.join().expect("a variant panicked")).collect()
-        });
+        let shaped: Vec<Vec<Surface>> = in_parallel((0..VARIANTS).map(|v| move || shape(v)));
         // Every variant's, since a strip's lamps are its edge's and must not depend on the tile.
         spec.carried = bake::carried(&shaped.iter().map(|layers| &layers[1]).collect::<Vec<_>>());
         let spec = &spec;
         let interiors = bake::interiors(spec, TILE_M, seed);
-        let lit: Vec<(Vec<Vec<Vec3>>, usize)> = std::thread::scope(|scope| {
-            let baking: Vec<_> = shaped
-                .iter()
-                .enumerate()
-                .zip(&interiors)
-                .map(|((v, layers), interior)| {
-                    scope.spawn(move || {
-                        let lamps = bake::of_variant(spec, layers, seed, v, interior);
-                        (bake::bake(spec, layers, &lamps), lamps.len())
-                    })
-                })
-                .collect();
-            baking.into_iter().map(|b| b.join().expect("a bake panicked")).collect()
-        });
+        let lit: Vec<(Vec<Vec<Vec3>>, usize)> = in_parallel(shaped.iter().enumerate().zip(&interiors).map(|((v, layers), interior)| {
+            move || {
+                let lamps = bake::of_variant(spec, layers, seed, v, interior);
+                (bake::bake(spec, layers, &lamps), lamps.len())
+            }
+        }));
         let lamps = lit.iter().map(|l| l.1).sum();
         let light = lit.into_iter().flat_map(|l| l.0).collect();
         Baked { shaped, light, lamps, carried: spec.carried }
@@ -232,4 +221,15 @@ impl Material for SprueMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         super::charted(descriptor, layout)
     }
+}
+
+/// A thread a job, except in a browser, which cannot start one: there they run in order here.
+fn in_parallel<T: Send, F: FnOnce() -> T + Send>(jobs: impl IntoIterator<Item = F>) -> Vec<T> {
+    if cfg!(target_arch = "wasm32") {
+        return jobs.into_iter().map(|job| job()).collect();
+    }
+    std::thread::scope(|scope| {
+        let running: Vec<_> = jobs.into_iter().map(|job| scope.spawn(job)).collect();
+        running.into_iter().map(|r| r.join().expect("a job panicked")).collect()
+    })
 }
