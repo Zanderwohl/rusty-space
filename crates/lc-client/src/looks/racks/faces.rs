@@ -222,10 +222,8 @@ fn halved(level: &[u8], size: UVec2) -> Vec<u8> {
     out
 }
 
-/// How many faces [`bake`] makes.
-pub fn count() -> u32 {
-    layouts().len() as u32 * VARIANTS as u32
-}
+/// How many faces [`bake`] makes: each of the layouts in each of its [`VARIANTS`].
+pub const COUNT: u32 = 8 * VARIANTS as u32;
 
 /// Every face, a layer apiece, with its mips.
 pub fn bake() -> Image {
@@ -248,9 +246,9 @@ pub fn bake() -> Image {
         }
     }
     let mut image = Image::new(
-        Extent3d { width: TEXELS.x, height: TEXELS.y, depth_or_array_layers: count() },
+        Extent3d { width: TEXELS.x, height: TEXELS.y, depth_or_array_layers: COUNT },
         TextureDimension::D2,
-        vec![0; (TEXELS.x * TEXELS.y * 4 * count()) as usize],
+        vec![0; (TEXELS.x * TEXELS.y * 4 * COUNT) as usize],
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -297,6 +295,7 @@ mod tests {
     fn the_bake_holds_every_level_of_every_face() {
         let image = bake();
         let per_face: u32 = (0..LEVELS).map(|k| (TEXELS.x >> k) * (TEXELS.y >> k) * 4).sum();
-        assert_eq!(image.data.as_ref().unwrap().len() as u32, per_face * count());
+        assert_eq!(layouts().len() as u32 * VARIANTS as u32, COUNT, "a layout added or taken away");
+        assert_eq!(image.data.as_ref().unwrap().len() as u32, per_face * COUNT);
     }
 }

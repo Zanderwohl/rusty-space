@@ -111,7 +111,7 @@ impl Racks {
             rack: Vec4::new(self.rack_m, self.server_m, self.post_m, self.groove_m),
             lean: Vec4::new(self.post_lean, self.groove_lean, self.tilt_deg.to_radians(), 0.0),
             hall: Vec4::new(self.depth_m, self.aisle_m, self.fan_m, 0.0),
-            face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::count() as f32, self.day_glow),
+            face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::COUNT as f32, self.day_glow),
             paint: self.paint.extend(self.spread),
             glow: hue.extend(self.glass_f0),
         }
@@ -127,7 +127,7 @@ impl Racks {
                 hall: Vec4::new(self.depth_m, self.aisle_m, self.fan_m, 0.0),
                 paint: self.paint.extend(self.spread),
                 surface: Vec4::new(self.roughness, self.metallic, self.glass_f0, self.glass_roughness),
-                face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::count() as f32, self.day_glow),
+                face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::COUNT as f32, self.day_glow),
                 glow: self.glow.extend(0.0),
                 to_star: self.to_star.extend(self.star_spin),
                 star_color: Vec3::splat(self.star).extend(0.0),

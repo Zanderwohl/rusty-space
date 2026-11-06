@@ -13,11 +13,13 @@
 //! - a torus, one [`ChartKind::Ring`], wrapping both ways.
 //!
 //! Every primitive's axis is its own x, and a chart's u cross its v is the surface's outward
-//! normal. A round part lying on its side, its axis nearer level than upright, has no end facing
-//! up: its band is marked [`ChartPoint::lying`], with its u measured from the line along its top,
-//! so a look that wants a roof takes one from the band's upper part, and its ends are sides. A look that treats a part's ends apart from its sides, as a roof, reads
-//! [`ChartPoint::end`]. Round charts use mean radii: a frustum's band is stretched around toward its wide end
+//! normal. Round charts use mean radii: a frustum's band is stretched around toward its wide end
 //! and pinched toward its narrow, and an ellipsoid's band as its sections are not circles.
+//!
+//! A look that treats a part's ends apart from its sides, as a roof, reads [`ChartPoint::end`]. A
+//! round part lying on its side, its axis nearer level than upright, has no end facing up: its
+//! band is marked [`ChartPoint::lying`], with its u measured from the line along its top, so a look
+//! that wants a roof takes one from the band's upper part, and its ends are sides.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
@@ -26,6 +28,7 @@ use lc_world::form::primitive::Shape;
 
 /// How far from its equator an ellipsoid's band runs, either way, as a latitude of the sphere it is
 /// stretched from. Low, so an ovoid habitat's roof, its upper cap, runs well down its sides.
+/// `shaders/charts.wgsl` stops a lying part's roof at the same: its `ROOF_ELEVATION`.
 pub const BAND_LATITUDE: f64 = 20.0 * PI / 180.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,8 +149,11 @@ pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
         Shape::Capsule { length, .. } => {
             if p.x.abs() <= length / 2.0 { 0 } else { end(p.x > 0.0) }
         }
+        // As `chart_at` measures latitude, so a vertex off the surface is split as its band's
+        // bounds have it.
         Shape::Ellipsoid { semi_axes } => {
-            if (p.x / semi_axes.x).abs() <= BAND_LATITUDE.sin() { 0 } else { end(p.x > 0.0) }
+            let q = p / semi_axes;
+            if q.x.atan2(q.y.hypot(q.z)).abs() <= BAND_LATITUDE { 0 } else { end(p.x > 0.0) }
         }
         Shape::Torus { .. } => 0,
     }
@@ -408,6 +414,15 @@ mod tests {
         let higher = at(DVec3::new(15.0, 0.6, 0.8));
         assert!(higher.uv.y > end.uv.y, "an end's v runs up");
         assert!(!oriented(&tube, DVec3::X).lying, "standing, it is not");
+    }
+
+    /// A lying part's roof, cut in the shader, stops where an ovoid's does.
+    #[test]
+    fn the_shader_stops_a_lying_roof_at_the_band_latitude() {
+        let wgsl = include_str!("../assets/shaders/charts.wgsl");
+        let line = wgsl.lines().find(|l| l.starts_with("const ROOF_ELEVATION")).expect("ROOF_ELEVATION is declared");
+        let value: f64 = line.split('=').nth(1).and_then(|v| v.trim().trim_end_matches(';').parse().ok()).expect("a number");
+        assert!((value - BAND_LATITUDE).abs() < 1e-6, "{value} against {BAND_LATITUDE}");
     }
 
     #[test]

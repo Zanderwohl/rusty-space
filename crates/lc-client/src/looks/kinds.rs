@@ -27,23 +27,33 @@ impl Plugin for HullLooksPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pipes>()
             .init_resource::<RackFaces>()
-            .add_systems(Startup, bake_pipes)
+            .add_systems(Startup, (bake_pipes, bake_rack_faces))
             .add_systems(PostUpdate, (fit_pipes, fit_rack_faces));
     }
 }
 
-/// The racks' faces: a fraction of a second, so baked where they are first wanted.
+/// The racks' faces, baked on the async pool, so no frame waits on them.
 #[derive(Resource, Default)]
-struct RackFaces(Option<Handle<Image>>);
+struct RackFaces {
+    baking: Option<Task<Image>>,
+    ready: Option<Handle<Image>>,
+}
 
-/// Hands the racks' faces to each hull material that lacks them.
+fn bake_rack_faces(mut faces: ResMut<RackFaces>) {
+    faces.baking = Some(AsyncComputeTaskPool::get().spawn(async { super::racks::faces::bake() }));
+}
+
+/// Hands the racks' faces to each hull material that lacks them, once they are baked.
 fn fit_rack_faces(mut faces: ResMut<RackFaces>, mut images: ResMut<Assets<Image>>, mut materials: ResMut<Assets<HullMaterial>>) {
+    if let Some(task) = faces.baking.as_mut()
+        && let Some(image) = check_ready(task)
+    {
+        faces.baking = None;
+        faces.ready = Some(images.add(image));
+    }
+    let Some(baked) = faces.ready.clone() else { return };
     let lacking: Vec<AssetId<HullMaterial>> =
         materials.iter().filter(|(_, m)| m.rack_faces.is_none()).map(|(id, _)| id).collect();
-    if lacking.is_empty() {
-        return;
-    }
-    let baked = faces.0.get_or_insert_with(|| images.add(super::racks::faces::bake())).clone();
     for id in lacking {
         if let Some(mut material) = materials.get_mut(id) {
             material.rack_faces = Some(baked.clone());

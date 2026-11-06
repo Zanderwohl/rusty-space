@@ -13,7 +13,7 @@
     view_transformations::position_world_to_clip,
 }
 #import "shaders/scars.wgsl"::{glass_specular, knapped}
-#import "shaders/panels.wgsl"::{Plate, plate}
+#import "shaders/panels.wgsl"::{Plate, around_index, plate}
 #import "shaders/habitat.wgsl"::{canopy, hex, room, stratus, window}
 #import "shaders/hash.wgsl"::{mix_hash, pcg, unit}
 #import "shaders/charts.wgsl"::{ChartView, chart_view}
@@ -895,14 +895,6 @@ fn fitted(pitch: f32, period: f32) -> vec2<f32> {
     return vec2<f32>(period / n, n);
 }
 
-fn wrapped_index(i: f32, n: f32) -> i32 {
-    if (n <= 0.0) {
-        return i32(i);
-    }
-    let k = i32(n);
-    return ((i32(i) % k) + k) % k;
-}
-
 /// `x` from the nearest multiple of `pitch`.
 fn offset(x: f32, pitch: f32) -> f32 {
     return x - pitch * round(x / pitch);
@@ -932,7 +924,7 @@ fn rack_side(p: vec2<f32>, seed: u32, periods: vec2<f32>, frame: mat3x3<f32>, st
     let up = fitted(material.rack.y, periods.y);
     let size = vec2<f32>(across.x, up.x);
     let cell = floor(p / size);
-    let id = mix_hash(mix_hash(seed, u32(wrapped_index(cell.x, across.y))), u32(wrapped_index(cell.y, up.y)));
+    let id = mix_hash(mix_hash(seed, around_index(cell.x, size.x, periods.x)), around_index(cell.y, size.y, periods.y));
     let base = shade_of(id);
     let n = normalize(frame * tipped_by(id, material.rack_lean.z));
     var lit = painted(n, star, e, lit_side, base, RACK_METALLIC, RACK_ROUGHNESS);
@@ -1233,11 +1225,8 @@ fn tubes_light(in: VertexOutput, c: HullChart, pixel: f32, lamp_color: vec3<f32>
         return material.reflected.rgb * buffed(p, c.frame, star, e, pixel);
     }
 
-    var column = i32(round(2.0 * center.x / w));
-    if (kind == BAND || kind == RING) {
-        column = ((column % (2 * around)) + 2 * around) % (2 * around);
-    }
-    let id = mix_hash(mix_hash(c.id, u32(column)), u32(i32(round(center.y * 4.0))));
+    let column = around_index(round(2.0 * center.x / w), 0.5 * w, select(0.0, bounds.x, kind == BAND || kind == RING));
+    let id = mix_hash(mix_hash(c.id, column), u32(i32(round(center.y * 4.0))));
     let base = TUBE_PAINT * mix(0.92, 1.08, unit(pcg(id + 3u)));
     var light = painted(surface, star, e, lit_side, base, RACK_METALLIC, RACK_ROUGHNESS);
     var glowing = vec3<f32>(0.0);
