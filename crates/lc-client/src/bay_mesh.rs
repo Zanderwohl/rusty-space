@@ -45,8 +45,10 @@ const DECK_M: f64 = 0.8;
 const RAIL_M: f64 = 0.4;
 /// Each buttress stands in a rib's plane from deck to deck, its back upright and standing off the
 /// wall by this share of the deck's reach: this share of the reach wide at its foot and this at its
-/// head, and this thick along x, with a flange this wide down the slope it turns to the shaft.
-const BUTTRESS_STANDOFF: f64 = 0.45;
+/// head, and this thick along x, with a flange this wide down the slope it turns to the shaft. It
+/// is pierced through the middle, leaving a frame this share of its foot's width all round.
+const BUTTRESS_STANDOFF: f64 = 1.0 / 3.0;
+const BUTTRESS_FRAME: f64 = 0.22;
 const BUTTRESS_FOOT: f64 = 1.0 / 6.0;
 const BUTTRESS_HEAD: f64 = 1.0 / 3.0;
 const BUTTRESS_M: f64 = 0.6;
@@ -546,7 +548,8 @@ impl Builder<'_> {
                     let foot = back - side * BUTTRESS_FOOT * hold.reach;
                     let head = back - side * BUTTRESS_HEAD * hold.reach;
                     let outline = [DVec2::new(back, floor), DVec2::new(foot, floor), DVec2::new(head, ceiling), DVec2::new(back, ceiling)];
-                    self.prism(x, BUTTRESS_M / 2.0, &outline, spar);
+                    let frame = BUTTRESS_FRAME * BUTTRESS_FOOT * hold.reach;
+                    self.pierced(x, BUTTRESS_M / 2.0, &outline, frame, spar);
                     let slope = |p: DVec2| DVec3::new(x, p.x, p.y);
                     let inward = DVec2::new(-side, 0.0) * (FLANGE_M / 2.0);
                     self.beam(slope(DVec2::new(foot, floor) + inward), slope(DVec2::new(head, ceiling) + inward), FLANGE_M, DVec3::X, spar);
@@ -555,11 +558,31 @@ impl Builder<'_> {
         }
     }
 
+    /// [`Builder::prism`] with a hole through it along x: the outline less itself inset by `frame`
+    /// meters, the hole's walls facing into it.
+    fn pierced(&mut self, x: f64, half: f64, outline: &[DVec2], frame: f64, region: u32) {
+        let outer = counterclockwise(outline);
+        let Some(inner) = inset(&outer, frame) else {
+            self.prism(x, half, &outer, region);
+            return;
+        };
+        let at = |p: DVec2, dx: f64| DVec3::new(x + dx, p.x, p.y);
+        let n = outer.len();
+        for k in 0..n {
+            let (a, b) = (outer[k], outer[(k + 1) % n]);
+            let (c, d) = (inner[k], inner[(k + 1) % n]);
+            // The outline's sides face out and the hole's in; each cap is a ring of quads between.
+            self.quad([at(a, -half), at(b, -half), at(b, half), at(a, half)], region, Chart::Own);
+            self.quad([at(d, -half), at(c, -half), at(c, half), at(d, half)], region, Chart::Own);
+            self.quad([at(a, half), at(b, half), at(d, half), at(c, half)], region, Chart::Own);
+            self.quad([at(a, -half), at(c, -half), at(d, -half), at(b, -half)], region, Chart::Own);
+        }
+    }
+
     /// A convex outline in (y, z), in either winding, stood `half` meters either side of the plane
     /// at `x`: two caps and a side per edge.
     fn prism(&mut self, x: f64, half: f64, outline: &[DVec2], region: u32) {
-        let area: f64 = (0..outline.len()).map(|k| outline[k].perp_dot(outline[(k + 1) % outline.len()])).sum();
-        let ccw: Vec<DVec2> = if area >= 0.0 { outline.to_vec() } else { outline.iter().rev().copied().collect() };
+        let ccw = counterclockwise(outline);
         let at = |p: DVec2, dx: f64| DVec3::new(x + dx, p.x, p.y);
         for k in 0..ccw.len() {
             let (a, b) = (ccw[k], ccw[(k + 1) % ccw.len()]);
@@ -604,6 +627,35 @@ impl Builder<'_> {
             }
         }
     }
+}
+
+fn counterclockwise(outline: &[DVec2]) -> Vec<DVec2> {
+    let area: f64 = (0..outline.len()).map(|k| outline[k].perp_dot(outline[(k + 1) % outline.len()])).sum();
+    if area >= 0.0 { outline.to_vec() } else { outline.iter().rev().copied().collect() }
+}
+
+/// A counterclockwise convex outline with every edge moved `by` meters inward, corner `k` where
+/// edges `k - 1` and `k` meet. `None` where it would turn inside out.
+fn inset(outline: &[DVec2], by: f64) -> Option<Vec<DVec2>> {
+    let n = outline.len();
+    // Each edge's inward normal and its offset along it, from `a` to the next corner.
+    let lines: Vec<(DVec2, f64)> = (0..n)
+        .map(|k| {
+            let (a, b) = (outline[k], outline[(k + 1) % n]);
+            let normal = (b - a).perp().normalize();
+            (normal, normal.dot(a) + by)
+        })
+        .collect();
+    let corners: Vec<DVec2> = (0..n)
+        .map(|k| {
+            let ((n0, d0), (n1, d1)) = (lines[(k + n - 1) % n], lines[k]);
+            let det = n0.perp_dot(n1);
+            DVec2::new(d0 * n1.y - d1 * n0.y, n0.x * d1 - n1.x * d0) / det
+        })
+        .collect();
+    // Inside out, an edge runs backward, though the winding may survive it.
+    let forward = (0..n).all(|k| (corners[(k + 1) % n] - corners[k]).dot(outline[(k + 1) % n] - outline[k]) > 0.0);
+    (corners.iter().all(|c| c.is_finite()) && forward).then_some(corners)
 }
 
 /// What a berth holds, drawn as a primitive seen from the side.
@@ -860,6 +912,34 @@ mod tests {
                 assert!(wound.dot((p(t[0]) + p(t[1]) + p(t[2])) / 3.0 - middle) > 0.0);
             }
         }
+    }
+
+    /// A pierced plate's enclosed volume, summed over its triangles as wound, is the outline's area
+    /// less the hole's times its thickness: every face, the hole's walls among them, wound outward.
+    #[test]
+    fn a_pierced_plate_is_wound_closed_around_its_hole() {
+        let (piece, _) = bay(DVec3::new(40.0, 30.0, 20.0), DMat3::IDENTITY);
+        let (frame, _) = layout(&piece).unwrap();
+        let outline = [DVec2::new(0.0, 0.0), DVec2::new(4.0, 0.0), DVec2::new(6.0, 8.0), DVec2::new(0.0, 8.0)];
+        let mut out = HullBuffers::default();
+        let mut b = Builder { out: &mut out, piece: &piece, frame, hull: oriented(&piece.shape, DVec3::Z), h: 1e-3, bay: 0, lamp: Lamp::None };
+        b.pierced(2.0, 0.5, &outline, 1.0, 0);
+        let p = |i: u32| DVec3::from_array(out.positions[i as usize].map(f64::from));
+        let volume: f64 = out.indices.chunks(3).map(|t| p(t[0]).dot(p(t[1]).cross(p(t[2]))) / 6.0).sum();
+        let area = |o: &[DVec2]| (0..o.len()).map(|k| o[k].perp_dot(o[(k + 1) % o.len()])).sum::<f64>() / 2.0;
+        let hole = inset(&outline, 1.0).unwrap();
+        let want = (area(&outline) - area(&hole)) * 1.0;
+        assert!((volume - want).abs() < 1e-3 * want, "{volume} against {want}");
+        assert!(area(&hole) > 0.0);
+    }
+
+    #[test]
+    fn inset_moves_each_edge_in_by_its_distance() {
+        let square = [DVec2::new(0.0, 0.0), DVec2::new(4.0, 0.0), DVec2::new(4.0, 4.0), DVec2::new(0.0, 4.0)];
+        let inner = inset(&square, 1.0).unwrap();
+        assert!(inner[0].abs_diff_eq(DVec2::new(1.0, 1.0), 1e-9), "{:?}", inner);
+        assert!(inner[2].abs_diff_eq(DVec2::new(3.0, 3.0), 1e-9));
+        assert!(inset(&square, 2.5).is_none());
     }
 
     #[test]
