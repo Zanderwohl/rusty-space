@@ -22,8 +22,9 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use glam::{DMat3, DVec2, DVec3};
 use lc_world::form::primitive::Shape;
 
-/// How far from its equator an ellipsoid's band runs, either way.
-pub const BAND_LATITUDE: f64 = 35.0 * PI / 180.0;
+/// How far from its equator an ellipsoid's band runs, either way, as a latitude of the sphere it is
+/// stretched from. Low, so an ovoid habitat's roof, its upper cap, runs well down its sides.
+pub const BAND_LATITUDE: f64 = 20.0 * PI / 180.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChartKind {
