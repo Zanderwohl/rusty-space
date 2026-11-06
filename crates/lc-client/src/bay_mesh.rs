@@ -10,9 +10,6 @@
 //! plate in the part's own charts, as any slab would; everything inside is charted on its own
 //! faces. Detail is in meters and does not change with the mesher's resolution.
 //!
-//! The hull material casts no shadows, so the hold is shaded in the mesh: from none of the star at
-//! the mouth to all of it [`Hold::fall`] in, handed per vertex as the face attribute's shadow.
-//!
 //! Square cornered: a slab's rounded `corner` is not drawn, so the shell stands proud of the
 //! distance field at its edges by at most `corner · (1 − 1/√3)`.
 
@@ -68,9 +65,6 @@ pub fn mesh(piece: &Piece, out: &mut HullBuffers) {
         frame,
         hull: oriented(&piece.shape, up),
         h: 1.0e-4 * piece.shape.least_dimension().max(1.0),
-        indoors: false,
-        mouth: hold.half.x,
-        fall: hold.fall(),
     };
     b.shell(&hold);
     b.ribs(&hold);
@@ -118,11 +112,6 @@ impl Hold {
         -self.tall + 2.0 * self.tall * k as f64 / self.levels as f64
     }
 
-    /// How far in from the mouth the star reaches: about as far as the mouth is across.
-    fn fall(&self) -> f64 {
-        self.wide.min(self.tall).max(1.0)
-    }
-
     fn ceiling(&self, k: usize) -> f64 {
         if k + 1 == self.levels { self.tall } else { self.floor(k + 1) - DECK_M }
     }
@@ -142,35 +131,11 @@ struct Builder<'a> {
     frame: DMat3,
     hull: Oriented,
     h: f64,
-    /// Inside the hold, and so shaded from the star by depth.
-    indoors: bool,
-    mouth: f64,
-    fall: f64,
 }
 
 impl Builder<'_> {
     /// `corners` counterclockwise about the face's normal, bay frame.
     fn quad(&mut self, corners: [DVec3; 4], region: u32, chart: Chart) {
-        // Cut where the shade deepens no further, so it interpolates true on either side.
-        let edge = self.mouth - self.fall;
-        if self.indoors {
-            for (a, b, c, d) in [(0, 1, 3, 2), (0, 3, 1, 2)] {
-                let (p, q) = (corners[a], corners[b]);
-                if (p.x - edge) * (q.x - edge) < 0.0 && (corners[c].x - p.x).abs() < 1e-9 && (corners[d].x - q.x).abs() < 1e-9 {
-                    let s = (edge - p.x) / (q.x - p.x);
-                    let (m, n) = (p.lerp(q, s), corners[c].lerp(corners[d], s));
-                    let mut near = corners;
-                    let mut far = corners;
-                    near[b] = m;
-                    near[d] = n;
-                    far[a] = m;
-                    far[c] = n;
-                    self.quad(near, region, Chart::Own);
-                    self.quad(far, region, Chart::Own);
-                    return;
-                }
-            }
-        }
         let normal = (corners[1] - corners[0]).cross(corners[3] - corners[0]).normalize_or_zero();
         if normal == DVec3::ZERO {
             return;
@@ -207,11 +172,7 @@ impl Builder<'_> {
         self.out.positions.push(pose.to_outer(self.frame * at).as_vec3().to_array());
         self.out.normals.push((pose.rotation * self.frame * normal).as_vec3().to_array());
         self.out.regions.push(region_weights(region, region, 0.0));
-        let mut face = face_attribute(0.0, None);
-        if self.indoors {
-            face[2] = (((self.mouth - at.x) / self.fall).clamp(0.0, 1.0) * 255.0).round() as u8;
-        }
-        self.out.faces.push(face);
+        self.out.faces.push(face_attribute(0.0, None));
         self.out.charts.push(chart.map(|x| x as f32));
         self.out.chart_bounds.push(bounds.map(|x| x as f32));
         self.out.tangents.push(along.as_vec3().extend(1.0).to_array());
@@ -266,7 +227,6 @@ impl Builder<'_> {
         self.rect(mouth + y * (w + band_y), y * band_y, z * t, outside, Chart::Hull);
         self.rect(mouth - y * (w + band_y), y * band_y, z * t, outside, Chart::Hull);
 
-        self.indoors = true;
         let mid = (hold.back + ex) / 2.0;
         let run = (ex - hold.back) / 2.0;
         self.rect(x * hold.back, y * w, z * t, inside, Chart::Own);
@@ -595,26 +555,6 @@ mod tests {
         // Up the shaft from floor to ceiling: only the shell, twice, and the shaft's own ends.
         let at = |h: f64| piece.pose.to_outer(DVec3::new(1.3, 0.0, 0.0) + up * h + DVec3::Z * 0.17);
         assert_eq!(crossings(&out, at(-30.0), at(30.0)), 4);
-    }
-
-    /// The shell is in the open; inside, the star gives out within the mouth's width and every
-    /// vertex past that is wholly shaded.
-    #[test]
-    fn the_hold_is_shaded_by_depth_and_the_shell_is_not() {
-        let edges = DVec3::new(120.0, 60.0, 40.0);
-        let (piece, out) = bay(edges, DMat3::IDENTITY);
-        let hold = Hold::new(edges);
-        for (p, face) in out.positions.iter().zip(&out.faces) {
-            let local = piece.pose.to_local(DVec3::from_array(p.map(f64::from)));
-            let on_shell = (local.abs() - edges / 2.0).max_element() > -1e-3;
-            let depth = hold.half.x - local.x;
-            if on_shell {
-                assert_eq!(face[2], 0, "{local}");
-            } else if depth > hold.fall() + 1e-3 {
-                assert_eq!(face[2], 255, "{local}");
-            }
-        }
-        assert!(out.faces.iter().any(|f| f[2] > 0 && f[2] < 255));
     }
 
     #[test]

@@ -54,11 +54,9 @@ pub const ATTRIBUTE_HULL_CHART_BOUNDS: MeshVertexAttribute =
 pub const ATTRIBUTE_HULL_GIRDER: MeshVertexAttribute =
     MeshVertexAttribute::new("HullGirder", 0x4855_4C4C_0000_0006, VertexFormat::Float32x4);
 
-/// `(share, face, shadow, 0)`: how much of the vertex lies on an open face, and that face's index
-/// into [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so
-/// a triangle at a face's rim names one face at all three corners. The index is read flat.
-/// `shadow` is the share of the star the vertex is hidden from, as deep inside a bay; the region
-/// graphs and the aztec plate honor it, and the night fill is left.
+/// `(share, face, 0, 0)`: how much of the vertex lies on an open face, and that face's index into
+/// [`HullUniform::faces`], [`NO_FACE`] for none. A vertex off every face names the nearest, so a
+/// triangle at a face's rim names one face at all three corners. The index is read flat.
 pub const ATTRIBUTE_HULL_FACE: MeshVertexAttribute =
     MeshVertexAttribute::new("HullFace", 0x4855_4C4C_0000_0007, VertexFormat::Unorm8x4);
 
@@ -228,6 +226,9 @@ pub struct HullUniform {
     /// `(guide_pitch_m, 0, 0, 0)`: the guide lights' spacing down a tube, lit at the region's
     /// [`Self::emitted`].
     pub tube_guide: Vec4,
+    /// The sphere [`HullMaterial::shadow_map`] is fit to, its center in the ship's frame and its
+    /// radius in `w`, meters; a radius of 0 is no shadow.
+    pub shadow: Vec4,
 }
 
 impl Default for HullUniform {
@@ -274,6 +275,7 @@ impl Default for HullUniform {
             tube_cell: Vec4::new(6.0, 1.8, 0.45, 0.0),
             tube_depth: Vec4::ZERO,
             tube_guide: Vec4::new(1.2, 0.0, 0.0, 0.0),
+            shadow: Vec4::ZERO,
         }
     }
 }
@@ -301,6 +303,10 @@ pub struct HullMaterial {
     #[texture(10, dimension = "2d_array", visibility(fragment))]
     #[sampler(11, visibility(fragment))]
     pub rack_faces: Option<Handle<Image>>,
+    /// The hull's depth from its star, a `Depth32Float` the caller draws; read by texel, so it
+    /// needs no sampler. See [`HullUniform::shadow`].
+    #[texture(12, sample_type = "float", filterable = false, visibility(fragment))]
+    pub shadow_map: Option<Handle<Image>>,
 }
 
 impl Material for HullMaterial {

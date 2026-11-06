@@ -50,6 +50,7 @@ pub mod haze;
 pub mod hud;
 pub mod hull;
 pub mod hull_mesh;
+pub mod hull_shadow;
 pub mod input;
 pub mod ledger;
 pub mod library;

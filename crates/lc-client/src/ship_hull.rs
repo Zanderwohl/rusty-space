@@ -69,7 +69,7 @@ pub struct ShipHullPlugin;
 
 impl Plugin for ShipHullPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::looks::kinds::HullLooksPlugin, HullPalettePlugin))
+        app.add_plugins((HullMaterialPlugin, HullMeshPlugin, crate::hull_shadow::HullShadowPlugin, crate::looks::kinds::HullLooksPlugin, HullPalettePlugin))
             .init_resource::<Rolls>()
             .init_resource::<RealHulls>()
             .add_systems(Update, request_palette.run_if(in_state(crate::app::AppState::InGame)));
@@ -415,7 +415,7 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None, shadow_map: None });
                         commands
                             .entity(hull.mesh)
                             .insert((HullForm { source, cells: None }, MeshMaterial3d(material)));
@@ -439,10 +439,15 @@ pub fn draw_hulls(
             }
         };
         if let Some(material) = material
-            && let Some(mut asset) = materials.get_mut(&material.0)
-            && asset.uniforms != uniforms
+            && let Some(asset) = materials.get(&material.0)
         {
-            asset.uniforms = uniforms;
+            // The shadow's sphere is the mesh's, kept by hull_shadow.
+            let uniforms = HullUniform { shadow: asset.uniforms.shadow, ..uniforms };
+            if asset.uniforms != uniforms
+                && let Some(mut asset) = materials.get_mut(&material.0)
+            {
+                asset.uniforms = uniforms;
+            }
         }
         let shows = shown(want.craft.is_none(), has_mesh, showing.drawing(want.craft));
         *visibility = if shows.mesh { Visibility::Inherited } else { Visibility::Hidden };
@@ -550,6 +555,7 @@ fn spawn(commands: &mut Commands, want: &Wanted) {
             NoFrustumCulling,
             crate::app::craft_layers(want.craft),
             HullMesh,
+            crate::hull_shadow::HullShadow::default(),
         ))
         .id();
     let root = commands

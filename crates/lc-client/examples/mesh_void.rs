@@ -294,7 +294,7 @@ fn spawn(
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
         pipe_tiles: None,
         pipe_light: None,
-        rack_faces: None,
+        rack_faces: None, shadow_map: None,
     });
 
     // Side by side in slots as wide as the largest, three to a row.
