@@ -337,7 +337,7 @@ fn spawn(
     materials: &mut Assets<HullMaterial>,
 ) -> Entity {
     let mut material = |uniforms: HullUniform| {
-        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), pipe_tiles: None, pipe_light: None })
+        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None })
     };
     let (frame, balance) = (&b.frame, &b.balance);
     let standing = standing(frame, balance);

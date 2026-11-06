@@ -53,6 +53,9 @@ const ROLLS_KEPT: usize = 64;
 pub(crate) fn lamp_of(kind: &str) -> Option<(f64, f64)> {
     match kind {
         "drone" => Some((300.0, 5000.0)),
+        // The racks' faces: screens and status lights, brighter than a window. Drawn in their own
+        // green, at this luminance.
+        "data" => Some((6000.0, 6500.0)),
         "living" => Some((300.0, 3000.0)),
         "mind" => Some((90.0, 9000.0)),
         "bay" => Some((300.0, 4000.0)),
@@ -412,7 +415,7 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None });
                         commands
                             .entity(hull.mesh)
                             .insert((HullForm { source, cells: None }, MeshMaterial3d(material)));

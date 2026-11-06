@@ -196,6 +196,36 @@ pub struct HullUniform {
     pub thruster: Vec4,
     /// The cells' color, linear: what leaves the face is drawn at its luminance in this hue.
     pub thruster_glow: Vec4,
+    /// Which regions are server racks and which a hive of launch tubes, one bit a region each:
+    /// `(racks, tubes, 0, 0)`. Both are laid out in the part's charts.
+    pub looks: UVec4,
+    /// A rack: `(rack_m, server_m, post_m, groove_m)`, a server's width and height, a post's width,
+    /// and the groove's between servers.
+    pub rack: Vec4,
+    /// `(post, groove, tilt_rad, 0)`: how far a post's faces and a groove's walls lean at most, as
+    /// tangents, and how far a server tips.
+    pub rack_lean: Vec4,
+    /// A rack region's ends, a data hall from above: `(depth_m, aisle_m, fan_m, 0)`, a row of rack
+    /// tops, the aisle between rows, and a rack top's fan across.
+    pub rack_hall: Vec4,
+    /// A server's glass face: `(width_m, height_m, faces, day_glow)`, its extent on a server as
+    /// asked for, how many faces [`HullMaterial::rack_faces`] holds, and on a face the star lights
+    /// what of its glow is left.
+    pub rack_face: Vec4,
+    /// The servers' paint, linear, and how far each strays from it in brightness.
+    pub rack_paint: Vec4,
+    /// A lit face's hue, of luminance 1, drawn at the region's [`Self::emitted`] luminance; and its
+    /// glass's reflectance face-on.
+    pub rack_glow: Vec4,
+    /// A hive's cells: `(hex_m, bore_radius_m, tape_m, 0)`, across a cell's flats, a tube's
+    /// radius, and the danger tape around its mouth.
+    pub tube_cell: Vec4,
+    /// `(depth_m, drone_m, open, loaded)`: a tube's depth, how far down a drone's nose is, the
+    /// share of tubes open and of those the share holding a drone.
+    pub tube_depth: Vec4,
+    /// `(guide_pitch_m, 0, 0, 0)`: the guide lights' spacing down a tube, lit at the region's
+    /// [`Self::emitted`].
+    pub tube_guide: Vec4,
 }
 
 impl Default for HullUniform {
@@ -232,6 +262,16 @@ impl Default for HullUniform {
             pipes: Vec4::new(0.9, 1.9, 24.0, 0.0),
             thruster: Vec4::ZERO,
             thruster_glow: Vec4::ZERO,
+            looks: UVec4::ZERO,
+            rack: Vec4::new(6.0, 3.0, 0.5, 0.2),
+            rack_lean: Vec4::ZERO,
+            rack_hall: Vec4::new(4.0, 2.0, 2.6, 0.0),
+            rack_face: Vec4::ZERO,
+            rack_paint: Vec4::ZERO,
+            rack_glow: Vec4::ZERO,
+            tube_cell: Vec4::new(6.0, 1.8, 0.45, 0.0),
+            tube_depth: Vec4::ZERO,
+            tube_guide: Vec4::new(1.2, 0.0, 0.0, 0.0),
         }
     }
 }
@@ -254,6 +294,11 @@ pub struct HullMaterial {
     pub pipe_tiles: Option<Handle<Image>>,
     #[texture(9, dimension = "2d_array", visibility(fragment))]
     pub pipe_light: Option<Handle<Image>>,
+    /// Server racks' glass faces, a face a layer, `(cover, glow, 0, 1)`, as their look bakes them.
+    /// Baked once and late, so a rack drawn before then shows no faces.
+    #[texture(10, dimension = "2d_array", visibility(fragment))]
+    #[sampler(11, visibility(fragment))]
+    pub rack_faces: Option<Handle<Image>>,
 }
 
 impl Material for HullMaterial {

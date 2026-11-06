@@ -304,6 +304,8 @@ fn spawn(
     for (slot, kind) in emitted.iter_mut().zip(REGION_GRAPHS) {
         *slot = match kind {
             "drone" => LIT_WINDOW * Vec3::new(0.85, 0.92, 1.0),
+            // As the game's: twenty times a window, drawn in the racks' own green.
+            "data" => 20.0 * LIT_WINDOW * Vec3::ONE,
             "living" => LIT_WINDOW * Vec3::new(1.0, 0.8, 0.55),
             "engine" => 8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0),
             "mind" => 0.3 * LIT_WINDOW * Vec3::new(0.6, 0.9, 1.0),
@@ -325,6 +327,7 @@ fn spawn(
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
         pipe_tiles: None,
         pipe_light: None,
+        rack_faces: None,
     });
     let aztec = aztecs.add(Aztec { to_star, ..default() }.material());
     let offices = aztecs.add(Aztec { to_star, windows: Some(Windows::default()), ..default() }.material());

@@ -74,6 +74,16 @@ impl Default for Tubes {
 }
 
 impl Tubes {
+    /// The hull material's `(tube_cell, tube_depth, tube_guide)` for a region of this hive. Its
+    /// guide lights are the region's lamp, in their own hue.
+    pub fn hull_tubes(&self) -> (Vec4, Vec4, Vec4) {
+        (
+            Vec4::new(self.hex_m, 0.5 * self.bore_m, self.tape_m, 0.0),
+            Vec4::new(self.depth_m, self.drone_m, self.open, self.loaded),
+            Vec4::new(self.guide_pitch_m, 0.0, 0.0, 0.0),
+        )
+    }
+
     pub fn material(&self) -> TubesMaterial {
         TubesMaterial {
             uniforms: TubesUniform {

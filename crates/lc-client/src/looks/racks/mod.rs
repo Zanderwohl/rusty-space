@@ -76,7 +76,7 @@ impl Default for Racks {
             spread: 0.18,
             roughness: 0.45,
             metallic: 0.3,
-            glow: Vec3::new(0.15, 1.0, 0.3) * 3.0,
+            glow: Vec3::new(0.06, 1.0, 0.15) * 3.0,
             day_glow: 0.0,
             glass_f0: 0.06,
             glass_roughness: 0.1,
@@ -92,7 +92,31 @@ impl Default for Racks {
     }
 }
 
+/// The hull material's racks: `(rack, rack_lean, rack_hall, rack_face, rack_paint, rack_glow)`.
+pub struct HullRacks {
+    pub rack: Vec4,
+    pub lean: Vec4,
+    pub hall: Vec4,
+    pub face: Vec4,
+    pub paint: Vec4,
+    pub glow: Vec4,
+}
+
 impl Racks {
+    /// The hull material's settings for a region of these racks. Its faces glow at the region's
+    /// lamp in [`Self::glow`]'s hue.
+    pub fn hull_racks(&self) -> HullRacks {
+        let hue = self.glow / self.glow.dot(Vec3::new(0.2126, 0.7152, 0.0722)).max(1.0e-6);
+        HullRacks {
+            rack: Vec4::new(self.rack_m, self.server_m, self.post_m, self.groove_m),
+            lean: Vec4::new(self.post_lean, self.groove_lean, self.tilt_deg.to_radians(), 0.0),
+            hall: Vec4::new(self.depth_m, self.aisle_m, self.fan_m, 0.0),
+            face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::count() as f32, self.day_glow),
+            paint: self.paint.extend(self.spread),
+            glow: hue.extend(self.glass_f0),
+        }
+    }
+
     /// Bakes the faces; see [`faces::bake`].
     pub fn material(&self, images: &mut Assets<Image>) -> RacksMaterial {
         RacksMaterial {

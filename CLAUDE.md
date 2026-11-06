@@ -83,6 +83,10 @@ or a better type removes the comment that would have explained it.
 
 Cap a module at **1000 lines of code**, tests excluded. Past that, split by responsibility.
 
+Shaders are exempt. A WGSL file can share only binding-free helpers through `#import`, so a
+material's shader holds every look that reads its bindings; splitting it would scatter one
+material across files that cannot stand alone.
+
 A module may raise its own cap by saying so in its module doc, with the reason:
 
 ```rust
