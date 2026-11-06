@@ -3,7 +3,7 @@
 //! a pattern clear of its edges:
 //!
 //! - a slab's six faces, each a [`ChartKind::Rect`]; on its four sides v runs up its z, and its
-//!   two faces across z are its ends;
+//!   two faces across z are its ends, z being whichever of its axes [`oriented`] picks;
 //! - a cylinder's or frustum's side, a [`ChartKind::Band`] around its axis, and its ends, each a
 //!   [`ChartKind::Disc`];
 //! - a capsule's side, a band, and its hemispheres, each a [`ChartKind::Dome`] laid out about its
@@ -74,17 +74,29 @@ fn across(p: DVec3, far: bool) -> DVec2 {
 
 /// `shape` turned so its charts' axis is the one they are laid out about, and the turn from the
 /// part's frame into that shape's: evaluate the charts at `turn * p`, and carry a tangent back by
-/// its transpose. Every primitive's axis is its own x but an ellipsoid's, which has none of its
-/// own: its caps go about whichever of its axes runs most along `up`, in the part's frame, so a
-/// habitat's roof is its top however the part is turned. The turn is a cyclic permutation of the
-/// axes, so it keeps a chart right-handed.
+/// its transpose. A round primitive's axis is its own x, its ends its own. An ellipsoid and a slab
+/// have no axis that must be theirs, so theirs is whichever runs most along `up`, in the part's
+/// frame: an ellipsoid's caps go about it, and a slab's ends are across it with its sides' v up it.
+/// So a habitat's roof is its top, and decks stand up, however the part is turned. The turn is a
+/// cyclic permutation of the axes, so it keeps a chart right-handed.
 pub fn oriented(shape: &Shape, up: DVec3) -> (Shape, DMat3) {
-    let Shape::Ellipsoid { semi_axes } = *shape else { return (*shape, DMat3::IDENTITY) };
-    let a = up.abs().max_position();
-    let (b, c) = ((a + 1) % 3, (a + 2) % 3);
     let row = |i: usize| DVec3::from_array(std::array::from_fn(|k| if k == i { 1.0 } else { 0.0 }));
-    let turn = DMat3::from_cols(row(a), row(b), row(c)).transpose();
-    (Shape::Ellipsoid { semi_axes: DVec3::new(semi_axes[a], semi_axes[b], semi_axes[c]) }, turn)
+    let a = up.abs().max_position();
+    match *shape {
+        // Its axis is x.
+        Shape::Ellipsoid { semi_axes } => {
+            let (b, c) = ((a + 1) % 3, (a + 2) % 3);
+            let turn = DMat3::from_cols(row(a), row(b), row(c)).transpose();
+            (Shape::Ellipsoid { semi_axes: DVec3::new(semi_axes[a], semi_axes[b], semi_axes[c]) }, turn)
+        }
+        // Its axis is z.
+        Shape::Slab { edges, corner } => {
+            let (b, c) = ((a + 1) % 3, (a + 2) % 3);
+            let turn = DMat3::from_cols(row(b), row(c), row(a)).transpose();
+            (Shape::Slab { edges: DVec3::new(edges[b], edges[c], edges[a]), corner }, turn)
+        }
+        _ => (*shape, DMat3::IDENTITY),
+    }
 }
 
 /// Which chart of `shape` holds `p`, in the part's frame: the one whose surface is nearest.
@@ -324,6 +336,18 @@ mod tests {
         assert!(chart(DVec3::new(0.0, 0.0, 10.0)).end, "its top is a cap");
         assert!(chart(DVec3::new(0.0, 0.0, -10.0)).end, "its bottom is a cap");
         assert!(!chart(DVec3::new(50.0, 0.0, 0.0)).end, "its tip is on the band");
+        assert!(turn.determinant() > 0.0, "a turn, not a reflection");
+    }
+
+    /// A slab mounted with its thin x outward and up: its broad faces across x are its ends.
+    #[test]
+    fn a_slab_takes_its_ends_across_the_axis_most_up() {
+        let flat = Shape::Slab { edges: DVec3::new(0.25, 6.3, 12.5), corner: 0.0 };
+        let up = DVec3::new(0.8, 0.0, 0.6);
+        let (shape, turn) = oriented(&flat, up);
+        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p);
+        assert!(chart(DVec3::new(0.125, 1.0, 2.0)).end, "its broad face is an end");
+        assert!(!chart(DVec3::new(0.0, 0.0, 6.25)).end, "its narrow edge is a side");
         assert!(turn.determinant() > 0.0, "a turn, not a reflection");
     }
 
