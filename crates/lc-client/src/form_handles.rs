@@ -419,19 +419,19 @@ pub fn lens(ui: &Ui, shown: &Shown, surface: &FormSurface) -> Option<Lens> {
     (ui.view == ViewMode::Form).then(|| Lens { orbit: ui.form.orbit.held_to(&extent), extent, rect })
 }
 
-/// Alt for the finer snapping steps; Shift to stretch an axis at fixed volume.
+/// Alt for the finer snapping steps. Shift stretches an axis at fixed volume, and holds a carried
+/// part to its parent's midlines.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Modifiers {
     pub fine: bool,
     pub keep_volume: bool,
+    pub align: bool,
 }
 
 impl Modifiers {
     pub fn of(keys: &ButtonInput<KeyCode>) -> Self {
-        Self {
-            fine: keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
-            keep_volume: keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
-        }
+        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+        Self { fine: keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]), keep_volume: shift, align: shift }
     }
 }
 
@@ -608,7 +608,7 @@ impl Bit {
 }
 
 /// A unit mesh along +y, laid from `from` to `to`, `width` meters across.
-fn laid(from: DVec3, to: DVec3, width: f64) -> Transform {
+pub(crate) fn laid(from: DVec3, to: DVec3, width: f64) -> Transform {
     let span = to - from;
     Transform {
         translation: ((from + to) * 0.5).as_vec3(),

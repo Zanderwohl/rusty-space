@@ -702,7 +702,7 @@ the ship.
 
 | handle | looks like | does |
 |---|---|---|
-| carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing |
+| carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does, at the point under the pointer. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing. See §Carrying |
 | axes | a red, green and blue line along the part's own axes, square ends | that one dimension, the volume going with it. Shift keeps the volume and lets the others give way. Snapped as a ratio. A reshape, done in place |
 | size | a line along the part's diagonal, ending in a ball | grows or shrinks it **at fixed proportions**, snapped |
 | twist | one ring | twist, about what twist turns the part about: its parent's normal through its foot, or its parent's axis when it encloses. Not its own axis, which a tilt takes off it |
@@ -731,10 +731,30 @@ the client, so tuning the feel is a data change:
 | volume | the R10 series: ten steps per decade, each about 26% larger than the last, anchored at `min_part_m3`. The modifier gives R40 |
 | proportions | ratios on the same series |
 | twist and tilt | 15°, and 5° with the modifier |
-| anchor | the parent's axes and their diagonals, and free with the modifier |
+| anchor | free: the point under the pointer. Shift holds it to the parent's midlines |
 | standoff | tenths of the child's reach, and hundredths with the modifier |
 
 The modifier is Alt, since Shift keeps an axis handle's volume. The table is `snap::SNAPS`.
+
+### Carrying
+
+- **A midline is a center plane of the parent**, across one of the two of its axes the surface
+  under the pointer does not face along. With Shift a carried part goes to the nearer of the two,
+  and to both, the face's center, within `snap::MIDDLE` of the face's half-width of it. Each is a
+  plane through the parent's center, so the anchor's direction still exits on it. They are drawn on
+  the parent as loops while Shift is held, on the handles' layer.
+- **A part lying along its parent keeps its heading in the ship's frame**: its axis is the heading
+  laid into the surface's tangent plane, and the side it lay on stays against the surface. So an
+  engine strapped along a side and firing aft still fires aft on the keel. It is centered on the
+  pointer, its foot a reach back along the heading, unless that falls over an edge onto a face
+  turned more than 10° from the one under the pointer, where it hangs by its foot at the pointer
+  instead. A part standing out of its parent keeps its twist and tilt, as before. Which it is
+  is read off it when it is picked up: its axis within 45° of its parent's normal stands.
+- **Space turns it**: standing, lying fore and aft, lying aft and fore, lying across, standing. A
+  part laid down by Space rests on the surface, its standoff the half-extent it lies on over its
+  reach; one picked up lying keeps the standoff it had.
+- A part dropped on a mirrored copy is anchored on its original at the reflected point, so its own
+  copy lands under the pointer.
 
 A ladder of ratios rather than fixed amounts means the same handle is fine on a 500 m ship and on a
 50 km one. The server never snaps anything. A console command or a hand-built target may ask for any

@@ -160,17 +160,37 @@ const PARALLEL: f64 = 1e-9;
 
 /// Axis along `normal`, y along the parent's y projected across it, or its z where the y is
 /// parallel.
-pub(super) fn normal_frame(normal: DVec3) -> DMat3 {
+pub fn normal_frame(normal: DVec3) -> DMat3 {
     let across = |v: DVec3| v - normal * normal.dot(v);
     let y = across(DVec3::Y);
     let y = if y.length() > PARALLEL { y } else { across(DVec3::Z) }.normalize();
     DMat3::from_cols(normal, y, normal.cross(y))
 }
 
-fn twist_tilt(twist: f64, tilt: DVec2) -> DMat3 {
+pub fn twist_tilt(twist: f64, tilt: DVec2) -> DMat3 {
     let (s, c) = libm::sincos(twist);
     let twist = DMat3::from_cols(DVec3::X, DVec3::new(0.0, c, s), DVec3::new(0.0, -s, c));
     twist * rotation_vector(DVec3::new(0.0, tilt.x, tilt.y))
+}
+
+/// The twist and tilt [`twist_tilt`] turns into `turn`, a proper rotation: its twist about x, then
+/// a swing about an axis across x. A swing of a half turn leaves the twist undefined, and takes
+/// zero.
+pub fn twist_tilt_of(turn: DMat3) -> (f64, DVec2) {
+    let q = glam::DQuat::from_mat3(&turn);
+    let q = if q.w < 0.0 { -q } else { q };
+    let twist = 2.0 * libm::atan2(q.x, q.w);
+    let (s, c) = libm::sincos(twist);
+    let untwist = DMat3::from_cols(DVec3::X, DVec3::new(0.0, c, -s), DVec3::new(0.0, s, c));
+    let swing = glam::DQuat::from_mat3(&(untwist * turn));
+    let swing = if swing.w < 0.0 { -swing } else { swing };
+    let across = DVec3::new(swing.x, swing.y, swing.z);
+    let sin_half = across.length();
+    if sin_half == 0.0 {
+        return (twist, DVec2::ZERO);
+    }
+    let v = across * (2.0 * libm::atan2(sin_half, swing.w) / sin_half);
+    (twist, DVec2::new(v.y, v.z))
 }
 
 /// θ² below which `sin θ / θ` and `(1 − cos θ) / θ²` are taken from their series. The next terms
@@ -664,6 +684,18 @@ mod tests {
         }
         let half_turn = rotation_vector(DVec3::Y * PI);
         assert!(close(half_turn * DVec3::X, -DVec3::X, 1.0));
+    }
+
+    #[test]
+    fn twist_and_tilt_are_recovered_from_the_turn_they_make() {
+        for twist in [0.0, 0.4, -1.3, 2.9, -3.0] {
+            for tilt in [DVec2::ZERO, DVec2::new(0.3, -0.2), DVec2::new(FRAC_PI_2, 0.0), DVec2::new(-1.0, 2.0)] {
+                let turn = twist_tilt(twist, tilt);
+                let (t, v) = twist_tilt_of(turn);
+                let back = twist_tilt(t, v);
+                assert!((back - turn).abs().to_cols_array().iter().all(|e| *e < 1e-12), "{twist} {tilt}: {back} against {turn}");
+            }
+        }
     }
 
     #[test]

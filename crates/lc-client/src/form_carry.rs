@@ -2,6 +2,11 @@
 //! whatever part the pointer meets, and the next click puts it down. New parts come off the
 //! palette the same way, and a drop on the palette deletes. Each move is an unsettled edit from
 //! where it was picked up, so the whole carry is one entry in the history.
+//!
+//! It goes where the pointer meets the parent, and Shift holds it to the parent's midlines. A part
+//! lying along its parent keeps its heading in the ship's frame and the side it lies on, and is
+//! centered on the pointer, so an engine firing aft still fires aft on another face. Space turns
+//! it through [`Orient`]'s cycle.
 
 use std::collections::BTreeSet;
 
@@ -9,16 +14,16 @@ use bevy::input::mouse::MouseButton;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::input::EguiWantsInput;
-use glam::{DMat3, DVec3};
+use glam::{DMat3, DVec2, DVec3};
 use lc_world::fitting::Balance;
-use lc_world::form::place::{Pose, Side};
+use lc_world::form::place::{Pose, Side, normal_frame, twist_tilt_of};
 use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Kind, Mount, Part, PartId, Placement, Primitive};
 
 use crate::action::Action;
 use crate::app::Ui;
 use crate::draft::{Draft, Edit, What};
-use crate::form_handles::{Lens, Modifiers, hit_except, lens, pick_part};
+use crate::form_handles::{Lens, Modifiers, hit_except, lens, original, pick_part};
 use crate::form_view::{FormSurface, Shown};
 use crate::input::Requested;
 use crate::snap;
@@ -59,6 +64,105 @@ pub struct Carry {
     /// What it cannot hang from: itself and what hangs from it.
     pub subtree: BTreeSet<PartId>,
     pub float: Float,
+    pub orient: Orient,
+    /// The midlines it is held to, while Shift holds it.
+    pub guide: Option<Guide>,
+}
+
+/// How a carried part is turned as it moves from face to face.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Orient {
+    /// Its axis out of the surface, turned as its placement says.
+    Standing { twist: f64, tilt: DVec2 },
+    /// Its axis along the surface, as near `axis` (ship frame) as the surface allows, with its own
+    /// `down` (a unit axis of its frame) against the surface. `rest` seats it on the surface
+    /// rather than at the standoff it was carried with.
+    Lying { axis: DVec3, down: DVec3, rest: bool },
+}
+
+/// Past this the axis is nearer along the surface than out of it.
+const STANDING_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// Normals closer than this, about 10°, are one face.
+const SAME_FACE_COS: f64 = 0.985;
+
+/// A heading the surface turns nearly square to is no heading on it.
+const LEAST_ALONG: f64 = 1e-6;
+
+impl Orient {
+    /// What Space turns it to: standing, lying fore and aft either way, lying across.
+    pub fn next(self) -> Orient {
+        let lying = |axis| Orient::Lying { axis, down: DVec3::NEG_Z, rest: true };
+        match self {
+            Orient::Standing { .. } => lying(DVec3::X),
+            Orient::Lying { axis, .. } if axis.x > STANDING_COS => lying(DVec3::NEG_X),
+            Orient::Lying { axis, .. } if axis.x < -STANDING_COS => lying(DVec3::Y),
+            Orient::Lying { .. } => Orient::Standing { twist: 0.0, tilt: DVec2::ZERO },
+        }
+    }
+
+    /// As a part already hangs: `rotation` its own, `normal` its parent's at its anchor, both in
+    /// the ship's frame.
+    fn of(placement: &Placement, rotation: DMat3, normal: DVec3) -> Orient {
+        let axis = rotation.x_axis;
+        if axis.dot(normal).abs() >= STANDING_COS {
+            return Orient::Standing { twist: placement.twist, tilt: placement.tilt };
+        }
+        let down = [DVec3::Y, DVec3::NEG_Y, DVec3::Z, DVec3::NEG_Z]
+            .into_iter()
+            .max_by(|a, b| (rotation * *a).dot(-normal).total_cmp(&(rotation * *b).dot(-normal)))
+            .unwrap_or(DVec3::NEG_Z);
+        Orient::Lying { axis, down, rest: false }
+    }
+}
+
+/// A parent's midlines: the center planes across its axes `axes`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Guide {
+    pub host: PartId,
+    pub axes: [usize; 2],
+}
+
+/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame.
+struct Seat {
+    anchor: DVec3,
+    twist: f64,
+    tilt: DVec2,
+    standoff: Option<f64>,
+}
+
+impl Seat {
+    /// `heading` is a lying part's axis already in the host's frame.
+    fn on(host: &Piece, target: DVec3, child: &lc_world::form::primitive::Shape, orient: Orient, heading: DVec3) -> Seat {
+        let standing = |twist, tilt| Seat { anchor: target.normalize_or(DVec3::X), twist, tilt, standoff: None };
+        let Orient::Lying { down, rest, .. } = orient else {
+            let Orient::Standing { twist, tilt } = orient else { unreachable!() };
+            return standing(twist, tilt);
+        };
+        let along = |normal: DVec3| {
+            let v = heading - normal * normal.dot(heading);
+            (v.length() > LEAST_ALONG).then(|| v.normalize())
+        };
+        let under = host.shape.exit(target.normalize_or(DVec3::X)).normal;
+        let Some(first) = along(under) else { return standing(0.0, DVec2::ZERO) };
+        // Its center over the target, so its foot a reach back along the heading, unless that is
+        // over an edge, where it hangs by its foot at the target instead.
+        let reach = child.reach();
+        let back = target - first * reach;
+        let over = host.shape.exit(back.normalize_or(DVec3::X));
+        let (foot, exit) = if over.normal.dot(under) >= SAME_FACE_COS {
+            (back, over)
+        } else {
+            (target, host.shape.exit(target.normalize_or(DVec3::X)))
+        };
+        let axis = along(exit.normal).unwrap_or(first);
+        let own = DMat3::from_cols(DVec3::X, -down, DVec3::X.cross(-down));
+        let wanted = DMat3::from_cols(axis, exit.normal, axis.cross(exit.normal)) * own.transpose();
+        let (twist, tilt) = twist_tilt_of(normal_frame(exit.normal).transpose() * wanted);
+        let half = child.extent(DMat3::IDENTITY, 0.0);
+        let standoff = rest.then(|| (half * down).abs().max_element() / reach);
+        Seat { anchor: foot.normalize_or(DVec3::X), twist, tilt, standoff }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -94,7 +198,13 @@ impl Carry {
         let inverse = Pose { position: about.rotation.transpose() * -about.position, rotation: about.rotation.transpose() };
         let pieces = sdf.pieces().iter().filter(|p| subtree.contains(&p.part)).map(|p| Piece { pose: inverse.then(&p.pose), ..p.clone() }).collect();
         let depth_m = lens.project(about.position).map(|(_, depth)| depth);
-        Some(Carry { was: Some(part), part, hung: true, subtree, float: Float { pieces, rotation: about.rotation, depth_m } })
+        let placement = part.placement?;
+        let Mount::Attached { anchor, .. } = placement.mount else { return None };
+        let (_, host) = original(sdf, placement.parent)?;
+        let normal = host.pose.rotation * host.shape.exit(anchor.normalize_or(DVec3::X)).normal;
+        let orient = Orient::of(&placement, about.rotation, normal);
+        let float = Float { pieces, rotation: about.rotation, depth_m };
+        Some(Carry { was: Some(part), part, hung: true, subtree, float, orient, guide: None })
     }
 
     pub fn new_part(draft: &Draft, kind: Kind, primitive: Primitive, balance: &Balance) -> Option<Carry> {
@@ -102,7 +212,13 @@ impl Carry {
         let part = *draft.add(mind, kind, primitive, DVec3::X, balance).ok()?.after.first()?;
         let piece = Piece { part: part.id, side: Side::Original, kind, shape: part.shape(balance.min_part_m3), pose: Pose::IDENTITY };
         let float = Float { pieces: vec![piece], rotation: DMat3::IDENTITY, depth_m: None };
-        Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]), float })
+        let orient = Orient::Standing { twist: 0.0, tilt: DVec2::ZERO };
+        Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]), float, orient, guide: None })
+    }
+
+    /// Space: on to the next of [`Orient::next`].
+    pub fn turn(&mut self) {
+        self.orient = self.orient.next();
     }
 
     /// Hangs it from the part under `at`, or floats it. The edit, if anything changed.
@@ -111,18 +227,35 @@ impl Carry {
         let Some((index, point)) = hit_except(sdf, origin, direction, 10.0 * lens.extent.size_m(), &self.subtree) else {
             return self.unhang();
         };
-        let piece = &sdf.pieces()[index];
-        let anchor = snap::anchor(piece.pose.to_local(point), keys.fine);
-        let part = match self.was {
+        let hit = &sdf.pieces()[index];
+        // An anchor names a point on the original, and a mirror's copy is its reflection.
+        let flip = |v: DVec3| if hit.side == Side::Mirror { v * DVec3::new(1.0, -1.0, 1.0) } else { v };
+        let (_, host) = original(sdf, hit.part)?;
+        let mut target = host.pose.to_local(flip(point));
+        let normal = host.shape.exit(target.normalize_or(DVec3::X)).normal;
+        self.guide = keys.align.then(|| Guide { host: hit.part, axes: snap::across(normal) });
+        if keys.align {
+            target = snap::midline(target, normal, host.shape.extent(DMat3::IDENTITY, 0.0));
+        }
+        let unturned = match self.was {
             Some(was) => {
                 let placement = was.placement?;
-                let Mount::Attached { standoff, .. } = placement.mount else { return None };
-                let mount = Mount::Attached { anchor, standoff };
-                Part { placement: Some(Placement { parent: piece.part, mount, ..placement }), ..was }
+                Part { placement: Some(Placement { parent: hit.part, ..placement }), ..was }
             }
             // Sized against what it hangs from.
-            None => Part { id: self.part.id, ..*draft.add(piece.part, self.part.kind, self.part.primitive, anchor, balance).ok()?.after.first()? },
+            None => Part { id: self.part.id, ..*draft.add(hit.part, self.part.kind, self.part.primitive, target, balance).ok()?.after.first()? },
         };
+        let heading = match self.orient {
+            Orient::Lying { axis, .. } => host.pose.rotation.transpose() * flip(axis),
+            Orient::Standing { .. } => DVec3::ZERO,
+        };
+        let seat = Seat::on(host, target, &unturned.shape(balance.min_part_m3), self.orient, heading);
+        let mut placement = unturned.placement?;
+        let Mount::Attached { standoff, .. } = placement.mount else { return None };
+        placement.mount = Mount::Attached { anchor: seat.anchor, standoff: seat.standoff.unwrap_or(standoff) };
+        placement.twist = seat.twist;
+        placement.tilt = seat.tilt;
+        let part = Part { placement: Some(placement), ..unturned };
         if self.hung && part == self.part {
             return None;
         }
@@ -133,6 +266,7 @@ impl Carry {
 
     /// Floats it, taking it off whatever it hung from.
     fn unhang(&mut self) -> Option<Edit> {
+        self.guide = None;
         if !self.hung {
             return None;
         }
@@ -209,7 +343,9 @@ pub fn carry(
     surface: Res<FormSurface>,
     mut carried: ResMut<Carried>,
     grabbed: Res<crate::form_handles::Grabbed>,
-    mut seen: Local<Option<Vec2>>,
+    typing: em_ui::Typing,
+    // Where the pointer was and what was held when it last followed.
+    mut seen: Local<(Option<Vec2>, Option<Modifiers>)>,
     mut out: MessageWriter<Requested>,
 ) {
     let balance = Balance::DEFAULT;
@@ -241,16 +377,21 @@ pub fn carry(
         let Some(id) = pick_part(sdf, &lens, at) else { return };
         out.write(Requested(Action::SelectPart(Some(id))));
         carried.0 = Carry::pick_up(draft, sdf, &lens, id);
-        *seen = Some(at);
+        seen.0 = Some(at);
         return;
     }
     let Some(carry) = carried.0.as_mut() else { return };
-    let Some(at) = cursor.filter(|at| Some(*at) != *seen) else { return };
-    *seen = Some(at);
+    let modifiers = Modifiers::of(&keys);
+    let turned = keys.just_pressed(KeyCode::Space) && !typing.active();
+    if turned {
+        carry.turn();
+    }
+    let Some(at) = cursor.filter(|at| turned || Some(*at) != seen.0 || Some(modifiers) != seen.1) else { return };
+    *seen = (Some(at), Some(modifiers));
     if controls.under_pointer() || !crate::form_view::on_picture(&surface, at) {
         return;
     }
-    if let Some(edit) = carry.follow(draft, sdf, &lens, at, Modifiers::of(&keys), &balance) {
+    if let Some(edit) = carry.follow(draft, sdf, &lens, at, modifiers, &balance) {
         out.write(Requested(Action::EditForm(Ok(edit))));
     }
 }
@@ -380,6 +521,82 @@ mod tests {
         lens.project(DVec3::new(0.0, 0.0, 33.0)).unwrap().0
     }
 
+    /// The starting form's storage top, toward the bow and port of the habitat on it.
+    fn on_deck(x: f64, y: f64) -> DVec3 {
+        let Some(lc_world::form::primitive::Shape::Slab { edges, .. }) = Form::starting().parts.iter().find(|p| p.id == PartId(1)).map(|p| p.shape(B.min_part_m3)) else { panic!() };
+        DVec3::new(x, y, edges.z / 2.0)
+    }
+
+    fn placed(draft: &Draft, id: PartId) -> Piece {
+        let sdf = Sdf::new(&draft.form, &B).unwrap();
+        original(&sdf, id).unwrap().1.clone()
+    }
+
+    #[test]
+    fn a_part_goes_where_the_pointer_meets_its_parent_and_keeps_its_heading() {
+        let mut draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let data = PartId(5);
+        let before = placed(&draft, data);
+        let mut carry = Carry::pick_up(&draft, &sdf, &lens, data).unwrap();
+        assert!(matches!(carry.orient, Orient::Lying { .. }), "slung fore and aft under the keel");
+        let point = on_deck(150.0, 60.0);
+        let at = lens.project(point).unwrap().0;
+        let edit = carry.follow(&draft, &sdf, &lens, at, Modifiers::default(), &B).unwrap();
+        apply(&mut draft, &edit);
+        assert_eq!(draft.part(data).unwrap().placement.unwrap().parent, PartId(1));
+        let after = placed(&draft, data);
+        let center = after.pose.position;
+        assert!((center.x - point.x).abs() < 2.0 && (center.y - point.y).abs() < 2.0, "centered on the pointer: {center}");
+        assert!(center.z > point.z, "on top of the deck: {center}");
+        let (was, now) = (before.pose.rotation.x_axis, after.pose.rotation.x_axis);
+        assert!(now.dot(was) > 1.0 - 1e-9, "still fore and aft the same way: {now} against {was}");
+    }
+
+    #[test]
+    fn shift_holds_a_carried_part_to_its_parents_midline() {
+        let mut draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let data = PartId(5);
+        let mut carry = Carry::pick_up(&draft, &sdf, &lens, data).unwrap();
+        let at = lens.project(on_deck(150.0, 60.0)).unwrap().0;
+        let shift = Modifiers { align: true, ..Modifiers::default() };
+        let edit = carry.follow(&draft, &sdf, &lens, at, shift, &B).unwrap();
+        assert_eq!(carry.guide, Some(Guide { host: PartId(1), axes: [0, 1] }));
+        apply(&mut draft, &edit);
+        let center = placed(&draft, data).pose.position;
+        assert!(center.y.abs() < 1e-6 && (center.x - 150.0).abs() < 2.0, "on the keel line: {center}");
+        let edit = carry.follow(&draft, &sdf, &lens, at, Modifiers::default(), &B).unwrap();
+        assert_eq!(carry.guide, None);
+        apply(&mut draft, &edit);
+        assert!((placed(&draft, data).pose.position.y - 60.0).abs() < 2.0, "and free again");
+    }
+
+    #[test]
+    fn space_lays_a_part_down_on_its_side_fore_and_aft_then_across() {
+        let mut draft = Draft::new(Form::starting());
+        let (sdf, lens) = scene(&draft);
+        let at = lens.project(on_deck(150.0, 60.0)).unwrap().0;
+        // Far enough toward the bow that lying aft its foot is over the edge.
+        let mut carry = Carry::new_part(&draft, Kind::Engine, crate::draft::PRIMITIVES[3], &B).unwrap();
+        let lay = |carry: &mut Carry, draft: &mut Draft| {
+            carry.turn();
+            let edit = carry.follow(draft, &sdf, &lens, at, Modifiers::default(), &B).unwrap();
+            apply(draft, &edit);
+            let piece = placed(draft, carry.part.id);
+            apply(draft, &carry.cancel().unwrap());
+            piece
+        };
+        for axis in [DVec3::X, DVec3::NEG_X, DVec3::Y] {
+            let piece = lay(&mut carry, &mut draft);
+            assert!(piece.pose.rotation.x_axis.dot(axis) > 1.0 - 1e-9, "along {axis}: {}", piece.pose.rotation.x_axis);
+            let low = piece.pose.position.z - piece.shape.extent(piece.pose.rotation, 0.0).z;
+            assert!((low - on_deck(0.0, 0.0).z).abs() < 1e-6, "resting on the deck: {low}");
+        }
+        let piece = lay(&mut carry, &mut draft);
+        assert!(piece.pose.rotation.x_axis.z > 1.0 - 1e-9, "and standing again");
+    }
+
     #[test]
     fn a_part_picked_up_and_put_down_is_one_move() {
         let mut draft = Draft::new(Form::reference());
@@ -393,7 +610,7 @@ mod tests {
         let placement = draft.part(data).unwrap().placement.unwrap();
         assert_eq!(placement.parent, PartId(4));
         let Mount::Attached { anchor, standoff } = placement.mount else { panic!() };
-        assert!(anchor.z > 0.0 && anchor == snap::anchor(anchor, false), "on the deck's top: {anchor}");
+        assert!(anchor.z > 0.0 && (anchor.length() - 1.0).abs() < 1e-12, "on the deck's top: {anchor}");
         assert_eq!(standoff, -0.3, "the standoff comes along");
         let down = carry.put_down().unwrap();
         assert!(down.settled && down.what == What::Move);
@@ -406,7 +623,8 @@ mod tests {
         let (sdf, lens) = scene(&draft);
         let mut deck = Carry::pick_up(&draft, &sdf, &lens, PartId(4)).unwrap();
         // It looks through itself to the storage, where it already hangs.
-        assert!(deck.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B).is_none());
+        let through = deck.follow(&draft, &sdf, &lens, top(&lens), Modifiers::default(), &B);
+        assert!(through.is_none_or(|e| e.after[0].placement.unwrap().parent == PartId(1)));
         let engine = lens.project(sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position).unwrap().0;
         let edit = deck.follow(&draft, &sdf, &lens, engine, Modifiers::default(), &B).unwrap();
         assert_eq!(edit.after[0].placement.unwrap().parent, PartId(2), "onto the engine");
