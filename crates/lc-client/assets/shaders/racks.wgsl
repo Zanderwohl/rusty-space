@@ -1,6 +1,7 @@
 // Server racks. On a side, servers a deck tall stacked between rounded rack posts, a V-groove
 // between each server and the next, each server its own shade and tipped a little so they catch
-// the light one by one. On the top and bottom, a data hall from above: rows of rack tops, each
+// the light one by one, and wears a face of glass from a baked set: a mirror by day, glowing by
+// night. On the top and bottom, a data hall from above: rows of rack tops, each
 // with a fan, between sunken aisles. Each face is mapped in its own frame (u, v, n), meters, with
 // v up on a side. Look development: crates/lc-client/src/looks/racks.rs.
 
@@ -35,8 +36,13 @@ struct RacksUniform {
     hall: vec4<f32>,
     /// The servers' paint, linear, and how far each strays from it in `w`.
     paint: vec4<f32>,
-    /// `(roughness, metallic, 0, 0)`.
+    /// `(roughness, metallic, glass_f0, glass_roughness)`.
     surface: vec4<f32>,
+    /// `(width_m, height_m, count, day_glow)`: a face's extent, centered on its server, how many
+    /// faces there are, and on a face the star lights, what of the glow is left.
+    face: vec4<f32>,
+    /// Lit glass, linear.
+    glow: vec4<f32>,
     /// Toward the star, and its turn in `w`.
     to_star: vec4<f32>,
     star_color: vec4<f32>,
@@ -49,6 +55,9 @@ struct RacksUniform {
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> m: RacksUniform;
+/// A face a layer: `(cover, glow, 0, 1)`, row 0 at the face's top.
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var faces: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var faces_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 /// A sunken aisle's wall, across the face.
@@ -57,6 +66,8 @@ const AISLE_WALL_M: f32 = 0.3;
 const RING_M: f32 = 0.25;
 const RING_LEAN: f32 = 0.5;
 const HUB_SHARE: f32 = 0.22;
+/// What face glass mirrors of the sky: dim above, dimmer below.
+const SKY: vec3<f32> = vec3<f32>(0.012, 0.016, 0.024);
 
 /// The star, turned about world Y at `to_star.w` rad/s.
 fn turned(to_star: vec4<f32>) -> vec3<f32> {
@@ -178,14 +189,44 @@ fn lit(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>, base: vec3<f32>) -> vec3<f
     return radiance;
 }
 
-/// A side: servers between posts, a groove between each and the next.
-fn side(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>) -> vec3<f32> {
+/// Face glass of normal `n`: dark, all reflection.
+fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>) -> vec3<f32> {
+    let f0 = vec3<f32>(m.surface.z);
+    let roughness = m.surface.w;
+    let r = reflect(-e, n);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, e), 0.0), 5.0);
+    var radiance = SKY * fresnel * mix(0.3, 1.0, 0.5 + 0.5 * r.y);
+    radiance += m.planet_color.rgb * fresnel * planet_seen(r, roughness);
+    let star = turned(m.to_star);
+    if (dot(star, face_n) > 0.0) {
+        radiance += m.star_color.rgb * specular(n, star, e, f0, roughness);
+    }
+    return radiance;
+}
+
+/// A side: servers between posts, each wearing a face, a groove between each and the next.
+/// `dx` and `dy` are the face coordinates' screen derivatives, taken where control flow is uniform.
+fn side(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec3<f32> {
     let rack = m.rack.x;
     let server = m.rack.y;
     let seed = mix_hash(u32(m.finish.y), f.id);
-    let id = mix_hash(mix_hash(seed, u32(i32(floor(p.x / rack)))), u32(i32(floor(p.y / server))));
+    let cell = floor(p / vec2<f32>(rack, server));
+    let id = mix_hash(mix_hash(seed, u32(i32(cell.x))), u32(i32(cell.y)));
     let base = shade(id);
-    var radiance = lit(normalize(frame * tipped(id, m.lean.z)), e, surface, base);
+    let n = normalize(frame * tipped(id, m.lean.z));
+    var radiance = lit(n, e, surface, base);
+
+    // The face, centered on the server and as wide and tall as `face` says.
+    let size = m.face.xy;
+    let local = p - cell * vec2<f32>(rack, server) - 0.5 * (vec2<f32>(rack, server) - size);
+    let uv = vec2<f32>(local.x, size.y - local.y) / size;
+    let flip = vec2<f32>(1.0, -1.0) / size;
+    let layer = i32(pcg(id + 13u) % u32(m.face.z));
+    let texel = textureSampleGrad(faces, faces_sampler, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), layer, dx * flip, dy * flip);
+    let inside = select(0.0, 1.0, all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0)));
+    let day = smoothstep(-0.05, 0.2, dot(turned(m.to_star), surface));
+    let glowing = m.glow.rgb * texel.g * mix(1.0, m.face.w, day);
+    radiance = mix(radiance, glass(n, e, surface) + glowing, texel.r * inside);
 
     // Each wall faces away from the groove's floor: the one above it down, the one below it up.
     let gy = offset(p.y, server);
@@ -251,11 +292,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
     let e = normalize(view.world_position - in.world_position);
     let pixel = max(fwidth(p), vec2<f32>(1.0e-4));
+    let dx = dpdx(p);
+    let dy = dpdy(p);
     var radiance: vec3<f32>;
     if (abs(f.n.y) > 0.5) {
         radiance = hall(p, f, frame, surface, e, pixel);
     } else {
-        radiance = side(p, f, frame, surface, e, pixel);
+        radiance = side(p, f, frame, surface, e, pixel, dx, dy);
     }
     return vec4<f32>(radiance * m.finish.x, 1.0);
 }

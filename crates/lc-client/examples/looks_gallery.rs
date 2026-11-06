@@ -173,7 +173,7 @@ fn spawn(
     let mut habitat = |unit_box| aztecs.add(Aztec { to_star, star_spin, unit_box, ..Aztec::habitat() }.material());
     let (habitat_box, habitat_ovoid) = (habitat(true), habitat(false));
     let obsidian = obsidians.add(Obsidian { to_star, star_spin, ..default() }.material());
-    let rack = racks.add(Racks { to_star, star_spin, ..default() }.material());
+    let rack = racks.add(Racks { to_star, star_spin, ..default() }.material(&mut images));
 
     // A row a look, a column a size, far enough apart that a box's neighbors stay small behind it.
     let largest = args.sizes.iter().copied().fold(0.0, f32::max);

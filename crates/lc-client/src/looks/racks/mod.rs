@@ -1,6 +1,9 @@
 //! Server racks: on the sides, a wall of servers a deck tall between raised rack posts, a groove
 //! between each server and the next; on the top and bottom, a data hall from above, rows of rack
-//! tops with a fan in each, between sunken aisles. Fully procedural; see `assets/shaders/racks.wgsl`.
+//! tops with a fan in each, between sunken aisles. Each server wears one of [`faces`], glass that
+//! mirrors the sky by day and glows green by night. See `assets/shaders/racks.wgsl`.
+
+pub mod faces;
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -34,6 +37,13 @@ pub struct Racks {
     pub spread: f32,
     pub roughness: f32,
     pub metallic: f32,
+    /// A face's lit glass, linear: past 1, so it blooms.
+    pub glow: Vec3,
+    /// On a face the star lights, what of the glow is left.
+    pub day_glow: f32,
+    /// The face glass's reflectance face-on, and its roughness.
+    pub glass_f0: f32,
+    pub glass_roughness: f32,
     pub to_star: Vec3,
     pub star: f32,
     /// The star's turn about world Y, rad/s; see [`super::spin`].
@@ -65,6 +75,10 @@ impl Default for Racks {
             spread: 0.18,
             roughness: 0.45,
             metallic: 0.3,
+            glow: Vec3::new(0.15, 1.0, 0.3) * 3.0,
+            day_glow: 0.0,
+            glass_f0: 0.06,
+            glass_roughness: 0.1,
             to_star: super::direction(30.0, -50.0),
             star: 3.0,
             star_spin: 0.0,
@@ -78,14 +92,18 @@ impl Default for Racks {
 }
 
 impl Racks {
-    pub fn material(&self) -> RacksMaterial {
+    /// Bakes the faces; see [`faces::bake`].
+    pub fn material(&self, images: &mut Assets<Image>) -> RacksMaterial {
         RacksMaterial {
+            faces: images.add(faces::bake()),
             uniforms: RacksUniform {
                 rack: Vec4::new(self.rack_m, self.server_m, self.post_m, self.groove_m),
                 lean: Vec4::new(self.post_lean, self.groove_lean, self.tilt_deg.to_radians(), 0.0),
                 hall: Vec4::new(self.depth_m, self.aisle_m, self.fan_m, 0.0),
                 paint: self.paint.extend(self.spread),
-                surface: Vec4::new(self.roughness, self.metallic, 0.0, 0.0),
+                surface: Vec4::new(self.roughness, self.metallic, self.glass_f0, self.glass_roughness),
+                face: Vec4::new(faces::FACE_M.x, faces::FACE_M.y, faces::count() as f32, self.day_glow),
+                glow: self.glow.extend(0.0),
                 to_star: self.to_star.extend(self.star_spin),
                 star_color: Vec3::splat(self.star).extend(0.0),
                 to_planet: self.to_planet.extend(self.planet_deg.to_radians()),
@@ -104,6 +122,8 @@ pub struct RacksUniform {
     hall: Vec4,
     paint: Vec4,
     surface: Vec4,
+    face: Vec4,
+    glow: Vec4,
     to_star: Vec4,
     star_color: Vec4,
     to_planet: Vec4,
@@ -116,6 +136,9 @@ pub struct RacksUniform {
 pub struct RacksMaterial {
     #[uniform(0, visibility(vertex, fragment))]
     uniforms: RacksUniform,
+    #[texture(1, dimension = "2d_array", visibility(fragment))]
+    #[sampler(2, visibility(fragment))]
+    faces: Handle<Image>,
 }
 
 impl Material for RacksMaterial {
