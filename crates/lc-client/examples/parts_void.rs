@@ -17,7 +17,7 @@
 //! | `--sun <deg>` | the star's elevation |
 //! | `--exposure <stops>` | open the exposure this many stops, as the game's flag does, and take the game's night fill, 0.3% of the star rather than 8%: a bay's lamps by night |
 //! | `--frames <n>` | frames after every mesh lands |
-//! | `--stay` | keep the window open to look around, as the game does: right-drag or the arrows orbit, the wheel or `=` and `-` zoom, `]` and `[` open and close the exposure half a stop, `\` puts it back, `P` photographs to the path |
+//! | `--stay` | keep the window open to look around, as the game does: right-drag or the arrows orbit, the wheel or `=` and `-` zoom, `]` and `[` open and close the exposure half a stop, `\` puts it back, `W` and `S` raise and lower the star and `A` and `D` swing it round, `P` photographs to the path |
 
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
@@ -201,7 +201,7 @@ fn main() {
         })
         .add_systems(Startup, request_tiles)
         .add_systems(Update, spawn.before(HullMeshSystems))
-        .add_systems(Update, (photograph.after(HullMeshSystems), (orbit, expose)))
+        .add_systems(Update, (photograph.after(HullMeshSystems), (orbit, expose, steer_star)))
         .add_systems(Last, take_texels)
         .run();
 }
@@ -415,7 +415,14 @@ fn spawn(
         Bloom::NATURAL,
         Tonemapping::TonyMcMapface,
         Transform::from_translation(toward * distance).looking_at(Vec3::ZERO, Vec3::Y),
-        Orbit { yaw: args.yaw_deg.to_radians(), pitch: args.pitch_deg.to_radians(), distance, stops: args.exposure_stops },
+        Orbit {
+            yaw: args.yaw_deg.to_radians(),
+            pitch: args.pitch_deg.to_radians(),
+            distance,
+            stops: args.exposure_stops,
+            star_elevation: sun,
+            star_azimuth: side.z.atan2(side.x),
+        },
     ));
 }
 
@@ -426,6 +433,9 @@ struct Orbit {
     pitch: f32,
     distance: f32,
     stops: f32,
+    /// Radians above the horizon, and around world Y from +X toward +Z.
+    star_elevation: f32,
+    star_azimuth: f32,
 }
 
 /// As the game's look and zoom: `lc_client::input`'s sensitivity, its wheel notch and its keys.
@@ -475,6 +485,41 @@ fn orbit(
     orbit.distance /= ZOOM_PER_NOTCH.powf(notches);
     let toward = Vec3::new(orbit.yaw.sin() * orbit.pitch.cos(), orbit.pitch.sin(), orbit.yaw.cos() * orbit.pitch.cos());
     *transform = Transform::from_translation(toward * orbit.distance).looking_at(Vec3::ZERO, Vec3::Y);
+}
+
+const STAR_RAD_S: f32 = 0.8;
+
+/// Steers the star by W, S, A and D, held, and turns every hull material's `to_star` with it; the
+/// shadow maps follow, as they read it each frame.
+fn steer_star(
+    scene: Res<Scene>,
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut camera: Query<&mut Orbit>,
+    mut hulls: ResMut<Assets<HullMaterial>>,
+) {
+    if !scene.args.stay {
+        return;
+    }
+    let Ok(mut orbit) = camera.single_mut() else { return };
+    let held = |key| f32::from(keys.pressed(key));
+    let turn = Vec2::new(held(KeyCode::KeyD) - held(KeyCode::KeyA), held(KeyCode::KeyW) - held(KeyCode::KeyS)) * STAR_RAD_S * time.delta_secs();
+    if turn != Vec2::ZERO {
+        orbit.star_azimuth += turn.x;
+        orbit.star_elevation = (orbit.star_elevation + turn.y).clamp(-FRAC_PI_2, FRAC_PI_2);
+        let (e, a) = (orbit.star_elevation, orbit.star_azimuth);
+        let to_star = Vec3::new(e.cos() * a.cos(), e.sin(), e.cos() * a.sin());
+        let ids: Vec<_> = hulls.ids().collect();
+        for id in ids {
+            if let Some(mut hull) = hulls.get_mut(id) {
+                let fill = hull.uniforms.to_star.w;
+                hull.uniforms.to_star = to_star.extend(fill);
+            }
+        }
+    }
+    if [KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD].into_iter().any(|k| keys.just_released(k)) {
+        info!("parts_void: star at {:.0} degrees up, {:.0} round", orbit.star_elevation.to_degrees(), orbit.star_azimuth.to_degrees());
+    }
 }
 
 /// Opens or closes every hull material's exposure, taking the game's night fill whenever it is
