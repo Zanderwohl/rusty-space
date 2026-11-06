@@ -12,8 +12,7 @@ pub enum Shortfall {
     Energy,
     /// This part's step would begin with no drone to do it.
     NoDrones(PartId),
-    /// A scaffold that cannot stand before anything is taken apart: it hangs from a part the
-    /// round builds or takes apart whole.
+    /// A scaffold that cannot be built before anything is taken apart.
     Scaffold(PartId),
 }
 

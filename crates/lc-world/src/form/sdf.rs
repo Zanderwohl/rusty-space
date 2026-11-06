@@ -325,8 +325,6 @@ impl Shape {
             Shape::Cylinder { radius, length } => axis * (length / 2.0) + across * radius + margin,
             Shape::Torus { major, minor } => across * major + minor + margin,
             Shape::Frustum { length, start, end } => axis * (length / 2.0) + across * start.max(end) + margin,
-            // A box's reach along each axis is its furthest corner's, and a distance offset adds
-            // the margin to every direction.
             Shape::Trapezoid { lower, upper, height, length } => {
                 let corners = trapezoid_corners(lower, upper, height, length).map(|c| (rotation * c).abs());
                 corners.into_iter().fold(DVec3::ZERO, DVec3::max) + margin

@@ -27,8 +27,7 @@ pub enum Shape {
     Torus { major: f64, minor: f64 },
     /// `start` is the radius of the end at −x, `end` of the one at +x.
     Frustum { length: f64, start: f64, end: f64 },
-    /// Widths along y of the faces at −z and +z, its height along z and length along x. Centered
-    /// on its box, so at half its height rather than its centroid.
+    /// Widths of the faces at −z and +z. Centered on its box, not its centroid.
     Trapezoid { lower: f64, upper: f64, height: f64, length: f64 },
 }
 
@@ -359,7 +358,7 @@ mod tests {
         match *shape {
             Shape::Ellipsoid { .. } | Shape::Slab { .. } => ray_cast(shape, fine / 4),
             Shape::Trapezoid { lower, upper, height, length } => {
-                // Exact as a polytope: its six faces, each a quad of its corners, outward.
+                // Exact as a polytope, sharing nothing with the closed forms.
                 let (x, z, l, u) = (length / 2.0, height / 2.0, lower / 2.0, upper / 2.0);
                 let c = |sx: f64, sy: f64, top: bool| {
                     DVec3::new(sx * x, sy * if top { u } else { l }, if top { z } else { -z })

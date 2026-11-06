@@ -130,8 +130,7 @@ fn boxed(shape: &Shape) -> Option<Shape> {
 
 /// Which chart of `shape` holds `p`, in the part's frame: the one whose surface is nearest.
 pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
-    // By its own faces, not its box's, so a steep slope is a side all the way up. Its charts are
-    // its box's: a slanted side is the box's side at the same y.
+    // Chosen by its own faces, so a steep slope is a side all the way up.
     if let Shape::Trapezoid { lower, upper, height, length } = *shape {
         let (m, k) = ((lower + upper) / 4.0, (upper - lower) / (2.0 * height));
         let off = [p.x.abs() - length / 2.0, (p.y.abs() - m - k * p.z) / k.hypot(1.0), p.z.abs() - height / 2.0];

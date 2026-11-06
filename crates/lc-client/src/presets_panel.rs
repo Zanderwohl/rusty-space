@@ -516,8 +516,8 @@ mod tests {
         form
     }
 
-    /// The Cluster's ids put an engine where the reference's only drone is, which planned as that
-    /// drone taken apart and nothing left to build with until the parts were matched by kind.
+    /// The Cluster's ids put an engine on the reference's only drone, which left nothing to build
+    /// with unless parts are matched by kind.
     #[test]
     fn a_layout_is_matched_to_the_ship_by_kind() {
         let mut shard = Presets::default();

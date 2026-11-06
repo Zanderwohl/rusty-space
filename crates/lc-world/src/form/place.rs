@@ -140,9 +140,8 @@ impl Form {
 /// on the anchor, displaced along the normal by `standoff` reaches, and tilt pivots it about that
 /// foot. So a child grows away from its parent, and follows the anchor out when the parent grows.
 ///
-/// Seated, the child is turned and then moved so its lowest point along the normal, its
-/// [`Shape::support`], is on the anchor, displaced the same way. Untilted that point is the foot, so
-/// the two agree; tilted, a seated part rolls on the surface rather than pivoting into it.
+/// Seated, the child is turned first and then moved so its [`Shape::support`] along the inward
+/// normal is on the anchor. Untilted that is the foot, so the two agree.
 pub fn relative(parent: &Shape, child: &Shape, placement: &Placement) -> Pose {
     let turn = twist_tilt(placement.twist, placement.tilt);
     match placement.mount {
@@ -162,16 +161,15 @@ pub fn relative(parent: &Shape, child: &Shape, placement: &Placement) -> Pose {
     }
 }
 
-/// Where an attached part placed at `pose` meets its parent, in the frame `pose` is in: its foot,
-/// or seated, its lowest point along the parent's normal. That normal is the part's own frame
-/// turned back through its twist and tilt, so the parent is not needed. `None` when enclosing.
+/// Where an attached part meets its parent, in `pose`'s frame. The normal is recovered from the
+/// part's own twist and tilt, so the parent is not needed.
 pub fn meeting(shape: &Shape, pose: &Pose, side: Side, placement: &Placement) -> Option<DVec3> {
     let Mount::Attached { seated, .. } = placement.mount else { return None };
     if !seated {
         return Some(pose.position - pose.rotation.x_axis * shape.reach());
     }
     let down = -(twist_tilt(placement.twist, placement.tilt).transpose() * DVec3::X);
-    // A mirrored copy's frame carries a flip of its own y, which every primitive is symmetric in.
+    // A mirror's frame flips its own y; every primitive is symmetric in it.
     let down = if side == Side::Mirror { down * DVec3::new(1.0, -1.0, 1.0) } else { down };
     Some(pose.position + pose.rotation * shape.support(down))
 }
@@ -198,9 +196,7 @@ pub fn twist_tilt(twist: f64, tilt: DVec2) -> DMat3 {
     twist * rotation_vector(DVec3::new(0.0, tilt.x, tilt.y))
 }
 
-/// The twist and tilt [`twist_tilt`] turns into `turn`, a proper rotation: its twist about x, then
-/// a swing about an axis across x. A swing of a half turn leaves the twist undefined, and takes
-/// zero.
+/// The inverse of [`twist_tilt`]. A half-turn swing leaves the twist undefined; it takes zero.
 pub fn twist_tilt_of(turn: DMat3) -> (f64, DVec2) {
     let q = glam::DQuat::from_mat3(&turn);
     let q = if q.w < 0.0 { -q } else { q };
@@ -245,18 +241,15 @@ pub struct Exit {
 }
 
 impl Shape {
-    /// Where an attached child's anchor puts it on this shape: along the anchor, or `seated`,
-    /// along the anchor scaled by the half-extents.
+    /// Seated, the anchor is scaled by the half-extents first.
     pub fn anchored(&self, anchor: DVec3, seated: bool) -> Exit {
         let direction = if seated { anchor * self.extent(DMat3::IDENTITY, 0.0) } else { anchor };
         // Scaled first, so an anchor whose squared length overflows still has a direction.
         self.exit((direction / direction.abs().max_element()).normalize())
     }
 
-    /// The point of the surface furthest along the unit `u`, in the shape's frame. A component of
-    /// `u` within [`FLAT`] of zero picks the middle of a flat, so a part resting on a face rests on
-    /// its middle: the frame a lying part is turned by leaves rounding there, which would
-    /// otherwise pick an end.
+    /// The surface point furthest along the unit `u`. A component within [`FLAT`] of zero takes the
+    /// middle of a flat, so rounding in a lying part's frame cannot pick an end.
     pub fn support(&self, u: DVec3) -> DVec3 {
         let sign = |x: f64| if x > FLAT { 1.0 } else if x < -FLAT { -1.0 } else { 0.0 };
         let radial = DVec3::new(0.0, u.y, u.z);
@@ -279,7 +272,7 @@ impl Shape {
                 let high = DVec2::new(y * upper / 2.0, z);
                 let across = DVec2::new(u.y, u.z);
                 let (a, b) = (low.dot(across), high.dot(across));
-                // Square to a slanted side, or to the top of a box, the middle of that face.
+                // Square to a face: its middle.
                 let point = if (a - b).abs() <= FLAT * (height + lower + upper) {
                     (low + high) / 2.0
                 } else if a > b {
@@ -358,8 +351,7 @@ impl Shape {
             }
             Shape::Slab { edges, corner } => slab_exit(edges / 2.0 - corner, corner, d),
             Shape::Trapezoid { lower, upper, height, length } => {
-                // Convex, so the ray leaves through whichever face's plane it reaches first. A
-                // slanted side is |y| = m + k z.
+                // Convex: the first face plane the ray reaches. A slanted side is |y| = m + k z.
                 let (m, k) = ((lower + upper) / 4.0, (upper - lower) / (2.0 * height));
                 let faces = [
                     (d.x.abs(), length / 2.0, DVec3::X * d.x.signum()),
@@ -790,8 +782,7 @@ mod tests {
         for shape in primitives().iter().map(|p| p.at(1.7)) {
             for u in anchors().into_iter().map(DVec3::normalize).chain([DVec3::new(0.3, -0.8, 0.52).normalize()]) {
                 let s = shape.support(u);
-                // Along its axis a torus is lowest on a whole circle, and its support is that
-                // circle's center, the hole its foot is.
+                // Along its axis a torus's support is its hole's center, off the surface.
                 let ring = matches!(shape, Shape::Torus { .. }) && DVec3::new(0.0, u.y, u.z).length() <= FLAT;
                 if !ring {
                     assert!(inside(&shape, s * (1.0 - 1e-9)) && !inside(&shape, s * (1.0 + 1e-6) + u * 1e-6), "{shape:?} {u}: {s}");

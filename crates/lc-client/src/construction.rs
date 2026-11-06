@@ -423,8 +423,7 @@ fn sized(piece: &Piece, form: &Form, share: f64) -> Option<Piece> {
         return None;
     }
     let shape = p.primitive.at(p.primitive.scale(volume_m3));
-    // Every point of a shape scales with it about its center, so about where it meets its parent
-    // too.
+    // A shape scales about its center, so also about where it meets its parent.
     let pose = match p.placement.and_then(|placement| meeting(&piece.shape, &piece.pose, piece.side, &placement)) {
         Some(at) => Pose { position: at + (piece.pose.position - at) * (shape.reach() / piece.shape.reach()), ..piece.pose },
         None => piece.pose,

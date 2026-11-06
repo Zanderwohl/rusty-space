@@ -38,7 +38,6 @@ impl Capacities {
         for part in &form.parts {
             let v = part.volume_m3 * f64::from(copies[&part.id]);
             match part.kind {
-                // A scaffold holds what storage does, for as long as it stands.
                 Kind::Storage | Kind::Scaffold => storage_m3 += v,
                 Kind::Drone => drone_m3 += v,
                 Kind::Engine => engine_m3 += v,

@@ -205,8 +205,7 @@ impl Draft {
 
     /// Edit against another form of the ship's, keeping the edits: the target of a round once one
     /// is accepted, and wherever a cancel left the ship after that. When the ship becomes what the
-    /// round it was edited against leaves, the round struck its scaffolds, so they go from the draft
-    /// too; a cancel leaves them, for Apply to resume.
+    /// round leaves, its scaffolds were struck and go from the draft; a cancel keeps them.
     pub fn rebase(&mut self, mut ship: Form) {
         ship.parts.sort_by_key(|p| p.id);
         if self.ship.settled() == ship {

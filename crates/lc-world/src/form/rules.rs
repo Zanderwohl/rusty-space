@@ -126,7 +126,7 @@ pub(crate) fn face(shape: &Shape) -> (f64, f64) {
         Shape::Frustum { length, start, end } => {
             if end >= start { (length / 2.0, end) } else { (-length / 2.0, start) }
         }
-        // The disk on its axis, held in by its top and bottom and by its slanted sides.
+        // The disk on its axis inside the end face.
         Shape::Trapezoid { lower, upper, height, length } => {
             let (m, k) = ((lower + upper) / 4.0, (upper - lower) / (2.0 * height));
             (length / 2.0, (height / 2.0).min(m / k.hypot(1.0)))

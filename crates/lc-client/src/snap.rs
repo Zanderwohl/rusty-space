@@ -85,8 +85,7 @@ pub fn standoff(reaches: f64, fine: bool) -> f64 {
 /// goes to the face's center.
 pub const MIDDLE: f64 = 0.15;
 
-/// The two axes of the parent's frame a point on its surface can slide along: all but the one its
-/// `normal` lies most along. Their center planes are the midlines Shift holds a part to.
+/// The two parent axes a point on a face slides along: all but the one `normal` lies most along.
 pub fn across(normal: DVec3) -> [usize; 2] {
     match normal.abs().max_position() {
         0 => [1, 2],
@@ -95,10 +94,9 @@ pub fn across(normal: DVec3) -> [usize; 2] {
     }
 }
 
-/// `point`, on a surface whose normal there is `normal`, taken onto the nearer of the midlines
-/// across it, and onto both near the middle. `half` is the parent's half-extents, so nearness is
-/// in shares of the face. Every midline is a plane through the parent's center, so the direction
-/// to the result still exits on it.
+/// `point` taken onto the nearer midline across its face, or both near the middle, nearness in
+/// shares of `half`. A midline is a plane through the center, so the direction to the result still
+/// exits on it.
 pub fn midline(point: DVec3, normal: DVec3, half: DVec3) -> DVec3 {
     let [a, b] = across(normal);
     let share = |i: usize| (point[i] / half[i].max(f64::MIN_POSITIVE)).abs();

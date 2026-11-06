@@ -3,10 +3,8 @@
 //! palette the same way, and a drop on the palette deletes. Each move is an unsettled edit from
 //! where it was picked up, so the whole carry is one entry in the history.
 //!
-//! It goes where the pointer meets the parent, and Shift holds it to the parent's midlines. A part
-//! lying along its parent keeps its heading in the ship's frame and the side it lies on, and is
-//! centered on the pointer, so an engine firing aft still fires aft on another face. Space turns
-//! it through [`Orient`]'s cycle.
+//! Shift holds it to the parent's midlines. A lying part keeps its heading in the ship's frame, so
+//! an engine firing aft still fires aft on another face. Space turns it through [`Orient`]'s cycle.
 
 use std::collections::BTreeSet;
 
@@ -72,11 +70,9 @@ pub struct Carry {
 /// How a carried part is turned as it moves from face to face.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Orient {
-    /// Its axis out of the surface, turned as its placement says.
     Standing { twist: f64, tilt: DVec2 },
-    /// Its axis along the surface, as near `axis` (ship frame) as the surface allows, with its own
-    /// `down` (a unit axis of its frame) against the surface. `rest` seats it on the surface
-    /// rather than at the standoff it was carried with.
+    /// Its axis as near `axis` (ship frame) as the surface allows, with `down`, a unit axis of its
+    /// own frame, against it. `rest` seats it at standoff zero.
     Lying { axis: DVec3, down: DVec3, rest: bool },
 }
 
@@ -120,9 +116,8 @@ pub struct Guide {
     pub axes: [usize; 2],
 }
 
-/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame. A
-/// lying part is seated, so the anchor is `target` in the host's proportions and it rests on its
-/// middle there; a standing one stays hung as it was, so a tilt keeps pivoting where it did.
+/// Where a part goes on `host`, its original copy. A lying part is seated; a standing one stays
+/// hung as it was, so a tilt keeps pivoting where it did.
 struct Seat {
     anchor: DVec3,
     twist: f64,
@@ -132,8 +127,7 @@ struct Seat {
 }
 
 impl Seat {
-    /// `heading` is a lying part's axis already in the host's frame. `hung` is the standoff it was
-    /// carried with and whether that was seated, which a lying part keeps the height of.
+    /// `heading` is in the host's frame. `hung` is the standoff carried and whether it was seated.
     fn on(host: &Piece, target: DVec3, child: &lc_world::form::primitive::Shape, orient: Orient, heading: DVec3, hung: (f64, bool)) -> Seat {
         let anchor = target / host.shape.extent(DMat3::IDENTITY, 0.0);
         let standing = |twist, tilt| {
@@ -213,7 +207,6 @@ impl Carry {
         Some(Carry { was: None, part, hung: false, subtree: BTreeSet::from([part.id]), float, orient, guide: None })
     }
 
-    /// Space: on to the next of [`Orient::next`].
     pub fn turn(&mut self) {
         self.orient = self.orient.next();
     }
@@ -574,7 +567,6 @@ mod tests {
         let mut draft = Draft::new(Form::starting());
         let (sdf, lens) = scene(&draft);
         let at = lens.project(on_deck(150.0, 60.0)).unwrap().0;
-        // Far enough toward the bow that lying aft its foot is over the edge.
         let mut carry = Carry::new_part(&draft, Kind::Engine, crate::draft::PRIMITIVES[3], &B).unwrap();
         let lay = |carry: &mut Carry, draft: &mut Draft| {
             carry.turn();

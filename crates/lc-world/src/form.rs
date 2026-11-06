@@ -23,7 +23,7 @@ pub const MAX_PARTS: usize = 256;
 pub struct PartId(pub u16);
 
 impl PartId {
-    /// One past the highest of `taken`, or the lowest free id once that is the last a `u16` holds.
+    /// One past the highest of `taken`, or the lowest free id where that would overflow.
     pub fn fresh(taken: impl IntoIterator<Item = PartId>) -> PartId {
         let taken: std::collections::BTreeSet<u16> = taken.into_iter().map(|id| id.0).collect();
         match taken.last() {
@@ -59,8 +59,8 @@ pub enum Kind {
     Data,
     Bay,
     Spar(SparMode),
-    /// Storage a round builds before anything is taken apart and takes down once it has built
-    /// everything else, so energy in transit has somewhere to be. Never in the form a round leaves.
+    /// Storage a round builds first and strikes last, to hold energy in transit. Never in the form
+    /// a round leaves.
     Scaffold,
 }
 
@@ -81,8 +81,7 @@ pub enum Primitive {
     /// Length over the radius of the end at −x, and the +x end's radius over it. Zero taper is a
     /// cone.
     Frustum { length: f64, taper: f64 },
-    /// An isosceles trapezoid across y and z, extruded along x. Each over the width of its face at
-    /// −z: the width at +z, the height along z and the length along x. Zero upper is a wedge.
+    /// An isosceles trapezoid across y and z, extruded along x, each ratio over its width at −z.
     Trapezoid { upper: f64, height: f64, length: f64 },
 }
 
@@ -92,10 +91,8 @@ pub enum Mount {
     /// leaves it. `standoff` is along the normal in multiples of the child's [`Shape::reach`];
     /// negative embeds.
     ///
-    /// `seated`, the anchor is in the parent's proportions, its half-extents along each axis, so a
-    /// part a third of the way along a face stays there as the parent stretches, and the child is
-    /// turned first and then rested by its lowest point along the normal rather than hung by its
-    /// foot, so a part lying along its parent lies on it. See [`place::relative`].
+    /// `seated`: the anchor is in the parent's half-extents, so it keeps its share of a face as the
+    /// parent stretches, and the child rests on its lowest point. See [`place::relative`].
     ///
     /// [`Shape::reach`]: primitive::Shape::reach
     Attached { anchor: DVec3, standoff: f64, seated: bool },
@@ -236,7 +233,7 @@ impl std::fmt::Display for FormError {
 impl std::error::Error for FormError {}
 
 impl Form {
-    /// What a round toward this form leaves: it without its scaffolds, which the round strikes.
+    /// Without its scaffolds, which a round strikes.
     pub fn settled(&self) -> Form {
         Form { parts: self.parts.iter().filter(|p| p.kind != Kind::Scaffold).copied().collect() }
     }

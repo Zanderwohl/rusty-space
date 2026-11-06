@@ -11,11 +11,11 @@ use crate::fitting::{Balance, C2};
 use crate::form::capacity::{Capacities, Transfer, part_kg, rebuilt};
 use crate::form::{rules, Form, FormError, Kind, Part, PartId, Placement};
 
-/// A round's phases, in the order they run.
+/// In the order they run, which `Ord` relies on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Phase {
-    /// Storage and drones built before anything is taken apart, so what comes back has room and
-    /// a drone replaced has its successor standing.
+    /// Storage and drones built before anything is taken apart, so returns have room and a
+    /// replaced drone has a successor.
     Prepare,
     Dismantle,
     Move,
@@ -113,8 +113,7 @@ pub enum Refusal {
     /// The build phase costs more than the dismantle phase leaves in storage, or a scaffold more
     /// than is stored as the round begins.
     Energy { short_j: f64 },
-    /// A scaffold that cannot be built before anything is taken apart: it hangs from a part the
-    /// round builds or takes apart whole, or is a copy a mirror adds.
+    /// A scaffold that cannot be built in the prepare phase.
     Scaffold { part: PartId },
 }
 
@@ -154,7 +153,6 @@ pub struct Canceled {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     round: Round,
-    /// The target without its scaffolds, which is what the round leaves.
     settled: Form,
     balance: Balance,
     steps: Vec<Step>,
@@ -302,9 +300,8 @@ pub fn changes(from: &Form, target: &Form, balance: &Balance) -> Vec<(PartId, Ch
     matter.chain(moves.into_iter().map(|id| (id, Change::Move))).collect()
 }
 
-/// Each of `dismantles` in order, its return kept in storage as far as there is room and vented
-/// past it. Room is judged against the capacity the whole phase leaves, so a return is not taken in
-/// by a store that a later step of the same phase takes apart.
+/// Room is judged against the capacity the whole phase leaves, so a return is not taken in by a
+/// store a later step takes apart.
 fn take_apart(
     dismantles: Vec<Pending>,
     phase: Phase,
@@ -349,11 +346,9 @@ fn take_apart(
     Ok(())
 }
 
-/// Which of `builds` run before anything is taken apart, done onto `parts`: storage and drones
-/// that grow or are new, in the builds' order, each if what is stored now pays for it. A part that
-/// grows does so where it stands, and moves after. A new part must hang from one the round keeps
-/// whole and come with the copies it will have. The rest are returned for the build phase, with
-/// the new parts built here, which a move then carries.
+/// Builds the storage and drones that grow or are new ahead of the dismantle phase, each if what is
+/// stored pays for it, and returns the rest. A part grows where it stands and moves after; a new
+/// one must hang from a part the round keeps whole.
 #[allow(clippy::too_many_arguments)]
 fn prepare(
     builds: Vec<Pending>,
@@ -433,13 +428,9 @@ fn prepare(
     Ok((later, prepared))
 }
 
-/// `target` with its parts renumbered so that one the ship lacks takes the id of a ship part of
-/// its kind the target has dropped, or holds as another kind, the largest of each first. A part is
-/// known by its id, so a store dropped here and a store added there would otherwise be taken apart
-/// and built again, where a reshape and a move do the same for the 5% loss on the difference. A
-/// part left on an id another takes moves to a fresh one. An arrangement dropped onto a ship is
-/// matched to it so; the planner itself never renumbers, so the ship it leaves is the target it
-/// was given.
+/// `target` renumbered so a part the ship lacks takes the id of a dropped ship part of its kind,
+/// largest first, which the planner prices as a reshape and a move rather than a rebuild. The
+/// planner never renumbers, so the ship it leaves is the target it was given.
 pub fn matched(from: &Form, mut target: Form) -> Form {
     let by_volume = |a: &&Part, b: &&Part| b.volume_m3.total_cmp(&a.volume_m3).then(a.id.cmp(&b.id));
     let kept = |id: PartId, kind: Kind| from.parts.iter().any(|f| f.id == id && f.kind == kind);
@@ -602,7 +593,7 @@ impl Plan {
         &self.round
     }
 
-    /// What the round leaves: its target, without the scaffolds it struck.
+    /// The target without its scaffolds, which is what the round leaves.
     pub fn target(&self) -> &Form {
         &self.settled
     }
@@ -1224,8 +1215,7 @@ mod tests {
         };
         assert_eq!(solve(&from, &usurped, 0.0).unwrap_err(), Refusal::Mind(PartId(9)));
 
-        // Replacing the only drone with a new one, stored too little to build it first, leaves
-        // nothing to build it with once the old one has paid for it.
+        // Too little stored to build the new drone first leaves none to build it with.
         let replaced = adding(&without(&from, &[2]), &[part(8, Kind::Drone, ROD, 1.0, 1)]);
         let short = 0.5 * energy(&get(&replaced, 8));
         assert_eq!(solve(&from, &replaced, short).unwrap_err(), Refusal::NoDrones { part: PartId(8) });

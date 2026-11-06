@@ -45,8 +45,8 @@ struct GuideRoot(Guide);
 #[derive(Component)]
 struct Segment(usize);
 
-/// Round the plane where `axis` is zero, in the shape's frame: where each ray from its center in
-/// that plane last leaves it, so the loop lies on the surface the anchor is solved on.
+/// Where each ray from the center in the plane `axis` = 0 leaves, so the loop lies on the surface
+/// an anchor is solved on.
 pub fn midline(shape: &Shape, axis: usize) -> Vec<DVec3> {
     let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
     (0..=SEGMENTS)

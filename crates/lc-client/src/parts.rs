@@ -243,7 +243,7 @@ fn prism(lower: f64, upper: f64, height: f64, length: f64) -> Mesh {
     for face in faces {
         let [a, b, cc, d] = face.map(|i| c[i]);
         let mut normal = (b - a).cross(d - a).normalize_or_zero();
-        // A wedge's top face is a line, whose normal is the edge between its sides; it has no area.
+        // A wedge's top face has no area.
         if normal == Vec3::ZERO {
             continue;
         }
