@@ -213,14 +213,18 @@ const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.707, 0.866);
 /// 230, rounded up for a pair that overlap less than fully. A strip lights the far wall of a shaft
 /// 40 m across at about half a lamp.
 const BAY_FLOOD_GAIN: f32 = 300.0;
-/// The hold's own light bounced off every wall and deck, the same everywhere inside it: dim as a
-/// full moon beside the floods, three stops under a floodlit card. Not less: the hull's tone curve
-/// is five stops deep, so exposed for the cards anything darker is black.
-const BAY_BOUNCE: f32 = 0.25;
+/// The hold's own light bounced off every wall and deck, the same everywhere inside it: a stop under
+/// a floodlit card.
+const BAY_BOUNCE: f32 = 1.0;
+/// Every lamp in a hold, this many times what it would be. Not physical: a hold lit as a floodlit
+/// yard is nine stops under the star's light on the hull around it, and black beside it however it
+/// is exposed. So boosted, its bounce is about two and a half stops under sunlit plate.
+const BAY_LAMP_BOOST: f32 = 24.0;
 const BAY_RUNWAY_GAIN: f32 = 12.0;
-/// The lamps themselves, seen: far brighter than what they light.
-const BAY_FLOOD_FIXTURE: f32 = 40.0;
-const BAY_RUNWAY_FIXTURE: f32 = 12.0;
+/// The lamps themselves, seen: a few times brighter than what they light, and no more, so the boost
+/// does not blow them out.
+const BAY_FLOOD_FIXTURE: f32 = 8.0;
+const BAY_RUNWAY_FIXTURE: f32 = 4.0;
 const BAY_RUNWAY_TINT: vec3<f32> = vec3<f32>(0.75, 0.88, 1.0);
 const BAY_RUNWAY_DASH_M: f32 = 3.0;
 
@@ -307,7 +311,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
         return out;
     }
     out.inside = true;
-    let lamp = material.emitted[BAY_REGION].rgb;
+    let lamp = material.emitted[BAY_REGION].rgb * BAY_LAMP_BOOST;
     out.light += lamp * BAY_BOUNCE;
 
     // The runway: four line lamps down the shaft, falling off as lines do.

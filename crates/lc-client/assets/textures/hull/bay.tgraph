@@ -2,7 +2,7 @@ TextureGraphFile(
     format_version: 2,
     metadata: FileMetadata(
         name: "bay hull",
-        description: Some("Bay: industrial blue-gray steel, plain but for grime in patches: no panels, which muddied the forms. Unlit: a slab bay's hold is lit by the lamps the hull material draws in it. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        description: Some("Bay: industrial blue-gray steel, plain but for faint grime in patches a few meters across: no panels, which muddied the forms. Unlit: a slab bay's hold is lit by the lamps the hull material draws in it. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
         authors: [
             "Alexander Lowry",
         ],
@@ -27,13 +27,13 @@ TextureGraphFile(
                 kind: Noise(Noise(
                     dims: D2,
                     seed_offset: 11,
-                    frequency: 4.0,
+                    frequency: 16.0,
                     range: Unsigned,
                     output: Grayscale,
                     kernel: Value,
-                    period: (4, 4, 0),
+                    period: (16, 16, 0),
                     fractal: Fractal(
-                        octaves: 4,
+                        octaves: 2,
                         lacunarity: 2.0,
                         gain: 0.5,
                         mode: Standard,
@@ -47,7 +47,7 @@ TextureGraphFile(
                 kind: ColorRamp(ColorRamp(
                     stops: [
                         ColorStop(
-                            t: 0.5,
+                            t: 0.55,
                             color: Const(Oklch(
                                 l: 0.0,
                                 chroma: 0.0,
@@ -56,9 +56,9 @@ TextureGraphFile(
                             )),
                         ),
                         ColorStop(
-                            t: 0.78,
+                            t: 0.8,
                             color: Const(Oklch(
-                                l: 0.7,
+                                l: 0.4,
                                 chroma: 0.0,
                                 hue: OklabHue(0.0),
                                 alpha: 1.0,
@@ -80,7 +80,7 @@ TextureGraphFile(
                 id: 5,
                 name: "grime color",
                 kind: Color(Oklch(
-                    l: 0.42,
+                    l: 0.48,
                     chroma: 0.025,
                     hue: OklabHue(230.0),
                     alpha: 1.0,
