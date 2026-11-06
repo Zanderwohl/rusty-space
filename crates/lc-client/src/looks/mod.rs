@@ -9,6 +9,7 @@ pub mod aztec;
 pub mod kinds;
 pub mod obsidian;
 pub mod outline;
+pub mod racks;
 pub mod sprue;
 
 use bevy::prelude::*;
@@ -21,6 +22,7 @@ impl Plugin for LooksPlugin {
             MaterialPlugin::<aztec::AztecMaterial>::default(),
             MaterialPlugin::<sprue::SprueMaterial>::default(),
             MaterialPlugin::<obsidian::ObsidianMaterial>::default(),
+            MaterialPlugin::<racks::RacksMaterial>::default(),
         ))
         .add_systems(PostUpdate, outline::outline_roofs.after(bevy::transform::TransformSystems::Propagate));
     }
