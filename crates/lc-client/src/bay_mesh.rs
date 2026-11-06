@@ -1,17 +1,21 @@
-//! A slab bay as built geometry rather than a distance field: a shell open at its +x face, and
-//! inside it a shadow box of flat layers. Truss ribs ring the hold every [`RIB_PITCH_M`]; decks
-//! run front to back out of the two side walls every [`LEVEL_M`], leaving a shaft up the middle
-//! for a craft to come in by, rise or sink to a level and turn aside into a berth. Each berth,
+//! A slab or trapezoid bay as built geometry rather than a distance field: a shell open at its +x
+//! face, and inside it a shadow box of flat layers. Truss ribs ring the hold every
+//! [`RIB_PITCH_M`], following its walls; decks run front to back out of the two side walls every
+//! [`LEVEL_M`], leaving a hall up the middle for a craft to come in by, rise or sink to a level and
+//! turn aside into a berth. Each level's decks reach a share of the hold's width at that height,
+//! so in a trapezoid the hall steps wider or narrower level by level, a terrace. Each berth,
 //! between two ribs on one deck, holds a pad and maybe a cutout card of a primitive's outline.
 //! See `lightcone/docs/32-ship-rendering.md` §The bay.
 //!
 //! Everything inside is the bay's own graph, an industrial steel, but for the lamps and the painted
 //! occupants.
 //!
-//! Laid out in the bay's own frame: x out of the mouth, z its up, y across. Up is whichever of the
-//! part's y and z runs most along the ship's z. The shell's outside wears the storage's aztec
-//! plate in the part's own charts, as any slab would; everything inside is charted on its own
-//! faces. Detail is in meters and does not change with the mesher's resolution.
+//! Laid out in the bay's own frame: x out of the mouth, z its up, y across. A slab's up is whichever
+//! of its y and z runs most along the ship's z; a trapezoid's is its own z, its section's axis,
+//! turned over with the part. The hold's section is a trapezoid either way, a slab's with equal
+//! sides. The shell's outside wears the storage's aztec plate in the part's own charts; everything
+//! inside is charted on its own faces. Detail is in meters and does not change with the mesher's
+//! resolution.
 //!
 //! Lit from inside by the hull material, which finds a fragment's berth from [`HullBay`] by the
 //! same arithmetic as [`Hold`]: runway strips down the shaft's floor and ceiling, and two floods in
@@ -57,7 +61,8 @@ const BUTTRESS_HEAD: f64 = 1.0 / 3.0;
 const BUTTRESS_M: f64 = 0.6;
 const FLANGE_M: f64 = 0.35;
 const PAD_M: f64 = 0.25;
-/// Each side's decks reach this share of the hold's width in, so the shaft is the rest.
+/// Each side's decks reach this share of the hold's width at their own height, so the hall is the
+/// rest.
 const DECK_SHARE: f64 = 0.28;
 /// Past these the pitch stretches, so a bay kilometers long is not tens of thousands of ribs.
 const MAX_SPANS: usize = 48;
@@ -91,21 +96,31 @@ enum Lamp {
 }
 const DISC_SIDES: usize = 20;
 
-/// Whether `piece` is meshed here rather than by the distance field.
+/// Whether `piece` is meshed here rather than by the distance field: a bay that is a slab, or a
+/// trapezoid wide enough at both ends to hold one.
 pub fn takes(piece: &Piece) -> bool {
-    piece.kind == Kind::Bay && matches!(piece.shape, Shape::Slab { .. })
+    piece.kind == Kind::Bay && layout(piece).is_some()
 }
 
-/// The bay's frame in the part's, and its hold. Up is the part's y or z, whichever runs more along
-/// the ship's z.
+/// The bay's frame in the part's, and its hold.
 fn layout(piece: &Piece) -> Option<(DMat3, Hold)> {
-    let Shape::Slab { edges, .. } = piece.shape else { return None };
     let up = piece.pose.rotation.transpose() * DVec3::Z;
-    let u = if up.y.abs() > up.z.abs() { DVec3::Y * up.y.signum() } else { DVec3::Z * if up.z < 0.0 { -1.0 } else { 1.0 } };
+    let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
     // Proper, so a bay-frame triangle keeps its winding in the part's.
-    let frame = DMat3::from_cols(DVec3::X, u.cross(DVec3::X), u);
-    let dims = DVec3::from_array([0, 1, 2].map(|k| edges.dot(frame.col(k).abs())));
-    Some((frame, Hold::new(dims)))
+    let frame = |u: DVec3| DMat3::from_cols(DVec3::X, u.cross(DVec3::X), u);
+    match piece.shape {
+        Shape::Slab { edges, .. } => {
+            let f = frame(if up.y.abs() > up.z.abs() { DVec3::Y * sign(up.y) } else { DVec3::Z * sign(up.z) });
+            let dims = DVec3::from_array([0, 1, 2].map(|k| edges.dot(f.col(k).abs())));
+            Some((f, Hold::new(dims.x, dims.y, dims.y, dims.z)?))
+        }
+        Shape::Trapezoid { lower, upper, height, length } => {
+            let turned = up.z < 0.0;
+            let (bottom, top) = if turned { (upper, lower) } else { (lower, upper) };
+            Some((frame(DVec3::Z * sign(up.z)), Hold::new(length, bottom, top, height)?))
+        }
+        _ => None,
+    }
 }
 
 /// Appends `piece`, which [`takes`], to `out`. `slot` is its place in [`HullBay`]s, if it has one,
@@ -145,8 +160,8 @@ pub fn hull_bay(piece: &Piece) -> Option<HullBay> {
     };
     Some(HullBay {
         to_bay: [row(0), row(1), row(2)],
-        hold: Vec4::new(hold.half.x as f32, hold.back as f32, hold.wide as f32, hold.tall as f32),
-        grid: Vec4::new(hold.spans as f32, hold.levels as f32, hold.reach as f32, seed(piece) as f32),
+        hold: Vec4::new(hold.half.x as f32, hold.back as f32, hold.low as f32, hold.tall as f32),
+        grid: Vec4::new(hold.spans as f32, hold.levels as f32, hold.high as f32, seed(piece) as f32),
     })
 }
 
@@ -215,34 +230,87 @@ fn unit(h: u32) -> f32 {
     (h >> 8) as f32 / 16_777_216.0
 }
 
-/// The cavity and how it is divided. `half` is the shell's half extent; the hold runs x from
-/// `back` to the mouth at `half.x`, y within `±wide` and z within `±tall`.
+/// The cavity and how it is divided. The shell's section is `outer`, counterclockwise in (y, z);
+/// the hold runs x from `back` to the mouth at `half.x` and z within `±tall`, its walls `low` from
+/// the middle at its floor and `high` at its ceiling, straight between.
 struct Hold {
     half: DVec3,
+    outer: [DVec2; 4],
     back: f64,
-    wide: f64,
+    low: f64,
+    high: f64,
     tall: f64,
     spans: usize,
     levels: usize,
-    /// How far each side's decks reach in from its wall.
-    reach: f64,
 }
 
+/// Narrower at either end than this, a hold has no room for a hall and decks either side.
+const NARROWEST_M: f64 = 4.0;
+
 impl Hold {
-    fn new(dims: DVec3) -> Self {
-        let half = dims / 2.0;
-        let wall = WALL_M.min(0.1 * dims.min_element());
-        let (back, wide, tall) = (-half.x + wall, half.y - wall, half.z - wall);
-        let length = half.x - back;
-        Hold {
-            half,
-            back,
-            wide,
-            tall,
-            spans: ((length / RIB_PITCH_M).round() as usize).clamp(1, MAX_SPANS),
-            levels: ((2.0 * tall / LEVEL_M).floor() as usize).clamp(1, MAX_LEVELS),
-            reach: DECK_SHARE * 2.0 * wide,
+    /// A shell `length` along x and `height` tall, `bottom` wide at its floor and `top` at its roof.
+    fn new(length: f64, bottom: f64, top: f64, height: f64) -> Option<Self> {
+        let half = DVec3::new(length, bottom.max(top), height) / 2.0;
+        let outer = [
+            DVec2::new(-bottom / 2.0, -half.z),
+            DVec2::new(bottom / 2.0, -half.z),
+            DVec2::new(top / 2.0, half.z),
+            DVec2::new(-top / 2.0, half.z),
+        ];
+        let wall = WALL_M.min(0.1 * length.min(height).min(bottom.min(top)));
+        let inner = inset(&outer, wall)?;
+        let (low, high, tall) = (inner[1].x, inner[2].x, inner[2].y);
+        if 2.0 * low.min(high) < NARROWEST_M || 2.0 * tall < NARROWEST_M {
+            return None;
         }
+        let back = -half.x + wall;
+        let run = half.x - back;
+        Some(Hold {
+            half,
+            outer,
+            back,
+            low,
+            high,
+            tall,
+            spans: ((run / RIB_PITCH_M).round() as usize).clamp(1, MAX_SPANS),
+            levels: ((2.0 * tall / LEVEL_M).floor() as usize).clamp(1, MAX_LEVELS),
+        })
+    }
+
+    /// The hold's own section, inside the walls, counterclockwise from its floor's -y corner.
+    fn section(&self) -> [DVec2; 4] {
+        let (l, h, t) = (self.low, self.high, self.tall);
+        [DVec2::new(-l, -t), DVec2::new(l, -t), DVec2::new(h, t), DVec2::new(-h, t)]
+    }
+
+    /// How far each wall stands from the middle at height `z`.
+    fn wall(&self, z: f64) -> f64 {
+        self.low + (self.high - self.low) * (z + self.tall) / (2.0 * self.tall)
+    }
+
+    /// Half the hall's width where a deck at height `z` would leave it: [`DECK_SHARE`] of the hold's
+    /// width there, from each wall.
+    fn hall_at(&self, z: f64) -> f64 {
+        self.wall(z) * (1.0 - 2.0 * DECK_SHARE)
+    }
+
+    fn hall(&self, k: usize) -> f64 {
+        self.hall_at(self.floor(k))
+    }
+
+    /// A berth's outer edge: its wall at the floor or the ceiling, whichever leans further in, so
+    /// what stands in it clears the wall.
+    fn edge(&self, k: usize) -> f64 {
+        self.wall(self.floor(k)).min(self.wall(self.ceiling(k)))
+    }
+
+    /// How much of a berth's width, from its edge to the hall, is room for what stands in it.
+    fn room(&self, k: usize) -> f64 {
+        self.edge(k) - self.hall(k)
+    }
+
+    fn middle(&self, k: usize) -> f64 {
+        (self.edge(k) + self.hall(k)) / 2.0
     }
 
     /// Where rib `i` stands, from 0 at the back wall to `spans` at the mouth.
@@ -366,87 +434,69 @@ impl Builder<'_> {
         self.cuboid((a + b) / 2.0, [x, y, x.cross(y)], DVec3::new(length / 2.0, width / 2.0, width / 2.0), region);
     }
 
+    /// The outline's sides and back outside, a rim at the mouth between it and the hold, and the
+    /// hold's walls and back wall inside.
     fn shell(&mut self, hold: &Hold) {
-        let outside = region(Kind::Storage);
-        let inside = region(Kind::Bay);
-        let DVec3 { x: ex, y: ey, z: ez } = hold.half;
-        let (x, y, z) = (DVec3::X, DVec3::Y, DVec3::Z);
-        self.rect(-x * ex, z * ez, y * ey, outside, Chart::Hull);
-        self.rect(y * ey, z * ez, x * ex, outside, Chart::Hull);
-        self.rect(-y * ey, x * ex, z * ez, outside, Chart::Hull);
-        self.rect(z * ez, x * ex, y * ey, outside, Chart::Hull);
-        self.rect(-z * ez, y * ey, x * ex, outside, Chart::Hull);
-
-        // The mouth's rim, a frame between the shell's edge and the hold's.
-        let (w, t) = (hold.wide, hold.tall);
-        let mouth = x * ex;
-        let band_z = (ez - t) / 2.0;
-        let band_y = (ey - w) / 2.0;
-        self.rect(mouth + z * (t + band_z), y * ey, z * band_z, outside, Chart::Hull);
-        self.rect(mouth - z * (t + band_z), y * ey, z * band_z, outside, Chart::Hull);
-        self.rect(mouth + y * (w + band_y), y * band_y, z * t, outside, Chart::Hull);
-        self.rect(mouth - y * (w + band_y), y * band_y, z * t, outside, Chart::Hull);
-
-        let mid = (hold.back + ex) / 2.0;
-        let run = (ex - hold.back) / 2.0;
-        self.rect(x * hold.back, y * w, z * t, inside, Chart::Own);
-        self.rect(DVec3::new(mid, 0.0, -t), x * run, y * w, inside, Chart::Own);
-        self.rect(DVec3::new(mid, 0.0, t), y * w, x * run, inside, Chart::Own);
-        self.rect(DVec3::new(mid, -w, 0.0), z * t, x * run, inside, Chart::Own);
-        self.rect(DVec3::new(mid, w, 0.0), x * run, z * t, inside, Chart::Own);
+        let (outside, inside) = (region(Kind::Storage), region(Kind::Bay));
+        let (back, mouth) = (hold.back, hold.half.x);
+        let at = |p: DVec2, x: f64| DVec3::new(x, p.x, p.y);
+        let (o, i) = (hold.outer, hold.section());
+        self.quad([at(o[0], -mouth), at(o[3], -mouth), at(o[2], -mouth), at(o[1], -mouth)], outside, Chart::Hull);
+        self.quad(i.map(|p| at(p, back)), inside, Chart::Own);
+        for k in 0..4 {
+            let (a, b) = (o[k], o[(k + 1) % 4]);
+            let (c, d) = (i[k], i[(k + 1) % 4]);
+            self.quad([at(a, -mouth), at(b, -mouth), at(b, mouth), at(a, mouth)], outside, Chart::Hull);
+            self.quad([at(a, mouth), at(b, mouth), at(d, mouth), at(c, mouth)], outside, Chart::Hull);
+            self.quad([at(d, back), at(c, back), at(c, mouth), at(d, mouth)], inside, Chart::Own);
+        }
     }
 
-    /// Each rib a ring of truss in its own plane: a chord along the walls, an inner chord
-    /// chamfered at the corners, and struts between them, upright and diagonal in turn.
+    /// Each rib a ring of truss in its own plane following the walls: a chord along them, an inner
+    /// chord inset from them and chamfered at the corners, and struts between, upright to the walls
+    /// and diagonal in turn.
     fn ribs(&mut self, hold: &Hold) {
-        let spar = region(Kind::Bay);
-        let (w, t) = (hold.wide, hold.tall);
-        let width = RIB_WIDTH_M.min(0.25 * w.min(t));
-        let (iw, it) = (w - width, t - width);
-        let chamfer = (2.0 * width).min(0.3 * iw.min(it));
-        let (ow, ot) = (w - CHORD_M / 2.0, t - CHORD_M / 2.0);
-        // Counterclockwise in (y, z) from the +y wall's foot; each straight side with the wall it
-        // faces, as the point on that wall square to a point on the side.
-        let inner = [
-            DVec2::new(iw, -it + chamfer),
-            DVec2::new(iw, it - chamfer),
-            DVec2::new(iw - chamfer, it),
-            DVec2::new(-iw + chamfer, it),
-            DVec2::new(-iw, it - chamfer),
-            DVec2::new(-iw, -it + chamfer),
-            DVec2::new(-iw + chamfer, -it),
-            DVec2::new(iw - chamfer, -it),
-        ];
-        let walls: [fn(DVec2, DVec2) -> DVec2; 4] = [
-            |p, o| DVec2::new(o.x, p.y),
-            |p, o| DVec2::new(p.x, o.y),
-            |p, o| DVec2::new(-o.x, p.y),
-            |p, o| DVec2::new(p.x, -o.y),
-        ];
-        let corners = [DVec2::new(ow, ot), DVec2::new(-ow, ot), DVec2::new(-ow, -ot), DVec2::new(ow, -ot)];
-        let o = DVec2::new(ow - CHORD_M / 2.0, ot - CHORD_M / 2.0);
+        let steel = region(Kind::Bay);
+        let section = hold.section();
+        let width = RIB_WIDTH_M.min(0.25 * hold.low.min(hold.high).min(hold.tall));
+        let (Some(along), Some(ends), Some(inner)) = (inset(&section, CHORD_M / 2.0), inset(&section, CHORD_M), inset(&section, width)) else {
+            return;
+        };
+        let shortest = (0..4).map(|k| inner[k].distance(inner[(k + 1) % 4])).fold(f64::INFINITY, f64::min);
+        let chamfer = (2.0 * width).min(0.3 * shortest);
+        // Each inner corner cut back along both its edges: where its chamfer starts and ends.
+        let cut: Vec<(DVec2, DVec2)> = (0..4)
+            .map(|k| {
+                let (p, prev, next) = (inner[k], inner[(k + 3) % 4], inner[(k + 1) % 4]);
+                (p + (prev - p).normalize() * chamfer, p + (next - p).normalize() * chamfer)
+            })
+            .collect();
+        let ring: Vec<DVec2> = cut.iter().flat_map(|&(a, b)| [a, b]).collect();
         for i in 1..=hold.spans {
             let x = hold.rib(i).min(hold.half.x - RIB_DEPTH_M / 2.0);
             let at = |p: DVec2| DVec3::new(x, p.x, p.y);
             for k in 0..8 {
-                self.chord(at(inner[k]), at(inner[(k + 1) % 8]));
+                self.chord(at(ring[k]), at(ring[(k + 1) % 8]));
             }
             for k in 0..4 {
-                self.chord(at(corners[k]), at(corners[(k + 1) % 4]));
-                // Side k runs from inner[2k] to inner[2k + 1]; the chamfer after it meets corner k.
-                let (a, b) = (inner[2 * k], inner[2 * k + 1]);
+                let next = (k + 1) % 4;
+                self.chord(at(along[k]), at(along[next]));
+                // Side k runs between corner k's chamfer and the next's, square to wall k.
+                let (a, b) = (cut[k].1, cut[next].0);
+                let inward = (inner[next] - inner[k]).normalize().perp();
+                let wall = |p: DVec2| p - inward * (width - CHORD_M);
                 let panels = ((a.distance(b) / (1.5 * width)).ceil() as usize).clamp(1, MAX_PANELS);
                 for j in 0..=panels {
                     let p = a.lerp(b, j as f64 / panels as f64);
-                    self.beam(at(p), at(walls[k](p, o)), WEB_M, DVec3::X, spar);
+                    self.beam(at(p), at(wall(p)), WEB_M, DVec3::X, steel);
                     if j < panels {
                         let q = a.lerp(b, (j + 1) as f64 / panels as f64);
-                        let (from, to) = if j % 2 == 0 { (p, walls[k](q, o)) } else { (q, walls[k](p, o)) };
-                        self.beam(at(from), at(to), WEB_M, DVec3::X, spar);
+                        let (from, to) = if j % 2 == 0 { (p, wall(q)) } else { (q, wall(p)) };
+                        self.beam(at(from), at(to), WEB_M, DVec3::X, steel);
                     }
                 }
-                let bend = (b + inner[(2 * k + 2) % 8]) / 2.0;
-                self.beam(at(bend), at(corners[k] - corners[k].signum() * CHORD_M / 2.0), WEB_M, DVec3::X, spar);
+                let bend = (cut[next].0 + cut[next].1) / 2.0;
+                self.beam(at(bend), at(ends[next]), WEB_M, DVec3::X, steel);
             }
         }
     }
@@ -465,24 +515,27 @@ impl Builder<'_> {
         self.cuboid((a + b) / 2.0, [d, DVec3::X, across], half, spar);
     }
 
+    /// Each level's decks from the walls in to its hall, their outer edges on the walls' slope, and
+    /// a rail along every hall edge, the floor's included.
     fn decks(&mut self, hold: &Hold) {
-        let (deck, spar) = (region(Kind::Bay), region(Kind::Bay));
+        let steel = region(Kind::Bay);
         let length = hold.half.x - hold.back;
-        let axes = [DVec3::X, DVec3::Y, DVec3::Z];
+        let middle = hold.back + length / 2.0;
         for k in 1..hold.levels {
-            let top = hold.floor(k);
+            let (top, hall) = (hold.floor(k), hold.hall(k));
+            let under = top - DECK_M;
             for side in [-1.0, 1.0] {
-                let y = side * (hold.wide - hold.reach / 2.0);
-                let center = DVec3::new(hold.back + length / 2.0, y, top - DECK_M / 2.0);
-                self.cuboid(center, axes, DVec3::new(length / 2.0, hold.reach / 2.0, DECK_M / 2.0), deck);
+                let o = |y: f64, z: f64| DVec2::new(side * y, z);
+                let outline = [o(hall, top), o(hold.wall(top), top), o(hold.wall(under), under), o(hall, under)];
+                self.prism(middle, length / 2.0, &outline, steel);
             }
         }
         for k in 0..hold.levels {
             let top = hold.floor(k);
             for side in [-1.0, 1.0] {
-                let edge = side * (hold.wide - hold.reach + RAIL_M / 2.0);
+                let edge = side * (hold.hall(k) + RAIL_M / 2.0);
                 let a = DVec3::new(hold.back, edge, top + RAIL_M / 2.0);
-                self.beam(a, a + DVec3::X * length, RAIL_M, DVec3::Z, spar);
+                self.beam(a, a + DVec3::X * length, RAIL_M, DVec3::Z, steel);
             }
         }
     }
@@ -490,10 +543,10 @@ impl Builder<'_> {
     /// Two strips of lamps down the shaft on its floor and two on its ceiling, mouth to back.
     fn runway(&mut self, hold: &Hold) {
         let length = hold.half.x - hold.back;
-        let y = RUNWAY_SHARE * (hold.wide - hold.reach);
         let axes = [DVec3::X, DVec3::Y, DVec3::Z];
         self.lamp = Lamp::Runway;
         for (z, side) in [(-hold.tall, 1.0), (hold.tall, -1.0)] {
+            let y = RUNWAY_SHARE * hold.hall_at(z);
             for across in [-y, y] {
                 let center = DVec3::new(hold.back + length / 2.0, across, z + side * STRIP_RISE_M / 2.0);
                 self.cuboid(center, axes, DVec3::new(length / 2.0, STRIP_M / 2.0, STRIP_RISE_M / 2.0), region(Kind::Bay));
@@ -515,24 +568,24 @@ impl Builder<'_> {
                 for side in [-1.0, 1.0] {
                     let index = berth_index(hold, i, k, side);
                     let mut roll = Roll(splitmix(u64::from(seed) << 32 | u64::from(index)));
-                    let y = side * (hold.wide - hold.reach / 2.0);
-                    let size = 0.7 * (x1 - x0).min(hold.reach);
+                    let (y, room) = (side * hold.middle(k), hold.room(k));
+                    let size = 0.7 * (x1 - x0).min(room);
                     if size <= 0.0 {
                         continue;
                     }
                     self.cuboid(DVec3::new(x, y, floor + PAD_M / 2.0), axes, DVec3::new(size / 2.0, size / 2.0, PAD_M / 2.0), pad);
                     self.lamp = Lamp::Flood;
                     for spread in [-FLOOD_SPREAD, FLOOD_SPREAD] {
-                        let head = DVec3::new(x1 - FLOOD_INSET_M, y + spread * hold.reach, ceiling - FLOOD_DROP_M);
+                        let head = DVec3::new(x1 - FLOOD_INSET_M, y + spread * room, ceiling - FLOOD_DROP_M);
                         self.cuboid(head, axes, DVec3::splat(FLOOD_HEAD_M / 2.0), pad);
                     }
                     self.lamp = Lamp::None;
                     if !occupied(seed, index) {
                         continue;
                     }
-                    let room = (ceiling - floor - PAD_M).max(0.0);
-                    let width = 0.8 * hold.reach * (0.6 + 0.4 * roll.next());
-                    let height = 0.8 * room * (0.5 + 0.5 * roll.next());
+                    let headroom = (ceiling - floor - PAD_M).max(0.0);
+                    let width = 0.8 * room * (0.6 + 0.4 * roll.next());
+                    let height = 0.8 * headroom * (0.5 + 0.5 * roll.next());
                     let outline = Outline::ALL[(roll.next() * Outline::ALL.len() as f64) as usize % Outline::ALL.len()];
                     let points = outline.points(width, height, &mut roll);
                     let base = DVec2::new(y, floor + PAD_M + height / 2.0);
@@ -544,7 +597,6 @@ impl Builder<'_> {
         }
     }
 
-    /// A convex outline in the plane at `x`, counterclockwise in (y, z), as two faces back to back.
     /// In every rib's plane between two berths, on every level and either side, a bracket from deck
     /// to deck, its back upright and well off the wall, widening toward the shaft as it rises, with a
     /// flange down its slope.
@@ -555,12 +607,12 @@ impl Builder<'_> {
             for k in 0..hold.levels {
                 let (floor, ceiling) = (hold.floor(k), hold.ceiling(k));
                 for side in [-1.0, 1.0] {
-                    let wall = side * hold.wide;
-                    let back = wall - side * BUTTRESS_STANDOFF * hold.reach;
-                    let foot = back - side * BUTTRESS_FOOT * hold.reach;
-                    let head = back - side * BUTTRESS_HEAD * hold.reach;
+                    let room = hold.room(k);
+                    let back = side * (hold.edge(k) - BUTTRESS_STANDOFF * room);
+                    let foot = back - side * BUTTRESS_FOOT * room;
+                    let head = back - side * BUTTRESS_HEAD * room;
                     let outline = [DVec2::new(back, floor), DVec2::new(foot, floor), DVec2::new(head, ceiling), DVec2::new(back, ceiling)];
-                    let frame = BUTTRESS_FRAME * BUTTRESS_FOOT * hold.reach;
+                    let frame = BUTTRESS_FRAME * BUTTRESS_FOOT * room;
                     self.pierced(x, BUTTRESS_M / 2.0, &outline, frame, spar);
                     let slope = |p: DVec2| DVec3::new(x, p.x, p.y);
                     let inward = DVec2::new(-side, 0.0) * (FLANGE_M / 2.0);
@@ -617,6 +669,7 @@ impl Builder<'_> {
         }
     }
 
+    /// A convex outline in the plane at `x`, counterclockwise in (y, z), as two faces back to back.
     fn card(&mut self, x: f64, outline: &[DVec2], region: u32) {
         if outline.len() < 3 {
             return;
@@ -850,6 +903,7 @@ mod tests {
             ("BAY_RIB_DEPTH_M", RIB_DEPTH_M),
             ("BAY_DECK_M", DECK_M),
             ("BAY_PAD_M", PAD_M),
+            ("BAY_DECK_SHARE", DECK_SHARE),
             ("BAY_FLOOD_INSET_M", FLOOD_INSET_M),
             ("BAY_FLOOD_SPREAD", FLOOD_SPREAD),
             ("BAY_FLOOD_DROP_M", FLOOD_DROP_M),
@@ -963,8 +1017,66 @@ mod tests {
         assert!(inset(&square, 2.5).is_none());
     }
 
+    fn trapezoid(lower: f64, upper: f64, rotation: DMat3) -> (Piece, HullBuffers) {
+        let piece = Piece {
+            part: PartId(4),
+            side: Side::Original,
+            kind: Kind::Bay,
+            shape: Shape::Trapezoid { lower, upper, height: 40.0, length: 80.0 },
+            pose: Pose { position: DVec3::new(-3.0, 7.0, 2.0), rotation },
+        };
+        let mut out = HullBuffers::default();
+        mesh(&piece, Some(0), &mut out);
+        (piece, out)
+    }
+
+    /// Wide at the top and wide at the bottom, and turned over: everything inside the trapezoid,
+    /// and the hall clear from the mouth to the back wall.
     #[test]
-    fn only_a_slab_bay_is_taken() {
+    fn a_trapezoid_bay_stays_inside_its_shape_with_its_hall_clear() {
+        for (lower, upper) in [(60.0, 30.0), (30.0, 60.0)] {
+            for rotation in [DMat3::IDENTITY, DMat3::from_rotation_x(std::f64::consts::PI)] {
+                let (piece, out) = trapezoid(lower, upper, rotation);
+                assert!(takes(&piece) && !out.indices.is_empty());
+                for p in &out.positions {
+                    let local = piece.pose.to_local(DVec3::from_array(p.map(f64::from)));
+                    assert!(piece.shape.distance(local) < 1e-3, "{lower}/{upper}: {local} outside");
+                }
+                let (frame, hold) = layout(&piece).unwrap();
+                let into = |b: DVec3| piece.pose.to_outer(frame * b);
+                let off = DVec3::new(0.0, 0.37, 0.21);
+                let shaft = crossings(&out, into(DVec3::new(50.0, 0.0, 0.0) + off), into(DVec3::new(hold.back + 0.5, 0.0, 0.0) + off));
+                assert_eq!(shaft, 0, "{lower}/{upper}");
+            }
+        }
+    }
+
+    /// Each level's hall is its share of the hold's width at that height, so it steps out level by
+    /// level under a wide roof and in under a narrow one.
+    #[test]
+    fn a_trapezoid_holds_halls_are_terraced_the_way_its_walls_lean() {
+        for (lower, upper, widening) in [(30.0, 60.0, true), (60.0, 30.0, false)] {
+            let (piece, _) = trapezoid(lower, upper, DMat3::IDENTITY);
+            let (_, hold) = layout(&piece).unwrap();
+            assert!(hold.levels > 2);
+            for k in 1..hold.levels {
+                assert_eq!(hold.hall(k) > hold.hall(k - 1), widening, "{lower}/{upper} level {k}");
+                // What stands in a berth clears both its walls.
+                assert!(hold.edge(k) <= hold.wall(hold.floor(k)) && hold.edge(k) <= hold.wall(hold.ceiling(k)));
+                assert!(hold.room(k) > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_wedge_is_too_narrow_at_its_point_to_hold_a_bay() {
+        let (piece, out) = trapezoid(60.0, 0.0, DMat3::IDENTITY);
+        assert!(!takes(&piece));
+        assert!(out.indices.is_empty());
+    }
+
+    #[test]
+    fn only_a_slab_or_trapezoid_bay_is_taken() {
         let (mut piece, _) = bay(DVec3::new(10.0, 10.0, 10.0), DMat3::IDENTITY);
         assert!(takes(&piece));
         piece.kind = Kind::Storage;
@@ -972,5 +1084,7 @@ mod tests {
         piece.kind = Kind::Bay;
         piece.shape = Shape::Cylinder { radius: 3.0, length: 9.0 };
         assert!(!takes(&piece));
+        piece.shape = Shape::Trapezoid { lower: 20.0, upper: 10.0, height: 12.0, length: 30.0 };
+        assert!(takes(&piece));
     }
 }

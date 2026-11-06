@@ -72,8 +72,9 @@ const REGIONS: u32 = 16u;
 const FACES: u32 = 16u;
 const BAYS: u32 = 4u;
 
-/// em_render::hull_material::HullBay: rows into the bay's frame, (half_x, back, wide, tall) and
-/// (spans, levels, reach, seed).
+/// em_render::hull_material::HullBay: rows into the bay's frame, (half_x, back, low, tall) and
+/// (spans, levels, high, seed): the walls stand `low` from the middle at the floor and `high` at the
+/// ceiling.
 struct HullBay {
     to_bay: array<vec4<f32>, 3>,
     hold: vec4<f32>,
@@ -186,6 +187,7 @@ const BAY_REGION: u32 = 7u;
 const BAY_RIB_DEPTH_M: f32 = 1.2;
 const BAY_DECK_M: f32 = 0.8;
 const BAY_PAD_M: f32 = 0.25;
+const BAY_DECK_SHARE: f32 = 0.28;
 const BAY_FLOOD_INSET_M: f32 = 0.6;
 const BAY_FLOOD_SPREAD: f32 = 0.3;
 const BAY_FLOOD_DROP_M: f32 = 0.3;
@@ -322,6 +324,17 @@ fn flood_tint(seed: u32, index: u32, head: u32) -> vec3<f32> {
     return batch;
 }
 
+/// As lc_client::bay_mesh::Hold::wall: how far each wall stands from the middle at height `z`.
+fn bay_wall(bay: HullBay, z: f32) -> f32 {
+    let tall = bay.hold.w;
+    return mix(bay.hold.z, bay.grid.z, (z + tall) / (2.0 * tall));
+}
+
+/// As Hold::hall_at: half the hall's width where a deck at height `z` leaves it.
+fn bay_hall(bay: HullBay, z: f32) -> f32 {
+    return bay_wall(bay, z) * (1.0 - 2.0 * BAY_DECK_SHARE);
+}
+
 /// As lc_client::bay_mesh::occupied.
 fn bay_occupied(seed: u32, index: u32) -> bool {
     return unit(mix_hash(seed, index)) >= BAY_VACANT;
@@ -344,25 +357,24 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     let n = vec3<f32>(dot(bay.to_bay[0].xyz, n_ship), dot(bay.to_bay[1].xyz, n_ship), dot(bay.to_bay[2].xyz, n_ship));
     let mouth = bay.hold.x;
     let back = bay.hold.y;
-    let wide = bay.hold.z;
     let tall = bay.hold.w;
     let spans = max(bay.grid.x, 1.0);
     let levels = max(bay.grid.y, 1.0);
-    let reach = bay.grid.z;
     let seed = u32(bay.grid.w);
     let slack = 0.05;
-    if (abs(p.y) > wide + slack || abs(p.z) > tall + slack || p.x < back - slack || p.x > mouth + slack) {
+    if (abs(p.y) > bay_wall(bay, p.z) + slack || abs(p.z) > tall + slack || p.x < back - slack || p.x > mouth + slack) {
         return out;
     }
     out.inside = true;
     let lamp = material.emitted[BAY_REGION].rgb * BAY_LAMP_BOOST;
     out.light += lamp * BAY_BOUNCE;
 
-    // The runway: four line lamps down the shaft, falling off as lines do.
-    let runway_y = BAY_RUNWAY_SHARE * (wide - reach);
+    // The runway: two strips down the hall's floor and two down its ceiling.
     var strips = 0.0;
     for (var k = 0u; k < 4u; k++) {
-        let at = vec2<f32>(select(-runway_y, runway_y, (k & 1u) == 1u), select(-tall, tall, k >= 2u));
+        let z = select(-tall, tall, k >= 2u);
+        let runway_y = BAY_RUNWAY_SHARE * bay_hall(bay, z);
+        let at = vec2<f32>(select(-runway_y, runway_y, (k & 1u) == 1u), z);
         strips += strip_light(p, n, at, back, mouth);
     }
     out.light += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_GAIN * strips;
@@ -371,26 +383,28 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
         out.glow += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_FIXTURE * dashed;
     }
 
-    // The berth this is in, if it is on a deck's side of the shaft, and its floods if occupied.
-    let edge = wide - reach;
-    if (abs(p.y) < edge - slack) {
+    // The berth this is in, if it is on a deck's side of its level's hall, and its floods if
+    // occupied. As bay_mesh::Hold: a deck's top is the berth above it, its underside the berth below.
+    let level_m = 2.0 * tall / levels;
+    let level = clamp(floor((p.z + tall + 1.0e-3) / level_m), 0.0, levels - 1.0);
+    let floor_z = -tall + level * level_m;
+    let ceiling = select(floor_z + level_m - BAY_DECK_M, tall, level + 1.0 >= levels);
+    let hall = bay_hall(bay, floor_z);
+    if (abs(p.y) < hall - slack) {
         return out;
     }
     let side = sign(p.y);
     let pitch = (mouth - back) / spans;
     let span = clamp(floor((p.x - back) / pitch), 0.0, spans - 1.0);
-    let level_m = 2.0 * tall / levels;
-    // A deck's top is the berth above it, its underside the berth below.
-    let level = clamp(floor((p.z + tall + 1.0e-3) / level_m), 0.0, levels - 1.0);
     let index = u32((span * levels + level) * 2.0) + select(0u, 1u, side > 0.0);
     if (!bay_occupied(seed, index)) {
         return out;
     }
-    let floor_z = -tall + level * level_m;
-    let ceiling = select(floor_z + level_m - BAY_DECK_M, tall, level + 1.0 >= levels);
+    let edge = min(bay_wall(bay, floor_z), bay_wall(bay, ceiling));
+    let reach = edge - hall;
     let x0 = back + span * pitch + 0.5 * BAY_RIB_DEPTH_M;
     let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
-    let middle_y = side * (wide - 0.5 * reach);
+    let middle_y = side * 0.5 * (edge + hall);
     let aimed_at = vec3<f32>(0.5 * (x0 + x1), middle_y, floor_z + BAY_PAD_M + 0.5 * (ceiling - floor_z - BAY_PAD_M));
     let sodium = dot(lamp, LUMA) * BAY_SODIUM / dot(BAY_SODIUM, LUMA);
     var floods = vec3<f32>(0.0);

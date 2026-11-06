@@ -140,7 +140,7 @@ client warns when it meshes one.
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
 | spar | plated structure |
-| bay | a shell with a mouth, and a lit interior grid of decks and gantries. As built for a slab only (§The bay); any other primitive is still meshed solid in the bay's graph |
+| bay | a shell with a mouth, and a lit interior grid of decks and gantries. As built for a slab or a trapezoid (§The bay); any other primitive is still meshed solid in the bay's graph |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
@@ -212,8 +212,14 @@ primitive.
 
 ### The bay
 
-A slab bay is the one part not meshed from its distance field: `lc_client::bay_mesh` builds it as
-geometry, a shadow box of flat layers seen through its mouth at +x. The shell's outside is the
+A slab or trapezoid bay is the one part not meshed from its distance field: `lc_client::bay_mesh`
+builds it as geometry, a shadow box of flat layers seen through its mouth at +x, the trapezoid's
+section face, whether its wide side is down or up. The hold's section is a trapezoid either way, a
+slab's with equal sides: the ribs follow its walls, and each level's decks reach a share of its width
+at their own height, so the hall steps wider under a wide roof and narrower under a narrow one, a
+terrace. What stands in a berth is sized to the narrower of its floor and ceiling, so it clears a
+leaning wall. A trapezoid too narrow at either end for a hall and its decks, a wedge, is meshed
+solid. The shell's outside is the
 storage's aztec plate in the part's own charts, and the mouth a rim as thick as the wall. Inside:
 
 - **Ribs** every 12 m, each a ring of truss in its own plane: a chord along the walls, an inner

@@ -12,7 +12,7 @@
 //! | `--cells <n>` | the mesher's grid across each piece; 128 by default |
 //! | `--yaw <deg>` / `--pitch <deg>` / `--zoom <x>` | the camera about the grid, and its distance as a multiple of what frames it |
 //! | `--only <column>` | one column: a kind as `hull_mesh::REGION_GRAPHS` names it, or `aztec`, `offices`, `habitat`, `obsidian`, `sprue`, `racks` or `tubes` |
-//! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus` or `frustum` |
+//! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus`, `frustum`, `trapezoid` (wide at its base) or `flared` (wide at its top) |
 //! | `--lying` | every part on its side, its axis along the ship's x, rather than standing |
 //! | `--sun <deg>` | the star's elevation |
 //! | `--exposure <stops>` | open the exposure this many stops, as the game's flag does, and take the game's night fill, 0.3% of the star rather than 8%: a bay's lamps by night |
@@ -76,16 +76,19 @@ const KINDS: [Kind; 8] = [
 const LOOKS: [&str; 7] = ["aztec", "offices", "habitat", "obsidian", "sprue", "racks", "tubes"];
 
 /// Each primitive in a proportion that shows it, its axis standing up.
-const PRIMITIVES: [Primitive; 6] = [
+const PRIMITIVES: [Primitive; 8] = [
     Primitive::Ellipsoid { axes: DVec3::new(1.4, 1.0, 0.8) },
     Primitive::Capsule { length: 2.0 },
     Primitive::Slab { edges: DVec3::new(1.4, 1.0, 0.7), corner: 0.12 },
     Primitive::Cylinder { length: 2.5 },
     Primitive::Torus { major: 3.0 },
     Primitive::Frustum { length: 2.0, taper: 0.5 },
+    // Wide at the base, and flared, wide at the top: scaled by its lower width.
+    Primitive::Trapezoid { upper: 0.5, height: 0.6, length: 1.4 },
+    Primitive::Trapezoid { upper: 2.0, height: 1.2, length: 2.8 },
 ];
 
-const PRIMITIVE_NAMES: [&str; 6] = ["ellipsoid", "capsule", "slab", "cylinder", "torus", "frustum"];
+const PRIMITIVE_NAMES: [&str; 8] = ["ellipsoid", "capsule", "slab", "cylinder", "torus", "frustum", "trapezoid", "flared"];
 
 #[derive(Clone, Copy)]
 enum Column {
