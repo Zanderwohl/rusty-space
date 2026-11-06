@@ -43,9 +43,11 @@ const WEB_M: f64 = 0.35;
 const LEVEL_M: f64 = 9.0;
 const DECK_M: f64 = 0.8;
 const RAIL_M: f64 = 0.4;
-/// Each buttress hangs in a rib's plane under the deck above, its back on the wall: from this share
-/// of the way up its berth, this share of the deck's reach in at its foot and this at its head, and
-/// this thick along x, with a flange this wide down the slope it turns to the shaft.
+/// Each buttress hangs in a rib's plane under the deck above, its back upright and standing off the
+/// wall by this share of the deck's reach: from this share of the way up its berth, this share of
+/// the reach wide at its foot and this at its head, and this thick along x, with a flange this wide
+/// down the slope it turns to the shaft.
+const BUTTRESS_STANDOFF: f64 = 0.45;
 const BUTTRESS_RISE: f64 = 0.5;
 const BUTTRESS_FOOT: f64 = 1.0 / 6.0;
 const BUTTRESS_HEAD: f64 = 1.0 / 3.0;
@@ -532,7 +534,8 @@ impl Builder<'_> {
 
     /// A convex outline in the plane at `x`, counterclockwise in (y, z), as two faces back to back.
     /// In every rib's plane between two berths, on every level and either side, a bracket under the
-    /// deck above with its back on the wall, widening as it rises, with a flange down its slope.
+    /// deck above, its back upright and well off the wall, widening toward the shaft as it rises,
+    /// with a flange down its slope.
     fn buttresses(&mut self, hold: &Hold) {
         let spar = region(Kind::Spar(SparMode::Saddle));
         for i in 1..hold.spans {
@@ -542,9 +545,10 @@ impl Builder<'_> {
                 for side in [-1.0, 1.0] {
                     let wall = side * hold.wide;
                     let low = floor + BUTTRESS_RISE * (ceiling - floor);
-                    let foot = wall - side * BUTTRESS_FOOT * hold.reach;
-                    let head = wall - side * BUTTRESS_HEAD * hold.reach;
-                    let outline = [DVec2::new(wall, low), DVec2::new(foot, low), DVec2::new(head, ceiling), DVec2::new(wall, ceiling)];
+                    let back = wall - side * BUTTRESS_STANDOFF * hold.reach;
+                    let foot = back - side * BUTTRESS_FOOT * hold.reach;
+                    let head = back - side * BUTTRESS_HEAD * hold.reach;
+                    let outline = [DVec2::new(back, low), DVec2::new(foot, low), DVec2::new(head, ceiling), DVec2::new(back, ceiling)];
                     self.prism(x, BUTTRESS_M / 2.0, &outline, spar);
                     let slope = |p: DVec2| DVec3::new(x, p.x, p.y);
                     let inward = DVec2::new(-side, 0.0) * (FLANGE_M / 2.0);
