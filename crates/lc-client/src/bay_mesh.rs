@@ -5,6 +5,9 @@
 //! between two ribs on one deck, holds a pad and maybe a cutout card of a primitive's outline.
 //! See `lightcone/docs/32-ship-rendering.md` §The bay.
 //!
+//! Everything inside is the bay's own graph, an industrial steel, but for the lamps and the painted
+//! occupants.
+//!
 //! Laid out in the bay's own frame: x out of the mouth, z its up, y across. Up is whichever of the
 //! part's y and z runs most along the ship's z. The shell's outside wears the storage's aztec
 //! plate in the part's own charts, as any slab would; everything inside is charted on its own
@@ -19,7 +22,7 @@
 //! distance field at its edges by at most `corner · (1 − 1/√3)`.
 
 use glam::{DMat3, DVec2, DVec3};
-use lc_world::form::{Kind, SparMode};
+use lc_world::form::Kind;
 use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::Piece;
@@ -387,7 +390,7 @@ impl Builder<'_> {
     /// Each rib a ring of truss in its own plane: a chord along the walls, an inner chord
     /// chamfered at the corners, and struts between them, upright and diagonal in turn.
     fn ribs(&mut self, hold: &Hold) {
-        let spar = region(Kind::Spar(SparMode::Saddle));
+        let spar = region(Kind::Bay);
         let (w, t) = (hold.wide, hold.tall);
         let width = RIB_WIDTH_M.min(0.25 * w.min(t));
         let (iw, it) = (w - width, t - width);
@@ -440,7 +443,7 @@ impl Builder<'_> {
     }
 
     fn chord(&mut self, a: DVec3, b: DVec3) {
-        let spar = region(Kind::Spar(SparMode::Saddle));
+        let spar = region(Kind::Bay);
         // Deep along x and narrower across, so a rib reads as a plane edge on from the mouth.
         let along = b - a;
         let length = along.length();
@@ -454,7 +457,7 @@ impl Builder<'_> {
     }
 
     fn decks(&mut self, hold: &Hold) {
-        let (deck, spar) = (region(Kind::Bay), region(Kind::Spar(SparMode::Saddle)));
+        let (deck, spar) = (region(Kind::Bay), region(Kind::Bay));
         let length = hold.half.x - hold.back;
         let axes = [DVec3::X, DVec3::Y, DVec3::Z];
         for k in 1..hold.levels {
@@ -493,7 +496,7 @@ impl Builder<'_> {
     /// A pad on every berth's floor, on most a cutout card standing on it facing the mouth, and two
     /// flood heads under its ceiling, lit only when it is occupied.
     fn berths(&mut self, hold: &Hold, seed: u32) {
-        let (pad, card) = (region(Kind::Spar(SparMode::Saddle)), region(Kind::Storage));
+        let (pad, card) = (region(Kind::Bay), region(Kind::Storage));
         let axes = [DVec3::X, DVec3::Y, DVec3::Z];
         for i in 0..hold.spans {
             let (x0, x1) = (hold.rib(i) + RIB_DEPTH_M / 2.0, hold.rib(i + 1) - RIB_DEPTH_M / 2.0);
@@ -537,7 +540,7 @@ impl Builder<'_> {
     /// to deck, its back upright and well off the wall, widening toward the shaft as it rises, with a
     /// flange down its slope.
     fn buttresses(&mut self, hold: &Hold) {
-        let spar = region(Kind::Spar(SparMode::Saddle));
+        let spar = region(Kind::Bay);
         for i in 1..hold.spans {
             let x = hold.rib(i);
             for k in 0..hold.levels {
