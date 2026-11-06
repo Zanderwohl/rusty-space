@@ -2,7 +2,7 @@ TextureGraphFile(
     format_version: 2,
     metadata: FileMetadata(
         name: "bay hull",
-        description: Some("Bay: industrial blue-gray steel. Plates 4 m by 2 m, each a tone of its own, dark seams between, and grime in patches. Unlit: a slab bay's hold is lit by the lamps the hull material draws in it. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
+        description: Some("Bay: industrial blue-gray steel, plain but for grime in patches: no panels, which muddied the forms. Unlit: a slab bay's hold is lit by the lamps the hull material draws in it. One tile is 64 m of hull and must repeat: integer frequencies, and noise with period == frequency. Output color is albedo; the layer named lights is the lit share of each texel. See em_render::hull_material."),
         authors: [
             "Alexander Lowry",
         ],
@@ -13,194 +13,16 @@ TextureGraphFile(
         layers: [
             Layer(
                 id: 1,
-                name: "u",
-                kind: Coordinate(Coordinate(
-                    axis: U,
+                name: "steel",
+                kind: Color(Oklch(
+                    l: 0.58,
+                    chroma: 0.042,
+                    hue: OklabHue(245.0),
+                    alpha: 1.0,
                 )),
             ),
             Layer(
                 id: 2,
-                name: "v",
-                kind: Coordinate(Coordinate(
-                    axis: V,
-                )),
-            ),
-            Layer(
-                id: 3,
-                name: "plate",
-                kind: Color(Oklch(
-                    l: 0.56,
-                    chroma: 0.045,
-                    hue: OklabHue(248.0),
-                    alpha: 1.0,
-                )),
-            ),
-            Layer(
-                id: 4,
-                name: "light plate",
-                kind: Color(Oklch(
-                    l: 0.62,
-                    chroma: 0.04,
-                    hue: OklabHue(242.0),
-                    alpha: 1.0,
-                )),
-            ),
-            Layer(
-                id: 5,
-                name: "plate tone",
-                kind: Noise(Noise(
-                    dims: D2,
-                    seed_offset: 3,
-                    frequency: 16.0,
-                    range: Unsigned,
-                    output: Grayscale,
-                    kernel: Value,
-                    period: (16, 16, 0),
-                    fractal: Fractal(
-                        octaves: 1,
-                        lacunarity: 2.0,
-                        gain: 0.5,
-                        mode: Standard,
-                        normalize: true,
-                    ),
-                )),
-            ),
-            Layer(
-                id: 6,
-                name: "plates",
-                kind: Mix(Mix(
-                    a: Some(3),
-                    b: Some(4),
-                    mode: Blend,
-                    factor: Layer(5),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 7,
-                name: "seam u wave",
-                kind: Wave(Wave(
-                    input: Layer(1),
-                    shape: Triangle,
-                    frequency: 16.0,
-                    phase: 0.75,
-                    range: Unsigned,
-                )),
-            ),
-            Layer(
-                id: 8,
-                name: "seam u edge",
-                kind: ColorRamp(ColorRamp(
-                    stops: [
-                        ColorStop(
-                            t: 0.035,
-                            color: Const(Oklch(
-                                l: 1.0,
-                                chroma: 0.0,
-                                hue: OklabHue(0.0),
-                                alpha: 1.0,
-                            )),
-                        ),
-                        ColorStop(
-                            t: 0.06,
-                            color: Const(Oklch(
-                                l: 0.0,
-                                chroma: 0.0,
-                                hue: OklabHue(0.0),
-                                alpha: 1.0,
-                            )),
-                        )
-                    ],
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 9,
-                name: "seam u",
-                kind: Map(Map(
-                    value: Some(7),
-                    palette: Some(8),
-                )),
-            ),
-            Layer(
-                id: 10,
-                name: "seam v wave",
-                kind: Wave(Wave(
-                    input: Layer(2),
-                    shape: Triangle,
-                    frequency: 32.0,
-                    phase: 0.75,
-                    range: Unsigned,
-                )),
-            ),
-            Layer(
-                id: 11,
-                name: "seam v edge",
-                kind: ColorRamp(ColorRamp(
-                    stops: [
-                        ColorStop(
-                            t: 0.05,
-                            color: Const(Oklch(
-                                l: 1.0,
-                                chroma: 0.0,
-                                hue: OklabHue(0.0),
-                                alpha: 1.0,
-                            )),
-                        ),
-                        ColorStop(
-                            t: 0.085,
-                            color: Const(Oklch(
-                                l: 0.0,
-                                chroma: 0.0,
-                                hue: OklabHue(0.0),
-                                alpha: 1.0,
-                            )),
-                        )
-                    ],
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 12,
-                name: "seam v",
-                kind: Map(Map(
-                    value: Some(10),
-                    palette: Some(11),
-                )),
-            ),
-            Layer(
-                id: 13,
-                name: "seams",
-                kind: MinMax(MinMax(
-                    a: Some(9),
-                    b: Some(12),
-                    mode: Max,
-                    criterion: Luma,
-                )),
-            ),
-            Layer(
-                id: 14,
-                name: "seam",
-                kind: Color(Oklch(
-                    l: 0.36,
-                    chroma: 0.03,
-                    hue: OklabHue(250.0),
-                    alpha: 1.0,
-                )),
-            ),
-            Layer(
-                id: 15,
-                name: "plated",
-                kind: Mix(Mix(
-                    a: Some(6),
-                    b: Some(14),
-                    mode: Blend,
-                    factor: Layer(13),
-                    space: Oklch,
-                )),
-            ),
-            Layer(
-                id: 16,
                 name: "grime noise",
                 kind: Noise(Noise(
                     dims: D2,
@@ -220,7 +42,7 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 17,
+                id: 3,
                 name: "grime edge",
                 kind: ColorRamp(ColorRamp(
                     stops: [
@@ -247,15 +69,15 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 18,
+                id: 4,
                 name: "grime",
                 kind: Map(Map(
-                    value: Some(16),
-                    palette: Some(17),
+                    value: Some(2),
+                    palette: Some(3),
                 )),
             ),
             Layer(
-                id: 19,
+                id: 5,
                 name: "grime color",
                 kind: Color(Oklch(
                     l: 0.42,
@@ -265,18 +87,18 @@ TextureGraphFile(
                 )),
             ),
             Layer(
-                id: 20,
+                id: 6,
                 name: "albedo",
                 kind: Mix(Mix(
-                    a: Some(15),
-                    b: Some(19),
+                    a: Some(1),
+                    b: Some(5),
                     mode: Blend,
-                    factor: Layer(18),
+                    factor: Layer(4),
                     space: Oklch,
                 )),
             ),
             Layer(
-                id: 21,
+                id: 7,
                 name: "lights",
                 kind: Color(Oklch(
                     l: 0.0,
@@ -287,16 +109,16 @@ TextureGraphFile(
             ),
         ],
         list_order: [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+            1, 2, 3, 4, 5, 6, 7,
         ],
         canvases: {},
         output: Output(
-            color: Some(20),
+            color: Some(6),
             roughness: Const(0.5),
             metallic: Const(0.0),
             normal: None,
         ),
         params: {},
-        next_id: 22,
+        next_id: 8,
     ),
 )
