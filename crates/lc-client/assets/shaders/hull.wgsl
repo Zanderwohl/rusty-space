@@ -221,9 +221,9 @@ const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.707, 0.866);
 /// 230, rounded up for a pair that overlap less than fully. A strip lights the far wall of a shaft
 /// 40 m across at about half a lamp.
 const BAY_FLOOD_GAIN: f32 = 300.0;
-/// The hold's own light bounced off every wall and deck, the same everywhere inside it: a stop under
-/// a floodlit card.
-const BAY_BOUNCE: f32 = 1.0;
+/// The hold's own light bounced off every wall and deck, the same everywhere inside it: two stops
+/// under a floodlit card.
+const BAY_BOUNCE: f32 = 0.5;
 /// Every lamp in a hold, this many times what it would be. Not physical: a hold lit as a floodlit
 /// yard is nine stops under the star's light on the hull around it, and black beside it however it
 /// is exposed. So boosted, its bounce is about two and a half stops under sunlit plate.
