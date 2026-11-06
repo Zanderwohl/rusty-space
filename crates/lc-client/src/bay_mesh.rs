@@ -29,7 +29,7 @@ use bevy::prelude::{AssetId, Assets, Entity, Local, Mesh, Mesh3d, MeshMaterial3d
 use em_render::hull_material::{BAYS, HullBay, HullMaterial, face_attribute, region_weights};
 use glam::Vec4;
 
-use crate::charts::{ChartKind, Oriented, chart_at, chart_of, oriented, tangent};
+use crate::charts::{ChartKind, Oriented, chart_at, chart_of, oriented};
 use crate::hull_mesh::{HullBuffers, HullForm, HullSource, region};
 
 const WALL_M: f64 = 1.5;
@@ -263,13 +263,24 @@ impl Builder<'_> {
         match chart {
             Chart::Hull => {
                 let local = corners.map(|c| self.hull.turn * self.frame * c);
-                let index = chart_of(&self.hull.shape, (local[0] + local[2]) / 2.0);
+                let middle = (local[0] + local[2]) / 2.0;
+                let index = chart_of(&self.hull.shape, middle);
+                // One tangent for the quad, square to its own face. The distance field's normal
+                // would not do: these corners are square and the slab's are rounded, so out at a
+                // corner it leans, and a look that seeds its layout from the tangent re-seeds
+                // along every line where the leaning tangent rounds differently.
+                let flat = self.hull.turn * self.frame * normal;
+                let du = DVec3::from_array([DVec3::X, DVec3::Y, DVec3::Z].map(|a| {
+                    let at = |p: DVec3| chart_at(&self.hull.shape, index, p, self.hull.lying).uv.x;
+                    at(middle + a * self.h) - at(middle - a * self.h)
+                }));
+                let along_turned = (du - flat * flat.dot(du)).try_normalize().unwrap_or_else(|| flat.any_orthonormal_vector());
+                let along = self.piece.pose.rotation * self.hull.turn.transpose() * along_turned;
                 for (c, l) in corners.into_iter().zip(local) {
                     let here = chart_at(&self.hull.shape, index, l, self.hull.lying);
-                    let along = self.hull.turn.transpose() * tangent(&self.hull.shape, index, l, self.h, self.hull.lying);
                     let flag = if here.end { 1.0 } else if here.lying { 2.0 } else { 0.0 };
                     let at = [here.uv.x, here.uv.y, here.kind as u8 as f64, flag];
-                    self.vertex(c, normal, region, at, here.bounds, self.piece.pose.rotation * along);
+                    self.vertex(c, normal, region, at, here.bounds, along);
                 }
             }
             Chart::Own => {
@@ -745,6 +756,20 @@ mod tests {
         assert!(got.abs_diff_eq(inside, 1e-3), "{got}");
         assert_eq!(hull.grid.x as usize, hold.spans);
         assert_eq!(hull.grid.w as u32, seed(&piece));
+    }
+
+    /// A tangent leaning off its face is what re-seeded the aztec plate in stripes across the
+    /// shell, where square corners stand outside the slab's rounded ones.
+    #[test]
+    fn every_tangent_lies_in_its_face() {
+        let (mut piece, _) = bay(DVec3::new(100.0, 70.0, 50.0), DMat3::from_rotation_z(0.4) * DMat3::from_rotation_y(0.2));
+        piece.shape = Shape::Slab { edges: DVec3::new(100.0, 70.0, 50.0), corner: 6.0 };
+        let mut out = HullBuffers::default();
+        mesh(&piece, Some(0), &mut out);
+        for (n, t) in out.normals.iter().zip(&out.tangents) {
+            let (n, t) = (glam::Vec3::from_array(*n), glam::Vec4::from_array(*t).truncate());
+            assert!(n.dot(t).abs() < 1e-4, "{n} against {t}");
+        }
     }
 
     #[test]
