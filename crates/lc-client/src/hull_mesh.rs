@@ -366,11 +366,8 @@ impl Field for Union<'_> {
     }
 }
 
-/// Appends `piece`'s surface with its vertices shared, but for a corner on a crease, which gets a
-/// vertex of its own with its triangle's flat normal. Each triangle is laid out whole in the chart
-/// its middle is in, its corners unwrapped to within half a period of its first across a band's or
-/// ring's seam, so a pattern never runs backwards across it; a corner shared between charts, or
-/// between sides of a seam, is a vertex in each.
+/// Vertices are shared but for a corner on a crease, which takes its triangle's flat normal, and a
+/// corner shared between charts or sides of a seam, which is a vertex in each; see [`lay_out`].
 fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DVec3], regions: [[u8; 4]; 4], faces: &[[u8; 4]]) {
     let mut shared: HashMap<(u32, u8, i32, i32), u32> = HashMap::new();
     let pose = piece.pose;
@@ -803,8 +800,7 @@ mod tests {
         }
     }
 
-    /// A strap about two meters deep on a grid of about seven: kept where a sample lands in it
-    /// and nowhere else, and closed either way. [`mesh_pieces`] meshes it finer, so it stays whole.
+    /// A strap thinner than a cell is holed but closed; [`mesh_pieces`] meshes it finer.
     #[test]
     fn a_strap_thinner_than_a_cell_is_holed_not_broken() {
         let form = spar_fixture(SparMode::Strap);
@@ -829,8 +825,8 @@ mod tests {
         }
     }
 
-    /// The bell's wide end is lit whole, and nothing turned away from it is. Half the radius in, as
-    /// the rim eases over a cell and the starting ship's faces are four cells across at 96.
+    /// The bell's wide end is lit whole, and nothing turned away from it is. Checked half the radius
+    /// in: the rim eases over a cell, and the starting ship's faces are four cells across at 96.
     #[test]
     fn the_open_face_is_the_engines_wide_end_and_nothing_else() {
         for form in [Form::reference(), Form::starting(), Builtin::Plate.form()] {
@@ -939,8 +935,7 @@ mod tests {
         world.get::<Mesh3d>(e).map(|m| m.0.clone())
     }
 
-    /// The old mesh stays up through the frame that asks for a new one and every frame until it
-    /// lands, and the new one is swapped in once it has.
+    /// The old mesh stays up until the new one lands.
     #[test]
     fn a_remesh_never_holds_up_a_frame() {
         let mut app = headless();

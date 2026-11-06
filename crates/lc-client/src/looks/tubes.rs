@@ -1,10 +1,9 @@
 //! Launch tubes in a hive: hexagonal cells, each with a tube at its middle under an iris, open or
 //! shut, ringed in danger tape. An open tube is drawn by tracing the view into it: its walls ringed
 //! and lit by guide lights running down it, and a drone's nose at the bottom or the empty floor.
-//! Laid out in the part's own charts, which the hull mesher writes ([`crate::charts`]), so a mesh
-//! from anything else will not draw: no cell is cut by a chart's edge, a margin two apothems wide
-//! being buffed steel, and a band takes a whole number of cells around. Fully procedural; see
-//! `assets/shaders/tubes.wgsl`.
+//! Laid out in the part's charts ([`crate::charts`]), so only hull-mesher meshes draw: a margin two
+//! apothems wide inside each chart's edge is buffed steel, and a band takes a whole number of
+//! cells around. See `assets/shaders/tubes.wgsl`.
 
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -74,8 +73,7 @@ impl Default for Tubes {
 }
 
 impl Tubes {
-    /// The hull material's `(tube_cell, tube_depth, tube_guide)` for a region of this hive. Its
-    /// guide lights are the region's lamp, in their own hue.
+    /// The hull material's `(tube_cell, tube_depth, tube_guide)`; guide lights are the region's lamp.
     pub fn hull_tubes(&self) -> (Vec4, Vec4, Vec4) {
         (
             Vec4::new(self.hex_m, 0.5 * self.bore_m, self.tape_m, 0.0),

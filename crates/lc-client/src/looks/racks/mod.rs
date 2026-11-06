@@ -17,8 +17,7 @@ use bevy_mesh::MeshVertexBufferLayoutRef;
 pub struct Racks {
     /// A server's width, between one post and the next.
     pub rack_m: f32,
-    /// A server's height: a deck, as [`super::aztec::Windows::deck_m`] is, so it reads at a
-    /// building's scale.
+    /// A server's height: a deck, so it reads at a building's scale.
     pub server_m: f32,
     /// A post's width, and how far its rounded faces lean at its edges, as a tangent.
     pub post_m: f32,
@@ -28,8 +27,7 @@ pub struct Racks {
     pub groove_lean: f32,
     /// How far a server's front may tip off the face's.
     pub tilt_deg: f32,
-    /// Seen from above: a row of rack tops this deep, an aisle this wide between rows, and a fan
-    /// this wide across in each rack top.
+    /// On an end: a row of rack tops this deep, the aisle between rows, a rack top's fan across.
     pub depth_m: f32,
     pub aisle_m: f32,
     pub fan_m: f32,
@@ -103,8 +101,7 @@ pub struct HullRacks {
 }
 
 impl Racks {
-    /// The hull material's settings for a region of these racks. Its faces glow at the region's
-    /// lamp in [`Self::glow`]'s hue.
+    /// Faces glow at the region's lamp in [`Self::glow`]'s hue.
     pub fn hull_racks(&self) -> HullRacks {
         let hue = self.glow / self.glow.dot(Vec3::new(0.2126, 0.7152, 0.0722)).max(1.0e-6);
         HullRacks {

@@ -26,9 +26,8 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use glam::{DMat3, DVec2, DVec3};
 use lc_world::form::primitive::Shape;
 
-/// How far from its equator an ellipsoid's band runs, either way, as a latitude of the sphere it is
-/// stretched from. Low, so an ovoid habitat's roof, its upper cap, runs well down its sides.
-/// `shaders/charts.wgsl` stops a lying part's roof at the same: its `ROOF_ELEVATION`.
+/// Where an ellipsoid's band gives way to its caps, as a latitude on the sphere it is stretched
+/// from. Low, so an ovoid habitat's roof runs well down its sides. `charts.wgsl` matches it.
 pub const BAND_LATITUDE: f64 = 20.0 * PI / 180.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,8 +85,6 @@ fn across(p: DVec3, far: bool, lying: bool) -> DVec2 {
 /// Upright enough that a round part's end is its roof: its axis within 60 degrees of up.
 const STANDING_COS: f64 = 0.5;
 
-/// A part's shape as its charts are laid out, the turn into that frame, and whether it lies on its
-/// side; see [`oriented`].
 #[derive(Clone, Copy, Debug)]
 pub struct Oriented {
     pub shape: Shape,
@@ -95,14 +92,10 @@ pub struct Oriented {
     pub lying: bool,
 }
 
-/// `shape` turned so its charts' axis is the one they are laid out about, and the turn from the
-/// part's frame into that shape's: evaluate the charts at `turn * p`, and carry a tangent back by
-/// its transpose. A round primitive's axis is its own x, its ends its own; lying on its side it is
-/// turned about that axis to put its +y up, its band's u then 0 along its top. An ellipsoid and a
-/// slab have no axis that must be theirs, so theirs is whichever runs most along `up`, in the
-/// part's frame: an ellipsoid's caps go about it, and a slab's ends are across it with its sides' v
-/// up it. So a habitat's roof is its top, and decks stand up, however the part is turned. Each turn
-/// is a rotation, so it keeps a chart right-handed.
+/// `shape` in the frame its charts are laid out in: evaluate them at `turn * p` and carry a tangent
+/// back by the transpose. An ellipsoid or slab takes as its axis whichever of its own runs most
+/// along `up` (part frame), so a roof lands on top however the part is turned; a round part lying
+/// on its side is turned about its axis to put +y up. Every turn is a rotation.
 pub fn oriented(shape: &Shape, up: DVec3) -> Oriented {
     let up = up.normalize_or_zero();
     let row = |i: usize| DVec3::from_array(std::array::from_fn(|k| if k == i { 1.0 } else { 0.0 }));
@@ -149,8 +142,7 @@ pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
         Shape::Capsule { length, .. } => {
             if p.x.abs() <= length / 2.0 { 0 } else { end(p.x > 0.0) }
         }
-        // As `chart_at` measures latitude, so a vertex off the surface is split as its band's
-        // bounds have it.
+        // Latitude as `chart_at` measures it, so an off-surface vertex agrees with the bounds.
         Shape::Ellipsoid { semi_axes } => {
             let q = p / semi_axes;
             if q.x.atan2(q.y.hypot(q.z)).abs() <= BAND_LATITUDE { 0 } else { end(p.x > 0.0) }
@@ -159,9 +151,7 @@ pub fn chart_of(shape: &Shape, p: DVec3) -> u8 {
     }
 }
 
-/// Where `p`, in the part's frame, lies in chart `chart` of `shape`, `lying` on its side as
-/// [`oriented`] says. Any chart answers for any point, so a triangle can be laid out whole in one
-/// chart.
+/// Any chart answers for any point, so a triangle can be laid out whole in one.
 pub fn chart_at(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
     let mut point = laid(shape, chart, p, lying);
     if lying {
@@ -210,7 +200,7 @@ fn laid(shape: &Shape, chart: u8, p: DVec3, lying: bool) -> ChartPoint {
             let h = length / 2.0;
             match chart {
                 0 => band(theta, radius, p.x, h),
-                // Laid out about the pole, each point its arc from it: so the rim is a quarter turn out.
+                // Each point's arc from the pole, so the rim is a quarter turn out.
                 _ => {
                     let polar = (if far { p.x - h } else { -p.x - h }).max(0.0);
                     let arc = radius * p.y.hypot(p.z).atan2(polar);
@@ -257,10 +247,9 @@ fn dome(uv: DVec2, radius: f64, sphere: f64) -> ChartPoint {
     ChartPoint { uv, kind: ChartKind::Dome, bounds: [radius, sphere, 0.0, 0.0], end: true, lying: false }
 }
 
-/// A triangle's corners, in the part's frame, laid out whole in the chart its middle is in, so a
-/// pattern never smears across one: the chart, and each corner's point there unwrapped to within
-/// half a period of the first's across a seam, with how many periods that took each way, which
-/// tells a corner on one side of a seam from the same corner on the other.
+/// A triangle laid out whole in the chart its middle is in, so a pattern never smears across one.
+/// Corners are unwrapped to within half a period of the first; the periods taken tell a corner on
+/// one side of a seam from the same corner on the other.
 pub fn lay_out(shape: &Shape, corners: [DVec3; 3], lying: bool) -> (u8, [(ChartPoint, [i32; 2]); 3]) {
     let chart = chart_of(shape, (corners[0] + corners[1] + corners[2]) / 3.0);
     let laid = corners.map(|p| chart_at(shape, chart, p, lying));
@@ -281,8 +270,7 @@ pub fn unwrapped(x: f64, near: f64, period: f64) -> f64 {
     if period > 0.0 { x - period * ((x - near) / period).round() } else { x }
 }
 
-/// The direction u grows along the surface at `p`, in the part's frame: u's gradient laid into the
-/// plane square to the surface's.
+/// The direction u grows along the surface at `p`, part frame.
 pub fn tangent(shape: &Shape, chart: u8, p: DVec3, h: f64, lying: bool) -> DVec3 {
     let axes = [DVec3::X, DVec3::Y, DVec3::Z];
     let here = chart_at(shape, chart, p, lying);
@@ -355,8 +343,7 @@ mod tests {
         }
     }
 
-    /// A meter along the surface is about a meter in the chart, where the chart is not stretched
-    /// by design: everywhere on a slab, cylinder or capsule.
+    /// A meter on the surface is a meter in the chart, where no mean radius stretches it.
     #[test]
     fn a_meter_on_the_surface_is_a_meter_in_the_chart() {
         for shape in &shapes()[..2] {
@@ -371,8 +358,7 @@ mod tests {
         }
     }
 
-    /// A habitat lying long along its x and short along its z, with z up: its caps, so its roof, go
-    /// on its top and bottom, not its ends.
+    /// A flat ovoid with z up is capped top and bottom, not at its tips.
     #[test]
     fn an_ellipsoid_is_capped_about_the_axis_most_up() {
         let lying = Shape::Ellipsoid { semi_axes: DVec3::new(50.0, 25.0, 10.0) };
@@ -396,8 +382,7 @@ mod tests {
         assert!(turn.determinant() > 0.0, "a turn, not a reflection");
     }
 
-    /// A cylinder lying along the ship's x: its band's u is 0 along its top and its ends are sides,
-    /// their v running up.
+    /// A lying cylinder's band is measured from its top; its ends are sides with v up.
     #[test]
     fn a_lying_cylinder_measures_its_band_from_its_top() {
         let tube = Shape::Cylinder { radius: 8.0, length: 30.0 };

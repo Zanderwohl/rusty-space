@@ -1,10 +1,7 @@
-// Server racks. On a side, servers a deck tall stacked between rounded rack posts, a V-groove
-// between each server and the next, each server its own shade and tipped a little so they catch
-// the light one by one, and wears a face of glass from a baked set: a mirror by day, glowing by
-// night. On a part's ends, a data hall from above: rows of rack tops, each with a fan, between
-// sunken aisles. Laid out in the part's own charts (crate::charts in lc-client), servers stacked up
-// v, and a whole number of racks around a band or ring and of servers around a ring's tube. Look
-// development: crates/lc-client/src/looks/racks.rs.
+// Server racks: servers a deck tall between rounded posts, each its own shade, slightly tipped, and
+// wearing a baked glass face that mirrors by day and glows by night; on a part's ends, a data hall
+// from above. Laid out in the part's charts, a whole number of racks around a wrap. Look
+// development: crates/lc-client/src/looks/racks/mod.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -124,7 +121,6 @@ fn tipped(id: u32, tilt: f32) -> vec3<f32> {
     return vec3<f32>(sin(r) * cos(a), sin(r) * sin(a), cos(r));
 }
 
-/// A shade of the paint, its own for `id`.
 fn shade(id: u32) -> vec3<f32> {
     return m.paint.rgb * (1.0 + m.paint.w * (2.0 * unit(pcg(id + 3u)) - 1.0));
 }
@@ -206,9 +202,8 @@ fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>) -> vec3<f32> {
     return radiance;
 }
 
-/// A side: servers between posts, each wearing a face, a groove between each and the next.
-/// `periods` are u's and v's where they wrap, 0 where they do not. `dx` and `dy` are the chart
-/// coordinates' screen derivatives, taken where control flow is uniform.
+/// `periods` are u's and v's, 0 where they do not wrap. `dx` and `dy` are the chart's screen
+/// derivatives, taken where control flow is uniform.
 fn side(p: vec2<f32>, seed: u32, periods: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec3<f32> {
     let across = fitted(m.rack.x, periods.x);
     let up = fitted(m.rack.y, periods.y);
@@ -225,8 +220,7 @@ fn side(p: vec2<f32>, seed: u32, periods: vec2<f32>, frame: mat3x3<f32>, surface
     let n = normalize(frame * tipped(id, m.lean.z));
     var radiance = lit(n, e, surface, base);
 
-    // The face, centered on the server and as wide and tall as `face` says of a server as it was
-    // asked for, so it keeps its margin where the server was fitted to a wrap.
+    // Scaled with the server, so it keeps its margin where the server was fitted to a wrap.
     let size = m.face.xy * vec2<f32>(rack, server) / m.rack.xy;
     let local = p - cell * vec2<f32>(rack, server) - 0.5 * (vec2<f32>(rack, server) - size);
     let uv = vec2<f32>(local.x, size.y - local.y) / size;
@@ -261,7 +255,6 @@ fn hall(p: vec2<f32>, seed: u32, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3
     let id = mix_hash(mix_hash(seed, u32(i32(row))), u32(i32(floor(p.x / rack))));
     let base = shade(id);
 
-    // A rack top, and the groove between it and the next along its row.
     let middle = vec2<f32>((floor(p.x / rack) + 0.5) * rack, row * pitch + 0.5 * depth);
     var top = lit(normalize(frame * tipped(id, m.lean.z)), e, surface, base);
     let gx = offset(p.x, rack);
@@ -269,7 +262,7 @@ fn hall(p: vec2<f32>, seed: u32, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3
     let groove = normalize(vec3<f32>(-sign(gx) * steady(m.lean.y, gh, pixel.x), 0.0, 1.0));
     top = mix(top, lit(frame * groove, e, surface, 0.35 * base), cover(gx, gh, pixel.x));
 
-    // The fan: a dark grille of rings about a hub, each ring's walls leaning in and out.
+    // The fan: a grille of rings about a hub.
     let radius = 0.5 * m.hall.z;
     let to_fan = p - middle;
     let d = length(to_fan);
@@ -306,8 +299,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel = max(fwidth(p), vec2<f32>(1.0e-4));
     let dx = dpdx(p);
     let dy = dpdy(p);
-    // Each chart its own servers, told apart by its extent, and a rectangle, all of one direction,
-    // by which way its u runs: a cube's faces are alike in extent.
+    // A cube's faces are alike in extent, so a rectangle is also told apart by its u's direction.
     let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), u32(round(in.chart.z)) == 0u);
     let seed = mix_hash(mix_hash(u32(m.finish.y), kind + 8u * facing), bitcast<u32>(seen.bounds.x + 2.0 * seen.bounds.w) ^ u32(in.chart.w));
     var periods = vec2<f32>(0.0);

@@ -1,10 +1,7 @@
-// Launch tubes in a hive. Hexagonal cells, a groove between them, each with a tube at its middle
-// ringed in red and white danger tape and closed by a six-bladed iris, shut, half open or open. An
-// open tube is traced: the view ray meets its wall, ringed and lit by guide lights running down it,
-// or a drone's nose, or the empty floor. Laid out in the part's own charts (crate::charts in
-// lc-client): a margin two apothems wide inside each chart's edge is buffed steel, turned in
-// overlapping swirls, so no cell is cut, and a band or ring takes a whole number of cells around. Look
-// development: crates/lc-client/src/looks/tubes.rs.
+// Launch tubes in a hive: hexagonal cells, each a tube ringed in danger tape under a six-bladed
+// iris. An open tube is traced down to its wall, a drone's nose, or the floor. Laid out in the
+// part's charts, with a buffed-steel margin two apothems wide so no cell is cut. Look development:
+// crates/lc-client/src/looks/tubes.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -75,7 +72,7 @@ const GUIDE_M: f32 = 0.08;
 /// How far a drone's nose is across, as a share of the bore.
 const NOSE_SHARE: f32 = 0.75;
 const EYE: vec3<f32> = vec3<f32>(1.0, 0.08, 0.04) * 2.0;
-/// Buffed steel: swirls this far apart, each this wide, laid in rows, each over the last.
+/// Buffed steel's swirls: their pitch, and each one's radius.
 const SWIRL_PITCH_M: f32 = 1.2;
 const SWIRL_M: f32 = 1.0;
 const STEEL: vec3<f32> = vec3<f32>(0.56, 0.57, 0.58);
@@ -205,8 +202,8 @@ fn circle(q: vec2<f32>, d: vec2<f32>, radius: f32, exit: bool) -> f32 {
     return select((-b - root) / (2.0 * a), (-b + root) / (2.0 * a), exit);
 }
 
-/// What the eye sees down an open tube from `q`, meters from its axis on the mouth, looking along
-/// `d`, which is in the face's frame with z into it. `daylight` is what spills in at the mouth.
+/// What the eye sees down an open tube from `q`, meters from its axis, along `d` in the chart's
+/// frame with z into the tube.
 fn down_tube(q: vec2<f32>, d: vec3<f32>, loaded: bool, daylight: vec3<f32>, pixel: f32) -> vec3<f32> {
     let r = m.cell.y;
     let depth = m.tube.x;
@@ -248,7 +245,6 @@ fn down_tube(q: vec2<f32>, d: vec3<f32>, loaded: bool, daylight: vec3<f32>, pixe
         return vec3<f32>(0.12) * (spill * 0.3 + glow_fill);
     }
     if (hit.z >= depth - 1.0e-3) {
-        // The empty floor, a landing ring marked on it.
         let ring = 1.0 - smoothstep(0.04, 0.08, abs(length(hit.xy) - 0.6 * r));
         return vec3<f32>(0.06) * (spill + glow_fill) + 0.3 * guide * ring * exp(-depth / (4.0 * r));
     }
@@ -266,8 +262,8 @@ fn down_tube(q: vec2<f32>, d: vec3<f32>, loaded: bool, daylight: vec3<f32>, pixe
     return c;
 }
 
-/// Buffed steel: each point brushed around the middle of the latest swirl over it, so the star's
-/// highlight runs in arcs across the swirls. Where a swirl is under a few pixels, plain steel.
+/// Each point is brushed about the middle of the latest swirl over it, so the star's highlight runs
+/// in arcs. Where a swirl is under a few pixels, plain steel.
 fn buffed(p: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: f32) -> vec3<f32> {
     let g = p / SWIRL_PITCH_M;
     var middle = vec2<f32>(0.0);
@@ -321,8 +317,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel = max(length(fwidth(p)), 1.0e-4);
     let star = turned(m.to_star);
 
-    // Around a band or ring, a whole number of cells; down a ring's tube, a whole number of pairs of
-    // rows, stretching the cells a little that way.
+    // A whole number of cells around a wrap; down a ring's tube, of pairs of rows.
     var w = m.cell.x;
     var across = 1;
     if (kind == BAND || kind == RING) {
@@ -360,7 +355,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let base = m.paint.rgb * mix(0.92, 1.08, unit(pcg(id + 3u)));
     var radiance = lit(surface, e, surface, base);
 
-    // The groove between cells: its walls lean toward the edge.
     let groove_half = 0.5 * GROOVE_M;
     let groove_share = (1.0 - smoothstep(groove_half - pixel, groove_half + pixel, h.z)) * clamp(GROOVE_M / pixel, 0.0, 1.0);
     let toward_edge = edge_out(off) * steady(GROOVE_LEAN, groove_half, pixel);
@@ -374,7 +368,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let radial = select(vec2<f32>(1.0, 0.0), off / d, d > 1.0e-4);
         let phi = atan2(off.y, off.x);
 
-        // Diagonal stripes around the mouth, and a rounded lip at its inner edge.
         let s = (phi * (r + 0.5 * tape) + (d - r)) / STRIPE_M;
         let stripe_aa = 2.0 * pixel / STRIPE_M;
         let white = smoothstep(0.5 - stripe_aa, 0.5 + stripe_aa, abs(fract(0.5 * s) * 2.0 - 1.0));
@@ -389,7 +382,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             let state = unit(pcg(id + 5u));
             let open = m.tube.z;
             let aperture = select(select(0.0, 0.5 * r, state < open + 0.12), 0.97 * r, state < open);
-            // Each blade sweeps around as it runs in, and leans so that each overlaps the next.
+            // Each blade leans so it overlaps the next.
             let b = BLADES * fract(phi / (2.0 * PI) + BLADE_SWEEP * (r - d) / r);
             let t_b = fract(b);
             let seam_aa = BLADES * pixel / (2.0 * PI * max(d, 0.1)) * 2.0;
