@@ -8,7 +8,6 @@ use lc_world::form::Kind;
 
 use super::aztec::{Aztec, Roof, Windows};
 use super::obsidian::Obsidian;
-use super::outline::{LivingRoof, outline_hull_roofs};
 use super::sprue::{HEIGHTS, Sprue, TILE_M};
 use crate::hull_mesh::{ENGINE_FLANK, region};
 
@@ -19,15 +18,14 @@ const THRUSTER_DEPTH_M: f32 = 2.0;
 /// Ionized xenon's blue, linear: a cell's color at its walls.
 const XENON: Vec3 = Vec3::new(0.08, 0.3, 1.0);
 
-/// Outlines a hull's habitat roof once its mesh lands, which a hull asks for with [`living_roof`],
-/// and bakes the engine flanks' sprue once, handing it to every hull material.
+/// Bakes the engine flanks' sprue once, handing it to every hull material.
 pub struct HullLooksPlugin;
 
 impl Plugin for HullLooksPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Pipes>()
             .add_systems(Startup, bake_pipes)
-            .add_systems(PostUpdate, (outline_hull_roofs, fit_pipes));
+            .add_systems(PostUpdate, fit_pipes);
     }
 }
 
@@ -59,11 +57,6 @@ fn fit_pipes(mut pipes: ResMut<Pipes>, mut images: ResMut<Assets<Image>>, mut ma
             material.pipe_light = Some(light.clone());
         }
     }
-}
-
-/// What a hull entity carries so its Living roof is walled in under its rim.
-pub fn living_roof() -> LivingRoof {
-    LivingRoof(region(Kind::Living))
 }
 
 /// `uniform` with the Mind knapped in obsidian, Storage in azteced plate, Living a habitat, an

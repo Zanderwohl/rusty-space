@@ -142,8 +142,9 @@ pub struct HullUniform {
     /// chamfered seams, each its own shade and lit at its own tilt.
     pub plated: u32,
     /// Which regions are habitat, one bit a region: plate with office windows on the sides, rooms
-    /// traced behind them, and over the top a roof of glass hexes on a forest. Decks stack along
-    /// the ship's z. A lit window is the region's [`Self::emitted`].
+    /// traced behind them, and on the end of its part that faces the ship's z a roof of glass hexes
+    /// on a forest. Laid out in the part's charts, decks up each side's. A lit window is the
+    /// region's [`Self::emitted`].
     pub habitat: u32,
     /// Which *layers* are a layered sprue, one bit a layer: an engine's flank, say, not its open
     /// face. The surface is the top layer of pipe, and the layer under it and the plated base are
@@ -245,14 +246,6 @@ pub struct HullMaterial {
     /// The same with [`Tile::Lights`]: the share of each texel that is lit.
     #[texture(3, dimension = "2d_array", visibility(fragment))]
     pub lights: Handle<Image>,
-    /// A habitat roof's outline seen from above, in the ship's frame: signed meters to its edge,
-    /// positive inside, so a ray through the glass meets a wall dropping from the rim. Taken from
-    /// the mesh, so kept apart from [`Self::uniforms`], which follow the ship's light.
-    #[texture(4, visibility(fragment))]
-    #[sampler(5, visibility(fragment))]
-    pub roof_map: Option<Handle<Image>>,
-    #[uniform(6, visibility(fragment))]
-    pub roof_outline: RoofOutline,
     /// A layered sprue's tiles, three layers to a variant, and its baked lamp light, both as its
     /// look makes them. Baked once and late, so a hull drawn before then draws its flanks as tiles.
     #[texture(7, dimension = "2d_array", visibility(fragment))]
@@ -260,14 +253,6 @@ pub struct HullMaterial {
     pub pipe_tiles: Option<Handle<Image>>,
     #[texture(9, dimension = "2d_array", visibility(fragment))]
     pub pipe_light: Option<Handle<Image>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
-pub struct RoofOutline {
-    /// The ship-frame XY the map spans, `(x0, y0, x1, y1)`; empty where there is no map.
-    pub bounds: Vec4,
-    /// `(width_m, 0, 0, 0)`: the widest circle the outline holds.
-    pub width: Vec4,
 }
 
 impl Material for HullMaterial {

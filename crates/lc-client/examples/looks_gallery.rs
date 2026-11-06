@@ -38,7 +38,7 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use lc_client::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, HullSource, REGION_GRAPHS, region};
-use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
 use lc_client::procedural::ProceduralTexturesPlugin;
 use lc_client::ship_hull::{HullPalettePlugin, Palette, request_palette};
 use lc_client::tonemap::ToneMap;
@@ -254,13 +254,14 @@ fn spawn(
     // Past the last column, in the middle of the rows, its long axis along x.
     let length = args.ovoid;
     let ovoid_at = Vec3::new(columns.last().copied().unwrap_or(0.0) + 2.0 * STANDOFF * (largest + length), 0.0, 0.5 * rows[6]);
-    // Its own x, which its caps are about, stood up: the top cap is the roof.
-    let semi_axes = glam::DVec3::new(0.1, 0.5, 0.25) * length as f64;
+    // Long along x, short along its z, which stands along Bevy's y: its caps go about the axis
+    // that runs most up, so the top one is the roof.
+    let semi_axes = glam::DVec3::new(0.5, 0.25, 0.1) * length as f64;
     let ovoid = Piece { part: PartId(0), side: Side::Original, kind: Kind::Living, shape: Shape::Ellipsoid { semi_axes }, pose: Pose::IDENTITY };
     commands.spawn((
         HullForm { source: HullSource::Pieces(Arc::from([ovoid])), cells: Some(128) },
         MeshMaterial3d(habitat),
-        Transform::from_translation(ovoid_at).with_rotation(Quat::from_rotation_z(FRAC_PI_2)),
+        Transform::from_translation(ovoid_at).with_rotation(standing),
     ));
     stations.push((ovoid_at, 0.6 * length));
     commands.insert_resource(Stations(stations));
@@ -321,8 +322,6 @@ fn spawn_ships(
         }),
         albedo,
         lights,
-        roof_map: None,
-        roof_outline: default(),
         pipe_tiles: None,
         pipe_light: None,
     });
@@ -332,7 +331,6 @@ fn spawn_ships(
         let (lo, hi) = Sdf::new(&form, &Balance::DEFAULT).expect("checked at startup").bounds();
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
-            living_roof(),
             HullForm::form(form, Balance::DEFAULT),
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world * center).with_rotation(ship_to_world),

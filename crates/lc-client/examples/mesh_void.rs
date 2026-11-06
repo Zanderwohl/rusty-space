@@ -36,7 +36,7 @@ use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::hull_material::{FACES, HullMaterial, HullMaterialPlugin, HullUniform, REGIONS, Tile, tile_array};
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
-use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
 use lc_client::hull_mesh::{
     ENGINE_FLANK, HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, REGION_GRAPHS, region, spar_fixture,
 };
@@ -290,8 +290,6 @@ fn spawn(
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
-        roof_map: None,
-        roof_outline: default(),
         pipe_tiles: None,
         pipe_light: None,
     });
@@ -328,7 +326,6 @@ fn spawn(
         let center = ((lo + hi) / 2.0).as_vec3();
         commands.spawn((
             Hull(name),
-            living_roof(),
             HullForm { cells: args.cells, ..HullForm::form(form, balance) },
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at - ship_to_world() * center).with_rotation(ship_to_world()),

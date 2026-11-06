@@ -412,10 +412,10 @@ pub fn draw_hulls(
                 match form {
                     Some(mut form) => form.source = source,
                     None => {
-                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), roof_map: None, roof_outline: default(), pipe_tiles: None, pipe_light: None });
+                        let material = materials.add(HullMaterial { uniforms: uniforms.clone(), albedo: albedo.clone(), lights: lights.clone(), pipe_tiles: None, pipe_light: None });
                         commands
                             .entity(hull.mesh)
-                            .insert((HullForm { source, cells: None }, MeshMaterial3d(material), crate::looks::kinds::living_roof()));
+                            .insert((HullForm { source, cells: None }, MeshMaterial3d(material)));
                     }
                 }
             }

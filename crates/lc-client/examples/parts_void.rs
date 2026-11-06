@@ -30,7 +30,7 @@ use em_render::hull_material::{HullMaterial, HullMaterialPlugin, HullUniform, RE
 use em_render::population_material::PopulationMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use glam::{DMat3, DVec3};
-use lc_client::looks::kinds::{HullLooksPlugin, living_roof, wear};
+use lc_client::looks::kinds::{HullLooksPlugin, wear};
 use lc_client::hull_mesh::{HullForm, HullMeshPlugin, HullMeshState, HullMeshSystems, HullSource, REGION_GRAPHS, region};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::sprue::{Sprue, SprueMaterial};
@@ -319,8 +319,6 @@ fn spawn(
         }),
         albedo: images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         lights: images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
-        roof_map: None,
-        roof_outline: default(),
         pipe_tiles: None,
         pipe_light: None,
     });
@@ -353,7 +351,7 @@ fn spawn(
             };
             match *column {
                 Column::Kind(kind) => {
-                    commands.spawn((form(kind, shape), MeshMaterial3d(hull.clone()), transform, living_roof()));
+                    commands.spawn((form(kind, shape), MeshMaterial3d(hull.clone()), transform));
                 }
                 Column::Look("sprue") => {
                     let layers = sprue_layers.as_ref().expect("made when a column is the sprue");

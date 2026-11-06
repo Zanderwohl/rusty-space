@@ -10,7 +10,6 @@
 pub mod aztec;
 pub mod kinds;
 pub mod obsidian;
-pub mod outline;
 pub mod racks;
 pub mod sprue;
 pub mod tubes;

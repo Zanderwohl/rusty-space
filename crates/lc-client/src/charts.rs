@@ -8,7 +8,8 @@
 //!   [`ChartKind::Disc`];
 //! - a capsule's side, a band, and its hemispheres, each a [`ChartKind::Dome`] laid out about its
 //!   pole;
-//! - an ellipsoid's middle, a band within [`BAND_LATITUDE`] of its equator, and its caps, domes;
+//! - an ellipsoid's middle, a band within [`BAND_LATITUDE`] of its equator, and its caps, domes,
+//!   about whichever of its axes [`oriented`] picks;
 //! - a torus, one [`ChartKind::Ring`], wrapping both ways.
 //!
 //! Every primitive's axis is its own x, and a chart's u cross its v is the surface's outward
@@ -18,7 +19,7 @@
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use glam::{DVec2, DVec3};
+use glam::{DMat3, DVec2, DVec3};
 use lc_world::form::primitive::Shape;
 
 /// How far from its equator an ellipsoid's band runs, either way.
@@ -68,6 +69,21 @@ fn around(p: DVec3) -> f64 {
 /// `-x` at the near, so either end's chart faces out.
 fn across(p: DVec3, far: bool) -> DVec2 {
     DVec2::new(if far { p.y } else { -p.y }, p.z)
+}
+
+/// `shape` turned so its charts' axis is the one they are laid out about, and the turn from the
+/// part's frame into that shape's: evaluate the charts at `turn * p`, and carry a tangent back by
+/// its transpose. Every primitive's axis is its own x but an ellipsoid's, which has none of its
+/// own: its caps go about whichever of its axes runs most along `up`, in the part's frame, so a
+/// habitat's roof is its top however the part is turned. The turn is a cyclic permutation of the
+/// axes, so it keeps a chart right-handed.
+pub fn oriented(shape: &Shape, up: DVec3) -> (Shape, DMat3) {
+    let Shape::Ellipsoid { semi_axes } = *shape else { return (*shape, DMat3::IDENTITY) };
+    let a = up.abs().max_position();
+    let (b, c) = ((a + 1) % 3, (a + 2) % 3);
+    let row = |i: usize| DVec3::from_array(std::array::from_fn(|k| if k == i { 1.0 } else { 0.0 }));
+    let turn = DMat3::from_cols(row(a), row(b), row(c)).transpose();
+    (Shape::Ellipsoid { semi_axes: DVec3::new(semi_axes[a], semi_axes[b], semi_axes[c]) }, turn)
 }
 
 /// Which chart of `shape` holds `p`, in the part's frame: the one whose surface is nearest.
@@ -295,6 +311,19 @@ mod tests {
                 assert!((du / 0.01 - 1.0).abs() < 0.02, "{shape:?} chart {chart}: {} m a meter", du / 0.01);
             }
         }
+    }
+
+    /// A habitat lying long along its x and short along its z, with z up: its caps, so its roof, go
+    /// on its top and bottom, not its ends.
+    #[test]
+    fn an_ellipsoid_is_capped_about_the_axis_most_up() {
+        let lying = Shape::Ellipsoid { semi_axes: DVec3::new(50.0, 25.0, 10.0) };
+        let (shape, turn) = oriented(&lying, DVec3::Z);
+        let chart = |p: DVec3| chart_at(&shape, chart_of(&shape, turn * p), turn * p);
+        assert!(chart(DVec3::new(0.0, 0.0, 10.0)).end, "its top is a cap");
+        assert!(chart(DVec3::new(0.0, 0.0, -10.0)).end, "its bottom is a cap");
+        assert!(!chart(DVec3::new(50.0, 0.0, 0.0)).end, "its tip is on the band");
+        assert!(turn.determinant() > 0.0, "a turn, not a reflection");
     }
 
     #[test]
