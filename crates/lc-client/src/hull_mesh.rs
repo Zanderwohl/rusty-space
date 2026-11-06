@@ -396,7 +396,7 @@ fn append(out: &mut HullBuffers, piece: &Piece, surface: &Surface, normals: &[DV
                 out.normals.push(normal.as_vec3().to_array());
                 out.regions.push(regions);
                 out.faces.push(faces[v as usize]);
-                out.charts.push([uv.x as f32, uv.y as f32, here.kind as u8 as f32, 0.0]);
+                out.charts.push([uv.x as f32, uv.y as f32, here.kind as u8 as f32, if here.end { 1.0 } else { 0.0 }]);
                 out.chart_bounds.push(here.bounds.map(|x| x as f32));
                 out.tangents.push(along.as_vec3().extend(1.0).to_array());
                 out.positions.len() as u32 - 1

@@ -34,16 +34,16 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
     MeshVertexAttribute::new("HullRegions3", 0x4855_4C4C_0000_0004, VertexFormat::Unorm8x4),
 ];
 
-/// `(u_m, v_m, kind, 0)`: where the vertex lies on its part's own surface, in one of the part's
-/// charts, and which kind of chart: 0 a rectangle, 1 a disc, 2 a band wrapping in u, 3 a ring
-/// wrapping both ways. A look lays its pattern in these meters, so it follows the part and keeps
+/// `(u_m, v_m, kind, end)`: where the vertex lies on its part's own surface, in one of the part's
+/// charts, which kind of chart (0 a rectangle, 1 a disc, 2 a band wrapping in u, 3 a ring wrapping
+/// both ways, 4 a dome laid out about its pole), and 1 where the chart is one of the part's ends. A look lays its pattern in these meters, so it follows the part and keeps
 /// clear of its edges.
 pub const ATTRIBUTE_HULL_CHART: MeshVertexAttribute =
     MeshVertexAttribute::new("HullChart", 0x4855_4C4C_0000_0008, VertexFormat::Float32x4);
 
 /// The chart's extent: `(u_lo, u_hi, v_lo, v_hi)` for a rectangle, `(radius, 0, 0, 0)` for a disc
 /// about its origin, `(u_period, 0, v_lo, v_hi)` for a band, `(u_period, v_period, 0, 0)` for a
-/// ring. Alike on every vertex of a chart.
+/// ring, `(radius, sphere_radius, 0, 0)` for a dome, its arcs measured on a sphere that size. Alike on every vertex of a chart.
 pub const ATTRIBUTE_HULL_CHART_BOUNDS: MeshVertexAttribute =
     MeshVertexAttribute::new("HullChartBounds", 0x4855_4C4C_0000_0009, VertexFormat::Float32x4);
 

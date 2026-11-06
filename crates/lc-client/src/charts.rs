@@ -2,15 +2,18 @@
 //! primitive is cut into a few charts, each flat or wrapping, with the bounds a look needs to keep
 //! a pattern clear of its edges:
 //!
-//! - a slab's six faces, each a [`ChartKind::Rect`];
+//! - a slab's six faces, each a [`ChartKind::Rect`]; on its four sides v runs up its z, and its
+//!   two faces across z are its ends;
 //! - a cylinder's or frustum's side, a [`ChartKind::Band`] around its axis, and its ends, each a
 //!   [`ChartKind::Disc`];
-//! - a capsule's side, a band, and its hemispheres, each a disc laid out about its pole;
-//! - an ellipsoid's middle, a band within [`BAND_LATITUDE`] of its equator, and its caps, discs;
+//! - a capsule's side, a band, and its hemispheres, each a [`ChartKind::Dome`] laid out about its
+//!   pole;
+//! - an ellipsoid's middle, a band within [`BAND_LATITUDE`] of its equator, and its caps, domes;
 //! - a torus, one [`ChartKind::Ring`], wrapping both ways.
 //!
 //! Every primitive's axis is its own x, and a chart's u cross its v is the surface's outward
-//! normal. Round charts use mean radii: a frustum's band is stretched around toward its wide end
+//! normal. A look that treats a part's ends apart from its sides, as a roof, reads
+//! [`ChartPoint::end`]. Round charts use mean radii: a frustum's band is stretched around toward its wide end
 //! and pinched toward its narrow, and an ellipsoid's band as its sections are not circles.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -31,6 +34,9 @@ pub enum ChartKind {
     Band = 2,
     /// u and v both wrap; `bounds` are `(u_period, v_period, 0, 0)`.
     Ring = 3,
+    /// A cap laid out about its pole, each point its arc from it measured on a sphere of radius
+    /// `bounds.y`; `bounds` are `(radius, sphere_radius, 0, 0)`.
+    Dome = 4,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,6 +44,8 @@ pub struct ChartPoint {
     pub uv: DVec2,
     pub kind: ChartKind,
     pub bounds: [f64; 4],
+    /// One of the part's ends rather than its side.
+    pub end: bool,
 }
 
 impl ChartPoint {
@@ -99,9 +107,19 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
         Shape::Slab { edges, .. } => {
             let axis = (chart / 2) as usize;
             let sign = if chart % 2 == 1 { 1.0 } else { -1.0 };
-            let (b, c) = ((axis + 1) % 3, (axis + 2) % 3);
+            // u across, v up the part's z on a side; across x then y on an end.
+            let (b, c, flip) = match axis {
+                0 => (1, 2, sign),
+                1 => (0, 2, -sign),
+                _ => (0, 1, sign),
+            };
             let half = edges / 2.0;
-            ChartPoint { uv: DVec2::new(sign * p[b], p[c]), kind: ChartKind::Rect, bounds: [-half[b], half[b], -half[c], half[c]] }
+            ChartPoint {
+                uv: DVec2::new(flip * p[b], p[c]),
+                kind: ChartKind::Rect,
+                bounds: [-half[b], half[b], -half[c], half[c]],
+                end: axis == 2,
+            }
         }
         Shape::Cylinder { radius, length } => match chart {
             0 => band(theta, radius, p.x, length / 2.0),
@@ -123,7 +141,7 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
                 _ => {
                     let polar = (if far { p.x - h } else { -p.x - h }).max(0.0);
                     let arc = radius * p.y.hypot(p.z).atan2(polar);
-                    disc(across(p, far).normalize_or_zero() * arc, radius * FRAC_PI_2)
+                    dome(across(p, far).normalize_or_zero() * arc, radius * FRAC_PI_2, radius)
                 }
             }
         }
@@ -137,23 +155,32 @@ pub fn chart_at(shape: &Shape, chart: u8, p: DVec3) -> ChartPoint {
                 0 => band(theta, equator, latitude * meridian, BAND_LATITUDE * meridian),
                 _ => {
                     let arc = (FRAC_PI_2 - latitude.abs()) * meridian;
-                    disc(across(q, far).normalize_or_zero() * arc, (FRAC_PI_2 - BAND_LATITUDE) * meridian)
+                    dome(across(q, far).normalize_or_zero() * arc, (FRAC_PI_2 - BAND_LATITUDE) * meridian, meridian)
                 }
             }
         }
         Shape::Torus { major, minor } => {
             let tube = p.x.atan2(p.y.hypot(p.z) - major);
-            ChartPoint { uv: DVec2::new(theta * major, tube * minor), kind: ChartKind::Ring, bounds: [TAU * major, TAU * minor, 0.0, 0.0] }
+            ChartPoint {
+                uv: DVec2::new(theta * major, tube * minor),
+                kind: ChartKind::Ring,
+                bounds: [TAU * major, TAU * minor, 0.0, 0.0],
+                end: false,
+            }
         }
     }
 }
 
 fn band(theta: f64, radius: f64, v: f64, half: f64) -> ChartPoint {
-    ChartPoint { uv: DVec2::new(theta * radius, v), kind: ChartKind::Band, bounds: [TAU * radius, 0.0, -half, half] }
+    ChartPoint { uv: DVec2::new(theta * radius, v), kind: ChartKind::Band, bounds: [TAU * radius, 0.0, -half, half], end: false }
 }
 
 fn disc(uv: DVec2, radius: f64) -> ChartPoint {
-    ChartPoint { uv, kind: ChartKind::Disc, bounds: [radius, 0.0, 0.0, 0.0] }
+    ChartPoint { uv, kind: ChartKind::Disc, bounds: [radius, 0.0, 0.0, 0.0], end: true }
+}
+
+fn dome(uv: DVec2, radius: f64, sphere: f64) -> ChartPoint {
+    ChartPoint { uv, kind: ChartKind::Dome, bounds: [radius, sphere, 0.0, 0.0], end: true }
 }
 
 /// `x` less whole periods, to within half of one of `near`; as is for no period.

@@ -1,9 +1,10 @@
 // Server racks. On a side, servers a deck tall stacked between rounded rack posts, a V-groove
 // between each server and the next, each server its own shade and tipped a little so they catch
 // the light one by one, and wears a face of glass from a baked set: a mirror by day, glowing by
-// night. On the top and bottom, a data hall from above: rows of rack tops, each
-// with a fan, between sunken aisles. Each face is mapped in its own frame (u, v, n), meters, with
-// v up on a side. Look development: crates/lc-client/src/looks/racks.rs.
+// night. On a part's ends, a data hall from above: rows of rack tops, each with a fan, between
+// sunken aisles. Laid out in the part's own charts (crate::charts in lc-client), servers stacked up
+// v, and a whole number of racks around a band or ring and of servers around a ring's tube. Look
+// development: crates/lc-client/src/looks/racks.rs.
 
 #import bevy_pbr::{
     mesh_functions,
@@ -16,12 +17,19 @@ struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    // em_render::hull_material::ATTRIBUTE_HULL_CHART and ATTRIBUTE_HULL_CHART_BOUNDS.
+    @location(2) chart: vec4<f32>,
+    @location(3) bounds: vec4<f32>,
+    @location(4) tangent: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
+    @location(2) chart: vec4<f32>,
+    @location(3) @interpolate(flat) bounds: vec4<f32>,
+    @location(4) world_tangent: vec3<f32>,
 }
 
 struct RacksUniform {
@@ -84,35 +92,28 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.world_position = world.xyz;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
+    out.chart = vertex.chart;
+    out.bounds = vertex.bounds;
+    out.world_tangent = mesh_functions::mesh_tangent_local_to_world(world_from_local, vertex.tangent, vertex.instance_index).xyz;
     return out;
 }
 
-struct Face {
-    u: vec3<f32>,
-    v: vec3<f32>,
-    n: vec3<f32>,
-    id: u32,
+const BAND: u32 = 2u;
+const RING: u32 = 3u;
+
+/// `x` modulo `n`, never negative.
+fn wrap(x: i32, n: i32) -> i32 {
+    return ((x % n) + n) % n;
 }
 
-/// The axis `normal` is nearest, signed: a curved surface is mapped by the box face it faces most.
-fn dominant(normal: vec3<f32>) -> vec3<f32> {
-    let a = abs(normal);
-    if (a.x >= a.y && a.x >= a.z) { return vec3<f32>(sign(normal.x), 0.0, 0.0); }
-    if (a.y >= a.z) { return vec3<f32>(0.0, sign(normal.y), 0.0); }
-    return vec3<f32>(0.0, 0.0, sign(normal.z));
-}
-
-fn face(normal: vec3<f32>) -> Face {
-    let n = dominant(normal);
-    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(n.y) > 0.9);
-    let u = normalize(cross(up, n));
-    return Face(u, cross(n, u), n, u32(dot(round(n), vec3<f32>(1.0, 3.0, 9.0)) + 13.0));
-}
-
-/// The face's u and v laid into the surface's tangent plane, and the surface's own normal.
-fn tangent_frame(f: Face, surface: vec3<f32>) -> mat3x3<f32> {
-    let t = normalize(f.u - surface * dot(f.u, surface));
-    return mat3x3<f32>(t, cross(surface, t), surface);
+/// `pitch` made to fit `period` a whole number of times, and that number; unchanged, with no
+/// count, for no period.
+fn fitted(pitch: f32, period: f32) -> vec2<f32> {
+    if (period <= 0.0) {
+        return vec2<f32>(pitch, 0.0);
+    }
+    let n = max(round(period / pitch), 1.0);
+    return vec2<f32>(period / n, n);
 }
 
 /// A normal in the face's frame, tipped by up to `tilt` radians, uniform over that disc.
@@ -205,19 +206,27 @@ fn glass(n: vec3<f32>, e: vec3<f32>, face_n: vec3<f32>) -> vec3<f32> {
 }
 
 /// A side: servers between posts, each wearing a face, a groove between each and the next.
-/// `dx` and `dy` are the face coordinates' screen derivatives, taken where control flow is uniform.
-fn side(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec3<f32> {
-    let rack = m.rack.x;
-    let server = m.rack.y;
-    let seed = mix_hash(u32(m.finish.y), f.id);
-    let cell = floor(p / vec2<f32>(rack, server));
-    let id = mix_hash(mix_hash(seed, u32(i32(cell.x))), u32(i32(cell.y)));
+/// `periods` are u's and v's where they wrap, 0 where they do not. `dx` and `dy` are the chart
+/// coordinates' screen derivatives, taken where control flow is uniform.
+fn side(p: vec2<f32>, seed: u32, periods: vec2<f32>, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec3<f32> {
+    let across = fitted(m.rack.x, periods.x);
+    let up = fitted(m.rack.y, periods.y);
+    let rack = across.x;
+    let server = up.x;
+    var cell = floor(p / vec2<f32>(rack, server));
+    // Named around a wrap, so the servers either side of a seam agree.
+    let named = vec2<i32>(
+        select(i32(cell.x), wrap(i32(cell.x), i32(across.y)), across.y > 0.0),
+        select(i32(cell.y), wrap(i32(cell.y), i32(up.y)), up.y > 0.0),
+    );
+    let id = mix_hash(mix_hash(seed, u32(named.x)), u32(named.y));
     let base = shade(id);
     let n = normalize(frame * tipped(id, m.lean.z));
     var radiance = lit(n, e, surface, base);
 
-    // The face, centered on the server and as wide and tall as `face` says.
-    let size = m.face.xy;
+    // The face, centered on the server and as wide and tall as `face` says of a server as it was
+    // asked for, so it keeps its margin where the server was fitted to a wrap.
+    let size = m.face.xy * vec2<f32>(rack, server) / m.rack.xy;
     let local = p - cell * vec2<f32>(rack, server) - 0.5 * (vec2<f32>(rack, server) - size);
     let uv = vec2<f32>(local.x, size.y - local.y) / size;
     let flip = vec2<f32>(1.0, -1.0) / size;
@@ -241,14 +250,13 @@ fn side(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f
     return mix(radiance, lit(frame * post, e, surface, 1.3 * m.paint.rgb), cover(px, ph, pixel.x));
 }
 
-/// A top or bottom: rows of rack tops along u, each a fan in every rack's width, between aisles.
-fn hall(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>) -> vec3<f32> {
+/// An end: rows of rack tops along u, each a fan in every rack's width, between aisles.
+fn hall(p: vec2<f32>, seed: u32, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f32>, pixel: vec2<f32>) -> vec3<f32> {
     let rack = m.rack.x;
     let depth = m.hall.x;
     let pitch = depth + m.hall.y;
     let row = floor(p.y / pitch);
     let across = p.y - row * pitch;
-    let seed = mix_hash(u32(m.finish.y), f.id);
     let id = mix_hash(mix_hash(seed, u32(i32(row))), u32(i32(floor(p.x / rack))));
     let base = shade(id);
 
@@ -287,18 +295,30 @@ fn hall(p: vec2<f32>, f: Face, frame: mat3x3<f32>, surface: vec3<f32>, e: vec3<f
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = normalize(in.world_normal);
-    let f = face(surface);
-    let frame = tangent_frame(f, surface);
-    let p = vec2<f32>(dot(in.world_position, f.u), dot(in.world_position, f.v));
+    let along = normalize(in.world_tangent - surface * dot(in.world_tangent, surface));
+    let frame = mat3x3<f32>(along, cross(surface, along), surface);
+    let p = in.chart.xy;
+    let kind = u32(round(in.chart.z));
     let e = normalize(view.world_position - in.world_position);
     let pixel = max(fwidth(p), vec2<f32>(1.0e-4));
     let dx = dpdx(p);
     let dy = dpdy(p);
+    // Each chart its own servers, told apart by its extent, and a rectangle, all of one direction,
+    // by which way its u runs: a cube's faces are alike in extent.
+    let facing = select(0u, u32(round(dot(along, vec3<f32>(1.0, 3.0, 9.0))) + 13.0), kind == 0u);
+    let seed = mix_hash(mix_hash(u32(m.finish.y), kind + 8u * facing), bitcast<u32>(in.bounds.x + 2.0 * in.bounds.w) ^ u32(in.chart.w));
+    var periods = vec2<f32>(0.0);
+    if (kind == BAND || kind == RING) {
+        periods.x = in.bounds.x;
+    }
+    if (kind == RING) {
+        periods.y = in.bounds.y;
+    }
     var radiance: vec3<f32>;
-    if (abs(f.n.y) > 0.5) {
-        radiance = hall(p, f, frame, surface, e, pixel);
+    if (in.chart.w > 0.5) {
+        radiance = hall(p, seed, frame, surface, e, pixel);
     } else {
-        radiance = side(p, f, frame, surface, e, pixel, dx, dy);
+        radiance = side(p, seed, periods, frame, surface, e, pixel, dx, dy);
     }
     return vec4<f32>(radiance * m.finish.x, 1.0);
 }

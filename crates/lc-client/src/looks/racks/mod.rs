@@ -1,7 +1,8 @@
 //! Server racks: on the sides, a wall of servers a deck tall between raised rack posts, a groove
 //! between each server and the next; on the top and bottom, a data hall from above, rows of rack
 //! tops with a fan in each, between sunken aisles. Each server wears one of [`faces`], glass that
-//! mirrors the sky by day and glows green by night. See `assets/shaders/racks.wgsl`.
+//! mirrors the sky by day and glows green by night. Laid out in the part's own charts, which the
+//! hull mesher writes ([`crate::charts`]), so only its meshes draw. See `assets/shaders/racks.wgsl`.
 
 pub mod faces;
 
@@ -156,6 +157,6 @@ impl Material for RacksMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        super::position_and_normal(descriptor, layout)
+        super::charted(descriptor, layout)
     }
 }

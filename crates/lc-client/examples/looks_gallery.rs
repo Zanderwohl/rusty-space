@@ -213,16 +213,23 @@ fn spawn(
         columns.push(x);
     }
     let rows = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0].map(|row| row * 3.0 * STANDOFF * largest);
+    // A box as a part, meshed, so it carries the charts a look is laid out in; its z, which its
+    // sides' charts run up, stood along Bevy's y.
+    let boxed = |edge: f32, kind: Kind| {
+        let shape = Shape::Slab { edges: glam::DVec3::splat(edge as f64), corner: 0.0 };
+        let piece = Piece { part: PartId(0), side: Side::Original, kind, shape, pose: Pose::IDENTITY };
+        HullForm { source: HullSource::Pieces(Arc::from([piece])), cells: Some(32) }
+    };
+    let standing = Quat::from_rotation_x(-FRAC_PI_2);
     for (&size, &x) in args.sizes.iter().zip(&columns) {
         for (look, &z) in rows.iter().enumerate() {
             let center = Vec3::new(x, 0.0, z);
             if look == 0 {
                 for (k, layer) in sprue_layers.iter().enumerate() {
-                    let edge = size + 2.0 * Sprue::lift(k);
                     commands.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(edge, edge, edge))),
+                        boxed(size + 2.0 * Sprue::lift(k), Kind::Engine),
                         MeshMaterial3d(layer.clone()),
-                        Transform::from_translation(center),
+                        Transform::from_translation(center).with_rotation(standing),
                     ));
                 }
             } else if look == 4 {
@@ -232,20 +239,9 @@ fn spawn(
                     Transform::from_translation(center),
                 ));
             } else if look == 5 {
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(size, size, size))),
-                    MeshMaterial3d(rack.clone()),
-                    Transform::from_translation(center),
-                ));
+                commands.spawn((boxed(size, Kind::Data), MeshMaterial3d(rack.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else if look == 6 {
-                // A part, meshed, so it carries the charts the tubes are laid out in.
-                let edges = glam::DVec3::splat(size as f64);
-                let piece = Piece { part: PartId(0), side: Side::Original, kind: Kind::Drone, shape: Shape::Slab { edges, corner: 0.0 }, pose: Pose::IDENTITY };
-                commands.spawn((
-                    HullForm { source: HullSource::Pieces(Arc::from([piece])), cells: Some(32) },
-                    MeshMaterial3d(tube.clone()),
-                    Transform::from_translation(center),
-                ));
+                commands.spawn((boxed(size, Kind::Drone), MeshMaterial3d(tube.clone()), Transform::from_translation(center).with_rotation(standing)));
             } else {
                 commands.spawn((
                     Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),

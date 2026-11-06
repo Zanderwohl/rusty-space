@@ -108,6 +108,7 @@ const RECT: u32 = 0u;
 const DISC: u32 = 1u;
 const BAND: u32 = 2u;
 const RING: u32 = 3u;
+const DOME: u32 = 4u;
 
 /// `x` modulo `n`, never negative.
 fn wrap(x: i32, n: i32) -> i32 {
@@ -340,7 +341,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var kept = true;
     if (kind == RECT) {
         kept = all(center >= bounds.xz + vec2<f32>(w)) && all(center <= bounds.yw - vec2<f32>(w));
-    } else if (kind == DISC) {
+    } else if (kind == DISC || kind == DOME) {
         kept = length(center) <= bounds.x - w;
     } else if (kind == BAND) {
         kept = center.y >= bounds.z + w && center.y <= bounds.w - w;

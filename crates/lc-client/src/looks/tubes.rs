@@ -13,7 +13,6 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 use bevy_mesh::MeshVertexBufferLayoutRef;
-use em_render::hull_material::{ATTRIBUTE_HULL_CHART, ATTRIBUTE_HULL_CHART_BOUNDS};
 
 pub struct Tubes {
     /// A cell across its flats: two apothems.
@@ -130,14 +129,6 @@ impl Material for TubesMaterial {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        let vertex_layout = layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            ATTRIBUTE_HULL_CHART.at_shader_location(2),
-            ATTRIBUTE_HULL_CHART_BOUNDS.at_shader_location(3),
-            Mesh::ATTRIBUTE_TANGENT.at_shader_location(4),
-        ])?;
-        descriptor.vertex.buffers = vec![vertex_layout];
-        Ok(())
+        super::charted(descriptor, layout)
     }
 }
