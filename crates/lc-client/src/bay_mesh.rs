@@ -43,6 +43,12 @@ const WEB_M: f64 = 0.35;
 const LEVEL_M: f64 = 9.0;
 const DECK_M: f64 = 0.8;
 const RAIL_M: f64 = 0.4;
+/// Each buttress stands in a rib's plane from the wall, this share of the deck's reach in at its
+/// foot and this at its head, and this thick along x, with a flange this wide down its slope.
+const BUTTRESS_FOOT: f64 = 0.5;
+const BUTTRESS_HEAD: f64 = 0.15;
+const BUTTRESS_M: f64 = 0.6;
+const FLANGE_M: f64 = 0.35;
 const PAD_M: f64 = 0.25;
 /// Each side's decks reach this share of the hold's width in, so the shaft is the rest.
 const DECK_SHARE: f64 = 0.28;
@@ -110,6 +116,7 @@ pub fn mesh(piece: &Piece, slot: Option<usize>, out: &mut HullBuffers) {
     b.ribs(&hold);
     b.decks(&hold);
     b.runway(&hold);
+    b.buttresses(&hold);
     b.berths(&hold, seed(piece));
 }
 
@@ -522,6 +529,56 @@ impl Builder<'_> {
     }
 
     /// A convex outline in the plane at `x`, counterclockwise in (y, z), as two faces back to back.
+    /// In every rib's plane between two berths, on every level and either side, a plate from the
+    /// wall reaching further in than the rib, broad at the deck and narrow under the next, with a
+    /// flange down its slope.
+    fn buttresses(&mut self, hold: &Hold) {
+        let spar = region(Kind::Spar(SparMode::Saddle));
+        for i in 1..hold.spans {
+            let x = hold.rib(i);
+            for k in 0..hold.levels {
+                let (floor, ceiling) = (hold.floor(k), hold.ceiling(k));
+                for side in [-1.0, 1.0] {
+                    let wall = side * hold.wide;
+                    let foot = wall - side * BUTTRESS_FOOT * hold.reach;
+                    let head = wall - side * BUTTRESS_HEAD * hold.reach;
+                    let outline = [DVec2::new(wall, floor), DVec2::new(foot, floor), DVec2::new(head, ceiling), DVec2::new(wall, ceiling)];
+                    self.prism(x, BUTTRESS_M / 2.0, &outline, spar);
+                    let slope = |p: DVec2| DVec3::new(x, p.x, p.y);
+                    let inward = DVec2::new(-side, 0.0) * (FLANGE_M / 2.0);
+                    self.beam(slope(DVec2::new(foot, floor) + inward), slope(DVec2::new(head, ceiling) + inward), FLANGE_M, DVec3::X, spar);
+                }
+            }
+        }
+    }
+
+    /// A convex outline in (y, z), in either winding, stood `half` meters either side of the plane
+    /// at `x`: two caps and a side per edge.
+    fn prism(&mut self, x: f64, half: f64, outline: &[DVec2], region: u32) {
+        let area: f64 = (0..outline.len()).map(|k| outline[k].perp_dot(outline[(k + 1) % outline.len()])).sum();
+        let ccw: Vec<DVec2> = if area >= 0.0 { outline.to_vec() } else { outline.iter().rev().copied().collect() };
+        let at = |p: DVec2, dx: f64| DVec3::new(x + dx, p.x, p.y);
+        for k in 0..ccw.len() {
+            let (a, b) = (ccw[k], ccw[(k + 1) % ccw.len()]);
+            // Counterclockwise about the outward normal, which is the edge turned clockwise in (y, z).
+            self.quad([at(a, -half), at(b, -half), at(b, half), at(a, half)], region, Chart::Own);
+        }
+        for facing in [1.0, -1.0] {
+            let n = ccw.len() as u32;
+            let first = self.out.positions.len() as u32;
+            let (lo, hi) = ccw.iter().fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            let along = self.piece.pose.rotation * self.frame * (DVec3::Y * facing);
+            let bounds = if facing > 0.0 { [lo.x, hi.x, lo.y, hi.y] } else { [-hi.x, -lo.x, lo.y, hi.y] };
+            for p in &ccw {
+                self.vertex(at(*p, facing * half), DVec3::X * facing, region, [facing * p.x, p.y, ChartKind::Rect as u8 as f64, 0.0], bounds, along);
+            }
+            for k in 1..n - 1 {
+                let (b, c) = if facing > 0.0 { (k, k + 1) } else { (k + 1, k) };
+                self.out.indices.extend([first, first + b, first + c]);
+            }
+        }
+    }
+
     fn card(&mut self, x: f64, outline: &[DVec2], region: u32) {
         if outline.len() < 3 {
             return;
@@ -778,6 +835,27 @@ mod tests {
         for (n, t) in out.normals.iter().zip(&out.tangents) {
             let (n, t) = (glam::Vec3::from_array(*n), glam::Vec4::from_array(*t).truncate());
             assert!(n.dot(t).abs() < 1e-4, "{n} against {t}");
+        }
+    }
+
+    /// Every triangle of a prism, either winding in, faces out from its middle, as its normals say.
+    #[test]
+    fn a_prism_faces_out_whichever_way_its_outline_runs() {
+        let (piece, _) = bay(DVec3::new(40.0, 30.0, 20.0), DMat3::IDENTITY);
+        let (frame, _) = layout(&piece).unwrap();
+        let outline = [DVec2::new(0.0, 0.0), DVec2::new(4.0, 0.0), DVec2::new(1.0, 3.0), DVec2::new(0.0, 3.0)];
+        for points in [outline.to_vec(), outline.iter().rev().copied().collect()] {
+            let mut out = HullBuffers::default();
+            let mut b = Builder { out: &mut out, piece: &piece, frame, hull: oriented(&piece.shape, DVec3::Z), h: 1e-3, bay: 0, lamp: Lamp::None };
+            b.prism(2.0, 0.5, &points, 0);
+            let p = |i: u32| DVec3::from_array(out.positions[i as usize].map(f64::from));
+            let middle = out.positions.iter().map(|q| DVec3::from_array(q.map(f64::from))).sum::<DVec3>() / out.positions.len() as f64;
+            for t in out.indices.chunks(3) {
+                let wound = (p(t[1]) - p(t[0])).cross(p(t[2]) - p(t[0])).normalize();
+                let stored = DVec3::from_array(out.normals[t[0] as usize].map(f64::from));
+                assert!(wound.dot(stored) > 0.99, "{wound} against {stored}");
+                assert!(wound.dot((p(t[0]) + p(t[1]) + p(t[2])) / 3.0 - middle) > 0.0);
+            }
         }
     }
 
