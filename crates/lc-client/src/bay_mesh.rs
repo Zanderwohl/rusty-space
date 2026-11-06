@@ -164,9 +164,11 @@ pub fn hull_bays(pieces: &[Piece]) -> [HullBay; BAYS] {
 /// `Mesh3d` is touched every frame, and a form's pieces are worth placing only when it changes.
 pub fn fit_bays(
     hulls: Query<(Entity, &Mesh3d, &HullForm, &MeshMaterial3d<HullMaterial>)>,
-    mut materials: ResMut<Assets<HullMaterial>>,
+    materials: Option<ResMut<Assets<HullMaterial>>>,
     mut seen: Local<HashMap<Entity, AssetId<Mesh>>>,
 ) {
+    // Absent where meshes are made without the hull material, as the mesher's own tests do.
+    let Some(mut materials) = materials else { return };
     let mut now = HashMap::with_capacity(seen.len());
     for (entity, mesh, form, material) in &hulls {
         now.insert(entity, mesh.id());
