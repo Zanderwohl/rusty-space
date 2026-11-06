@@ -196,12 +196,16 @@ const BAY_RUNWAY_LAMP: u32 = 1u;
 const BAY_FLOOD_LAMP: u32 = 2u;
 /// A flood's beam: full inside 25 degrees off its aim, gone past 40, so 50 to 80 degrees across.
 const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.766, 0.906);
-/// What the lamps give a surface, as multiples of the bay region's lit window: a flood's in square
-/// meters, as it falls off with distance squared, and a runway strip's in meters, as a line does.
-const BAY_FLOOD_GAIN: f32 = 48.0;
-const BAY_RUNWAY_GAIN: f32 = 2.0;
-/// The lamps themselves, seen.
-const BAY_FIXTURE_GAIN: f32 = 4.0;
+/// What the lamps give a surface, as multiples of the bay region's lamp, which is a lit window's
+/// 300 cd/m²: a flood's in square meters, as it falls off with distance squared, and a strip's in
+/// meters, as a line does. A floodlit yard's 2000 lux on what a flood is aimed at about 12 m off is
+/// 2000 / π / 300 ≈ 2 lamps, so 2 × 12² ≈ 300; a strip lights the far wall of a shaft 40 m across
+/// at about half a lamp.
+const BAY_FLOOD_GAIN: f32 = 300.0;
+const BAY_RUNWAY_GAIN: f32 = 12.0;
+/// The lamps themselves, seen: far brighter than what they light.
+const BAY_FLOOD_FIXTURE: f32 = 40.0;
+const BAY_RUNWAY_FIXTURE: f32 = 12.0;
 const BAY_RUNWAY_TINT: vec3<f32> = vec3<f32>(0.75, 0.88, 1.0);
 const BAY_RUNWAY_DASH_M: f32 = 3.0;
 
@@ -259,7 +263,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     out.light += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_GAIN * strips;
     if (tag.y == BAY_RUNWAY_LAMP) {
         let dashed = select(0.1, 1.0, fract((p.x - back) / BAY_RUNWAY_DASH_M) < 0.35);
-        out.glow += BAY_RUNWAY_TINT * lamp * BAY_FIXTURE_GAIN * dashed;
+        out.glow += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_FIXTURE * dashed;
     }
 
     // The berth this is in, if it is on a deck's side of the shaft, and its floods if occupied.
@@ -282,11 +286,11 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     let x0 = back + span * pitch + 0.5 * BAY_RIB_DEPTH_M;
     let x1 = back + (span + 1.0) * pitch - 0.5 * BAY_RIB_DEPTH_M;
     let head_y = side * (edge + 0.5 * BAY_FLOOD_HEAD_M);
-    let target = vec3<f32>(0.5 * (x0 + x1), side * (wide - 0.5 * reach), floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
+    let aimed_at = vec3<f32>(0.5 * (x0 + x1), side * (wide - 0.5 * reach), floor_z + BAY_PAD_M + 0.4 * (ceiling - floor_z - BAY_PAD_M));
     var floods = 0.0;
     for (var k = 0u; k < 2u; k++) {
         let head = vec3<f32>(select(x0 + BAY_FLOOD_INSET_M, x1 - BAY_FLOOD_INSET_M, k == 1u), head_y, ceiling - BAY_FLOOD_DROP_M);
-        let aim = normalize(target - head);
+        let aim = normalize(aimed_at - head);
         let off = p - head;
         let d = length(off);
         let from_head = off / max(d, 1.0e-3);
@@ -295,7 +299,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     }
     out.light += lamp * BAY_FLOOD_GAIN * floods;
     if (tag.y == BAY_FLOOD_LAMP) {
-        out.glow += lamp * BAY_FIXTURE_GAIN;
+        out.glow += lamp * BAY_FLOOD_FIXTURE;
     }
     return out;
 }

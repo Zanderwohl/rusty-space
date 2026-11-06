@@ -15,6 +15,7 @@
 //! | `--primitive <name>` | one row: `ellipsoid`, `capsule`, `slab`, `cylinder`, `torus` or `frustum` |
 //! | `--lying` | every part on its side, its axis along the ship's x, rather than standing |
 //! | `--sun <deg>` | the star's elevation |
+//! | `--exposure <stops>` | open the exposure this many stops, as the game's flag does, and take the game's night fill, 0.3% of the star rather than 8%: a bay's lamps by night |
 //! | `--frames <n>` | frames after every mesh lands |
 
 use std::f32::consts::FRAC_PI_2;
@@ -52,6 +53,8 @@ const TILE_M: f32 = 64.0;
 const TILE_TEXELS: u32 = 512;
 const LIT_WINDOW: f32 = 0.0075;
 const LIT_HULL: f32 = 0.3;
+/// `lc_client::hull::HULL_NIGHT`: a real hull's night fill.
+const GAME_NIGHT: f32 = 0.003;
 
 const FOV_Y: f32 = 0.5;
 
@@ -106,6 +109,7 @@ struct Args {
     pitch_deg: f32,
     zoom: f32,
     sun_deg: f32,
+    exposure_stops: f32,
     frames: u32,
     lying: bool,
 }
@@ -142,6 +146,7 @@ impl Args {
             pitch_deg: value("--pitch").unwrap_or(20.0),
             zoom: value("--zoom").unwrap_or(1.0),
             sun_deg: value("--sun").unwrap_or(35.0),
+            exposure_stops: value("--exposure").unwrap_or(0.0),
             frames: value("--frames").unwrap_or(10.0) as u32,
             lying: args.iter().any(|a| a == "--lying"),
         }
@@ -322,8 +327,8 @@ fn spawn(
     }
     let hull = hulls.add(HullMaterial {
         uniforms: wear(HullUniform {
-            to_star: to_star.extend(0.08),
-            exposure: Vec4::new(LIT_HULL * 2f32.powf(1.5), ToneMap::default().surface_stops, 0.0, 0.0),
+            to_star: to_star.extend(if args.exposure_stops > 0.0 { GAME_NIGHT } else { 0.08 }),
+            exposure: Vec4::new(LIT_HULL * 2f32.powf(1.5 - args.exposure_stops), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
             emitted,
             ..default()

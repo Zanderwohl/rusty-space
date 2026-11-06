@@ -23,7 +23,9 @@ use lc_world::form::{Kind, SparMode};
 use lc_world::form::place::Side;
 use lc_world::form::primitive::Shape;
 use lc_world::form::sdf::Piece;
-use bevy::prelude::{Assets, DetectChanges, Mesh3d, MeshMaterial3d, Query, Ref, ResMut};
+use std::collections::HashMap;
+
+use bevy::prelude::{AssetId, Assets, Entity, Local, Mesh, Mesh3d, MeshMaterial3d, Query, ResMut};
 use em_render::hull_material::{BAYS, HullBay, HullMaterial, face_attribute, region_weights};
 use glam::Vec4;
 
@@ -132,10 +134,17 @@ pub fn hull_bays(pieces: &[Piece]) -> [HullBay; BAYS] {
     out
 }
 
-/// Hands each hull material its bays once the mesh they were built into lands.
-pub fn fit_bays(hulls: Query<(Ref<Mesh3d>, &HullForm, &MeshMaterial3d<HullMaterial>)>, mut materials: ResMut<Assets<HullMaterial>>) {
-    for (mesh, form, material) in &hulls {
-        if !mesh.is_changed() {
+/// Hands each hull material its bays once the mesh they were built into lands. By the mesh's id:
+/// `Mesh3d` is touched every frame, and a form's pieces are worth placing only when it changes.
+pub fn fit_bays(
+    hulls: Query<(Entity, &Mesh3d, &HullForm, &MeshMaterial3d<HullMaterial>)>,
+    mut materials: ResMut<Assets<HullMaterial>>,
+    mut seen: Local<HashMap<Entity, AssetId<Mesh>>>,
+) {
+    let mut now = HashMap::with_capacity(seen.len());
+    for (entity, mesh, form, material) in &hulls {
+        now.insert(entity, mesh.id());
+        if seen.get(&entity) == Some(&mesh.id()) {
             continue;
         }
         let bays = match &form.source {
@@ -150,6 +159,7 @@ pub fn fit_bays(hulls: Query<(Ref<Mesh3d>, &HullForm, &MeshMaterial3d<HullMateri
             asset.uniforms.bays = bays;
         }
     }
+    *seen = now;
 }
 
 /// Whether berth `index` of a bay seeded `seed` holds something. `hull.wgsl`'s `bay_occupied`.

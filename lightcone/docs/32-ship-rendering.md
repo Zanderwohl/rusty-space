@@ -227,8 +227,22 @@ storage's aztec plate in the part's own charts, and the mouth a rim as thick as 
 Up is whichever of the part's y and z runs most along the ship's z. Pitches stretch past 48 ribs
 and 16 levels, so a kilometers-long bay stays thousands of triangles, not millions. The slab's
 rounded corners are not drawn. The star reaches into the hold only through the mouth, by the hull's
-shadow map (§Shadows), so the ribs stripe the floor and a berth out of the light is lit only by the
-bay graph's own lamps. Photographed by `parts_void --only bay --primitive slab --lying`.
+shadow map (§Shadows), so the ribs stripe the floor. A ship turns its top to its star, so a bay on
+its beam is never lit by the star at all: the hold is lit by its own lamps.
+
+- **Runway strips**, two down the shaft's floor and two down its ceiling, mouth to back, lamps in a
+  dashed line, lighting as line sources: a pale blue fill over the whole hold.
+- **Floods**, two under each occupied berth's ceiling at its front edge, beams 50 to 80 degrees
+  across aimed at what is in it, at a floodlit yard's 2000 lux. An empty berth's are dark.
+
+None is a light. The hull material finds a fragment's bay from the face attribute's spare bytes and
+its berth from `HullBay`, the bay's frame and grid, by `Hold`'s arithmetic, and sums only that
+berth's floods and the four strips, analytically. Decks and ribs hold the light in because a berth's
+floods light nothing outside it, not by shadow: no lamp casts one. Which berths are occupied is one
+pcg hash written alike in Rust and WGSL, and a test holds the shader's copies of the hold's constants
+to the mesher's. The lamps are a window's 300 cd/m² scaled, so like windows they are lost by day and
+show on a night side. Photographed by `parts_void --only bay --primitive slab --lying`, and by
+night with `--sun -60 --exposure 5`.
 
 ### Shadows
 
