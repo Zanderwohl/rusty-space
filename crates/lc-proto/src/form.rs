@@ -47,7 +47,12 @@ pub enum Primitive {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mount {
-    Attached { anchor: [f64; 3], standoff: f64 },
+    Attached {
+        anchor: [f64; 3],
+        standoff: f64,
+        #[serde(default)]
+        seated: bool,
+    },
     Enclosing,
 }
 

@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use glam::{DMat3, DQuat, DVec2, DVec3};
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::Capacities;
-use lc_world::form::place::{Pose, Side};
+use lc_world::form::place::{Pose, Side, meeting};
 use lc_world::form::sdf::Piece;
 use lc_world::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
 use lc_world::refit::rounds::{Change, Work, Plan, Round};
@@ -415,10 +415,6 @@ fn applied(form: &Form, id: PartId, after: Option<Part>) -> Form {
     Form { parts }
 }
 
-fn mount(form: &Form, id: PartId) -> Option<Mount> {
-    part(form, id).and_then(|p| p.placement).map(|p| p.mount)
-}
-
 /// The copy at `share` of its volume, still standing on its foot. `None` at nothing.
 fn sized(piece: &Piece, form: &Form, share: f64) -> Option<Piece> {
     let p = part(form, piece.part)?;
@@ -427,20 +423,19 @@ fn sized(piece: &Piece, form: &Form, share: f64) -> Option<Piece> {
         return None;
     }
     let shape = p.primitive.at(p.primitive.scale(volume_m3));
-    let pose = match mount(form, piece.part) {
-        Some(Mount::Attached { .. }) => {
-            let foot = piece.pose.position - piece.pose.axis() * piece.shape.reach();
-            Pose { position: foot + piece.pose.axis() * shape.reach(), ..piece.pose }
-        }
-        _ => piece.pose,
+    // Every point of a shape scales with it about its center, so about where it meets its parent
+    // too.
+    let pose = match p.placement.and_then(|placement| meeting(&piece.shape, &piece.pose, piece.side, &placement)) {
+        Some(at) => Pose { position: at + (piece.pose.position - at) * (shape.reach() / piece.shape.reach()), ..piece.pose },
+        None => piece.pose,
     };
     Some(Piece { shape, pose, ..*piece })
 }
 
 /// Where a copy meets its parent, and how far its far edge is from there.
 fn joint(piece: &Piece, after: &Form, before: &Form) -> (DVec3, f64) {
-    let attached = matches!(mount(after, piece.part).or_else(|| mount(before, piece.part)), Some(Mount::Attached { .. }));
-    let joint = if attached { piece.pose.position - piece.pose.axis() * piece.shape.reach() } else { piece.pose.position };
+    let placement = part(after, piece.part).or_else(|| part(before, piece.part)).and_then(|p| p.placement);
+    let joint = placement.and_then(|p| meeting(&piece.shape, &piece.pose, piece.side, &p)).unwrap_or(piece.pose.position);
     let span = (0..SPAN_SAMPLES)
         .map(|i| piece.pose.to_outer(piece.shape.exit(fibonacci(i, SPAN_SAMPLES)).point).distance(joint))
         .fold(0.0, f64::max);
@@ -544,7 +539,7 @@ pub fn demo_round(balance: &Balance, scale: f64) -> Round {
     }
     let placement = |parent: u16, anchor: DVec3, standoff: f64, mirror: bool| Placement {
         parent: PartId(parent),
-        mount: Mount::Attached { anchor, standoff },
+        mount: Mount::Attached { anchor, standoff, seated: false },
         twist: 0.0,
         tilt: DVec2::ZERO,
         blend: 0.0,

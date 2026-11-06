@@ -139,20 +139,45 @@ impl Form {
 /// Attached, the child's foot — the end of its axis at −x, [`Shape::reach`] from its center — sits
 /// on the anchor, displaced along the normal by `standoff` reaches, and tilt pivots it about that
 /// foot. So a child grows away from its parent, and follows the anchor out when the parent grows.
+///
+/// Seated, the child is turned and then moved so its lowest point along the normal, its
+/// [`Shape::support`], is on the anchor, displaced the same way. Untilted that point is the foot, so
+/// the two agree; tilted, a seated part rolls on the surface rather than pivoting into it.
 pub fn relative(parent: &Shape, child: &Shape, placement: &Placement) -> Pose {
     let turn = twist_tilt(placement.twist, placement.tilt);
     match placement.mount {
         Mount::Enclosing => Pose { position: DVec3::ZERO, rotation: turn },
-        Mount::Attached { anchor, standoff } => {
-            // Scaled first, so an anchor whose squared length overflows still has a direction.
-            let exit = parent.exit((anchor / anchor.abs().max_element()).normalize());
+        Mount::Attached { anchor, standoff, seated } => {
+            let exit = parent.anchored(anchor, seated);
             let rotation = normal_frame(exit.normal) * turn;
             let reach = child.reach();
-            let foot = exit.point + exit.normal * (standoff * reach);
-            Pose { position: foot + rotation.x_axis * reach, rotation }
+            let at = exit.point + exit.normal * (standoff * reach);
+            let position = if seated {
+                at - rotation * child.support(rotation.transpose() * -exit.normal)
+            } else {
+                at + rotation.x_axis * reach
+            };
+            Pose { position, rotation }
         }
     }
 }
+
+/// Where an attached part placed at `pose` meets its parent, in the frame `pose` is in: its foot,
+/// or seated, its lowest point along the parent's normal. That normal is the part's own frame
+/// turned back through its twist and tilt, so the parent is not needed. `None` when enclosing.
+pub fn meeting(shape: &Shape, pose: &Pose, side: Side, placement: &Placement) -> Option<DVec3> {
+    let Mount::Attached { seated, .. } = placement.mount else { return None };
+    if !seated {
+        return Some(pose.position - pose.rotation.x_axis * shape.reach());
+    }
+    let down = -(twist_tilt(placement.twist, placement.tilt).transpose() * DVec3::X);
+    // A mirrored copy's frame carries a flip of its own y, which every primitive is symmetric in.
+    let down = if side == Side::Mirror { down * DVec3::new(1.0, -1.0, 1.0) } else { down };
+    Some(pose.position + pose.rotation * shape.support(down))
+}
+
+/// Of a unit direction, a component this near zero is square to a flat face or a straight side.
+pub const FLAT: f64 = 1e-9;
 
 /// Below this the parent's y lies along the normal to rounding, and what is left of it after
 /// projection points nowhere in particular.
@@ -220,6 +245,36 @@ pub struct Exit {
 }
 
 impl Shape {
+    /// Where an attached child's anchor puts it on this shape: along the anchor, or `seated`,
+    /// along the anchor scaled by the half-extents.
+    pub fn anchored(&self, anchor: DVec3, seated: bool) -> Exit {
+        let direction = if seated { anchor * self.extent(DMat3::IDENTITY, 0.0) } else { anchor };
+        // Scaled first, so an anchor whose squared length overflows still has a direction.
+        self.exit((direction / direction.abs().max_element()).normalize())
+    }
+
+    /// The point of the surface furthest along the unit `u`, in the shape's frame. A component of
+    /// `u` within [`FLAT`] of zero picks the middle of a flat, so a part resting on a face rests on
+    /// its middle: the frame a lying part is turned by leaves rounding there, which would
+    /// otherwise pick an end.
+    pub fn support(&self, u: DVec3) -> DVec3 {
+        let sign = |x: f64| if x > FLAT { 1.0 } else if x < -FLAT { -1.0 } else { 0.0 };
+        let radial = DVec3::new(0.0, u.y, u.z);
+        let out = if radial.length() > FLAT { radial.normalize() } else { DVec3::ZERO };
+        match *self {
+            Shape::Ellipsoid { semi_axes: a } => a * a * u / (a * u).length(),
+            Shape::Capsule { radius, length } => DVec3::X * (sign(u.x) * length / 2.0) + u * radius,
+            Shape::Slab { edges, corner } => (edges / 2.0 - corner) * u.map(sign) + u * corner,
+            Shape::Cylinder { radius, length } => DVec3::X * (sign(u.x) * length / 2.0) + out * radius,
+            Shape::Frustum { length, start, end } => {
+                let near = DVec3::X * (-length / 2.0) + out * start;
+                let far = DVec3::X * (length / 2.0) + out * end;
+                if far.dot(u) > near.dot(u) { far } else { near }
+            }
+            Shape::Torus { major, minor } => out * major + u * minor,
+        }
+    }
+
     /// Distance from the center to the end of the axis, and so to the foot an attached part
     /// rests on.
     pub fn reach(&self) -> f64 {
@@ -435,7 +490,7 @@ mod tests {
     }
 
     fn attached(anchor: DVec3, standoff: f64) -> Mount {
-        Mount::Attached { anchor, standoff }
+        Mount::Attached { anchor, standoff, seated: false }
     }
 
     fn turned(mut part: Part, twist: f64, tilt: DVec2) -> Part {
@@ -684,6 +739,83 @@ mod tests {
         }
         let half_turn = rotation_vector(DVec3::Y * PI);
         assert!(close(half_turn * DVec3::X, -DVec3::X, 1.0));
+    }
+
+    fn seated(anchor: DVec3, standoff: f64) -> Mount {
+        Mount::Attached { anchor, standoff, seated: true }
+    }
+
+    #[test]
+    fn the_support_is_the_furthest_point_and_on_the_surface() {
+        for shape in primitives().iter().map(|p| p.at(1.7)) {
+            for u in anchors().into_iter().map(DVec3::normalize).chain([DVec3::new(0.3, -0.8, 0.52).normalize()]) {
+                let s = shape.support(u);
+                // Along its axis a torus is lowest on a whole circle, and its support is that
+                // circle's center, the hole its foot is.
+                let ring = matches!(shape, Shape::Torus { .. }) && DVec3::new(0.0, u.y, u.z).length() <= FLAT;
+                if !ring {
+                    assert!(inside(&shape, s * (1.0 - 1e-9)) && !inside(&shape, s * (1.0 + 1e-6) + u * 1e-6), "{shape:?} {u}: {s}");
+                }
+                for k in 0..400 {
+                    let z = 1.0 - 2.0 * (k as f64 + 0.5) / 400.0;
+                    let r = (1.0 - z * z).sqrt();
+                    let (sn, cs) = (2.4 * k as f64).sin_cos();
+                    let on = shape.exit(DVec3::new(r * cs, r * sn, z)).point;
+                    assert!(on.dot(u) <= s.dot(u) + 1e-9, "{shape:?} {u}: {on} past {s}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn untilted_a_seated_part_is_where_an_attached_one_is() {
+        for parent in primitives() {
+            for child in primitives() {
+                for axis in [DVec3::X, -DVec3::X, DVec3::Y, DVec3::Z, -DVec3::Z] {
+                    let at = |mount| {
+                        let form = pair(parent, turned(part(2, child, 2e4, 1, mount), 0.7, DVec2::ZERO));
+                        *form.place(MIN_PART_M3).unwrap().get(PartId(2), Side::Original).unwrap()
+                    };
+                    let (hung, sat) = (at(attached(axis, 0.2)), at(seated(axis, 0.2)));
+                    assert!(close(hung.position, sat.position, 100.0), "{parent:?} {child:?} {axis}: {} {}", hung.position, sat.position);
+                    assert!(hung.rotation.abs_diff_eq(sat.rotation, 1e-12));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_seated_part_lying_along_a_face_rests_on_its_middle_there() {
+        let deck = Primitive::Slab { edges: DVec3::new(9.0, 4.0, 1.0), corner: 0.0 };
+        let pod = Primitive::Capsule { length: 3.0 };
+        let deck_shape = deck.at(deck.scale(5e5));
+        let Shape::Slab { edges, .. } = deck_shape else { unreachable!() };
+        // Lying fore and aft on the top: a quarter turn about the twisted y.
+        let lying = DVec2::new(-FRAC_PI_2, 0.0);
+        let anchor = DVec3::new(0.5, -0.25, 1.0);
+        let place = |anchor, standoff| {
+            let child = turned(part(2, pod, 2e4, 1, seated(anchor, standoff)), 0.0, lying);
+            let form = Form { parts: vec![Part::mind(PartId(0), MIN_PART_M3), part(1, deck, 5e5, 0, Mount::Enclosing), child] };
+            let poses = form.place(MIN_PART_M3).unwrap();
+            let pose = *poses.get(PartId(2), Side::Original).unwrap();
+            (pose, form.parts[2])
+        };
+        let (pose, child) = place(anchor, 0.0);
+        let Shape::Capsule { radius, .. } = child.shape(MIN_PART_M3) else { unreachable!() };
+        assert!(pose.rotation.x_axis.z.abs() < 1e-12, "lying: {}", pose.rotation.x_axis);
+        let expected = DVec3::new(0.5 * edges.x / 2.0, -0.25 * edges.y / 2.0, edges.z / 2.0 + radius);
+        assert!(close(pose.position, expected, 100.0), "{} against {expected}", pose.position);
+        let meets = meeting(&child.shape(MIN_PART_M3), &pose, Side::Original, &child.placement.unwrap()).unwrap();
+        assert!(close(meets, expected - DVec3::Z * radius, 100.0), "it meets the deck under its middle: {meets}");
+
+        // Twice as long, the deck carries the part to the same share of its length.
+        let long = Primitive::Slab { edges: DVec3::new(18.0, 4.0, 1.0), corner: 0.0 };
+        let child = turned(part(2, pod, 2e4, 1, seated(anchor, 0.0)), 0.0, lying);
+        let form = Form { parts: vec![Part::mind(PartId(0), MIN_PART_M3), part(1, long, 5e5, 0, Mount::Enclosing), child] };
+        let Shape::Slab { edges, .. } = long.at(long.scale(5e5)) else { unreachable!() };
+        let pose = *form.place(MIN_PART_M3).unwrap().get(PartId(2), Side::Original).unwrap();
+        // A sharp box's exit is a double root, good to a few parts in a billion.
+        assert!((pose.position.x - 0.5 * edges.x / 2.0).abs() < 1e-7 * edges.x, "{} of {}", pose.position.x, edges.x);
     }
 
     #[test]

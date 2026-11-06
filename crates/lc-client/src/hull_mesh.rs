@@ -192,8 +192,8 @@ pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
                 h.u64(1 + parent.0 as u64);
                 match mount {
                     Mount::Enclosing => h.u64(0),
-                    Mount::Attached { anchor, standoff } => {
-                        h.u64(1);
+                    Mount::Attached { anchor, standoff, seated } => {
+                        h.u64(1 + u64::from(seated));
                         for x in anchor.to_array() {
                             h.f64(x);
                         }
@@ -419,7 +419,7 @@ pub fn spar_fixture(mode: SparMode) -> Form {
     let tank = hang(1, Kind::Storage, sphere, 5.0e5, 0, Mount::Enclosing);
     let spar = match mode {
         SparMode::Saddle => {
-            let anchor = Mount::Attached { anchor: DVec3::new(0.3, 1.0, 0.2), standoff: -0.3 };
+            let anchor = Mount::Attached { anchor: DVec3::new(0.3, 1.0, 0.2), standoff: -0.3, seated: false };
             hang(2, Kind::Spar(mode), Primitive::Cylinder { length: 8.0 }, 2.0e4, 1, anchor)
         }
         SparMode::Strap => {
@@ -430,7 +430,7 @@ pub fn spar_fixture(mode: SparMode) -> Form {
     };
     let mut parts = vec![Part::mind(PartId(0), balance.min_part_m3), tank, spar];
     if mode == SparMode::Saddle {
-        parts.push(hang(3, Kind::Engine, sphere, 1.0e4, 2, Mount::Attached { anchor: DVec3::X, standoff: -0.5 }));
+        parts.push(hang(3, Kind::Engine, sphere, 1.0e4, 2, Mount::Attached { anchor: DVec3::X, standoff: -0.5, seated: false }));
     }
     Form { parts }
 }

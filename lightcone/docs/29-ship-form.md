@@ -122,7 +122,8 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 | field | meaning |
 |---|---|
 | `parent` | a part id |
-| `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
+| `mount` | attached or enclosing. `Mount::Attached` carries `anchor`, `standoff` and `seated`, so an enclosing part cannot have any of them |
+| `seated` | attached only: the anchor is in the parent's proportions, and the child rests on its lowest point rather than hanging by its foot. See §Seated |
 | `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it; along the axis, where every point of the inner equator is nearest, the one toward the parent's +y |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
@@ -145,6 +146,32 @@ surface itself has no closed form for a general parent. Tilt pivots the child ab
 bolted on rather than sliding its base across the parent. Reach is also the unit of `standoff`,
 because it is the length the placement is already made of: F1's scale means a different dimension on
 each primitive, and the extent along the normal would change under tilt.
+
+### Seated
+
+A seated part differs from one hung by its foot in two ways, and in nothing else:
+
+- **Its anchor is in the parent's proportions.** The ray leaves along `anchor` times the parent's
+  half-extents along its own axes, not along `anchor` itself, so a component of the anchor is how
+  far across the face the part sits: 0.5 along a slab's x is halfway to its end, however long the
+  slab grows. Hung by its foot, an anchor near the bow of a deck slides off the end when the deck
+  is thickened.
+- **It rests on its lowest point.** It is turned by twist and tilt first, in the frame of the
+  normal as before, and then moved so that its **support** along the inward normal, its surface
+  point furthest that way (`Shape::support`, closed form for every primitive), meets the anchor,
+  standoff reaches out along the normal. Untilted the support is the foot, so the two agree to the
+  bit. Tilted, a seated part rolls on the surface where one hung by its foot pivots into it: a pod
+  laid fore and aft along a deck lies on it, its middle over the anchor, where by its foot it would
+  be half buried with its end on the anchor.
+
+A component of the direction within `place::FLAT` of zero takes the middle of a flat, so a lying
+part rests on its middle rather than on an end that rounding picked. A torus seated straight along
+its axis rests on its hole, as by its foot. `place::meeting` gives the point either kind meets its
+parent, for the handles' ring and for a part growing in a refit, which grows from it.
+
+The editor seats every part it adds and every part it carries; the starting form, the reference and
+the built-in presets still hang by their feet. Carried, a lying part hung by its foot keeps its
+height: its standoff loses its half-extent across the surface over its reach.
 
 The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`. Space is
 Z-up, so the ship's z is up, its y is port, and the port–starboard plane a mirror reflects through is
@@ -777,14 +804,13 @@ The modifier is Alt, since Shift keeps an axis handle's volume. The table is `sn
   the parent as loops while Shift is held, on the handles' layer.
 - **A part lying along its parent keeps its heading in the ship's frame**: its axis is the heading
   laid into the surface's tangent plane, and the side it lay on stays against the surface. So an
-  engine strapped along a side and firing aft still fires aft on the keel. It is centered on the
-  pointer, its foot a reach back along the heading, unless that falls over an edge onto a face
-  turned more than 10° from the one under the pointer, where it hangs by its foot at the pointer
-  instead. A part standing out of its parent keeps its twist and tilt, as before. Which it is
-  is read off it when it is picked up: its axis within 45° of its parent's normal stands.
+  engine strapped along a side and firing aft still fires aft on the keel. Seated, it lies on its
+  middle at the pointer. A part standing out of its parent keeps its twist and tilt, as before.
+  Which it is is read off it when it is picked up: its axis within 45° of its parent's normal
+  stands.
 - **Space turns it**: standing, lying fore and aft, lying aft and fore, lying across, standing. A
-  part laid down by Space rests on the surface, its standoff the half-extent it lies on over its
-  reach; one picked up lying keeps the standoff it had.
+  part laid down by Space rests on the surface, at standoff zero; one picked up lying keeps the
+  height it had.
 - A part dropped on a mirrored copy is anchored on its original at the reflected point, so its own
   copy lands under the pointer.
 

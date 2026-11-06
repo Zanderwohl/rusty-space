@@ -237,7 +237,7 @@ mod tests {
     }
 
     fn on(anchor: DVec3, standoff: f64) -> Mount {
-        Mount::Attached { anchor, standoff }
+        Mount::Attached { anchor, standoff, seated: false }
     }
 
     fn refused(form: &Form) -> Vec<FormError> {

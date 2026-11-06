@@ -38,7 +38,7 @@ fn hang(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64, parent: PartI
 }
 
 fn on(anchor: DVec3, standoff: f64) -> Mount {
-    Mount::Attached { anchor, standoff }
+    Mount::Attached { anchor, standoff, seated: false }
 }
 
 fn blended(mut part: Part, blend: f64) -> Part {

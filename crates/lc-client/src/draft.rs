@@ -20,8 +20,8 @@ pub struct Draft {
     /// In id order.
     pub form: Form,
     pub ship: Form,
-    /// An enclosing part's last anchor and standoff, restored when it is attached again.
-    remembered: BTreeMap<PartId, (DVec3, f64)>,
+    /// An enclosing part's last attachment, restored when it is attached again.
+    remembered: BTreeMap<PartId, Mount>,
 }
 
 /// What an edit did, for the history to list it by.
@@ -270,10 +270,10 @@ impl Draft {
         }
         for was in &edit.before {
             let now = edit.after.iter().find(|p| p.id == was.id).and_then(|p| p.placement);
-            if let (Some(Placement { mount: Mount::Attached { anchor, standoff }, .. }), Some(now)) = (was.placement, now)
+            if let (Some(Placement { mount: attached @ Mount::Attached { .. }, .. }), Some(now)) = (was.placement, now)
                 && now.mount == Mount::Enclosing
             {
-                self.remembered.insert(was.id, (anchor, standoff));
+                self.remembered.insert(was.id, attached);
             }
         }
         self.form = next;
@@ -328,8 +328,7 @@ impl Draft {
         let mount = match placement.mount {
             Mount::Attached { .. } => Mount::Enclosing,
             Mount::Enclosing => {
-                let (anchor, standoff) = self.remembered.get(&id).copied().unwrap_or((DVec3::X, ADDED_STANDOFF));
-                Mount::Attached { anchor, standoff }
+                self.remembered.get(&id).copied().unwrap_or(Mount::Attached { anchor: DVec3::X, standoff: ADDED_STANDOFF, seated: true })
             }
         };
         self.place(id, Placement { mount, ..placement })
@@ -339,7 +338,7 @@ impl Draft {
     pub fn anchor(&self, id: PartId, anchor: DVec3) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
         let mount = match placement.mount {
-            Mount::Attached { standoff, .. } => Mount::Attached { anchor, standoff },
+            Mount::Attached { standoff, seated, .. } => Mount::Attached { anchor, standoff, seated },
             Mount::Enclosing => Mount::Enclosing,
         };
         self.place(id, Placement { mount, ..placement })
@@ -351,7 +350,7 @@ impl Draft {
         let part = self.editable(id)?;
         let parent = self.part(placement.parent).ok_or(Refused::NoSuchPart(placement.parent))?;
         let moved = match placement.mount {
-            Mount::Attached { anchor, .. } => Placement { mount: Mount::Attached { anchor, standoff }, ..placement },
+            Mount::Attached { anchor, seated, .. } => Placement { mount: Mount::Attached { anchor, standoff, seated }, ..placement },
             Mount::Enclosing => placement,
         };
         let min = balance.min_part_m3;
@@ -359,7 +358,7 @@ impl Draft {
             return Err(Refused::Fault(FormError::Detached(id)));
         }
         let mount = match placement.mount {
-            Mount::Attached { anchor, .. } => Mount::Attached { anchor, standoff },
+            Mount::Attached { anchor, seated, .. } => Mount::Attached { anchor, standoff, seated },
             Mount::Enclosing => Mount::Enclosing,
         };
         self.place(id, Placement { mount, ..placement })
@@ -382,7 +381,7 @@ impl Draft {
         let id = dropped.unwrap_or_else(|| PartId(self.form.parts.iter().chain(&self.ship.parts).map(|p| p.id.0).max().map_or(0, |m| m + 1)));
         let placement = Placement {
             parent,
-            mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF },
+            mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF, seated: true },
             twist: 0.0,
             tilt: DVec2::ZERO,
             blend: 0.0,
@@ -686,7 +685,7 @@ pub fn shown(x: f64) -> String {
 pub fn value(part: &Part, field: Field) -> Option<f64> {
     let placement = part.placement;
     let attached = placement.and_then(|p| match p.mount {
-        Mount::Attached { anchor, standoff } => Some((anchor, standoff)),
+        Mount::Attached { anchor, standoff, .. } => Some((anchor, standoff)),
         Mount::Enclosing => None,
     });
     match (field, part.primitive) {

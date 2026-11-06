@@ -250,7 +250,7 @@ mod tests {
     fn part(id: u16, kind: Kind, primitive: Primitive, volume_m3: f64) -> Part {
         let placement = Placement {
             parent: PartId(0),
-            mount: Mount::Attached { anchor: DVec3::X, standoff: 0.0 },
+            mount: Mount::Attached { anchor: DVec3::X, standoff: 0.0, seated: false },
             twist: 0.0,
             tilt: DVec2::ZERO,
             blend: 0.0,

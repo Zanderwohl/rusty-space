@@ -77,8 +77,13 @@ pub enum Mount {
     /// leaves it. `standoff` is along the normal in multiples of the child's [`Shape::reach`];
     /// negative embeds.
     ///
+    /// `seated`, the anchor is in the parent's proportions, its half-extents along each axis, so a
+    /// part a third of the way along a face stays there as the parent stretches, and the child is
+    /// turned first and then rested by its lowest point along the normal rather than hung by its
+    /// foot, so a part lying along its parent lies on it. See [`place::relative`].
+    ///
     /// [`Shape::reach`]: primitive::Shape::reach
-    Attached { anchor: DVec3, standoff: f64 },
+    Attached { anchor: DVec3, standoff: f64, seated: bool },
     /// Centered on the parent and containing it.
     Enclosing,
 }
@@ -423,8 +428,8 @@ impl From<Primitive> for lc_proto::form::Primitive {
 impl From<lc_proto::form::Mount> for Mount {
     fn from(m: lc_proto::form::Mount) -> Self {
         match m {
-            lc_proto::form::Mount::Attached { anchor, standoff } => {
-                Self::Attached { anchor: DVec3::from_array(anchor), standoff }
+            lc_proto::form::Mount::Attached { anchor, standoff, seated } => {
+                Self::Attached { anchor: DVec3::from_array(anchor), standoff, seated }
             }
             lc_proto::form::Mount::Enclosing => Self::Enclosing,
         }
@@ -434,7 +439,7 @@ impl From<lc_proto::form::Mount> for Mount {
 impl From<Mount> for lc_proto::form::Mount {
     fn from(m: Mount) -> Self {
         match m {
-            Mount::Attached { anchor, standoff } => Self::Attached { anchor: anchor.to_array(), standoff },
+            Mount::Attached { anchor, standoff, seated } => Self::Attached { anchor: anchor.to_array(), standoff, seated },
             Mount::Enclosing => Self::Enclosing,
         }
     }
@@ -593,7 +598,7 @@ mod tests {
             volume_m3: 50_000.0,
             placement: Some(Placement {
                 parent: PartId(parent),
-                mount: Mount::Attached { anchor: DVec3::Y, standoff: 0.0 },
+                mount: Mount::Attached { anchor: DVec3::Y, standoff: 0.0, seated: false },
                 twist: 0.0,
                 tilt: DVec2::ZERO,
                 blend: 0.1,
@@ -691,7 +696,7 @@ mod tests {
             (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), Number::Tilt),
             (2, |p| p.placement.as_mut().unwrap().blend = -0.1, Number::Blend),
             (2, |p| p.placement.as_mut().unwrap().blend = f64::INFINITY, Number::Blend),
-            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0 }, Number::Anchor),
+            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0, seated: false }, Number::Anchor),
             (0, |p| p.volume_m3 = f64::NAN, Number::Volume),
         ];
         for (index, spoil, number) in cases {
@@ -709,7 +714,7 @@ mod tests {
         form.parts[3].primitive = Primitive::Frustum { length: 2.0, taper: 0.0 };
         form.parts[1].primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.5 };
         form.parts[4].primitive = Primitive::Torus { major: 1.0 };
-        form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5 };
+        form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5, seated: false };
         assert_eq!(form.validate(), Ok(()));
     }
 

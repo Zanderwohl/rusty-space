@@ -209,11 +209,10 @@ impl Handles {
         let axes = piece.pose.rotation;
         let center = piece.pose.position;
         let (ring, sink) = match placement.mount {
-            Mount::Attached { anchor, .. } => {
-                // As `place::relative` finds it.
-                let exit = parent.shape.exit((anchor / anchor.abs().max_element()).normalize());
+            Mount::Attached { anchor, seated, .. } => {
+                let exit = parent.shape.anchored(anchor, seated);
                 let normal = (parent.pose.rotation * exit.normal).normalize();
-                let foot = center - axes.x_axis * piece.shape.reach();
+                let foot = lc_world::form::place::meeting(&piece.shape, &piece.pose, piece.side, &placement).unwrap_or(center);
                 let ring = Ring::about(normal, foot, center, h, least);
                 let tip = ring.center - normal * (piece.shape.reach() * REACH_OUT).max(least);
                 (ring, Some((ring.center, tip)))
@@ -346,10 +345,10 @@ impl Held {
                 (What::Move, Part { placement: Some(Placement { twist, ..placement }), ..self.part })
             }
             Grip::Standoff => {
-                let Mount::Attached { anchor, standoff } = placement.mount else { return Err(Refused::Mind) };
+                let Mount::Attached { anchor, standoff, seated } = placement.mount else { return Err(Refused::Mind) };
                 // Pulling along the arrow sinks the part.
                 let wanted = snap::standoff(standoff - (now - self.start) / self.reach_m, fine);
-                let at = |s: f64| Placement { mount: Mount::Attached { anchor, standoff: s }, ..placement };
+                let at = |s: f64| Placement { mount: Mount::Attached { anchor, standoff: s, seated }, ..placement };
                 let (parent, child) = self.handles.shapes;
                 let sunk = if wanted <= standoff || crate::draft::touches(&parent, &child, &at(wanted)) {
                     wanted
@@ -877,9 +876,9 @@ mod tests {
         assert!(standoff < -0.2 && (standoff * 10.0 - (standoff * 10.0).round()).abs() < 1e-9, "{standoff}");
         let out = held.edit(&lens, px(&lens, from - (to - from) * 3.0), Modifiers::default(), &B).unwrap();
         let Mount::Attached { standoff, .. } = out.after[0].placement.unwrap().mount else { panic!() };
-        let placed = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff }, ..part.placement.unwrap() };
+        let placed = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff, seated: false }, ..part.placement.unwrap() };
         assert!(crate::draft::touches(&h.shapes.0, &h.shapes.1, &placed), "it stops touching: {standoff}");
-        let further = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff: standoff + 0.1 }, ..placed };
+        let further = Placement { mount: Mount::Attached { anchor: DVec3::NEG_X, standoff: standoff + 0.1, seated: false }, ..placed };
         assert!(!crate::draft::touches(&h.shapes.0, &h.shapes.1, &further), "and no further than that: {standoff}");
     }
 

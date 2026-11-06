@@ -83,9 +83,6 @@ pub enum Orient {
 /// Past this the axis is nearer along the surface than out of it.
 const STANDING_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
-/// Normals closer than this, about 10°, are one face.
-const SAME_FACE_COS: f64 = 0.985;
-
 /// A heading the surface turns nearly square to is no heading on it.
 const LEAST_ALONG: f64 = 1e-6;
 
@@ -123,7 +120,9 @@ pub struct Guide {
     pub axes: [usize; 2],
 }
 
-/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame.
+/// Where a part goes on `host` (its original copy) for a point there, `target` in its frame. It is
+/// seated, so the anchor is `target` in the host's proportions and a lying part rests on its middle
+/// there.
 struct Seat {
     anchor: DVec3,
     twist: f64,
@@ -132,36 +131,30 @@ struct Seat {
 }
 
 impl Seat {
-    /// `heading` is a lying part's axis already in the host's frame.
-    fn on(host: &Piece, target: DVec3, child: &lc_world::form::primitive::Shape, orient: Orient, heading: DVec3) -> Seat {
-        let standing = |twist, tilt| Seat { anchor: target.normalize_or(DVec3::X), twist, tilt, standoff: None };
+    /// `heading` is a lying part's axis already in the host's frame. `hung` is the standoff it was
+    /// carried with and whether that was seated, which a lying part keeps the height of.
+    fn on(host: &Piece, target: DVec3, child: &lc_world::form::primitive::Shape, orient: Orient, heading: DVec3, hung: (f64, bool)) -> Seat {
+        let anchor = target / host.shape.extent(DMat3::IDENTITY, 0.0);
+        let standing = |twist, tilt| Seat { anchor, twist, tilt, standoff: None };
         let Orient::Lying { down, rest, .. } = orient else {
             let Orient::Standing { twist, tilt } = orient else { unreachable!() };
             return standing(twist, tilt);
         };
-        let along = |normal: DVec3| {
-            let v = heading - normal * normal.dot(heading);
-            (v.length() > LEAST_ALONG).then(|| v.normalize())
-        };
-        let under = host.shape.exit(target.normalize_or(DVec3::X)).normal;
-        let Some(first) = along(under) else { return standing(0.0, DVec2::ZERO) };
-        // Its center over the target, so its foot a reach back along the heading, unless that is
-        // over an edge, where it hangs by its foot at the target instead.
-        let reach = child.reach();
-        let back = target - first * reach;
-        let over = host.shape.exit(back.normalize_or(DVec3::X));
-        let (foot, exit) = if over.normal.dot(under) >= SAME_FACE_COS {
-            (back, over)
-        } else {
-            (target, host.shape.exit(target.normalize_or(DVec3::X)))
-        };
-        let axis = along(exit.normal).unwrap_or(first);
+        let exit = host.shape.anchored(anchor, true);
+        let v = heading - exit.normal * exit.normal.dot(heading);
+        if v.length() <= LEAST_ALONG {
+            return standing(0.0, DVec2::ZERO);
+        }
+        let axis = v.normalize();
         let own = DMat3::from_cols(DVec3::X, -down, DVec3::X.cross(-down));
         let wanted = DMat3::from_cols(axis, exit.normal, axis.cross(exit.normal)) * own.transpose();
         let (twist, tilt) = twist_tilt_of(normal_frame(exit.normal).transpose() * wanted);
-        let half = child.extent(DMat3::IDENTITY, 0.0);
-        let standoff = rest.then(|| (half * down).abs().max_element() / reach);
-        Seat { anchor: foot.normalize_or(DVec3::X), twist, tilt, standoff }
+        // Hung by its foot, a lying part's axis was the standoff's height off the surface; seated,
+        // its underside is.
+        let (standoff, seated) = hung;
+        let under = (child.extent(DMat3::IDENTITY, 0.0) * down).abs().max_element() / child.reach();
+        let standoff = if rest { 0.0 } else if seated { standoff } else { standoff - under };
+        Seat { anchor, twist, tilt, standoff: Some(standoff) }
     }
 }
 
@@ -249,10 +242,10 @@ impl Carry {
             Orient::Lying { axis, .. } => host.pose.rotation.transpose() * flip(axis),
             Orient::Standing { .. } => DVec3::ZERO,
         };
-        let seat = Seat::on(host, target, &unturned.shape(balance.min_part_m3), self.orient, heading);
         let mut placement = unturned.placement?;
-        let Mount::Attached { standoff, .. } = placement.mount else { return None };
-        placement.mount = Mount::Attached { anchor: seat.anchor, standoff: seat.standoff.unwrap_or(standoff) };
+        let Mount::Attached { standoff, seated, .. } = placement.mount else { return None };
+        let seat = Seat::on(host, target, &unturned.shape(balance.min_part_m3), self.orient, heading, (standoff, seated));
+        placement.mount = Mount::Attached { anchor: seat.anchor, standoff: seat.standoff.unwrap_or(standoff), seated: true };
         placement.twist = seat.twist;
         placement.tilt = seat.tilt;
         let part = Part { placement: Some(placement), ..unturned };
@@ -609,8 +602,8 @@ mod tests {
         apply(&mut draft, &edit);
         let placement = draft.part(data).unwrap().placement.unwrap();
         assert_eq!(placement.parent, PartId(4));
-        let Mount::Attached { anchor, standoff } = placement.mount else { panic!() };
-        assert!(anchor.z > 0.0 && (anchor.length() - 1.0).abs() < 1e-12, "on the deck's top: {anchor}");
+        let Mount::Attached { anchor, standoff, seated } = placement.mount else { panic!() };
+        assert!(anchor.z > 0.0 && seated, "seated on the deck's top: {anchor}");
         assert_eq!(standoff, -0.3, "the standoff comes along");
         let down = carry.put_down().unwrap();
         assert!(down.settled && down.what == What::Move);

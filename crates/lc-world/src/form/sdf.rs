@@ -464,7 +464,7 @@ mod tests {
     }
 
     fn at(anchor: DVec3, standoff: f64) -> Mount {
-        Mount::Attached { anchor, standoff }
+        Mount::Attached { anchor, standoff, seated: false }
     }
 
     const SPHERE: Primitive = Primitive::Capsule { length: 0.0 };
