@@ -140,7 +140,7 @@ client warns when it meshes one.
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
 | spar | plated structure |
-| bay | a shell with a mouth, and a lit interior grid of decks and gantries |
+| bay | a shell with a mouth, and a lit interior grid of decks and gantries. As built for a slab only (§The bay); any other primitive is still meshed solid in the bay's graph |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
@@ -209,6 +209,28 @@ Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling
 size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
 primitive.
 
+
+### The bay
+
+A slab bay is the one part not meshed from its distance field: `lc_client::bay_mesh` builds it as
+geometry, a shadow box of flat layers seen through its mouth at +x. The shell's outside is the
+storage's aztec plate in the part's own charts, and the mouth a rim as thick as the wall. Inside:
+
+- **Ribs** every 12 m, each a ring of truss in its own plane: a chord along the walls, an inner
+  chord chamfered at the corners, and struts between, upright and diagonal in turn.
+- **Decks** out of both side walls every 9 m, front to back, each reaching 28% of the hold's width
+  in, so a shaft runs up the middle: a craft comes in, rises or sinks to a level and turns aside.
+- **Berths**, between two ribs on one deck, each with a pad and, seven times in ten, a cutout card
+  of a primitive's outline (disc, block, capsule, wedge, hexagon) standing on it facing the mouth,
+  plated in aztec. Placeholders for what a bay will hold.
+
+Up is whichever of the part's y and z runs most along the ship's z. Pitches stretch past 48 ribs
+and 16 levels, so a kilometers-long bay stays thousands of triangles, not millions. The slab's
+rounded corners are not drawn. The hull material casts no shadow, so the hold is shaded in the
+mesh: a vertex's share of the star falls from all at the mouth to none as far in as the mouth is
+across, carried as the third byte of `ATTRIBUTE_HULL_FACE`, which the region graphs and the aztec
+plate honor. The light is the same whichever way the star lies; beyond that depth only the bay
+graph's own lamps show. Photographed by `parts_void --only bay --primitive slab --lying`.
 
 ## Building, as a function of time
 
