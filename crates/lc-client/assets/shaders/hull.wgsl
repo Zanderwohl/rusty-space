@@ -216,7 +216,7 @@ const PANEL_GRAY: f32 = 0.41;
 const BAY_FLOOD_COS: vec2<f32> = vec2<f32>(0.707, 0.866);
 /// What the lamps give a surface, as multiples of the bay region's lamp, which is a lit window's
 /// 300 cd/m²: a flood's in square meters, as it falls off with distance squared, and a strip's in
-/// meters, as a line does. A floodlit yard's 2000 lux on what a flood is aimed at is 2000 / π / 300
+/// meters, as a line does, and seen from beside a long one twice what one light a meter gives. A floodlit yard's 2000 lux on what a flood is aimed at is 2000 / π / 300
 /// ≈ 2 lamps; a card is about 9 m off its floods and turned 45 degrees from them, so 2 × 9² / 0.7 ≈
 /// 230, rounded up for a pair that overlap less than fully. A strip lights the far wall of a shaft
 /// 40 m across at about half a lamp.
@@ -228,13 +228,30 @@ const BAY_BOUNCE: f32 = 0.5;
 /// yard is nine stops under the star's light on the hull around it, and black beside it however it
 /// is exposed. So boosted, its bounce is about two and a half stops under sunlit plate.
 const BAY_LAMP_BOOST: f32 = 24.0;
-const BAY_RUNWAY_GAIN: f32 = 12.0;
+const BAY_RUNWAY_GAIN: f32 = 6.0;
 /// The lamps themselves, seen: a few times brighter than what they light, and no more, so the boost
 /// does not blow them out.
 const BAY_FLOOD_FIXTURE: f32 = 8.0;
 const BAY_RUNWAY_FIXTURE: f32 = 4.0;
 const BAY_RUNWAY_TINT: vec3<f32> = vec3<f32>(0.75, 0.88, 1.0);
 const BAY_RUNWAY_DASH_M: f32 = 3.0;
+
+/// What a lamp along x from `x0` to `x1` through `at` in (y, z) gives a surface at `p` facing `n`,
+/// per unit of the lamp's power a meter: n · (s − p) / |s − p|³ summed down it, in closed form. Its
+/// ends matter: a wall facing down the strip, as the back wall does, is lit end on, which a line
+/// taken as endless never lights. Parts of the strip behind the surface are let cancel parts in
+/// front rather than clipped, and the whole held at zero or more.
+fn strip_light(p: vec3<f32>, n: vec3<f32>, at: vec2<f32>, x0: f32, x1: f32) -> f32 {
+    let off = at - p.yz;
+    let rho2 = max(dot(off, off), 1.0);
+    let u0 = x0 - p.x;
+    let u1 = x1 - p.x;
+    let r0 = sqrt(u0 * u0 + rho2);
+    let r1 = sqrt(u1 * u1 + rho2);
+    let along = n.x * (1.0 / r0 - 1.0 / r1);
+    let across = dot(n.yz, off) * (u1 / r1 - u0 / r0) / rho2;
+    return max(along + across, 0.0);
+}
 
 struct BayLight {
     /// What multiplies albedo.
@@ -346,10 +363,7 @@ fn bay_light(tag: vec2<u32>, p_ship: vec3<f32>, n_ship: vec3<f32>) -> BayLight {
     var strips = 0.0;
     for (var k = 0u; k < 4u; k++) {
         let at = vec2<f32>(select(-runway_y, runway_y, (k & 1u) == 1u), select(-tall, tall, k >= 2u));
-        let off = at - p.yz;
-        let d = length(off);
-        let toward = vec3<f32>(0.0, off / max(d, 1.0e-3));
-        strips += max(dot(n, toward), 0.0) / max(d, 1.0);
+        strips += strip_light(p, n, at, back, mouth);
     }
     out.light += BAY_RUNWAY_TINT * lamp * BAY_RUNWAY_GAIN * strips;
     if (tag.y == BAY_RUNWAY_LAMP) {
