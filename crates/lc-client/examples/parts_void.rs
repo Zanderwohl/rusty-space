@@ -299,7 +299,6 @@ fn spawn(
             to_star: to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(1.5), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-            bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             ..default()
         }),

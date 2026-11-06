@@ -17,7 +17,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use em_render::hull_material::{ATTRIBUTE_HULL_FACE, ATTRIBUTE_HULL_SEAM, face_attribute, insert_region_weights, region_weights};
+use em_render::hull_material::{ATTRIBUTE_HULL_FACE, face_attribute, insert_region_weights, region_weights};
 use glam::DVec3;
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::{Aperture, apertures};
@@ -82,18 +82,12 @@ const CREASE_COS: f64 = 0.8;
 /// vanish whole.
 const THINNEST_CELLS: f64 = 3.0;
 
-/// [`ATTRIBUTE_HULL_SEAM`]'s `across` on every vertex: large enough that the shader's derivative
-/// of it spreads any bolt to nothing.
-const SEAM_FAR: f32 = 1.0e4;
-
 /// Mesh buffers in the ship's frame, meters.
 #[derive(Clone, Debug, Default)]
 pub struct HullBuffers {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub regions: Vec<[[u8; 4]; 4]>,
-    /// [`ATTRIBUTE_HULL_SEAM`]'s `(across, along)`.
-    pub seams: Vec<[f32; 2]>,
     /// [`ATTRIBUTE_HULL_FACE`]'s, indexing [`apertures`].
     pub faces: Vec<[u8; 4]>,
     pub indices: Vec<u32>,
@@ -105,7 +99,6 @@ impl HullBuffers {
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         insert_region_weights(&mut mesh, &self.regions);
-        mesh.insert_attribute(ATTRIBUTE_HULL_SEAM, self.seams);
         mesh.insert_attribute(ATTRIBUTE_HULL_FACE, VertexAttributeValues::Unorm8x4(self.faces));
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
@@ -378,7 +371,6 @@ fn append(out: &mut HullBuffers, surface: &Surface, normals: &[DVec3], regions: 
                 out.positions.push(surface.vertices[v as usize].as_vec3().to_array());
                 out.normals.push(normal.as_vec3().to_array());
                 out.regions.push(regions);
-                out.seams.push([SEAM_FAR, 0.0]);
                 out.faces.push(faces[v as usize]);
                 out.positions.len() as u32 - 1
             };
@@ -841,7 +833,7 @@ mod tests {
         let b = mesh_form(&Builtin::Cluster.form(), &B, 32).unwrap();
         let n = b.positions.len();
         assert!(n > 0 && b.indices.len() % 3 == 0);
-        assert_eq!((b.normals.len(), b.regions.len(), b.seams.len(), b.faces.len()), (n, n, n, n));
+        assert_eq!((b.normals.len(), b.regions.len(), b.faces.len()), (n, n, n));
         assert!(b.indices.iter().all(|&i| (i as usize) < n));
         let against = b
             .indices

@@ -282,7 +282,6 @@ fn spawn(
             to_star: to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-args.exposure), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-            bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             // As the game draws an engine: its grid on its open faces, its flank everywhere else.
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),

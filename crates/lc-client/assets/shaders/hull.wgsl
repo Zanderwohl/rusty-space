@@ -31,10 +31,8 @@ struct Vertex {
     @location(3) regions_1: vec4<f32>,
     @location(4) regions_2: vec4<f32>,
     @location(5) regions_3: vec4<f32>,
-    // em_render::hull_material::ATTRIBUTE_HULL_SEAM: signed meters across to the seam, and along it.
-    @location(6) seam: vec2<f32>,
     // em_render::hull_material::ATTRIBUTE_HULL_FACE: (share, face / 255, 0, 0).
-    @location(7) face: vec4<f32>,
+    @location(6) face: vec4<f32>,
 #endif
 }
 
@@ -50,13 +48,12 @@ struct VertexOutput {
     @location(4) regions_1: vec4<f32>,
     @location(5) regions_2: vec4<f32>,
     @location(6) regions_3: vec4<f32>,
-    @location(7) seam: vec2<f32>,
-    @location(8) face_share: f32,
-    @location(9) @interpolate(flat) face: u32,
+    @location(7) face_share: f32,
+    @location(8) @interpolate(flat) face: u32,
     // The camera, and the direction to the star, in the ship's frame: glass is lit where its
     // scars are cut.
-    @location(10) eye_ship: vec3<f32>,
-    @location(11) star_ship: vec3<f32>,
+    @location(9) eye_ship: vec3<f32>,
+    @location(10) star_ship: vec3<f32>,
 #endif
 }
 
@@ -84,10 +81,6 @@ struct HullUniform {
     lattice: vec4<f32>,
     /// Albedo, and work lights.
     girder: vec4<f32>,
-    /// `(pitch_m, head_radius_m, offset_m, albedo)`.
-    bolts: vec4<f32>,
-    /// One bit a region.
-    bolted: u32,
     /// One bit a region: knapped glass.
     glassy: u32,
     /// One bit a region: azteced plate.
@@ -195,7 +188,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.regions_1 = vertex.regions_1;
     out.regions_2 = vertex.regions_2;
     out.regions_3 = vertex.regions_3;
-    out.seam = vertex.seam;
     out.face_share = vertex.face.x;
     out.face = u32(round(vertex.face.y * 255.0));
     // A ship's transform is a rotation and a uniform scale, so its inverse is the transpose over
@@ -386,23 +378,6 @@ fn heaviest(in: VertexOutput) -> Pair {
         }
     }
     return Pair(first, second, max(w2, 0.0) / max(w1 + max(w2, 0.0), 1.0e-6));
-}
-
-/// How much of the fragment is a bolt head, from its seam coordinates. A row too fine to see is
-/// drawn as its share of the pixels it crosses, so it fades rather than sparkling.
-fn bolt_cover(seam: vec2<f32>) -> f32 {
-    let pitch = material.bolts.x;
-    let r = material.bolts.y;
-    let across = abs(seam.x) - material.bolts.z;
-    let along = (fract(seam.y / pitch) - 0.5) * pitch;
-    // Meters a pixel spans.
-    let w = max(fwidth(seam.x) + fwidth(seam.y), 1.0e-4);
-    let d = length(vec2<f32>(across, along));
-    let sharp = 1.0 - smoothstep(r - 0.5 * w, r + 0.5 * w, d);
-    let wide = max(w, 2.0 * r);
-    let band = 1.0 - smoothstep(0.25 * wide, 0.75 * wide, abs(across));
-    let mean = min(3.14159265 * r * r / (pitch * wide), 1.0) * band;
-    return mix(sharp, mean, smoothstep(r, 3.0 * r, w));
 }
 
 /// The layer a region is drawn with here: an open-faced region's flank off its faces. Chosen
@@ -766,7 +741,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let near = triplanar(in.ship_position, w, near_layer);
     let far = triplanar(in.ship_position, w, far_layer);
     // Before any discard: these take derivatives.
-    let bolt = bolt_cover(in.seam);
     let pixel = pixel_m(in.ship_position);
     // Taken here, outside any branch, for the habitat's rim chamfer.
     let up_normal = normalize(in.ship_normal);
@@ -780,10 +754,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let plated_here = plated(in.ship_position, in.ship_normal);
     let t = pair.share;
     var albedo = mix(near.albedo, far.albedo, t);
-    let side = select(max(pair.first, pair.second), min(pair.first, pair.second), in.seam.x > 0.0);
-    if (((material.bolted >> side) & 1u) != 0u) {
-        albedo = mix(albedo, vec3<f32>(material.bolts.w), bolt);
-    }
     var emitted = mix(
         near.lit * light_of(pair.first, near_layer, in),
         far.lit * light_of(pair.second, far_layer, in),

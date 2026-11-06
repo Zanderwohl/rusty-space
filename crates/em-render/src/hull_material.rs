@@ -34,16 +34,6 @@ pub const ATTRIBUTE_HULL_REGIONS: [MeshVertexAttribute; 4] = [
     MeshVertexAttribute::new("HullRegions3", 0x4855_4C4C_0000_0004, VertexFormat::Unorm8x4),
 ];
 
-/// `(across, along)`: signed meters from the vertex to the nearest seam between two regions,
-/// positive on the lower-numbered region's side, and meters along that seam from anywhere fixed
-/// on it. What a bolted region draws its row of heads by. A vertex far from every seam writes a
-/// large `across`.
-///
-/// The side comes from the sign rather than from which region weighs more, because in the
-/// middle of a fillet the two weights differ by less than a byte.
-pub const ATTRIBUTE_HULL_SEAM: MeshVertexAttribute =
-    MeshVertexAttribute::new("HullSeam", 0x4855_4C4C_0000_0005, VertexFormat::Float32x2);
-
 /// A girder's `(x_m, threshold, scaffold, 0)`: meters from the joint to it, the share of its band
 /// that must have passed for it to stand, and 1 for scaffold, which stands outside the finished
 /// surface and comes down with the last band.
@@ -131,11 +121,6 @@ pub struct HullUniform {
     pub lattice: Vec4,
     /// A girder's albedo, and its work lights in [`Self::reflected`]'s units.
     pub girder: Vec4,
-    /// A bolted region's row of heads along each seam: `(pitch_m, head_radius_m, offset_m,
-    /// albedo)`, the offset measured from the seam into the bolted region.
-    pub bolts: Vec4,
-    /// Which regions are bolted, one bit a region.
-    pub bolted: u32,
     /// Which regions are knapped glass, one bit a region: their tile gives way to
     /// [`Self::glass_finish`]'s color under flake scars, each facet lit at its own lean, with the
     /// star's highlight and a faint sky mirrored in it.
@@ -212,8 +197,6 @@ impl Default for HullUniform {
             build_widths: Vec4::ONE,
             lattice: Vec4::new(8.0, 0.35, 0.0, 0.4),
             girder: Vec4::new(0.55, 0.42, 0.22, 0.0),
-            bolts: Vec4::new(1.5, 0.25, 0.8, 0.45),
-            bolted: 0,
             glassy: 0,
             plated: 0,
             habitat: 0,
@@ -313,8 +296,7 @@ impl Material for HullMaterial {
             ATTRIBUTE_HULL_REGIONS[1].at_shader_location(3),
             ATTRIBUTE_HULL_REGIONS[2].at_shader_location(4),
             ATTRIBUTE_HULL_REGIONS[3].at_shader_location(5),
-            ATTRIBUTE_HULL_SEAM.at_shader_location(6),
-            ATTRIBUTE_HULL_FACE.at_shader_location(7),
+            ATTRIBUTE_HULL_FACE.at_shader_location(6),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())

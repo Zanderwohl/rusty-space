@@ -32,7 +32,7 @@ use glam::DVec3;
 use lc_proto::ShipId;
 use lc_world::fitting::Balance;
 use lc_world::form::sdf::{Piece, Sdf};
-use lc_world::form::{Form, Kind, SparMode};
+use lc_world::form::{Form, Kind};
 
 use crate::hull::{Eye, PAINT, frame, glow_of, lighting, lit, windows_show};
 use crate::hull_mesh::{ENGINE_FLANK, HullForm, HullMeshPlugin, HullMeshState, HullSource, REGION_GRAPHS, form_hash, region};
@@ -185,7 +185,6 @@ pub(crate) fn finished(
         glow: base.emitted,
         exposure: base.exposure,
         detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-        bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
         emitted,
         open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
         faces: lit_faces,

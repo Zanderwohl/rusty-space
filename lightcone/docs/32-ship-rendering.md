@@ -139,7 +139,7 @@ client warns when it meshes one.
 | engine | an ion thruster's face on the open face: a uniform grid of dark bars over blue hex cells 2 m behind it, seen through its gaps at their depth, each cell glowing at the luminance of whatever leaves through the face, deep blue at its walls and paling toward its core, and dark grid over black when nothing leaves; as built, `thruster` in the hull material, which draws it in place of the engine graph's grid. A layered sprue on its flanks: two cutout layers of mazed pipe over a plated base, lit by sodium floodlights. As built, the flank layer is `piped` in the hull material: the surface is the top layer of pipe, and the layer under it and the base are seen through its gaps at their depths by parallax, the sprue's baked tiles and lamp light sampled in the ship's frame and the star shadowed by the layers above; the tiles bake once on the async pool, and until then the flank draws its old graph, greebled machinery. The grid is the only thing drawn on the face and the machinery the only thing drawn off it, so an engine reads as one at any distance even when nothing is lit |
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
-| spar | plated structure, with a row of bolt heads along every line where it meets a neighbor. The line is where the spar's distance and the neighbor's grown distance are both near zero, so the shader finds it with no geometry of its own. The shader draws a head every 1.5 m, 0.8 m in from a seam it is handed per vertex as signed meters across and meters along, but no mesher hands it one since parts were meshed apart: a spar meshed alone has no neighbor to meet, and only `hull_void`'s spheres show the row |
+| spar | plated structure |
 | bay | a shell with a mouth, and a lit interior grid of decks and gantries |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
@@ -164,8 +164,6 @@ a floodlit yard's 2000 lux. Two things had to change for a night side to show th
 ![Between the stars, `--demo refit` exposed for its lights](../images/lights-between-stars.jpg)
 
 ![Every kind by day and by night](../images/hull-kinds.png)
-
-![The spar's bolt row on both spheres, and the plating reveal mask partway](../images/hull-seams.png)
 
 ### Looks in development
 

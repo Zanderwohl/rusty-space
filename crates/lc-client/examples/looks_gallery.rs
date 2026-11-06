@@ -43,7 +43,7 @@ use lc_client::ship_hull::{HullPalettePlugin, Palette, request_palette};
 use lc_client::tonemap::ToneMap;
 use lc_world::fitting::Balance;
 use lc_world::form::sdf::Sdf;
-use lc_world::form::{Form, Kind, SparMode};
+use lc_world::form::{Form, Kind};
 use lc_client::looks::aztec::{Aztec, AztecMaterial, Windows};
 use lc_client::looks::obsidian::{Obsidian, ObsidianMaterial};
 use lc_client::looks::outline::RoofOutline;
@@ -293,7 +293,6 @@ fn spawn_ships(
             to_star: ships.to_star.extend(0.08),
             exposure: Vec4::new(LIT_HULL * 2f32.powf(-HULL_STOPS), ToneMap::default().surface_stops, 0.0, 0.0),
             detail: Vec4::new(TILE_M, 0.0, 0.0, 0.0),
-            bolted: 1 << region(Kind::Spar(SparMode::Saddle)),
             emitted,
             open: UVec4::new(region(Kind::Engine), ENGINE_FLANK, 1, 0),
             faces: [(8.0 * LIT_WINDOW * Vec3::new(0.75, 0.85, 1.0)).extend(0.0); FACES],
