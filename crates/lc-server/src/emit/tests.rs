@@ -57,7 +57,7 @@ fn along(axis: DVec3) -> Aim {
 fn illuminated(said: &[Outbound]) -> Vec<(i64, f64, i64)> {
     said.iter()
         .filter_map(|m| match m {
-            Outbound::Illuminated { beam, power_w, arrive_t, .. } => Some((*beam, *power_w, *arrive_t)),
+            Outbound::Illuminated(lit) => Some((lit.get().beam, lit.get().power_w, lit.get().arrive_t)),
             _ => None,
         })
         .collect()

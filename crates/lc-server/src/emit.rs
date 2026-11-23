@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, Glare, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
+use lc_proto::{Aim, Apertures, Cleared, Glare, Illumination, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::CraftId;
 use lc_world::emit::{Boost, Jet};
@@ -550,14 +550,19 @@ impl<J: Journal> Server<J> {
             self.emissions.lit_by.remove(&observer);
         }
         if let Some(owner) = self.owners.get(&observer).copied() {
-            wire.send(owner, Outbound::Illuminated {
+            let lit = Illumination {
                 ship_id: ShipId(observer.0),
                 beam: emitted.beam,
                 bearing: (-offset).normalize_or_zero().to_array(),
                 spectrum: emitted.spectrum,
                 power_w: arriving_w,
                 arrive_t,
-            });
+            };
+            match Cleared::arrived(lit, self.now_t) {
+                Ok(lit) => wire.send(owner, Outbound::Illuminated(lit)),
+                // A landing is found at or before now, so this is a bug in finding it.
+                Err(_) => debug_assert!(false, "a beam landing at {arrive_t} was found at {}", self.now_t),
+            }
         }
         let Some(craft) = self.fleet.get_mut(observer) else { return false };
         craft.adjust(at_s, |fitting| fitting.set_lit_w(fitting.lit_w() + arriving_w - was_w));

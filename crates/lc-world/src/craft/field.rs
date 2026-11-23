@@ -42,7 +42,7 @@ impl Craft {
     /// Its star as it lit it at `t`, seen from along `to_observer`. `None` between systems.
     pub fn starlit_at(&self, t: f64, to_observer: glam::DVec3) -> Option<Starlit> {
         let system = self.system.as_deref()?;
-        let to_star = self.to_star(self.motion_at(t), t)?;
+        let to_star = super::to_star(self.motion_at(t), Some(system), t)?;
         let at = self.position_at(t * 1.0e6) / crate::motion::LIGHT_US_PER_LY;
         let distance_m = (system.star_position_at(t)? - at).length() * crate::system::M_PER_LY;
         Some(Starlit {

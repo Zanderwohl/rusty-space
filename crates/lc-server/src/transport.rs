@@ -19,7 +19,7 @@ pub trait Transport {
     /// Say something to one client.
     ///
     /// Takes an [`Outbound`] and nothing else, so the only sightings that can reach it are the
-    /// ones [`lc_proto::Cleared::clear`] made. Implementations must not grow a second method.
+    /// ones [`lc_proto::Cleared::arrived`] made. Implementations must not grow a second method.
     fn send(&mut self, to: ClientId, message: Outbound);
 }
 

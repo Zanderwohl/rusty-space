@@ -1296,12 +1296,11 @@ impl<J: Journal> Server<J> {
         self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events)
     }
 
-    /// Release what has arrived. **The only place anything reaches a client.**
+    /// Release the sightings and contacts that have arrived.
     ///
-    /// Every sighting and every contact here goes through a [`Cleared::clear`], which is the
-    /// only constructor of the only type [`Outbound::Sightings`] and [`Outbound::Present`] can
-    /// hold. Adding a second path out would mean adding a second way to build a `Cleared`, and
-    /// there is not one.
+    /// Each goes through [`Cleared::arrived`], the only constructor of the only type
+    /// [`Outbound::Sightings`], [`Outbound::Present`] and [`Outbound::Illuminated`] can hold. A beam
+    /// is released where it lands, in `crate::emit`, through the same gate.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         let emissions = &self.emissions;
@@ -1955,6 +1954,56 @@ use crate::transport::Loopback;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.
         assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
+    }
+
+    /// **A contact's nose is where it pointed when its light left.** The quarry sets off after a
+    /// third craft and cuts within a few ticks; for the two hours its old light is still landing,
+    /// the watcher must go on seeing the nose it had before. Reading the facing from the current
+    /// motive shows the turn before any light of it has arrived.
+    #[tokio::test]
+    async fn a_contact_does_not_turn_before_the_light_of_its_turn_arrives() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.see_everything(true);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(2);
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
+        server.admit(ClientId(1), crate::world::still(ShipId(1), far), 0.0);
+        server.admit(ClientId(3), crate::world::still(ShipId(3), far + DVec3::Y * 1.0e6), 0.0);
+        for _ in 0..2 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let now_s = |server: &Server<Memory>| server.now_t() as f64 * 1.0e-6;
+        let nose = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+
+        let ordered_t = server.now_t();
+        let chase = Order::Intercept { ship_id: ShipId(3), closeness: lc_proto::Closeness::Company, approach: lc_proto::Approach::Direct };
+        for order in [chase, Order::CutDrive] {
+            wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order, issued_at_client_t: server.now_t() }));
+            for _ in 0..3 {
+                server.tick(&mut wire).await.unwrap();
+            }
+        }
+        let turned = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+        assert!(turned.dot(nose) < 0.99, "premise: the burn turned it, from {nose} to {turned}");
+
+        wire.take(watcher);
+        let mut checked = 0;
+        while (server.now_t() as f64) < ordered_t as f64 + TWO_LIGHT_HOURS - 2.0 * TICK_US as f64 {
+            server.tick(&mut wire).await.unwrap();
+            for contact in presences(&wire.take(watcher)).into_iter().filter(|c| c.ship_id == ShipId(1)) {
+                assert!(contact.emitted_t < ordered_t, "premise: light from before the order");
+                let seen = DVec3::from_array(contact.facing);
+                assert!(
+                    seen.dot(nose) > 1.0 - 1.0e-9,
+                    "at {} the watcher sees a nose of {seen} in light that left at {}, before the order at {ordered_t}; it was {nose}",
+                    server.now_t(),
+                    contact.emitted_t,
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "premise: the watcher saw it");
     }
 
     /// **Where another ship is drawn, and when.**

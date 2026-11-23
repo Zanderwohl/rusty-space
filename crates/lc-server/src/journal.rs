@@ -5,7 +5,7 @@
 //! reads deliveries through exactly the index-only range scan phase 7 demonstrated, and is there
 //! only with the `storage` feature.
 //!
-//! Nothing here decides *what* may be sent. That is [`lc_proto::Cleared::clear`], and it sits
+//! Nothing here decides *what* may be sent. That is [`lc_proto::Cleared::arrived`], and it sits
 //! between this and the wire.
 
 use lc_proto::ShipId;

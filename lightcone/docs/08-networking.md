@@ -66,11 +66,21 @@ say anything; the Postgres one has its own, which skip when there is none.
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
 
-**Built as a type, not a convention.** `Cleared<T>` has a private field and no constructor but
-its `clear` gates; `Outbound::Sightings` and `Outbound::Present` can hold nothing else. "There
+**Built as a type, not a convention.** `Cleared<T>` has a private field and one constructor,
+`Cleared::arrived`, for any `T: Arrives` — anything that states when its light lands — with the
+noise floor a second test for a sighting. `Outbound::Sightings`, `Outbound::Present` and
+`Outbound::Illuminated` can hold nothing else. "There
 is no second path to a socket" is then a fact the compiler enforces rather than a rule a
-reviewer has to notice being broken, and the two `compile_fail` doctests on the type are what
-say so — one for a struct literal, one for a destructuring pattern.
+reviewer has to notice being broken, and the `compile_fail` doctests on the type are what
+say so — a struct literal, a destructuring pattern, and a beam sent without the gate.
+
+The gate is only as good as the `arrive_t` it is handed. A contact's is the present by
+construction, since the retarded solve makes it so, so for `Present` what actually keeps the
+client in the past is that every reading is taken at the emission instant: `lc_server::chase`
+builds a contact from a craft as its light left it and nothing else, and
+`a_contact_does_not_turn_before_the_light_of_its_turn_arrives` is the test. The drive's power is
+still read from the fitting as it is now (`an_order_does_not_rewrite_the_drive_power_before_it`,
+ignored until a fitting keeps its account per stretch).
 
 ### Seeing other ships
 
