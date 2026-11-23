@@ -154,7 +154,7 @@ jobs:
     # stops running. Here it is not optional.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:19
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
