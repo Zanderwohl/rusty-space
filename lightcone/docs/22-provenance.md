@@ -369,6 +369,29 @@ ship in sight until its light went out knows, and files it under that craft as w
 Whose a collapse was is otherwise a claim in its thread, `Writing::Was`, written by a player or
 received in a report, scoped like any entry and standing as a name does; `Was(None)` takes one back.
 
+### A run of sightings on one trajectory
+
+Records are kept for ever, but a run of sightings is kept compactly. A craft in sight is filed
+again every six game hours, and before trajectories it was filed whenever it curved off a
+straight line, which a craft in orbit does within the hour. At the shard's 8 766× clock that put
+1.9 million sightings, 395 MB, in one file in a month, and the checkpoint that wrote it outgrew
+PostgreSQL's 1 GiB message.
+
+So the roster fits a **trajectory** to what it sees (`knowledge::trajectory`): a conic of any
+eccentricity about the body whose influence holds the craft, or a straight line between systems.
+It gathers places at least ten game minutes apart and fits once it has five, which pin a conic in
+its plane; the body's `G m` is public, so the times then place the craft on it. A fit counts only
+if every place it was made from lies on it, within three sigma or a kilometer. The fit uses only
+positions and times, so a held orbit, an ellipse, a transfer coasting out on a hyperbola and a
+drift between the stars are all fitted the same way, and a craft under thrust fits nothing and is
+filed in full, as before.
+
+The sighting that carries a fit names it and the times of the sightings it was made from, and
+those sightings fold away: their places are the trajectory's at those times. While the craft keeps
+to it, each refile replaces the run's one full sighting and adds the old one's time, eight bytes.
+A sighting that falls off it is first refitted over the whole run, because a fit from a short arc
+drifts without anything having burned; only if the run will not refit does a new run begin.
+
 A craft's **last known place** is folded from these as a star's belief is: the best sighting,
 carried forward on the motion last seen, its uncertainty growing with age, with the witness and
 hops of each kept so a player can see that it is Osprey's fix, two weeks old, relayed by Wren.
@@ -389,6 +412,7 @@ In `lc-world::knowledge`, engine-free and tested:
 | `knowledge::record` | `Witness`, `Hop`, `Sighting`, `Sample`, `Series`, `Claim`, `Naming`, `Orbit`, `Colors` |
 | `knowledge::report` | `Report` with its `Entry` per system and `Part` per subject |
 | `knowledge::subject` | `Subject` — star, body, population, craft — and `BodyId` |
+| `knowledge::trajectory` | `Trajectory`, a conic or a line fitted from five places, which a run of sightings folds onto |
 | `knowledge::names` | designations, discovery designations, and planet letters against the `SPACING` table |
 | `knowledge::astrometry` | bearings, centroid precision, the two triangulations, `Distance` |
 | `knowledge::survey` | `Optics`, detection and glare, the `Sweep` and its field order, `Duty` |

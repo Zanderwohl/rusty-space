@@ -8,10 +8,12 @@ use glam::DVec3;
 use lc_proto::{Chat, FactionId, Outbound, Payload, Scope, ShipId, Stated};
 use lc_spacetime::{LIGHT_MICROSECOND_M, Worldline};
 use lc_world::craft::CraftId;
-use lc_world::flight::JULIAN_YEAR_S;
 use lc_world::knowledge::{Bearing, Subject};
+use lc_world::flight::JULIAN_YEAR_S;
+use lc_world::knowledge::trajectory::{Place, Trajectory};
 use lc_world::knowledge::whereabouts::{Fix, Kind, Sighting, Witnessed};
 use lc_world::motion::LIGHT_US_PER_LY;
+use lc_world::system::{LocalSystem, M_PER_LY};
 
 use crate::chase;
 use crate::instruments::witness;
@@ -21,13 +23,29 @@ use crate::world::Event;
 
 /// Game seconds between passes over every pair of craft.
 const PASS_S: f64 = 60.0;
-/// A craft kept in sight is filed again this often, so its stay's span keeps up with it.
+/// A craft kept in sight is filed again this often, so its stay's span keeps up with it. One that
+/// keeps to its trajectory costs its file only the time.
 const REFILE_S: f64 = 6.0 * 3600.0;
+/// Places gathered toward a fit are at least this far apart in game seconds, so five of them span
+/// enough of an arc to bend.
+const PLACE_GAP_S: f64 = 600.0;
+/// Places held toward a fit; past this every other one is dropped, so the arc they span doubles
+/// until it is long enough to say what it is.
+const MOST_PLACES: usize = 16;
+/// Full sightings since the last fit that the next fit may fold; older ones stay as they are.
+const MOST_UNFOLDED: usize = 32;
+/// Places on the current trajectory kept to refit over when a sighting falls off it. A run longer
+/// than this is not folded into the refit, and stands as it is.
+const MOST_RUN: usize = 64;
+/// Off a fitted trajectory by more than this, or three sigma, is off it, meters: what the
+/// light-cone solve and a body's ephemeris may disagree by.
+const FIT_FLOOR_M: f64 = 1e3;
 /// How well a detection places a craft across the line of sight, radians: about a metre-class
 /// aperture's diffraction. Range comes from the light-cone solve, as a contact's does.
 const SEEN_SIGMA_RAD: f64 = 1e-6;
-/// Below this a craft that strays from where its last filing reckoned it is taken to be in orbit,
-/// not maneuvering, meters: orbital curvature alone would refile every pass.
+/// Before a trajectory is fitted, a craft that strays less than this from where its last filing
+/// reckoned it on a straight line is not filed again, meters: orbital curvature alone would refile
+/// it every pass.
 const STRAY_FLOOR_M: f64 = 1e7;
 /// How well a receiver tells which way a transmission came from, radians.
 const HEARD_SIGMA_RAD: f64 = 1e-2;
@@ -56,19 +74,122 @@ impl Roster {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Filed {
+    /// When it was last filed, in full or carried on.
     emitted_s: f64,
+    system: Option<lc_world::sky::StarId>,
+    /// Where it was last filed in full, and how it was moving.
     position_ly: DVec3,
     beta: DVec3,
-    system: Option<lc_world::sky::StarId>,
+    /// Fitted from what was seen, and kept while the craft holds to it.
+    trajectory: Option<Trajectory>,
+    /// Places toward a fit, oldest first, at least [`PLACE_GAP_S`] apart.
+    places: Vec<Place>,
+    /// Full sightings filed since the last fit, which the next one folds.
+    unfolded: Vec<Place>,
+    /// Places on `trajectory`: those it was fitted from, and each filing on it since.
+    run: Vec<Place>,
+}
+
+/// What a pass makes of one craft seen by another.
+enum Pass {
+    /// Nothing new to file.
+    Quiet,
+    /// Only the roster's own state moved: a place gathered toward a fit.
+    Gathered(Filed),
+    /// A sighting to file, and the state after it.
+    File(Filed, Option<Trajectory>, Vec<f64>),
 }
 
 impl Filed {
-    fn strayed(&self, emitted_s: f64, position_ly: DVec3, sigma_ly: f64) -> bool {
-        let reckoned = self.position_ly + self.beta * ((emitted_s - self.emitted_s) / JULIAN_YEAR_S);
+    fn first(system: Option<lc_world::sky::StarId>, place: Place, beta: DVec3) -> Self {
+        Filed {
+            emitted_s: place.at_s,
+            system,
+            position_ly: place.position_ly,
+            beta,
+            trajectory: None,
+            places: vec![place],
+            unfolded: vec![place],
+            run: Vec::new(),
+        }
+    }
+
+    /// Fitted from `run`, which ends at `place`: the sighting to file, folding the rest.
+    fn fitted(&self, trajectory: Trajectory, mut run: Vec<Place>, place: Place) -> Pass {
+        if run.len() > MOST_RUN {
+            run.drain(..run.len() - MOST_RUN);
+        }
+        let folded = run.iter().map(|p| p.at_s).filter(|&t| t < place.at_s).collect();
+        let after = Filed {
+            emitted_s: place.at_s,
+            trajectory: Some(trajectory),
+            places: Vec::new(),
+            unfolded: Vec::new(),
+            run,
+            ..self.clone()
+        };
+        Pass::File(after, Some(trajectory), folded)
+    }
+
+    /// Off the straight line from where it was last filed in full.
+    fn strayed(&self, place: Place, sigma_ly: f64) -> bool {
+        let reckoned = self.position_ly + self.beta * ((place.at_s - self.emitted_s) / JULIAN_YEAR_S);
         let floor_ly = STRAY_FLOOR_M / LIGHT_MICROSECOND_M / LIGHT_US_PER_LY;
-        reckoned.distance(position_ly) > (3.0 * sigma_ly).max(floor_ly)
+        reckoned.distance(place.position_ly) > (3.0 * sigma_ly).max(floor_ly)
+    }
+
+    /// Fold this pass's sight of the craft in. `system` is `None` when the craft is in a system
+    /// that is not loaded, so no conic can be read and none is fitted.
+    fn pass(&self, system: Option<&LocalSystem>, can_fit: bool, place: Place, beta: DVec3, sigma_ly: f64) -> Pass {
+        let tolerance_ly = (3.0 * sigma_ly).max(FIT_FLOOR_M / M_PER_LY);
+        let refile = place.at_s - self.emitted_s >= REFILE_S;
+        if let Some(trajectory) = self.trajectory {
+            let on = trajectory.place_at(system, place.at_s).is_some_and(|at| at.distance(place.position_ly) <= tolerance_ly);
+            let mut run = self.run.clone();
+            run.push(place);
+            return match (on, refile) {
+                (true, false) => Pass::Quiet,
+                (true, true) => {
+                    run.drain(..run.len().saturating_sub(MOST_RUN));
+                    Pass::File(Filed { emitted_s: place.at_s, run, ..self.clone() }, Some(trajectory), Vec::new())
+                }
+                // Off a fit from a short arc need not be a burn: the whole run says which.
+                (false, _) => match Trajectory::fit(system, &run, tolerance_ly).filter(|_| can_fit) {
+                    Some(refitted) => self.fitted(refitted, run, place),
+                    None => Pass::File(Filed::first(self.system, place, beta), None, Vec::new()),
+                },
+            };
+        }
+        let mut next = self.clone();
+        let gathered = self.places.last().is_none_or(|last| place.at_s - last.at_s >= PLACE_GAP_S);
+        if gathered {
+            next.places.push(place);
+        }
+        if can_fit {
+            let mut points: Vec<Place> = next.places.iter().chain(&next.unfolded).copied().chain([place]).collect();
+            points.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+            points.dedup_by(|a, b| a.at_s.to_bits() == b.at_s.to_bits());
+            if let Some(fitted) = Trajectory::fit(system, &points, tolerance_ly) {
+                return self.fitted(fitted, points, place);
+            }
+        }
+        if next.places.len() > MOST_PLACES {
+            let latest = next.places.len() - 1;
+            next.places = next.places.iter().enumerate().filter(|(k, _)| (latest - k) % 2 == 0).map(|(_, p)| *p).collect();
+        }
+        if refile || self.strayed(place, sigma_ly) {
+            next.emitted_s = place.at_s;
+            next.position_ly = place.position_ly;
+            next.beta = beta;
+            next.unfolded.push(place);
+            if next.unfolded.len() > MOST_UNFOLDED {
+                next.unfolded.remove(0);
+            }
+            return Pass::File(next, None, Vec::new());
+        }
+        if gathered { Pass::Gathered(next) } else { Pass::Quiet }
     }
 }
 
@@ -125,7 +246,7 @@ impl<J: Journal> Server<J> {
     }
 
     /// File, for every craft, every craft it now detects that is news to it: first sight, a new
-    /// system, a course that has changed, or long enough since the last filing.
+    /// system, a trajectory fitted, leaving the trajectory, or long enough since the last filing.
     pub(crate) fn watch_crafts(&mut self) {
         if self.now_t < self.roster.next_t {
             return;
@@ -150,31 +271,36 @@ impl<J: Journal> Server<J> {
                 in_sight.insert((observer, quarry));
                 let sigma_ly = SEEN_SIGMA_RAD * here.distance(seen.position_ly);
                 let system = self.world.star_containing(seen.position_ly);
-                let due = match self.roster.filed.get(&(observer, quarry)) {
-                    None => true,
-                    Some(last) => {
-                        last.system != system
-                            || seen.emitted_s - last.emitted_s >= REFILE_S
-                            || last.strayed(seen.emitted_s, seen.position_ly, sigma_ly)
-                    }
+                let local = system.and_then(|id| self.world.loaded_system(id)).map(|s| s.as_ref());
+                let place = Place { at_s: seen.emitted_s, position_ly: seen.position_ly };
+                let pass = match self.roster.filed.get(&(observer, quarry)) {
+                    Some(last) if last.system == system => last.pass(local, system.is_none() || local.is_some(), place, seen.beta, sigma_ly),
+                    _ => Pass::File(Filed::first(system, place, seen.beta), None, Vec::new()),
                 };
-                if due {
-                    let filed = Filed { emitted_s: seen.emitted_s, position_ly: seen.position_ly, beta: seen.beta, system };
-                    news.push((observer, quarry, filed, sigma_ly));
-                }
+                news.push((observer, quarry, pass, place, seen.beta, sigma_ly));
             }
         }
         self.roster.in_sight = in_sight;
         let now_s = self.now_t as f64 * 1.0e-6;
-        for (observer, quarry, filed, sigma_ly) in news {
-            self.roster.filed.insert((observer, quarry), filed);
+        for (observer, quarry, pass, place, beta, sigma_ly) in news {
+            let (filed, trajectory, thinned_s) = match pass {
+                Pass::Quiet => continue,
+                Pass::Gathered(filed) => {
+                    self.roster.filed.insert((observer, quarry), filed);
+                    continue;
+                }
+                Pass::File(filed, trajectory, thinned_s) => (filed, trajectory, thinned_s),
+            };
             let sighting = Sighting {
                 kind: Kind::Seen,
-                emitted_s: filed.emitted_s,
+                emitted_s: place.at_s,
                 system: filed.system,
-                fix: Fix::Place { position_ly: filed.position_ly, beta: filed.beta, sigma_ly },
+                fix: Fix::Place { position_ly: place.position_ly, beta, sigma_ly },
                 witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
+                trajectory,
+                thinned_s,
             };
+            self.roster.filed.insert((observer, quarry), filed);
             self.aboard(observer).knowledge.spotted(Subject::Craft(quarry.0), sighting);
         }
     }
@@ -217,6 +343,8 @@ impl<J: Journal> Server<J> {
                 system,
                 fix: Fix::Place { position_ly, beta: DVec3::ZERO, sigma_ly: SEEN_SIGMA_RAD * here.distance(position_ly) },
                 witnesses: vec![Witnessed { witness: witness(observer), observed_s: now_s, scope: Scope::Open, lineage: Vec::new() }],
+                trajectory: None,
+                thinned_s: Vec::new(),
             };
             let whose = self.roster.in_sight.contains(&(observer, wreck));
             let knowledge = &mut self.aboard(observer).knowledge;
@@ -255,6 +383,8 @@ impl<J: Journal> Server<J> {
                     system: self.world.star_containing(position_ly),
                     fix: Fix::Place { position_ly, beta: DVec3::from_array(stated.beta), sigma_ly: 0.0 },
                     witnesses: held(scope_of(addressing.to, addressing.under)),
+                    trajectory: None,
+                    thinned_s: Vec::new(),
                 }
             }
             None => {
@@ -270,7 +400,7 @@ impl<J: Journal> Server<J> {
                 let system = self.world.star_containing(from_ly).filter(|star| Some(*star) == mine);
                 let bearing = Bearing { observer_ly: here, toward: (from_ly - here).normalize_or_zero(), sigma_rad: HEARD_SIGMA_RAD };
                 let flux = f64::from(strength) / (LIGHT_MICROSECOND_M * LIGHT_MICROSECOND_M);
-                Sighting { kind: Kind::Heard, emitted_s, system, fix: Fix::Toward { bearing, flux }, witnesses: held(Scope::Open) }
+                Sighting { kind: Kind::Heard, emitted_s, system, fix: Fix::Toward { bearing, flux }, witnesses: held(Scope::Open), trajectory: None, thinned_s: Vec::new() }
             }
         };
         self.aboard(observer).knowledge.spotted(Subject::Craft(sender.0), sighting);

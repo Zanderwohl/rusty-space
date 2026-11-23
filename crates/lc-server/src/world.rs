@@ -220,6 +220,11 @@ impl World {
         }
     }
 
+    /// A system already loaded, without loading it or counting as a use.
+    pub fn loaded_system(&self, id: StarId) -> Option<&Arc<LocalSystem>> {
+        self.loaded.get(&id).map(|held| &held.system)
+    }
+
     pub fn loaded(&self) -> impl Iterator<Item = &Arc<LocalSystem>> {
         self.loaded.values().map(|held| &held.system)
     }
