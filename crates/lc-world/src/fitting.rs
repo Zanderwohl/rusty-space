@@ -397,7 +397,8 @@ impl Drop for Reservation {
 /// settles first: a new motive, a refit step, a grant.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fitting {
-    form: Form,
+    /// Shared, as `refit` is, so the craft's history of its account costs a pointer a settlement.
+    form: Arc<Form>,
     hull: Hull,
     /// Of the last form the grid measured, per kilogram, which a step that does not place keeps.
     geometry: Arc<Geometry>,
@@ -418,7 +419,7 @@ pub struct Fitting {
     starlight_w: f64,
     /// Watts arriving at the field from other craft. Restated by the authority, and not saved.
     lit_w: f64,
-    refit: Option<Plan>,
+    refit: Option<Arc<Plan>>,
     posture: Posture,
     /// Emissions with no net thrust, in time order. Only those not over by `since_s` are kept.
     lit: Vec<Lit>,
@@ -450,7 +451,7 @@ impl Fitting {
 
     fn holding(form: Form, hull: Hull, geometry: Arc<Geometry>, balance: Balance, now_s: f64) -> Self {
         Self {
-            form,
+            form: Arc::new(form),
             hull,
             geometry,
             balance,
@@ -470,7 +471,7 @@ impl Fitting {
 
     pub fn account(&self) -> Account {
         Account {
-            form: self.form.clone(),
+            form: (*self.form).clone(),
             stored_j: self.stored_j,
             since_s: self.since_s,
             rapidity_since: self.rapidity_since,
@@ -491,7 +492,7 @@ impl Fitting {
     /// measure one: keeping the extent and gyration of the round's start. Neither placing, it keeps
     /// the starting form's.
     pub fn from_account(account: &Account, balance: Balance) -> Self {
-        let refit = account.refit.as_ref().and_then(|round| round.solve(&balance).ok());
+        let refit = account.refit.as_ref().and_then(|round| round.solve(&balance).ok()).map(Arc::new);
         let form = account.form.clone();
         let (hull, geometry) = Hull::measure(&form, &balance).unwrap_or_else(|_| {
             let was = account.refit.as_ref().map(|round| &round.from).and_then(|from| Hull::measure(from, &balance).ok());
@@ -526,7 +527,7 @@ impl Fitting {
     /// densities and the envelope's margin are the balance's.
     pub fn set_balance(&mut self, balance: Balance) {
         self.balance = balance;
-        self.take_form(self.form.clone());
+        self.take_form((*self.form).clone());
     }
 
     /// Become `form`, measuring it if the grid can: at a step's end, when the form it was partway
@@ -539,7 +540,7 @@ impl Fitting {
             }
             Err(_) => self.hull = Hull::partway(&form, &self.balance, &self.hull),
         }
-        self.form = form;
+        self.form = Arc::new(form);
     }
 
     /// The form as of the last settlement, counting refit steps finished by then.
@@ -553,7 +554,7 @@ impl Fitting {
     }
 
     pub fn refit(&self) -> Option<&Plan> {
-        self.refit.as_ref()
+        self.refit.as_deref()
     }
 
     pub fn since_s(&self) -> f64 {
@@ -665,7 +666,7 @@ impl Fitting {
             if done {
                 self.refit = None;
             }
-            if progress.form != self.form {
+            if progress.form != *self.form {
                 self.take_form(progress.form);
             }
         }
@@ -731,7 +732,7 @@ impl Fitting {
 
     /// Begin a round. Settle first; the caller has already solved it from this form and store.
     pub fn begin_refit(&mut self, plan: Plan) {
-        self.refit = Some(plan);
+        self.refit = Some(Arc::new(plan));
     }
 
     /// Only the time is skipped: the remaining steps' energy is still taken, and their loss and
@@ -750,7 +751,7 @@ impl Fitting {
     pub fn refit_at_once(&mut self, form: Form) -> Result<(), FormError> {
         (self.hull, self.geometry) = Hull::measure(&form, &self.balance)?;
         self.refit = None;
-        self.form = form;
+        self.form = Arc::new(form);
         self.stored_j = self.stored_j.min(self.hull.capacities.storage_j.max(0.0));
         Ok(())
     }
@@ -959,7 +960,7 @@ impl From<&Fitting> for lc_proto::Hull {
         }
         let (c, aft_w) = (&f.hull.capacities, f.hull.thrust_n * C_M_S);
         Self {
-            form: (&f.form).into(),
+            form: f.form().into(),
             scales_m: f.form.parts.iter().map(|p| p.scale_m(f.balance.min_part_m3)).collect(),
             capacities: lc_proto::form::Capacities {
                 storage_j: c.storage_j,

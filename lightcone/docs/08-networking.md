@@ -78,9 +78,12 @@ The gate is only as good as the `arrive_t` it is handed. A contact's is the pres
 construction, since the retarded solve makes it so, so for `Present` what actually keeps the
 client in the past is that every reading is taken at the emission instant: `lc_server::chase`
 builds a contact from a craft as its light left it and nothing else, and
-`a_contact_does_not_turn_before_the_light_of_its_turn_arrives` is the test. The drive's power is
-still read from the fitting as it is now (`an_order_does_not_rewrite_the_drive_power_before_it`,
-ignored until a fitting keeps its account per stretch).
+`a_contact_does_not_turn_before_the_light_of_its_turn_arrives` is the test. What a reading takes
+from the ship's form and energy — the mass its drive's power follows, the turn rate and broadside
+its nose swings by, the faces its exhaust leaves — comes from the account in force at that instant,
+which a craft keeps one of per settlement as it keeps a motive per stretch (`Craft::fitting_at`).
+`an_order_does_not_rewrite_the_drive_power_before_it` and
+`a_refit_does_not_rewrite_how_the_craft_looked_before_it` are the tests.
 
 ### Seeing other ships
 

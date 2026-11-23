@@ -122,7 +122,7 @@ impl<J: Journal> Server<J> {
     fn state_drive(&mut self, id: CraftId, t: i64, events: &mut Vec<Event>) {
         let Some(craft) = self.fleet.get(id) else { return };
         let wanted = wanted(craft, &self.balance, t);
-        let face_m2 = exhaust_face_m2(craft);
+        let face_m2 = exhaust_face_m2(craft, t as f64 * 1.0e-6);
         let spectrum = |power_w: f64| Spectrum::Blackbody { temperature_k: aperture_temperature_k(power_w, face_m2) };
         let mut lit = self.emissions.emitting.remove(&id).unwrap_or_default();
         for kind in [Jet::Drive, Jet::Thrusters] {
