@@ -791,8 +791,8 @@ mod tests {
         let stacked = Primitive::Slab { edges: DVec3::new(0.5, 5.0, 9.0), corner: 0.1 };
         let one = alone(flat, volume);
         let mut three = one.clone();
-        three.parts.push(hang(2, Kind::Storage, stacked, volume, 1, Mount::Attached { anchor: DVec3::Z, standoff: 3.0 }));
-        three.parts.push(hang(3, Kind::Storage, stacked, volume, 2, Mount::Attached { anchor: DVec3::X, standoff: 3.0 }));
+        three.parts.push(hang(2, Kind::Storage, stacked, volume, 1, Mount::Attached { anchor: DVec3::Z, standoff: 3.0, seated: false }));
+        three.parts.push(hang(3, Kind::Storage, stacked, volume, 2, Mount::Attached { anchor: DVec3::X, standoff: 3.0, seated: false }));
         let (one, three) = (FormGrid::new(&one, &B).unwrap(), FormGrid::new(&three, &B).unwrap());
 
         let above = three.shadow().along(DVec3::Z) / one.shadow().along(DVec3::Z);
@@ -885,7 +885,7 @@ mod tests {
     fn denser_parts_weigh_more() {
         let pod = Primitive::Capsule { length: 2.0 };
         let mut form = alone(pod, 1.0e5);
-        form.parts.push(hang(2, Kind::Bay, pod, 1.0e5, 1, Mount::Attached { anchor: DVec3::X, standoff: 0.0 }));
+        form.parts.push(hang(2, Kind::Bay, pod, 1.0e5, 1, Mount::Attached { anchor: DVec3::X, standoff: 0.0, seated: false }));
         let grid = FormGrid::new(&form, &B).unwrap();
         let storage = grid.sdf.pieces().iter().find(|p| p.part == PartId(1)).unwrap().pose.position;
         let bay = grid.sdf.pieces().iter().find(|p| p.part == PartId(2)).unwrap().pose.position;

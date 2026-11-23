@@ -83,6 +83,7 @@ pub fn applied(chosen: &Chosen, how: How, draft: &crate::draft::Draft, session: 
             (layout.form, left_out(&preset, &layout.emptied, &layout.unplaced))
         }
     };
+    let form = lc_world::refit::rounds::matched(&draft.ship, form);
     let how = if how == How::Layout { "a layout" } else { "a design" };
     Ok((form, Named { label: format!("applied {} as {how}", chosen.name()), note }))
 }
@@ -502,11 +503,36 @@ mod tests {
         for b in Builtin::ALL {
             let chosen = Chosen::Builtin(b);
             player.does(Action::ApplyPreset(chosen.clone(), How::Layout), &mut shard);
-            assert_eq!(player.draft().form, b.form().as_layout(&odd_ship(), min).unwrap().form, "{b:?}");
+            let matched = |form| sorted(lc_world::refit::rounds::matched(&odd_ship(), form));
+            assert_eq!(sorted(player.draft().form.clone()), matched(b.form().as_layout(&odd_ship(), min).unwrap().form), "{b:?}");
             player.does(Action::ApplyPreset(chosen, How::Design), &mut shard);
-            assert_eq!(player.draft().form, b.form().as_design(min).unwrap(), "{b:?}");
+            assert_eq!(sorted(player.draft().form.clone()), matched(b.form().as_design(min).unwrap()), "{b:?}");
         }
         assert_ne!(Builtin::Plate.form().as_layout(&odd_ship(), min).unwrap().form, Builtin::Plate.form());
+    }
+
+    fn sorted(mut form: Form) -> Form {
+        form.parts.sort_by_key(|p| p.id);
+        form
+    }
+
+    /// The Cluster's ids put an engine on the reference's only drone, which left nothing to build
+    /// with unless parts are matched by kind.
+    #[test]
+    fn a_layout_is_matched_to_the_ship_by_kind() {
+        let mut shard = Presets::default();
+        let ship = Form::reference();
+        let mut player = Player::new("acct-a", ship.clone());
+        player.does(Action::ApplyPreset(Chosen::Builtin(Builtin::Cluster), How::Layout), &mut shard);
+        let target = player.draft().form.clone();
+        for part in &ship.parts {
+            if let Some(same) = target.parts.iter().find(|t| t.id == part.id) {
+                assert_eq!(same.kind, part.kind, "{} kept its id but not its kind", part.id);
+            }
+        }
+        let stored_j = lc_world::form::capacity::Capacities::of(&ship, &B).storage_j;
+        let round = lc_world::refit::rounds::Round { from: ship, target, stored_j, start_s: 0.0 };
+        assert!(round.solve(&B).is_ok(), "{:?}", round.solve(&B).err());
     }
 
     /// No storage, and a bay the spindle has no part for.

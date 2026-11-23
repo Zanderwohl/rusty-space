@@ -27,6 +27,8 @@ pub enum Shape {
     Torus { major: f64, minor: f64 },
     /// `start` is the radius of the end at −x, `end` of the one at +x.
     Frustum { length: f64, start: f64, end: f64 },
+    /// Widths of the faces at −z and +z. Centered on its box, not its centroid.
+    Trapezoid { lower: f64, upper: f64, height: f64, length: f64 },
 }
 
 impl Primitive {
@@ -34,7 +36,7 @@ impl Primitive {
     pub const MIND: Primitive = Primitive::Slab { edges: DVec3::ONE, corner: 0.0 };
 
     /// `scale` is the ellipsoid's semi-axis along x, the slab's edge along x, the torus's minor
-    /// radius, the frustum's radius at −x, and the radius of the rest.
+    /// radius, the frustum's radius at −x, the trapezoid's lower width, and the radius of the rest.
     pub fn at(&self, scale: f64) -> Shape {
         match *self {
             Primitive::Ellipsoid { axes } => Shape::Ellipsoid { semi_axes: axes * (scale / axes.x) },
@@ -47,6 +49,9 @@ impl Primitive {
             Primitive::Torus { major } => Shape::Torus { major: major * scale, minor: scale },
             Primitive::Frustum { length, taper } => {
                 Shape::Frustum { length: length * scale, start: scale, end: taper * scale }
+            }
+            Primitive::Trapezoid { upper, height, length } => {
+                Shape::Trapezoid { lower: scale, upper: upper * scale, height: height * scale, length: length * scale }
             }
         }
     }
@@ -79,6 +84,9 @@ impl Shape {
             Shape::Cylinder { radius, length } => positive(radius) && positive(length),
             Shape::Torus { major, minor } => positive(major) && positive(minor),
             Shape::Frustum { length, start, end } => positive(length) && positive(start) && non_negative(end),
+            Shape::Trapezoid { lower, upper, height, length } => {
+                positive(lower) && non_negative(upper) && positive(height) && positive(length)
+            }
         }
     }
 
@@ -94,6 +102,7 @@ impl Shape {
             Shape::Cylinder { radius: r, length } => PI * r * r * length,
             Shape::Torus { major, minor } => 2.0 * PI * PI * major * minor * minor,
             Shape::Frustum { length, start: a, end: b } => PI * length * (a * a + a * b + b * b) / 3.0,
+            Shape::Trapezoid { lower, upper, height, length } => length * height * (lower + upper) / 2.0,
         }
     }
 
@@ -114,6 +123,10 @@ impl Shape {
             Shape::Torus { major, minor } => 4.0 * PI * PI * major * minor,
             Shape::Frustum { length, start: a, end: b } => {
                 PI * ((a + b) * (a - b).hypot(length) + a * a + b * b)
+            }
+            Shape::Trapezoid { lower, upper, height, length } => {
+                let slant = height.hypot((lower - upper) / 2.0);
+                height * (lower + upper) + length * (lower + upper + 2.0 * slant)
             }
         }
     }
@@ -172,6 +185,9 @@ mod tests {
         }
         for (length, taper) in [(1.0, 0.0), (2.0, 0.5), (0.3, 1.0), (5.0, 3.0), (10.0, 0.1)] {
             all.push(Primitive::Frustum { length, taper });
+        }
+        for (upper, height, length) in [(1.0, 1.0, 1.0), (0.5, 0.4, 3.0), (0.0, 1.5, 2.0), (2.5, 0.3, 0.6)] {
+            all.push(Primitive::Trapezoid { upper, height, length });
         }
         all
     }
@@ -341,6 +357,30 @@ mod tests {
     fn tessellate(shape: &Shape, fine: usize) -> (f64, f64) {
         match *shape {
             Shape::Ellipsoid { .. } | Shape::Slab { .. } => ray_cast(shape, fine / 4),
+            Shape::Trapezoid { lower, upper, height, length } => {
+                // Exact as a polytope, sharing nothing with the closed forms.
+                let (x, z, l, u) = (length / 2.0, height / 2.0, lower / 2.0, upper / 2.0);
+                let c = |sx: f64, sy: f64, top: bool| {
+                    DVec3::new(sx * x, sy * if top { u } else { l }, if top { z } else { -z })
+                };
+                let faces = [
+                    [c(-1.0, -1.0, false), c(-1.0, 1.0, false), c(1.0, 1.0, false), c(1.0, -1.0, false)],
+                    [c(-1.0, -1.0, true), c(1.0, -1.0, true), c(1.0, 1.0, true), c(-1.0, 1.0, true)],
+                    [c(-1.0, -1.0, false), c(1.0, -1.0, false), c(1.0, -1.0, true), c(-1.0, -1.0, true)],
+                    [c(-1.0, 1.0, false), c(-1.0, 1.0, true), c(1.0, 1.0, true), c(1.0, 1.0, false)],
+                    [c(-1.0, -1.0, false), c(-1.0, -1.0, true), c(-1.0, 1.0, true), c(-1.0, 1.0, false)],
+                    [c(1.0, -1.0, false), c(1.0, 1.0, false), c(1.0, 1.0, true), c(1.0, -1.0, true)],
+                ];
+                let (mut area, mut volume) = (0.0, 0.0);
+                for [a, b, c, d] in faces {
+                    for [p, q, r] in [[a, b, c], [a, c, d]] {
+                        let n = (q - p).cross(r - p);
+                        area += n.length() / 2.0;
+                        volume += p.dot(n) / 6.0;
+                    }
+                }
+                (area, volume.abs())
+            }
             Shape::Capsule { radius: r, length } => {
                 let h = length / 2.0;
                 let back = arc((-h, 0.0), r, PI, PI / 2.0, fine / 4);

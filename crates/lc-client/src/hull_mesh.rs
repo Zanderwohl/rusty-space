@@ -43,7 +43,8 @@ pub fn region(kind: Kind) -> u32 {
         Kind::Engine => 3,
         Kind::Data => 4,
         Kind::Mind => 5,
-        Kind::Spar(_) => 6,
+        // Structure, standing only while the round that built it runs.
+        Kind::Spar(_) | Kind::Scaffold => 6,
         Kind::Bay => 7,
     }
 }
@@ -125,7 +126,7 @@ pub fn mesh_form(form: &Form, balance: &Balance, cells: u32) -> Result<HullBuffe
 }
 
 /// Each piece on its own grid, at the step of `cells` along the longest side of all of them, or
-/// finer where a piece is thin. Every piece paints every face in `faces`: an engine sunk into a
+/// finer where a piece is thin; a slab bay is built by [`crate::bay_mesh`] instead. Every piece paints every face in `faces`: an engine sunk into a
 /// neighbor leaves its face on the neighbor's surface, which must draw it. Empty for no pieces.
 pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuffers {
     let mut out = HullBuffers::default();
@@ -134,7 +135,12 @@ pub fn mesh_pieces(pieces: &[Piece], cells: u32, faces: &[Aperture]) -> HullBuff
     }
     let step = extent(Union::new(pieces).bounds) / cells.max(1) as f64;
     let (mut scratch, mut aside) = (Vec::new(), Vec::new());
+    let mut bays = 0..;
     for piece in pieces {
+        if crate::bay_mesh::takes(piece) {
+            crate::bay_mesh::mesh(piece, bays.next(), &mut out);
+            continue;
+        }
         let alone = Union::new(std::slice::from_ref(piece));
         let grid = Grid::sample(&alone, piece_cells(piece, extent(alone.bounds), step));
         let surface = nets(&grid, &alone);
@@ -191,8 +197,8 @@ pub fn form_hash(form: &Form, balance: &Balance) -> u64 {
                 h.u64(1 + parent.0 as u64);
                 match mount {
                     Mount::Enclosing => h.u64(0),
-                    Mount::Attached { anchor, standoff } => {
-                        h.u64(1);
+                    Mount::Attached { anchor, standoff, seated } => {
+                        h.u64(1 + u64::from(seated));
                         for x in anchor.to_array() {
                             h.f64(x);
                         }
@@ -267,6 +273,7 @@ impl Fnv {
             Kind::Bay => 6,
             Kind::Spar(SparMode::Saddle) => 7,
             Kind::Spar(SparMode::Strap) => 8,
+            Kind::Scaffold => 9,
         });
     }
 
@@ -277,6 +284,8 @@ impl Fnv {
             Shape::Slab { edges, corner } => vec![edges.x, edges.y, edges.z, corner],
             Shape::Torus { major, minor } => vec![major, minor],
             Shape::Frustum { length, start, end } => vec![length, start, end],
+            // Led by a mark no length can be, so it never hashes as a slab of the same numbers.
+            Shape::Trapezoid { lower, upper, height, length } => vec![-1.0, lower, upper, height, length],
         };
         for x in dimensions {
             self.f64(x);
@@ -417,7 +426,7 @@ pub fn spar_fixture(mode: SparMode) -> Form {
     let tank = hang(1, Kind::Storage, sphere, 5.0e5, 0, Mount::Enclosing);
     let spar = match mode {
         SparMode::Saddle => {
-            let anchor = Mount::Attached { anchor: DVec3::new(0.3, 1.0, 0.2), standoff: -0.3 };
+            let anchor = Mount::Attached { anchor: DVec3::new(0.3, 1.0, 0.2), standoff: -0.3, seated: false };
             hang(2, Kind::Spar(mode), Primitive::Cylinder { length: 8.0 }, 2.0e4, 1, anchor)
         }
         SparMode::Strap => {
@@ -428,7 +437,7 @@ pub fn spar_fixture(mode: SparMode) -> Form {
     };
     let mut parts = vec![Part::mind(PartId(0), balance.min_part_m3), tank, spar];
     if mode == SparMode::Saddle {
-        parts.push(hang(3, Kind::Engine, sphere, 1.0e4, 2, Mount::Attached { anchor: DVec3::X, standoff: -0.5 }));
+        parts.push(hang(3, Kind::Engine, sphere, 1.0e4, 2, Mount::Attached { anchor: DVec3::X, standoff: -0.5, seated: false }));
     }
     Form { parts }
 }
@@ -531,7 +540,7 @@ pub struct HullMeshPlugin;
 
 impl Plugin for HullMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HullMeshes>().add_systems(Update, (measure, want, land).chain().in_set(HullMeshSystems));
+        app.init_resource::<HullMeshes>().add_systems(Update, (measure, want, land, crate::bay_mesh::fit_bays).chain().in_set(HullMeshSystems));
     }
 }
 

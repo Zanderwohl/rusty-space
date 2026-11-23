@@ -20,8 +20,6 @@ pub struct Steps {
     pub ladder: &'static [f64],
     /// Twist and tilt, radians.
     pub angle_rad: f64,
-    /// Whether an anchor goes to the parent's axes and diagonals.
-    pub anchor_on_axes: bool,
     /// Standoff, in the child's reaches.
     pub standoff: f64,
 }
@@ -39,8 +37,8 @@ impl Snaps {
 }
 
 pub const SNAPS: Snaps = Snaps {
-    coarse: Steps { ladder: &R10, angle_rad: 15.0 * DEG, anchor_on_axes: true, standoff: 0.1 },
-    fine: Steps { ladder: &R40, angle_rad: 5.0 * DEG, anchor_on_axes: false, standoff: 0.01 },
+    coarse: Steps { ladder: &R10, angle_rad: 15.0 * DEG, standoff: 0.1 },
+    fine: Steps { ladder: &R40, angle_rad: 5.0 * DEG, standoff: 0.01 },
 };
 
 const DEG: f64 = std::f64::consts::PI / 180.0;
@@ -83,31 +81,32 @@ pub fn standoff(reaches: f64, fine: bool) -> f64 {
     ((reaches / step).round() * step * 1.0e6).round() / 1.0e6
 }
 
-/// The nearest of the 26 axes and diagonals, or free and unit.
-pub fn anchor(direction: DVec3, fine: bool) -> DVec3 {
-    let unit = direction.normalize_or(DVec3::X);
-    if !SNAPS.steps(fine).anchor_on_axes {
-        return unit;
+/// Of a face's half-width, how near its middle the other midline takes hold too, so the point
+/// goes to the face's center.
+pub const MIDDLE: f64 = 0.15;
+
+/// The two parent axes a point on a face slides along: all but the one `normal` lies most along.
+pub fn across(normal: DVec3) -> [usize; 2] {
+    match normal.abs().max_position() {
+        0 => [1, 2],
+        1 => [0, 2],
+        _ => [0, 1],
     }
-    let mut best = DVec3::X;
-    let mut closest = f64::NEG_INFINITY;
-    for x in -1..=1 {
-        for y in -1..=1 {
-            for z in -1..=1 {
-                let candidate = DVec3::new(x as f64, y as f64, z as f64);
-                if candidate == DVec3::ZERO {
-                    continue;
-                }
-                // Exact integers, so an anchor on an axis stays exactly on it.
-                let cosine = unit.dot(candidate.normalize());
-                if cosine > closest {
-                    closest = cosine;
-                    best = candidate;
-                }
-            }
-        }
+}
+
+/// `point` taken onto the nearer midline across its face, or both near the middle, nearness in
+/// shares of `half`. A midline is a plane through the center, so the direction to the result still
+/// exits on it.
+pub fn midline(point: DVec3, normal: DVec3, half: DVec3) -> DVec3 {
+    let [a, b] = across(normal);
+    let share = |i: usize| (point[i] / half[i].max(f64::MIN_POSITIVE)).abs();
+    let (near, far) = if share(a) <= share(b) { (a, b) } else { (b, a) };
+    let mut on = point;
+    on[near] = 0.0;
+    if share(far) < MIDDLE {
+        on[far] = 0.0;
     }
-    best
+    on
 }
 
 #[cfg(test)]
@@ -158,12 +157,15 @@ mod tests {
     }
 
     #[test]
-    fn an_anchor_goes_to_an_axis_or_a_diagonal_unless_free() {
-        assert_eq!(anchor(DVec3::new(0.9, 0.1, 0.05), false), DVec3::X);
-        assert_eq!(anchor(DVec3::new(-1.0, 0.0, -0.9), false), DVec3::new(-1.0, 0.0, -1.0));
-        assert_eq!(anchor(DVec3::new(0.6, 0.5, 0.55), false), DVec3::ONE);
-        let free = anchor(DVec3::new(0.9, 0.1, 0.05), true);
-        assert!((free.length() - 1.0).abs() < 1e-12 && free.y > 0.0);
+    fn shift_holds_a_point_to_the_nearer_midline_and_the_middle_to_both() {
+        let half = DVec3::new(180.0, 80.0, 20.0);
+        let up = DVec3::Z;
+        assert_eq!(midline(DVec3::new(120.0, 10.0, 20.0), up, half), DVec3::new(120.0, 0.0, 20.0), "along the keel line");
+        assert_eq!(midline(DVec3::new(9.0, 60.0, 20.0), up, half), DVec3::new(0.0, 60.0, 20.0), "across amidships");
+        assert_eq!(midline(DVec3::new(20.0, 5.0, 20.0), up, half), DVec3::new(0.0, 0.0, 20.0), "the face's center");
+        let side = DVec3::new(0.1, 0.9, 0.2).normalize();
+        assert_eq!(across(side), [0, 2]);
+        assert_eq!(midline(DVec3::new(100.0, 80.0, 3.0), side, half), DVec3::new(100.0, 80.0, 0.0));
     }
 
     #[test]

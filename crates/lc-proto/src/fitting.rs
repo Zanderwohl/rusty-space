@@ -12,6 +12,8 @@ pub enum Shortfall {
     Energy,
     /// This part's step would begin with no drone to do it.
     NoDrones(PartId),
+    /// A scaffold that cannot be built before anything is taken apart.
+    Scaffold(PartId),
 }
 
 /// The shard's tunables, `lc_world::fitting::Balance`; stated so a client's preview uses the

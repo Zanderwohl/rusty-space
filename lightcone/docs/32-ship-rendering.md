@@ -140,7 +140,7 @@ client warns when it meshes one.
 | data | fine dense panels |
 | mind | knapped obsidian: blue-gray-black glass under flake scars, each facet lit at its own lean, with the star's highlight and a faint sky mirrored in it. Drawn only when nothing encloses it. As built, a `glassy` region of the hull material, cut in the ship's frame by `scars.wgsl`, which the obsidian look shares; its graph still gives the faint light |
 | spar | plated structure |
-| bay | a shell with a mouth, and a lit interior grid of decks and gantries |
+| bay | a shell with a mouth, and a lit interior grid of decks and gantries. As built for a slab or a trapezoid (§The bay); any other primitive is still meshed solid in the bay's graph |
 
 Living lights are emitters with a real (small) power, through the same exposure as everything
 else, so they show on a night side and vanish in sunlight as they should.
@@ -209,6 +209,63 @@ Photographed by `aztec_void` and `sprue_void` on a box, `looks_gallery` circling
 size forever as the star turns and then a habitat ovoid 10 long to 5 wide to 2 tall, and `parts_void`, which puts every kind and every look on every
 primitive.
 
+
+### The bay
+
+A slab or trapezoid bay is the one part not meshed from its distance field: `lc_client::bay_mesh`
+builds it as geometry, a shadow box of flat layers seen through its mouth at +x, the trapezoid's
+section face, whether its wide side is down or up. The hold's section is a trapezoid either way, a
+slab's with equal sides: the ribs follow its walls, and each level's decks reach a share of its width
+at their own height, so the hall steps wider under a wide roof and narrower under a narrow one, a
+terrace. What stands in a berth is sized to the narrower of its floor and ceiling, so it clears a
+leaning wall. A trapezoid too narrow at either end for a hall and its decks, a wedge, is meshed
+solid. The shell's outside is the
+storage's aztec plate in the part's own charts, and the mouth a rim as thick as the wall. Inside:
+
+- **Ribs** every 12 m, each a ring of truss in its own plane: a chord along the walls, an inner
+  chord chamfered at the corners, and struts between, upright and diagonal in turn.
+- **Decks** out of both side walls every 9 m, front to back, each reaching 28% of the hold's width
+  in, so a shaft runs up the middle: a craft comes in, rises or sinks to a level and turns aside.
+- **Berths**, between two ribs on one deck, each with a pad and, seven times in ten, a cutout card
+  of a primitive's outline (disc, block, capsule, wedge, hexagon) standing on it facing the mouth,
+  plated in aztec. Placeholders for what a bay will hold.
+
+Up is whichever of the part's y and z runs most along the ship's z. Pitches stretch past 48 ribs
+and 16 levels, so a kilometers-long bay stays thousands of triangles, not millions. The slab's
+rounded corners are not drawn. The star reaches into the hold only through the mouth, by the hull's
+shadow map (§Shadows), so the ribs stripe the floor. A ship turns its top to its star, so a bay on
+its beam is never lit by the star at all: the hold is lit by its own lamps.
+
+- **Runway strips**, two down the shaft's floor and two down its ceiling, mouth to back, lamps in a
+  dashed line, lighting as line sources: a pale blue fill over the whole hold.
+- **Floods**, two under each occupied berth's ceiling at its front edge, beams 50 to 80 degrees
+  across aimed at what is in it, at a floodlit yard's 2000 lux. An empty berth's are dark.
+
+None is a light. The hull material finds a fragment's bay from the face attribute's spare bytes and
+its berth from `HullBay`, the bay's frame and grid, by `Hold`'s arithmetic, and sums only that
+berth's floods and the four strips, analytically. Decks and ribs hold the light in because a berth's
+floods light nothing outside it, not by shadow: no lamp casts one. Which berths are occupied is one
+pcg hash written alike in Rust and WGSL, and a test holds the shader's copies of the hold's constants
+to the mesher's. The lamps are a window's 300 cd/m² scaled, so like windows they are lost by day and
+show on a night side. Photographed by `parts_void --only bay --primitive slab --lying`, and by
+night with `--sun -60 --exposure 5`.
+
+### Shadows
+
+A hull shadows itself from its star: a part sunk into another, a boom across the hull behind it,
+the inside of a bay. As built (`lc_client::hull_shadow`): each hull at least 128 pixels long, or
+pinned as a void pins it, has a 2048-texel depth map of its own mesh seen from the star, fit to the
+sphere about its mesh's bounds in the ship's frame and meters, and keeps it until it falls under
+32 pixels. Every map is drawn afresh each frame by a pass in the root render graph ahead of every
+camera, so it is the same for all of them and never lags a turn.
+
+Not Bevy's directional shadows: those are cascades fit to each camera's frustum in render units of
+an astronomical unit, where a ship is a billionth of one across. The hull material builds the map's
+frame from its own star direction and the sphere in `HullUniform::shadow`, as the pass does, so the
+two agree on every texel; it compares the four nearest, pushed out along the normal a texel and a
+half, and scales every direct term of the star by what reaches, its highlights included. The sky
+mirrored in a surface and the night fill are not shadowed. A map is 16 MB; only the few hulls near
+enough to show it have one. Construction meshes are not shadowed yet.
 
 ## Building, as a function of time
 
@@ -435,7 +492,7 @@ no drone flies before a step starts or after it ends.
 
 The drones' clock is the round's while it loops or runs in the game. `--refit-at` freezes the construction but not the
 traffic, so a burst of one step moves; `--rate 0` freezes both. Four consecutive frames of the
-dismantle at `--refit-at 0.1 --rate 3`, each mote a little further along:
+dismantle at `--refit-at 0.55 --rate 3`, each mote a little further along:
 
 ![burst frame 0](../images/drones-burst-0.jpg) ![burst frame 1](../images/drones-burst-1.jpg)
 ![burst frame 2](../images/drones-burst-2.jpg) ![burst frame 3](../images/drones-burst-3.jpg)

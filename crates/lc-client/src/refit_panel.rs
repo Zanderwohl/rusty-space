@@ -24,6 +24,9 @@ pub fn shortfall(short: lc_proto::Shortfall) -> String {
         Shortfall::NoDrones(id) => {
             format!("no drones left to work on {}: keep some until the build", lc_world::form::PartId::from(id))
         }
+        Shortfall::Scaffold(id) => {
+            format!("{} must hang from a part already built and kept", lc_world::form::PartId::from(id))
+        }
     }
 }
 
@@ -54,6 +57,7 @@ pub fn form_fault(fault: lc_proto::FormFault) -> String {
         F::TooSmall(id) => format!("{} is smaller than the smallest part", part(id)),
         F::TooFewDrones => "fewer drones than a ship may keep".into(),
         F::OtherMind(id) => format!("{} is not this ship's Mind, which it keeps", part(id)),
+        F::OnScaffold(id) => format!("{} hangs from a scaffold, which is taken down", part(id)),
     }
 }
 

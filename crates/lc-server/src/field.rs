@@ -650,6 +650,60 @@ mod tests {
         assert!(server.ship(second).is_some_and(|craft| craft.ended_s().is_none() && craft.fitting().is_some()));
     }
 
+    /// A ship keeps heating while its owner is signed out, and signing in again states the heat it
+    /// has reached, not the heat it was left with.
+    #[tokio::test]
+    async fn a_signed_out_ships_heat_keeps_running() {
+        use crate::testing::Broker;
+        let Some(near) = near_the_star() else { return };
+        let broker = Broker::new([1u8; 32]);
+        let mut server = Server::new(Memory::default(), 0, 1);
+        let mut trusted = crate::ticket::Trusted::new("shard-1");
+        assert_eq!(trusted.learn(&broker.jwks()), 1);
+        server.trust(trusted);
+        server.load_world(World::new(vec![a_star().unwrap()]));
+        server.set_rate(60.0);
+        let mut wire = Loopback::new();
+        let hello = |jti: &str| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket: broker.mint("acct-1", "shard-1", 60, jti) };
+
+        wire.client_says(OWNER, hello("j1"));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(OWNER);
+        let Some(Outbound::Welcome { ship_id, .. }) = said.first() else { panic!("{said:?}") };
+        let mut heating = still(*ship_id, near);
+        server.fit_new(&mut heating);
+        hold_black(&mut heating);
+        server.fleet.remove(CraftId(ship_id.0));
+        server.fleet.insert(heating);
+        let heat_at = |server: &Server<Memory>| {
+            let craft = server.ship(*ship_id).unwrap();
+            craft.fitting().unwrap().heat_j_at(&craft.motion, server.now_t() as f64 * 1.0e-6)
+        };
+        let left_j = heat_at(&server);
+        server.disconnected(OWNER);
+        for _ in 0..10 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        assert!(collapse_events(&server).is_empty(), "premise: still alive");
+        let now_j = heat_at(&server);
+        assert!(now_j > left_j * 1.01, "premise: it heated, {left_j} to {now_j}");
+
+        let again = ClientId(3);
+        wire.client_says(again, hello("j2"));
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(again);
+        let Some((fitting, field)) = said.iter().find_map(|m| match m {
+            Outbound::Fitted { ship_id: s, fitting, field: Some(field), .. } if s == ship_id => Some((fitting, field)),
+            _ => None,
+        }) else { panic!("{said:?}") };
+        let told = Fitting::from_wire(fitting, Some(field));
+        let craft = server.ship(*ship_id).unwrap();
+        let now_s = server.now_t() as f64 * 1.0e-6;
+        let shard_j = craft.fitting().unwrap().heat_j_at(&craft.motion, now_s);
+        assert!(shard_j > now_j, "and kept heating");
+        assert!((told.heat_j_at(&craft.motion, now_s) / shard_j - 1.0).abs() < 1.0e-9, "told {} of {shard_j}", told.heat_j_at(&craft.motion, now_s));
+    }
+
     /// A ship with no account whose pilot has gone leaves nobody to give another to.
     #[tokio::test]
     async fn an_unowned_ship_with_no_account_has_no_successor() {

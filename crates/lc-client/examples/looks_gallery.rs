@@ -321,7 +321,7 @@ fn spawn_ships(
         lights,
         pipe_tiles: None,
         pipe_light: None,
-        rack_faces: None,
+        rack_faces: None, shadow_map: None,
     });
     // From the ship's frame, z up, to Bevy's, y up.
     let ship_to_world = Quat::from_rotation_x(-FRAC_PI_2);

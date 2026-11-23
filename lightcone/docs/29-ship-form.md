@@ -29,6 +29,7 @@ A `Form` is a tree of **parts**. Each part is one primitive of one kind, with a 
 | cylinder | length over radius | `π r² h` |
 | torus | major radius over minor | `2 π² R r²` |
 | frustum | length over the first end's radius, and the second end's radius over the first's | `π h (r₁² + r₁ r₂ + r₂²) / 3` |
+| trapezoid | an isosceles trapezoid across y and z, extruded along x: its upper width, height and length, each over its lower width | `L h (a + b) / 2` |
 
 **Volume and proportions are stored. Scale is solved** from them in closed form. Overlaps and
 fillets are ignored when sizing: the volume of a blended union depends on the neighbors, which
@@ -50,6 +51,7 @@ value over its 392 699 m³ slot.
 | **data** | 7.5 bytes | half | three times as slow to build |
 | **bay** | a mouth, whose smaller dimension is the largest hull it can launch | a tenth | a shell with a procedural interior. After construction exists |
 | **spar** | nothing | a twentieth | structure for holding parts apart: cluster spokes, booms, straps. Conforms to what it touches; see below |
+| **scaffold** | as storage | module density | storage a round puts up first and takes down last, so energy in transit has room. Never in the form a round leaves; see §Refits |
 
 Module density is 395.8 kg/m³. **ME is the unit of energy**, 1.397 × 10²⁵ J.
 
@@ -121,7 +123,8 @@ Each part but the Mind hangs from a parent, and it is placed in one of two ways:
 | field | meaning |
 |---|---|
 | `parent` | a part id |
-| `mount` | attached or enclosing. `Mount::Attached` carries `anchor` and `standoff`, so an enclosing part cannot have either |
+| `mount` | attached or enclosing. `Mount::Attached` carries `anchor`, `standoff` and `seated`, so an enclosing part cannot have any of them |
+| `seated` | attached only: the anchor is in the parent's proportions, and the child rests on its lowest point rather than hanging by its foot. See §Seated |
 | `anchor` | attached only: a direction in the parent's frame. The attachment point is where a ray from the parent's center along it last leaves the parent's surface, so on a torus a child hangs off the rim. A ray that misses a torus's tube takes the point of the tube nearest it; along the axis, where every point of the inner equator is nearest, the one toward the parent's +y |
 | `twist` | rotation about the surface normal, or about the parent's axis when enclosing |
 | `tilt` | the child's axis relative to that normal or axis, as a small rotation: a two-component rotation vector across it, in radians |
@@ -145,6 +148,32 @@ bolted on rather than sliding its base across the parent. Reach is also the unit
 because it is the length the placement is already made of: F1's scale means a different dimension on
 each primitive, and the extent along the normal would change under tilt.
 
+### Seated
+
+A seated part differs from one hung by its foot in two ways, and in nothing else:
+
+- **Its anchor is in the parent's proportions.** The ray leaves along `anchor` times the parent's
+  half-extents along its own axes, not along `anchor` itself, so a component of the anchor is how
+  far across the face the part sits: 0.5 along a slab's x is halfway to its end, however long the
+  slab grows. Hung by its foot, an anchor near the bow of a deck slides off the end when the deck
+  is thickened.
+- **It rests on its lowest point.** It is turned by twist and tilt first, in the frame of the
+  normal as before, and then moved so that its **support** along the inward normal, its surface
+  point furthest that way (`Shape::support`, closed form for every primitive), meets the anchor,
+  standoff reaches out along the normal. Untilted the support is the foot, so the two agree to the
+  bit. Tilted, a seated part rolls on the surface where one hung by its foot pivots into it: a pod
+  laid fore and aft along a deck lies on it, its middle over the anchor, where by its foot it would
+  be half buried with its end on the anchor.
+
+A component of the direction within `place::FLAT` of zero takes the middle of a flat, so a lying
+part rests on its middle rather than on an end that rounding picked. A torus seated straight along
+its axis rests on its hole, as by its foot. `place::meeting` gives the point either kind meets its
+parent, for the handles' ring and for a part growing in a refit, which grows from it.
+
+The editor seats every part it adds and every part it carries; the starting form, the reference and
+the built-in presets still hang by their feet. Carried, a lying part hung by its foot keeps its
+height: its standoff loses its half-extent across the surface over its reach.
+
 The Mind's frame is the ship's frame: its axis is the nose, `lc_world::motion::facing`. Space is
 Z-up, so the ship's z is up, its y is port, and the port–starboard plane a mirror reflects through is
 y = 0.
@@ -167,9 +196,12 @@ torus's center lies in a plane through its axis, which cuts the tube in two circ
 exit is a quadratic; a rounded slab's is a quadratic on each of at most four pieces of the ray.
 Trigonometry is `libm`'s, as [06](06-crate-layout.md) §Shared determinism asks.
 
-**A part's axis is its local x**: a capsule's, cylinder's or frustum's length, a torus's axis of
-symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first end is at −x.
-Every part is centered on its own origin, a frustum at half its length rather than its centroid. At
+**A part's axis is its local x**: a capsule's, cylinder's, frustum's or trapezoid's length, a
+torus's axis of symmetry, an ellipsoid's first semi-axis and a slab's first edge. A frustum's first
+end is at −x, and a trapezoid's lower face at −z, so one enclosing the Mind is a hull section wide at
+the keel, and seated along a deck it lies on its lower face. Every part is centered on its own
+origin, a frustum at half its length and a trapezoid at half its height rather than their centroids.
+A trapezoid's corners are sharp; an upper width of zero is a wedge. At
 zero twist and tilt, a child's axis lies along the normal (attached) or its parent's axis (enclosing),
 and its y along the parent's y projected across that, or the parent's z where the y is parallel. Twist
 turns it about its axis. Tilt then rotates it by a rotation vector whose two components are along the
@@ -311,7 +343,8 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 - **An engine's or a bay's open face** is where its axis leaves it: a frustum's wide end, as 31 makes
   its aperture, and every other primitive's +x end, away from the foot it hangs by. A torus opens
   through its hole. Its radius is the disk inscribed in that end: the lesser cross semi-axis of an
-  ellipsoid, half the lesser end edge of a slab, so a slab's corners reach outside it.
+  ellipsoid, half the lesser end edge of a slab, so a slab's corners reach outside it, and for a
+  trapezoid the disk on its axis held in by its top, bottom and slanted sides.
 - **The cone** widens at the half-angle from the face's rim, not from its center, since the exhaust
   leaves the whole aperture. A filled cell in it that lies inside any other part blocks the engine,
   the engine's own mirrored copy included. Every filled cell is tested rather than rays marched
@@ -330,15 +363,23 @@ client agree to the bit, and to its resolution, **half a cell's diagonal**:
 ## Refits
 
 A refit takes the ship from its form to a target form. It is one **round** of edits, and a round runs
-in three phases, strictly in order:
+in five phases, strictly in order:
 
-1. **Dismantle.** Every part that shrinks, disappears or is being rebuilt gives up what it loses.
+1. **Prepare.** Storage and drones that grow or are new are built first, each if what is stored as
+   the round begins still pays for it, so what the dismantle phase returns has room and a drone
+   replaced has its successor standing. A part that grows does so where it stands and moves in the
+   move phase. A new one must hang from a part the round does not take apart whole, and come with
+   the copies the target gives it. The rest wait for the build phase.
+2. **Dismantle.** Every part that shrinks, disappears or is being rebuilt gives up what it loses.
    Drones go last. Each return is 95% of the mass-energy removed and lands in storage **if there is
    room**, where "room" means capacity left after this phase's own storage losses. **What does not fit
    is vented into the field as heat**, a burst at the end of the step that frees it. A return that
    finds the room already filled by starlight is heat as it arrives instead ([30](30-the-field.md#the-inputs)).
-2. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
-3. **Build.** Every part that grows, is new or is being rebuilt is built, drones first. Each takes its
+3. **Move.** Parts whose placement changed slide to their new place, root first. Free in energy.
+4. **Build.** Every part that grows, is new or is being rebuilt and was not built in the prepare
+   phase is built, drones first.
+5. **Strike.** Every scaffold in the target is taken down, in id order, its return going to storage
+   as a dismantle's does. The round leaves the target without them. Each takes its
    added mass-energy, structure included, from storage.
 
 | change to a part | phase | energy | time |
@@ -370,8 +411,8 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 
 - **Within a phase, parts go in id order**, drones apart as above, and moves by depth in the tree
   the round began with.
-- **A move carries what hung from the part when the round began**, as much of it as the dismantle
-  phase left, weighted by each part's work factor. A part both rebuilt and moved still moves,
+- **A move carries what hung from the part when the round began**, and what the prepare phase hung
+  from it, as much of it as the dismantle phase left, weighted by each part's work factor. A part both rebuilt and moved still moves,
   carrying its children, and is rebuilt in its new place.
 - **A store that shrinks while fuller than its new capacity spills the excess** as part of its own
   step's vent. The ledger is the round's own: drain and income are the ship's, and are not in the
@@ -383,7 +424,26 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
   What the builds still have to take is held out of free storage, as a burn's commitment is, so
   the drain runs out before a build does.
 - **A round is refused if the dismantle phase would leave no drone standing**, whether the drones
-  are removed, replaced by new parts or rebuilt, since the build phase would begin with none.
+  are removed, replaced by new parts storage cannot pay for up front, or rebuilt, since the build
+  phase would begin with none.
+- **The planner knows a part by its id and never renumbers**, so the ship it leaves is the target
+  it was given. A store dropped in one place and a store added in another is a dismantle and a
+  build. The editor gives ids so that it is a reshape and a move instead, for the 5% loss on the
+  difference rather than on the whole new part: a part added takes the id of a ship part of its kind
+  the draft has dropped, the lowest first, and a preset applied, as a layout or a design, is
+  renumbered by `rounds::matched`, which pairs each part the ship lacks with a ship part of its kind
+  that the preset drops or holds as another kind, largest with largest. A part left on an id
+  another takes moves to a fresh one. Anything a drag and the axis handles could do, this does, at
+  their price.
+- **A scaffold is built in the prepare phase or the round is refused**: `Shortfall::Scaffold` when
+  it hangs from a part the round builds or takes apart whole, or is a copy a mirror adds, and
+  `Energy` when what is stored as the round begins cannot pay for it. Standing only after the
+  dismantle phase, it would hold nothing it was put up for. Nothing may hang from one
+  (`FormFault::OnScaffold`), since it goes. It holds and weighs what storage does, so it costs the
+  5% loss on itself and the time to build and strike it: storage holds about five times its own
+  mass-energy, so holding `E` in transit loses about 1% of `E`, where venting it loses all of it.
+  The placement rules judge the target with its scaffolds, so one may not stand in an engine's cone.
+  Once a round is accepted the editor's draft loses its scaffolds with it.
 - The Mind's stored shape and volume may change freely, since nothing reads them.
 - **A copy gained or lost is its own step**, an `Add` or `Remove` of the part, which carries the
   part's `mirror`. The copy lost goes at the size it had, and the one gained comes at the size it
@@ -393,15 +453,18 @@ The planner is `lc_world::refit::rounds`. What it settles that the table does no
 ### Why strict phases
 
 The planner could interleave dismantles and builds so that energy in transit never piles up. It does
-not, because the strict order is predictable, and because it makes one rule do a lot of work:
+not, beyond building storage and drones first, because the strict order is predictable, and because it makes one rule do a lot of work:
 **energy in transit has to be stored somewhere.** A large transformation in one round vents the
 difference into the field, which may kill the ship. Done properly it takes rounds:
 
-1. Take the old section apart, and grow storage to hold what comes back.
+1. Take the old section apart, and grow storage to hold what comes back, which the prepare phase
+   builds before anything is taken apart.
 2. Spend that storage on the new section.
 3. If you like, shrink the extra storage away again.
 
-Each round is visible and survivable, and the editor says so before each Apply. Emptying a full
+Each round is visible and survivable, and the editor says so before each Apply. A **scaffold** does
+the same in one round: put up first to hold what the old section gives back, struck once the new one
+has taken it. Emptying a full
 storage part before changing its kind follows from the same rule, with nothing special added.
 Resizing or reshaping one does not need it: a change of shape is done in place, so a full store
 gives up only what its new volume cannot hold.
@@ -415,7 +478,8 @@ radiated loss is not recovered: putting a part back costs its whole mass-energy.
 pay, the dismantling finishes at once instead, and its return goes to storage as far as there is
 room. A move snaps back. Whatever the reversal or the finish loses, and whatever has no room, is a
 burst at the moment of cancel. The ship is left partway between its form and the
-target, which may be worse than either, and that is intended. The picture runs the step backward
+target, which may be worse than either, and that is intended. A scaffold already up stays, as any
+part does, until a later round takes it down. The picture runs the step backward
 from where it was, at its own pace ([32](32-ship-rendering.md#the-other-steps)).
 
 Flying and refitting still exclude each other, as in 19.
@@ -544,7 +608,7 @@ Check any that do not before it lands. The editor's camera must also never be th
 or `bevy_egui` gives it the primary context.
 
 **The editor is where refits are made.** The refit window (`R`) is the ledger: the budget, the
-three phases, progress, and Cancel.
+five phases, progress, and Cancel.
 
 ### Apply and the ledger
 
@@ -702,7 +766,7 @@ the ship.
 
 | handle | looks like | does |
 |---|---|---|
-| carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing |
+| carry | — | a click on an attached part picks it up, and it hangs from whatever part the pointer meets, re-parenting to it, as the spaceplane hangar does, at the point under the pointer. The next click puts it down; `Escape` puts it back. Off every part it floats at the pointer at the depth it was taken from, and the draft is as it was before the carry; a click then does nothing. See §Carrying |
 | axes | a red, green and blue line along the part's own axes, square ends | that one dimension, the volume going with it. Shift keeps the volume and lets the others give way. Snapped as a ratio. A reshape, done in place |
 | size | a line along the part's diagonal, ending in a ball | grows or shrinks it **at fixed proportions**, snapped |
 | twist | one ring | twist, about what twist turns the part about: its parent's normal through its foot, or its parent's axis when it encloses. Not its own axis, which a tilt takes off it |
@@ -710,7 +774,7 @@ the ship.
 | mount | a button | attached or enclosing. While a part is enclosing, the editor keeps its last anchor and standoff so switching back restores them. They are editor state, not part of the form |
 | spar mode | a button | saddle or strap. A change of kind, so the spar is rebuilt: the cut changes, the charged volume does not |
 | mirror | a button | for the subtree |
-| add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above |
+| add | the palette | a kind, in the palette's current shape, taken onto the pointer and carried as above. It takes the id of a ship part of its kind the draft has dropped, so the round reshapes and moves that part (§Refits) |
 | delete | a button, `Delete`, or a drop on the palette | the part and its subtree. Refused for the Mind. The last drones may go: a draft may pass through none on the way to a design, and Apply refuses a target with too few |
 
 A line drags by its point nearest the pointer's ray and the ring by where the ray meets its plane, so
@@ -731,10 +795,29 @@ the client, so tuning the feel is a data change:
 | volume | the R10 series: ten steps per decade, each about 26% larger than the last, anchored at `min_part_m3`. The modifier gives R40 |
 | proportions | ratios on the same series |
 | twist and tilt | 15°, and 5° with the modifier |
-| anchor | the parent's axes and their diagonals, and free with the modifier |
+| anchor | free: the point under the pointer. Shift holds it to the parent's midlines |
 | standoff | tenths of the child's reach, and hundredths with the modifier |
 
 The modifier is Alt, since Shift keeps an axis handle's volume. The table is `snap::SNAPS`.
+
+### Carrying
+
+- **A midline is a center plane of the parent**, across one of the two of its axes the surface
+  under the pointer does not face along. With Shift a carried part goes to the nearer of the two,
+  and to both, the face's center, within `snap::MIDDLE` of the face's half-width of it. Each is a
+  plane through the parent's center, so the anchor's direction still exits on it. They are drawn on
+  the parent as loops while Shift is held, on the handles' layer.
+- **A part lying along its parent keeps its heading in the ship's frame**: its axis is the heading
+  laid into the surface's tangent plane, and the side it lay on stays against the surface. So an
+  engine strapped along a side and firing aft still fires aft on the keel. Seated, it lies on its
+  middle at the pointer. A part standing out of its parent keeps its twist and tilt, as before.
+  Which it is is read off it when it is picked up: its axis within 45° of its parent's normal
+  stands.
+- **Space turns it**: standing, lying fore and aft, lying aft and fore, lying across, standing. A
+  part laid down by Space rests on the surface, at standoff zero; one picked up lying keeps the
+  height it had.
+- A part dropped on a mirrored copy is anchored on its original at the reflected point, so its own
+  copy lands under the pointer.
 
 A ladder of ratios rather than fixed amounts means the same handle is fine on a 500 m ship and on a
 50 km one. The server never snaps anything. A console command or a hand-built target may ask for any
@@ -887,7 +970,7 @@ Limits, which are constants rather than balance: `MAX_PARTS` 256, `MAX_PRESETS` 
 
 | crate | new | changed |
 |---|---|---|
-| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: three phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
+| `lc-world` | `form.rs` (parts, the tree and its structural checks) and its submodules `form/{primitive, place, sdf, capacity, presets, grid, rules}.rs`: sizing, placement, the distance field, capacities, the starting form and presets, the voxel grid (shadow, envelope, moments), the placement rules | `fitting.rs` loses `Loadout` and reads capacities. `refit/rounds.rs` plans rounds: five phases, one step per part change. `solar.rs` reads the shadow. `craft.rs` reads extent and moments. `seen.rs` keeps the forms a craft has had, each with the plan it was part of, and reads the step under way from them |
 | `lc-proto` | `form.rs`: the form's mirror types, `Hull`, `FormFault`, `Preset` | `Form` replaces `Loadout` in `Order::Refit`, `Fitted` and saves. `Presence` gains the form and the refit step under way as its light left |
 | `lc-store` | `presets.rs` | |
 | `lc-server` | | validation and refusals. `persist.rs`. The console's fitting commands. Preset save, delete and list |

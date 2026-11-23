@@ -1233,7 +1233,7 @@ mod tests {
             volume_m3: 1.96e6,
             placement: Some(Placement {
                 parent: PartId(1),
-                mount: Mount::Attached { anchor: [-1.0, 0.0, 0.0], standoff: -0.25 },
+                mount: Mount::Attached { anchor: [-1.0, 0.0, 0.0], standoff: -0.25, seated: false },
                 twist: 0.5,
                 tilt: [0.125, -0.25],
                 blend: 0.1,
@@ -1253,7 +1253,7 @@ mod tests {
             volume_m3: 3.93e5,
             placement: Some(Placement {
                 parent: PartId(1),
-                mount: Mount::Attached { anchor: [0.0, 0.0, 1.0], standoff: 0.0 },
+                mount: Mount::Attached { anchor: [0.0, 0.0, 1.0], standoff: 0.0, seated: false },
                 twist: 0.0,
                 tilt: [0.0, 0.0],
                 blend: 0.2,

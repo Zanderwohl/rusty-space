@@ -20,8 +20,8 @@ pub struct Draft {
     /// In id order.
     pub form: Form,
     pub ship: Form,
-    /// An enclosing part's last anchor and standoff, restored when it is attached again.
-    remembered: BTreeMap<PartId, (DVec3, f64)>,
+    /// An enclosing part's last attachment, restored when it is attached again.
+    remembered: BTreeMap<PartId, Mount>,
 }
 
 /// What an edit did, for the history to list it by.
@@ -119,6 +119,9 @@ pub enum Field {
     Corner,
     Major,
     Taper,
+    /// A trapezoid's width at +z and its height, over its width at −z.
+    Upper,
+    Height,
     Anchor(usize),
     Standoff,
     /// Degrees.
@@ -130,17 +133,26 @@ pub enum Field {
 }
 
 /// The primitives the editor adds, each at proportions that read as that primitive.
-pub const PRIMITIVES: [Primitive; 6] = [
+pub const PRIMITIVES: [Primitive; 7] = [
     Primitive::Ellipsoid { axes: DVec3::new(2.0, 1.0, 1.0) },
     Primitive::Capsule { length: 2.0 },
     Primitive::Slab { edges: DVec3::new(1.0, 2.0, 2.0), corner: 0.2 },
     Primitive::Cylinder { length: 2.0 },
     Primitive::Torus { major: 3.0 },
     Primitive::Frustum { length: 2.0, taper: 1.5 },
+    Primitive::Trapezoid { upper: 0.5, height: 0.5, length: 2.0 },
 ];
 
-pub const KINDS: [Kind; 7] =
-    [Kind::Storage, Kind::Drone, Kind::Engine, Kind::Living, Kind::Data, Kind::Bay, Kind::Spar(SparMode::Saddle)];
+pub const KINDS: [Kind; 8] = [
+    Kind::Storage,
+    Kind::Drone,
+    Kind::Engine,
+    Kind::Living,
+    Kind::Data,
+    Kind::Bay,
+    Kind::Spar(SparMode::Saddle),
+    Kind::Scaffold,
+];
 
 /// Of the parent's volume, what an added part starts at, before snapping.
 const ADDED_SHARE: f64 = 0.1;
@@ -155,6 +167,7 @@ pub fn primitive_name(primitive: &Primitive) -> &'static str {
         Primitive::Cylinder { .. } => "cylinder",
         Primitive::Torus { .. } => "torus",
         Primitive::Frustum { .. } => "frustum",
+        Primitive::Trapezoid { .. } => "trapezoid",
     }
 }
 
@@ -169,6 +182,7 @@ pub fn kind_name(kind: Kind) -> &'static str {
         Kind::Bay => "bay",
         Kind::Spar(SparMode::Saddle) => "spar, saddle",
         Kind::Spar(SparMode::Strap) => "spar, strap",
+        Kind::Scaffold => "scaffold",
     }
 }
 
@@ -190,9 +204,13 @@ impl Draft {
     }
 
     /// Edit against another form of the ship's, keeping the edits: the target of a round once one
-    /// is accepted, and wherever a cancel left the ship after that.
+    /// is accepted, and wherever a cancel left the ship after that. When the ship becomes what the
+    /// round leaves, its scaffolds were struck and go from the draft; a cancel keeps them.
     pub fn rebase(&mut self, mut ship: Form) {
         ship.parts.sort_by_key(|p| p.id);
+        if self.ship.settled() == ship {
+            self.form.parts.retain(|p| p.kind != Kind::Scaffold || ship.parts.iter().any(|s| s.id == p.id));
+        }
         self.ship = ship;
     }
 
@@ -259,10 +277,10 @@ impl Draft {
         }
         for was in &edit.before {
             let now = edit.after.iter().find(|p| p.id == was.id).and_then(|p| p.placement);
-            if let (Some(Placement { mount: Mount::Attached { anchor, standoff }, .. }), Some(now)) = (was.placement, now)
+            if let (Some(Placement { mount: attached @ Mount::Attached { .. }, .. }), Some(now)) = (was.placement, now)
                 && now.mount == Mount::Enclosing
             {
-                self.remembered.insert(was.id, (anchor, standoff));
+                self.remembered.insert(was.id, attached);
             }
         }
         self.form = next;
@@ -317,8 +335,7 @@ impl Draft {
         let mount = match placement.mount {
             Mount::Attached { .. } => Mount::Enclosing,
             Mount::Enclosing => {
-                let (anchor, standoff) = self.remembered.get(&id).copied().unwrap_or((DVec3::X, ADDED_STANDOFF));
-                Mount::Attached { anchor, standoff }
+                self.remembered.get(&id).copied().unwrap_or(Mount::Attached { anchor: DVec3::X, standoff: ADDED_STANDOFF, seated: true })
             }
         };
         self.place(id, Placement { mount, ..placement })
@@ -328,7 +345,7 @@ impl Draft {
     pub fn anchor(&self, id: PartId, anchor: DVec3) -> Result<Edit, Refused> {
         let placement = self.placement(id)?;
         let mount = match placement.mount {
-            Mount::Attached { standoff, .. } => Mount::Attached { anchor, standoff },
+            Mount::Attached { standoff, seated, .. } => Mount::Attached { anchor, standoff, seated },
             Mount::Enclosing => Mount::Enclosing,
         };
         self.place(id, Placement { mount, ..placement })
@@ -340,7 +357,7 @@ impl Draft {
         let part = self.editable(id)?;
         let parent = self.part(placement.parent).ok_or(Refused::NoSuchPart(placement.parent))?;
         let moved = match placement.mount {
-            Mount::Attached { anchor, .. } => Placement { mount: Mount::Attached { anchor, standoff }, ..placement },
+            Mount::Attached { anchor, seated, .. } => Placement { mount: Mount::Attached { anchor, standoff, seated }, ..placement },
             Mount::Enclosing => placement,
         };
         let min = balance.min_part_m3;
@@ -348,7 +365,7 @@ impl Draft {
             return Err(Refused::Fault(FormError::Detached(id)));
         }
         let mount = match placement.mount {
-            Mount::Attached { anchor, .. } => Mount::Attached { anchor, standoff },
+            Mount::Attached { anchor, seated, .. } => Mount::Attached { anchor, standoff, seated },
             Mount::Enclosing => Mount::Enclosing,
         };
         self.place(id, Placement { mount, ..placement })
@@ -365,10 +382,13 @@ impl Draft {
         }
         let host_m3 = host.shape(balance.min_part_m3).volume();
         let volume_m3 = snap::volume((host_m3 * ADDED_SHARE).max(balance.min_part_m3), balance.min_part_m3, false);
-        let id = PartId(self.form.parts.iter().map(|p| p.id.0).max().map_or(0, |m| m + 1));
+        // A ship part of its kind the draft has dropped lends its id, so the round reshapes and
+        // moves it rather than taking it apart and building this.
+        let dropped = self.ship.parts.iter().filter(|s| s.kind == kind && self.part(s.id).is_none()).map(|s| s.id).min();
+        let id = dropped.unwrap_or_else(|| PartId::fresh(self.form.parts.iter().chain(&self.ship.parts).map(|p| p.id)));
         let placement = Placement {
             parent,
-            mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF },
+            mount: Mount::Attached { anchor, standoff: ADDED_STANDOFF, seated: true },
             twist: 0.0,
             tilt: DVec2::ZERO,
             blend: 0.0,
@@ -416,6 +436,9 @@ impl Draft {
             (Field::Taper, Primitive::Frustum { length, .. }) => reshaped(Primitive::Frustum { length, taper: value }),
             (Field::Corner, Primitive::Slab { edges, .. }) => reshaped(Primitive::Slab { edges, corner: value }),
             (Field::Major, Primitive::Torus { .. }) => reshaped(Primitive::Torus { major: value }),
+            (Field::Length, Primitive::Trapezoid { upper, height, .. }) => reshaped(Primitive::Trapezoid { upper, height, length: value }),
+            (Field::Upper, Primitive::Trapezoid { height, length, .. }) => reshaped(Primitive::Trapezoid { upper: value, height, length }),
+            (Field::Height, Primitive::Trapezoid { upper, length, .. }) => reshaped(Primitive::Trapezoid { upper, height: value, length }),
             (Field::Anchor(i), _) => match placement.mount {
                 Mount::Attached { mut anchor, .. } => {
                     anchor[i] = value;
@@ -450,7 +473,7 @@ impl Draft {
         let held = Capacities::of(&alone, balance);
         let dry_kg = part_kg(part, balance) * copies;
         let mut out = match part.kind {
-            Kind::Storage => vec![("capacity", format!("{} ME", figure(held.storage_j / balance.module_energy_j())))],
+            Kind::Storage | Kind::Scaffold => vec![("capacity", format!("{} ME", figure(held.storage_j / balance.module_energy_j())))],
             Kind::Drone => vec![("building", format!("{} W", figure(held.building_w)))],
             Kind::Engine => {
                 let thrust_n = held.aperture_w / lc_world::flight::C_M_S;
@@ -612,6 +635,12 @@ pub fn stretched(primitive: Primitive, axis: usize, factor: f64, fine: bool) -> 
         Primitive::Capsule { length } => Primitive::Capsule { length: along(length) },
         Primitive::Cylinder { length } => Primitive::Cylinder { length: along(length) },
         Primitive::Frustum { length, taper } => Primitive::Frustum { length: along(length), taper },
+        // Its ratios are over its lower width, so widening it shortens the other two.
+        Primitive::Trapezoid { upper, height, length } => match axis {
+            0 => Primitive::Trapezoid { upper, height, length: snap::ratio(length * factor, fine) },
+            1 => Primitive::Trapezoid { upper, height: snap::ratio(height / factor, fine), length: snap::ratio(length / factor, fine) },
+            _ => Primitive::Trapezoid { upper, height: snap::ratio(height * factor, fine), length },
+        },
         // The torus's axis is across its ring, so stretching along it fattens the tube.
         Primitive::Torus { major } => {
             let f = if axis == 0 { 1.0 / factor } else { factor };
@@ -633,6 +662,7 @@ pub fn grown(part: &Part, axis: usize, factor: f64, fine: bool) -> Part {
             Primitive::Capsule { length: b } | Primitive::Cylinder { length: b } | Primitive::Frustum { length: b, .. },
         ) if axis != 0 && b > 0.0 => scale * a / b,
         (Primitive::Torus { major: a }, Primitive::Torus { major: b }) if axis == 0 => scale * a / b,
+        (Primitive::Trapezoid { length: a, .. }, Primitive::Trapezoid { length: b, .. }) if axis == 1 => scale * a / b,
         _ => scale,
     };
     Part { primitive, volume_m3: primitive.volume(kept), ..*part }
@@ -672,7 +702,7 @@ pub fn shown(x: f64) -> String {
 pub fn value(part: &Part, field: Field) -> Option<f64> {
     let placement = part.placement;
     let attached = placement.and_then(|p| match p.mount {
-        Mount::Attached { anchor, standoff } => Some((anchor, standoff)),
+        Mount::Attached { anchor, standoff, .. } => Some((anchor, standoff)),
         Mount::Enclosing => None,
     });
     match (field, part.primitive) {
@@ -685,6 +715,9 @@ pub fn value(part: &Part, field: Field) -> Option<f64> {
         (Field::Corner, Primitive::Slab { corner, .. }) => Some(corner),
         (Field::Major, Primitive::Torus { major }) => Some(major),
         (Field::Taper, Primitive::Frustum { taper, .. }) => Some(taper),
+        (Field::Length, Primitive::Trapezoid { length, .. }) => Some(length),
+        (Field::Upper, Primitive::Trapezoid { upper, .. }) => Some(upper),
+        (Field::Height, Primitive::Trapezoid { height, .. }) => Some(height),
         (Field::Anchor(i), _) => attached.map(|(anchor, _)| anchor[i]),
         (Field::Standoff, _) => attached.map(|(_, standoff)| standoff),
         (Field::Twist, _) => placement.map(|p| p.twist.to_degrees()),
@@ -705,6 +738,9 @@ pub fn fields(part: &Part) -> Vec<(&'static str, Vec<Field>)> {
         Primitive::Capsule { .. } | Primitive::Cylinder { .. } => vec![("length", vec![Field::Length])],
         Primitive::Frustum { .. } => vec![("length", vec![Field::Length]), ("taper", vec![Field::Taper])],
         Primitive::Torus { .. } => vec![("major", vec![Field::Major])],
+        Primitive::Trapezoid { .. } => {
+            vec![("upper", vec![Field::Upper]), ("height", vec![Field::Height]), ("length", vec![Field::Length])]
+        }
     });
     let Some(placement) = part.placement else { return out };
     out.push(("parent", vec![Field::Parent]));
@@ -730,6 +766,79 @@ mod tests {
 
     fn ids(parts: &[Part]) -> Vec<u16> {
         parts.iter().map(|p| p.id.0).collect()
+    }
+
+    #[test]
+    fn a_trapezoid_stretches_and_grows_along_each_of_its_dimensions() {
+        let part = Part {
+            id: PartId(9),
+            kind: Kind::Storage,
+            primitive: Primitive::Trapezoid { upper: 0.5, height: 0.5, length: 2.0 },
+            volume_m3: 1.0e6,
+            placement: None,
+        };
+        let dims = |p: &Part| {
+            let lc_world::form::primitive::Shape::Trapezoid { lower, upper, height, length } = p.shape(B.min_part_m3) else { panic!() };
+            DVec3::new(length, lower, height).extend(upper)
+        };
+        let before = dims(&part);
+        for axis in 0..3 {
+            let wider = Part { primitive: stretched(part.primitive, axis, 1.25, false), ..part };
+            assert!((wider.shape(B.min_part_m3).volume() - part.volume_m3).abs() < 1e-6 * part.volume_m3, "stretched at its volume");
+            let after = dims(&wider);
+            assert!(after[axis] > before[axis], "axis {axis} longer: {after} against {before}");
+            let grown = grown(&part, axis, 1.25, false);
+            let after = dims(&grown);
+            // Ratios snap to R10, which may land a step's few percent off.
+            assert!((after[axis] / before[axis] - 1.25).abs() < 0.03, "axis {axis} grown: {after}");
+            for other in (0..3).filter(|&o| o != axis) {
+                assert!((after[other] / before[other] - 1.0).abs() < 1e-9, "axis {axis} keeps {other}: {after}");
+            }
+        }
+        let upper = |p: &Part| dims(p).w / dims(p).y;
+        let wider_top = Part { primitive: Primitive::Trapezoid { upper: 1.5, height: 0.5, length: 2.0 }, ..part };
+        assert!((upper(&wider_top) - 1.5).abs() < 1e-12 && fields(&wider_top).iter().any(|(name, _)| *name == "upper"));
+    }
+
+    #[test]
+    fn a_scaffold_goes_from_the_draft_with_the_round_that_struck_it() {
+        let ship = Form::reference();
+        let mut draft = Draft::new(ship.clone());
+        let storage = draft.form.parts.iter().find(|p| p.kind == Kind::Storage).unwrap().id;
+        let scaffold = draft.add(storage, Kind::Scaffold, PRIMITIVES[1], DVec3::Y, &B).unwrap();
+        draft.apply(&scaffold, &B).unwrap();
+        let elsewhere = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::NEG_Y, &B).unwrap();
+        draft.apply(&elsewhere, &B).unwrap();
+        let target = draft.form.clone();
+        let settled = target.settled();
+        let mut canceled = draft.clone();
+
+        draft.rebase(target.clone());
+        assert_eq!(draft.form, target, "accepted, the round still has its scaffold to stand");
+        draft.rebase(settled.clone());
+        assert_eq!(draft.form, draft.ship, "finished, nothing left to apply");
+        assert!(draft.form.parts.iter().all(|p| p.kind != Kind::Scaffold));
+
+        canceled.rebase(target);
+        canceled.rebase(ship);
+        assert!(canceled.form.parts.iter().any(|p| p.kind == Kind::Scaffold), "a cancel keeps it for Apply to resume");
+    }
+
+    #[test]
+    fn a_part_added_takes_the_id_of_one_of_its_kind_the_draft_dropped() {
+        let mut draft = Draft::new(Form::reference());
+        let data = draft.form.parts.iter().find(|p| p.kind == Kind::Data).unwrap().id;
+        let storage = draft.form.parts.iter().find(|p| p.kind == Kind::Storage).unwrap().id;
+        let removal = draft.remove(data).unwrap();
+        draft.apply(&removal, &B).unwrap();
+        let added = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::Y, &B).unwrap();
+        assert_eq!(added.part, data, "the dropped data core lends its id");
+        draft.apply(&added, &B).unwrap();
+        let another = draft.add(storage, Kind::Data, PRIMITIVES[0], DVec3::NEG_Y, &B).unwrap();
+        let highest = draft.ship.parts.iter().chain(&draft.form.parts).map(|p| p.id.0).max().unwrap();
+        assert_eq!(another.part, PartId(highest + 1), "once it is taken, a fresh one");
+        let engine = draft.add(storage, Kind::Engine, PRIMITIVES[5], DVec3::NEG_X, &B).unwrap();
+        assert_ne!(engine.part, data, "never a part of another kind's");
     }
 
     #[test]

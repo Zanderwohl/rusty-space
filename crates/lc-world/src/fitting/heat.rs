@@ -14,7 +14,7 @@ use crate::cost;
 use crate::field::{Burst, Field, Mode, Segment, Stretch};
 use crate::form::capacity::Capacities;
 use crate::motion::ShipState;
-use crate::refit::rounds::{Phase, Plan, Step};
+use crate::refit::rounds::{Work, Plan, Step};
 
 /// An emission with no net thrust: `power_w` from `from_s` until `until_s`, coordinate seconds.
 /// Drawn as the drive's exhaust is, and committed when lit.
@@ -315,8 +315,8 @@ fn pieces(plan: Option<&Plan>, balance: &Balance, since_s: f64, now_s: f64, edge
 }
 
 fn losing_w(step: &Step, balance: &Balance) -> f64 {
-    match step.change.phase() {
-        Phase::Dismantle if step.duration_s > 0.0 => (1.0 - balance.recovery) * step.gross_j / step.duration_s,
+    match step.change.work() {
+        Work::Dismantle if step.duration_s > 0.0 => (1.0 - balance.recovery) * step.gross_j / step.duration_s,
         _ => 0.0,
     }
 }
@@ -1006,6 +1006,6 @@ mod tests {
         assert_eq!(field.shade, lc_proto::Shade::Black);
         let sent = lc_proto::Fitting::from(&fitting);
         assert_eq!(Fitting::from_wire(&sent, Some(&field)), fitting);
-        assert_eq!(Fitting::from(&sent).heat_j, fitting.hull().capacities.drain_w * b.field_tau_s);
+        assert_eq!(Fitting::from_wire(&sent, None).heat_j, fitting.hull().capacities.drain_w * b.field_tau_s);
     }
 }

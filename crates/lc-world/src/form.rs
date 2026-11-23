@@ -22,6 +22,18 @@ pub const MAX_PARTS: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PartId(pub u16);
 
+impl PartId {
+    /// One past the highest of `taken`, or the lowest free id where that would overflow.
+    pub fn fresh(taken: impl IntoIterator<Item = PartId>) -> PartId {
+        let taken: std::collections::BTreeSet<u16> = taken.into_iter().map(|id| id.0).collect();
+        match taken.last() {
+            None => PartId(0),
+            Some(&m) if m < u16::MAX => PartId(m + 1),
+            Some(_) => PartId((0..=u16::MAX).find(|id| !taken.contains(id)).expect("MAX_PARTS is far below a u16")),
+        }
+    }
+}
+
 impl std::fmt::Display for PartId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "part {}", self.0)
@@ -47,6 +59,9 @@ pub enum Kind {
     Data,
     Bay,
     Spar(SparMode),
+    /// Storage a round builds first and strikes last, to hold energy in transit. Never in the form
+    /// a round leaves.
+    Scaffold,
 }
 
 /// Shape without size: every field is a dimensionless ratio, and scale is solved from the
@@ -66,6 +81,8 @@ pub enum Primitive {
     /// Length over the radius of the end at −x, and the +x end's radius over it. Zero taper is a
     /// cone.
     Frustum { length: f64, taper: f64 },
+    /// An isosceles trapezoid across y and z, extruded along x, each ratio over its width at −z.
+    Trapezoid { upper: f64, height: f64, length: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,8 +91,11 @@ pub enum Mount {
     /// leaves it. `standoff` is along the normal in multiples of the child's [`Shape::reach`];
     /// negative embeds.
     ///
+    /// `seated`: the anchor is in the parent's half-extents, so it keeps its share of a face as the
+    /// parent stretches, and the child rests on its lowest point. See [`place::relative`].
+    ///
     /// [`Shape::reach`]: primitive::Shape::reach
-    Attached { anchor: DVec3, standoff: f64 },
+    Attached { anchor: DVec3, standoff: f64, seated: bool },
     /// Centered on the parent and containing it.
     Enclosing,
 }
@@ -181,6 +201,8 @@ pub enum FormError {
     TooSmall(PartId),
     /// Less than `min_drone_m3` of drone, every copy counted.
     TooFewDrones,
+    /// A part hanging from a scaffold, which would go with it.
+    OnScaffold(PartId),
 }
 
 impl std::fmt::Display for FormError {
@@ -203,6 +225,7 @@ impl std::fmt::Display for FormError {
             Self::Extent => write!(f, "the ship is longer or shorter than a ship may be"),
             Self::TooSmall(id) => write!(f, "{id} is smaller than the smallest part"),
             Self::TooFewDrones => write!(f, "fewer drones than a ship may keep"),
+            Self::OnScaffold(id) => write!(f, "{id} hangs from a scaffold"),
         }
     }
 }
@@ -210,6 +233,11 @@ impl std::fmt::Display for FormError {
 impl std::error::Error for FormError {}
 
 impl Form {
+    /// Without its scaffolds, which a round strikes.
+    pub fn settled(&self) -> Form {
+        Form { parts: self.parts.iter().filter(|p| p.kind != Kind::Scaffold).copied().collect() }
+    }
+
     /// Structure and well-formed numbers only: one Mind at the root, one tree, unique ids, at
     /// most [`MAX_PARTS`], and nothing NaN, infinite or of the wrong sign. Sizes and the
     /// placement rules are [`rules::check`].
@@ -249,6 +277,9 @@ impl Form {
                 (_, None) => return Err(FormError::Unplaced(part.id)),
                 (_, Some(p)) if !index.contains_key(&p.parent) => {
                     return Err(FormError::MissingParent { part: part.id, parent: p.parent });
+                }
+                (_, Some(p)) if self.parts[index[&p.parent]].kind == Kind::Scaffold => {
+                    return Err(FormError::OnScaffold(part.id));
                 }
                 (_, Some(_)) => {}
             }
@@ -309,6 +340,13 @@ impl Part {
                     (!non_negative(taper)).then_some(Number::Taper)
                 }
             }
+            Primitive::Trapezoid { upper, height, length } => {
+                if !positive(length) {
+                    Some(Number::Length)
+                } else {
+                    (!(non_negative(upper) && positive(height))).then_some(Number::Proportions)
+                }
+            }
         };
         if shape.is_some() {
             return shape;
@@ -361,6 +399,7 @@ impl From<lc_proto::form::Kind> for Kind {
             K::Bay => Self::Bay,
             K::Spar(S::Saddle) => Self::Spar(SparMode::Saddle),
             K::Spar(S::Strap) => Self::Spar(SparMode::Strap),
+            K::Scaffold => Self::Scaffold,
         }
     }
 }
@@ -378,6 +417,7 @@ impl From<Kind> for lc_proto::form::Kind {
             Kind::Bay => Self::Bay,
             Kind::Spar(SparMode::Saddle) => Self::Spar(S::Saddle),
             Kind::Spar(SparMode::Strap) => Self::Spar(S::Strap),
+            Kind::Scaffold => Self::Scaffold,
         }
     }
 }
@@ -392,6 +432,7 @@ impl From<lc_proto::form::Primitive> for Primitive {
             P::Cylinder { length } => Self::Cylinder { length },
             P::Torus { major } => Self::Torus { major },
             P::Frustum { length, taper } => Self::Frustum { length, taper },
+            P::Trapezoid { upper, height, length } => Self::Trapezoid { upper, height, length },
         }
     }
 }
@@ -405,6 +446,7 @@ impl From<Primitive> for lc_proto::form::Primitive {
             Primitive::Cylinder { length } => Self::Cylinder { length },
             Primitive::Torus { major } => Self::Torus { major },
             Primitive::Frustum { length, taper } => Self::Frustum { length, taper },
+            Primitive::Trapezoid { upper, height, length } => Self::Trapezoid { upper, height, length },
         }
     }
 }
@@ -412,8 +454,8 @@ impl From<Primitive> for lc_proto::form::Primitive {
 impl From<lc_proto::form::Mount> for Mount {
     fn from(m: lc_proto::form::Mount) -> Self {
         match m {
-            lc_proto::form::Mount::Attached { anchor, standoff } => {
-                Self::Attached { anchor: DVec3::from_array(anchor), standoff }
+            lc_proto::form::Mount::Attached { anchor, standoff, seated } => {
+                Self::Attached { anchor: DVec3::from_array(anchor), standoff, seated }
             }
             lc_proto::form::Mount::Enclosing => Self::Enclosing,
         }
@@ -423,7 +465,7 @@ impl From<lc_proto::form::Mount> for Mount {
 impl From<Mount> for lc_proto::form::Mount {
     fn from(m: Mount) -> Self {
         match m {
-            Mount::Attached { anchor, standoff } => Self::Attached { anchor: anchor.to_array(), standoff },
+            Mount::Attached { anchor, standoff, seated } => Self::Attached { anchor: anchor.to_array(), standoff, seated },
             Mount::Enclosing => Self::Enclosing,
         }
     }
@@ -555,6 +597,7 @@ impl From<FormError> for lc_proto::FormFault {
             FormError::Uncontained(id) => Self::Uncontained(id.into()),
             FormError::TooSmall(id) => Self::TooSmall(id.into()),
             FormError::TooFewDrones => Self::TooFewDrones,
+            FormError::OnScaffold(id) => Self::OnScaffold(id.into()),
         }
     }
 }
@@ -581,7 +624,7 @@ mod tests {
             volume_m3: 50_000.0,
             placement: Some(Placement {
                 parent: PartId(parent),
-                mount: Mount::Attached { anchor: DVec3::Y, standoff: 0.0 },
+                mount: Mount::Attached { anchor: DVec3::Y, standoff: 0.0, seated: false },
                 twist: 0.0,
                 tilt: DVec2::ZERO,
                 blend: 0.1,
@@ -679,7 +722,7 @@ mod tests {
             (2, |p| p.placement.as_mut().unwrap().tilt = DVec2::new(0.0, f64::NAN), Number::Tilt),
             (2, |p| p.placement.as_mut().unwrap().blend = -0.1, Number::Blend),
             (2, |p| p.placement.as_mut().unwrap().blend = f64::INFINITY, Number::Blend),
-            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0 }, Number::Anchor),
+            (2, |p| p.placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::ZERO, standoff: 0.0, seated: false }, Number::Anchor),
             (0, |p| p.volume_m3 = f64::NAN, Number::Volume),
         ];
         for (index, spoil, number) in cases {
@@ -697,7 +740,7 @@ mod tests {
         form.parts[3].primitive = Primitive::Frustum { length: 2.0, taper: 0.0 };
         form.parts[1].primitive = Primitive::Slab { edges: DVec3::new(1.0, 2.0, 3.0), corner: 0.5 };
         form.parts[4].primitive = Primitive::Torus { major: 1.0 };
-        form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5 };
+        form.parts[4].placement.as_mut().unwrap().mount = Mount::Attached { anchor: DVec3::X, standoff: -0.5, seated: false };
         assert_eq!(form.validate(), Ok(()));
     }
 

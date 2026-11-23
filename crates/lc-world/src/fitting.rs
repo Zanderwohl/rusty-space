@@ -928,12 +928,6 @@ impl Fitting {
     }
 }
 
-impl From<&lc_proto::Fitting> for Fitting {
-    fn from(f: &lc_proto::Fitting) -> Self {
-        Fitting::from_wire(f, None)
-    }
-}
-
 impl From<&Fitting> for lc_proto::Field {
     fn from(f: &Fitting) -> Self {
         let p = &f.posture;
@@ -1170,7 +1164,7 @@ mod tests {
         let mut fitting = Fitting::full(Form::reference(), b, 10.0);
         fitting.settle(&motion, 20.0);
         fitting.drain(3.0 * b.module_energy_j());
-        let across = |f: &Fitting| Fitting::from(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&lc_proto::Fitting::from(f))).unwrap());
+        let across = |f: &Fitting| Fitting::from_wire(&lc_proto::decode::<lc_proto::Fitting>(&lc_proto::encode(&lc_proto::Fitting::from(f))).unwrap(), None);
         assert_eq!(across(&fitting), fitting);
 
         begun(&mut fitting, more_engine(), 20.0, &motion);

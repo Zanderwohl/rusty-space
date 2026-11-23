@@ -31,6 +31,7 @@ pub enum Kind {
     Data,
     Bay,
     Spar(SparMode),
+    Scaffold,
 }
 
 /// Relative proportions only; each part's scale is solved from its volume.
@@ -42,11 +43,17 @@ pub enum Primitive {
     Cylinder { length: f64 },
     Torus { major: f64 },
     Frustum { length: f64, taper: f64 },
+    Trapezoid { upper: f64, height: f64, length: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mount {
-    Attached { anchor: [f64; 3], standoff: f64 },
+    Attached {
+        anchor: [f64; 3],
+        standoff: f64,
+        #[serde(default)]
+        seated: bool,
+    },
     Enclosing,
 }
 
@@ -165,4 +172,6 @@ pub enum FormFault {
     TooFewDrones,
     /// The target's Mind is not the ship's: a ship keeps its Mind through every refit.
     OtherMind(PartId),
+    /// A part hanging from a scaffold, which the round takes down.
+    OnScaffold(PartId),
 }

@@ -28,7 +28,7 @@ use lc_world::form::sdf::{Piece, Sdf};
 use lc_world::form::{Form, PartId};
 
 use crate::construction::{Frame, Refit, Sweep};
-use lc_world::refit::rounds::Phase;
+use lc_world::refit::rounds::Work;
 use crate::hull::lighting;
 use crate::hull_mesh::{HullForm, HullMeshState, HullSource, Union, form_hash};
 use crate::session::Session;
@@ -337,13 +337,13 @@ fn spawn(
     materials: &mut Assets<HullMaterial>,
 ) -> Entity {
     let mut material = |uniforms: HullUniform| {
-        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None })
+        materials.add(HullMaterial { uniforms, albedo: albedo.clone(), lights: light_tiles.clone(), pipe_tiles: None, pipe_light: None, rack_faces: None, shadow_map: None })
     };
     let (frame, balance) = (&b.frame, &b.balance);
     let standing = standing(frame, balance);
     let finish = material(finished.clone());
     let working = frame.working.as_ref();
-    let builds = working.filter(|w| w.change.phase() != Phase::Move);
+    let builds = working.filter(|w| w.change.work() != Work::Move);
     let riders: Arc<[Piece]> = working.map_or(Arc::from([]), |w| w.riders.clone().into());
     let copies: Vec<Sliver> = builds
         .map_or(&[][..], |w| &w.outer[..])
@@ -385,7 +385,7 @@ fn spawn(
     };
     hull(standing.source(), Drawn::Standing, finish.clone(), Transform::IDENTITY);
     if let Some(w) = working {
-        if w.change.phase() != Phase::Move {
+        if w.change.work() != Work::Move {
             for (n, piece) in w.outer.iter().enumerate() {
                 hull(HullSource::Pieces(Arc::from([*piece])), Drawn::Working, copies[n].material.clone(), Transform::IDENTITY);
             }
@@ -511,12 +511,12 @@ mod tests {
                 let x = end.span_m as f32 * j as f32 / 20.0;
                 let truss = share(u.build_fronts.x, u.build_widths.x, x);
                 let plating = share(u.reveal.w, u.reveal_panel.y, x);
-                match step.change.phase() {
-                    Phase::Dismantle => assert!(truss == 0.0 && plating == 0.0, "{x}: {truss} {plating}"),
+                match step.change.work() {
+                    Work::Dismantle => assert!(truss == 0.0 && plating == 0.0, "{x}: {truss} {plating}"),
                     _ => assert_eq!(end.look(x as f64), crate::construction::Look::FINISHED),
                 }
             }
-            dismantles += usize::from(step.change.phase() == Phase::Dismantle);
+            dismantles += usize::from(step.change.work() == Work::Dismantle);
         }
         assert!(dismantles > 0);
     }

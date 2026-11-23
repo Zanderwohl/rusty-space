@@ -23,10 +23,10 @@ use bevy::prelude::*;
 use glam::{DMat3, DQuat, DVec2, DVec3};
 use lc_world::fitting::Balance;
 use lc_world::form::capacity::Capacities;
-use lc_world::form::place::{Pose, Side};
+use lc_world::form::place::{Pose, Side, meeting};
 use lc_world::form::sdf::Piece;
 use lc_world::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive, SparMode};
-use lc_world::refit::rounds::{Change, Phase, Plan, Round};
+use lc_world::refit::rounds::{Change, Work, Plan, Round};
 use lc_world::seen::Underway;
 
 /// Of a step, how long each point spends in each phase. The truss's is how far the sweep's front
@@ -145,18 +145,18 @@ impl Working {
     /// backward: scaffold up from the far edge in, plating off, truss down. What differs is the
     /// drones' traffic, not the look.
     pub fn look(&self, d: f64) -> Look {
-        match self.change.phase() {
-            Phase::Build => Look::built(d, self.fraction).0,
-            Phase::Dismantle => Look::built(d, 1.0 - self.fraction).0,
-            Phase::Move => Look::FINISHED,
+        match self.change.work() {
+            Work::Build => Look::built(d, self.fraction).0,
+            Work::Dismantle => Look::built(d, 1.0 - self.fraction).0,
+            Work::Move => Look::FINISHED,
         }
     }
 
     pub fn band(&self, d: f64) -> Option<Band> {
-        match self.change.phase() {
-            Phase::Build => Look::built(d, self.fraction).1,
-            Phase::Dismantle => Look::built(d, 1.0 - self.fraction).1,
-            Phase::Move => None,
+        match self.change.work() {
+            Work::Build => Look::built(d, self.fraction).1,
+            Work::Dismantle => Look::built(d, 1.0 - self.fraction).1,
+            Work::Move => None,
         }
     }
 
@@ -173,10 +173,10 @@ impl Working {
 
     /// The same at `fraction` through the step: at 1, how the step leaves the copy.
     pub fn sweep_at(&self, copy: usize, fraction: f64) -> Option<Sweep> {
-        let f = match self.change.phase() {
-            Phase::Build => fraction,
-            Phase::Dismantle => 1.0 - fraction,
-            Phase::Move => return None,
+        let f = match self.change.work() {
+            Work::Build => fraction,
+            Work::Dismantle => 1.0 - fraction,
+            Work::Move => return None,
         };
         let (joint, span_m) = self.joints[copy];
         // `d` of the way across is `span_m * d` meters, and the front covers the span in `TRAVEL`.
@@ -236,8 +236,8 @@ impl Frame {
     fn of(plan: &Plan, balance: &Balance, before: &Form, finished: usize, current: Option<(usize, f64)>) -> Frame {
         let next = current.map_or(finished, |(i, _)| i);
         let stand = Stand {
-            ends: match plan.steps().get(next).map(|s| s.change.phase()) {
-                Some(Phase::Dismantle) => [&plan.round().from, plan.target()],
+            ends: match plan.steps().get(next).map(|s| s.change.work()) {
+                Some(Work::Dismantle) => [&plan.round().from, plan.target()],
                 _ => [plan.target(), &plan.round().from],
             },
             min_part_m3: balance.min_part_m3,
@@ -415,10 +415,6 @@ fn applied(form: &Form, id: PartId, after: Option<Part>) -> Form {
     Form { parts }
 }
 
-fn mount(form: &Form, id: PartId) -> Option<Mount> {
-    part(form, id).and_then(|p| p.placement).map(|p| p.mount)
-}
-
 /// The copy at `share` of its volume, still standing on its foot. `None` at nothing.
 fn sized(piece: &Piece, form: &Form, share: f64) -> Option<Piece> {
     let p = part(form, piece.part)?;
@@ -427,20 +423,18 @@ fn sized(piece: &Piece, form: &Form, share: f64) -> Option<Piece> {
         return None;
     }
     let shape = p.primitive.at(p.primitive.scale(volume_m3));
-    let pose = match mount(form, piece.part) {
-        Some(Mount::Attached { .. }) => {
-            let foot = piece.pose.position - piece.pose.axis() * piece.shape.reach();
-            Pose { position: foot + piece.pose.axis() * shape.reach(), ..piece.pose }
-        }
-        _ => piece.pose,
+    // A shape scales about its center, so also about where it meets its parent.
+    let pose = match p.placement.and_then(|placement| meeting(&piece.shape, &piece.pose, piece.side, &placement)) {
+        Some(at) => Pose { position: at + (piece.pose.position - at) * (shape.reach() / piece.shape.reach()), ..piece.pose },
+        None => piece.pose,
     };
     Some(Piece { shape, pose, ..*piece })
 }
 
 /// Where a copy meets its parent, and how far its far edge is from there.
 fn joint(piece: &Piece, after: &Form, before: &Form) -> (DVec3, f64) {
-    let attached = matches!(mount(after, piece.part).or_else(|| mount(before, piece.part)), Some(Mount::Attached { .. }));
-    let joint = if attached { piece.pose.position - piece.pose.axis() * piece.shape.reach() } else { piece.pose.position };
+    let placement = part(after, piece.part).or_else(|| part(before, piece.part)).and_then(|p| p.placement);
+    let joint = placement.and_then(|p| meeting(&piece.shape, &piece.pose, piece.side, &p)).unwrap_or(piece.pose.position);
     let span = (0..SPAN_SAMPLES)
         .map(|i| piece.pose.to_outer(piece.shape.exit(fibonacci(i, SPAN_SAMPLES)).point).distance(joint))
         .fold(0.0, f64::max);
@@ -518,7 +512,7 @@ fn slid(before: &Form, placed_before: &[Piece], placed_after: &[Piece], moved: P
 ///
 /// Not the Cluster preset, which the planner refuses from the reference form: its ids put an engine
 /// where the only drone was, which leaves nothing to build with. This stages one of each step instead: the data core taken apart, the deck moved aft,
-/// the hull grown by half, which is under way at the round's midpoint, and a mirrored pair of pods
+/// the hull grown by half, under way a fifth of the way through, and a mirrored pair of pods
 /// on spars built together.
 ///
 /// `scale` makes every part but the Mind that many times larger, as `--form reference*k` does, so a
@@ -544,7 +538,7 @@ pub fn demo_round(balance: &Balance, scale: f64) -> Round {
     }
     let placement = |parent: u16, anchor: DVec3, standoff: f64, mirror: bool| Placement {
         parent: PartId(parent),
-        mount: Mount::Attached { anchor, standoff },
+        mount: Mount::Attached { anchor, standoff, seated: false },
         twist: 0.0,
         tilt: DVec2::ZERO,
         blend: 0.0,
@@ -704,8 +698,8 @@ pub fn sighted(contact: &crate::uplink::Contact, balance: &Balance) -> Option<Fr
     let before = Form::from(&contact.form);
     let after = applied(&before, under.part, under.after);
     let stand = Stand {
-        ends: match under.change.phase() {
-            Phase::Dismantle => [&before, &after],
+        ends: match under.change.work() {
+            Work::Dismantle => [&before, &after],
             _ => [&after, &before],
         },
         min_part_m3: balance.min_part_m3,
@@ -835,10 +829,10 @@ mod tests {
         let plan = plan();
         let t0 = start(&plan);
         for s in plan.steps() {
-            let sign = match s.change.phase() {
-                Phase::Build => 1.0,
-                Phase::Dismantle => -1.0,
-                Phase::Move => continue,
+            let sign = match s.change.work() {
+                Work::Build => 1.0,
+                Work::Dismantle => -1.0,
+                Work::Move => continue,
             };
             let mut last = None;
             for i in 1..64 {
@@ -862,11 +856,11 @@ mod tests {
         assert_eq!(frame.working.as_ref().unwrap().outer.len(), 2);
     }
 
-    /// What `--refit-at 0.5` photographs, so a change of balance cannot move it onto another step
-    /// without saying so.
+    /// What `--refit-at 0.2` photographs, so a change of balance cannot move it onto another step
+    /// without saying so. The hull is storage, so it grows first, in the prepare phase.
     #[test]
-    fn the_demos_midpoint_is_the_hull_half_grown() {
-        let refit = Refit { plan: plan(), balance: B, clock: Clock::Frozen(0.5), canceled: None };
+    fn the_demos_fifth_is_the_hull_half_grown() {
+        let refit = Refit { plan: plan(), balance: B, clock: Clock::Frozen(0.2), canceled: None };
         let working = refit.frame(0.0).working.expect("a step is under way");
         assert_eq!((working.change, working.part), (Change::Grow, PartId(1)));
         assert!((0.2..0.8).contains(&working.fraction), "{}", working.fraction);
