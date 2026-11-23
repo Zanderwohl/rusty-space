@@ -88,6 +88,13 @@ pub struct Ui(pub UiState);
 #[derive(Resource, Deref, DerefMut)]
 pub struct Game(pub Session);
 
+impl Game {
+    /// The placeholder held until a sky loads; see [`enter_game`].
+    pub fn before_the_game() -> Self {
+        Game(Session::new(&AuthoredStars::sample(), 3))
+    }
+}
+
 /// Which sky to load, if any.
 ///
 /// An **asset path**, not a filesystem path: the asset server reads a file on the desktop and
@@ -150,7 +157,7 @@ impl Plugin for ClientPlugin {
             .init_state::<AppState>()
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             .init_resource::<Catalog>()
             .init_resource::<crate::dev::DevEntry>()
             .init_resource::<Looking>()

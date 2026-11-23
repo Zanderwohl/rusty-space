@@ -124,8 +124,13 @@ mod native {
             match drain_outgoing(&mut socket, from_app) {
                 Draining::Empty => {}
                 Draining::Failed(why) => break why,
-                // The app dropped its end: nobody is listening and nobody will send.
-                Draining::AppGone => return,
+                // The app dropped its end: nobody is listening and nobody will send. Said, so
+                // the shard sees a close rather than a reset.
+                Draining::AppGone => {
+                    let _ = socket.close(None);
+                    let _ = socket.flush();
+                    return;
+                }
             }
 
             match socket.read() {
