@@ -500,3 +500,26 @@ fn every_default_binds_for_whoever_can_see_it() {
         bind(spec, &parsed, spec.level).unwrap_or_else(|e| panic!("{line}: {e}"));
     }
 }
+
+/// A ship holding an orbit, kept in sight for days, is one sighting and the times it was seen on
+/// its orbit: five places fit the conic, the fit folds what was filed before it, and each refile
+/// after only carries the run on. Reckoned on a straight line it curved off within the hour, and
+/// a file held a full sighting for every one.
+#[tokio::test]
+async fn a_ship_kept_in_sight_on_its_orbit_is_one_sighting_and_its_times() {
+    let far = stars()[2].id.get();
+    let (mut server, mut wire) = shard(Level::ADMIN);
+    server.see_everything(true);
+    assert!(ask(&mut server, &mut wire, 1, &format!("teleport {far} altitude:5 ship:2")).await.0);
+    assert!(ask(&mut server, &mut wire, 2, &format!("teleport {far} altitude:2")).await.0);
+    let until = server.now_t() + (4.0 * 86_400.0e6) as i64;
+    while server.now_t() < until {
+        server.tick(&mut wire).await.unwrap();
+    }
+    let held = server.knowledge_of(ShipId(1)).unwrap();
+    let file = held.file(lc_world::knowledge::Subject::Craft(2)).expect("ship 2 was seen");
+    let stay = file.whereabouts().stays().last().expect("a stay");
+    let runs: Vec<_> = stay.sightings.iter().map(|s| (s.emitted_s, s.trajectory.is_some(), s.thinned_s.len())).collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert!(runs[0].1 && runs[0].2 >= 10, "{runs:?}");
+}

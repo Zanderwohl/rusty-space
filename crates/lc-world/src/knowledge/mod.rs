@@ -41,6 +41,7 @@ pub mod room;
 pub mod subject;
 pub mod survey;
 pub mod thread;
+pub mod trajectory;
 pub mod transit;
 mod tracked;
 pub mod turns;
@@ -1436,8 +1437,8 @@ mod tests {
         let mut seer = Knowledge::new(osprey);
         let fix = Fix::Place { position_ly: DVec3::X, beta: DVec3::ZERO, sigma_ly: 1e-9 };
         let witnessed = |scope| vec![Witnessed { witness: osprey, observed_s: 600.0, scope, lineage: Lineage::new() }];
-        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Seen, emitted_s: 5.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Open) });
-        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Stated, emitted_s: 500.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Faction(key)) });
+        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Seen, emitted_s: 5.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Open), trajectory: None, thinned_s: Vec::new() });
+        seer.spotted(Subject::Craft(99), Spotted { kind: Kind::Stated, emitted_s: 500.0, system: Some(star_id(1)), fix, witnesses: witnessed(lc_proto::Scope::Faction(key)), trajectory: None, thinned_s: Vec::new() });
         let mut relay = Knowledge::new(wren);
         relay.receive(&seer.report(Mark::default(), 700.0, thread::Seal::Faction(key)), 800.0);
         let mut ally = Knowledge::new(kite);

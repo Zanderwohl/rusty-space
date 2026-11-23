@@ -38,11 +38,38 @@ pub struct Discarded {
     pub through_s: f64,
 }
 
+/// File bytes sent in one statement. PostgreSQL refuses a protocol message over 1 GiB outright
+/// ("invalid message length") and drops the connection, so a checkpoint over that never lands.
+const BATCH_BYTES: usize = 64 << 20;
+
+/// Consecutive runs of `files` whose bodies add up to at most [`BATCH_BYTES`], or one file each
+/// where a single file is larger.
+fn batches(files: &[Filed]) -> Vec<&[Filed]> {
+    let mut out = Vec::new();
+    let (mut start, mut bytes) = (0, 0);
+    for (k, f) in files.iter().enumerate() {
+        if k > start && bytes + f.file.len() > BATCH_BYTES {
+            out.push(&files[start..k]);
+            (start, bytes) = (k, 0);
+        }
+        bytes += f.file.len();
+    }
+    if start < files.len() {
+        out.push(&files[start..]);
+    }
+    out
+}
+
 /// Write files, replacing whatever each craft had for each subject.
 pub async fn save_files(client: &impl GenericClient, files: &[Filed]) -> Result<u64, Error> {
-    if files.is_empty() {
-        return Ok(0);
+    let mut written = 0;
+    for batch in batches(files) {
+        written += save_batch(client, batch).await?;
     }
+    Ok(written)
+}
+
+async fn save_batch(client: &impl GenericClient, files: &[Filed]) -> Result<u64, Error> {
     let ships: Vec<i64> = files.iter().map(|f| f.ship_id).collect();
     let subjects: Vec<&[u8]> = files.iter().map(|f| f.subject.as_slice()).collect();
     let formats: Vec<i32> = files.iter().map(|f| f.format).collect();
@@ -197,6 +224,15 @@ mod tests {
 
     fn filed(ship_id: i64, subject: &[u8], file: &[u8]) -> Filed {
         Filed { ship_id, subject: subject.to_vec(), format: 1, file: file.to_vec(), saved_t: 5 }
+    }
+
+    #[test]
+    fn a_checkpoint_goes_in_statements_under_the_message_limit() {
+        let sized = |n: usize| Filed { file: vec![0; n], ..filed(1, b"s", b"") };
+        let files = vec![sized(40 << 20), sized(30 << 20), sized(10), sized(200 << 20), sized(1)];
+        let lengths: Vec<usize> = batches(&files).iter().map(|b| b.len()).collect();
+        assert_eq!(lengths, vec![1, 2, 1, 1], "a file over the batch still goes, alone");
+        assert!(batches(&[]).is_empty());
     }
 
     #[tokio::test]
