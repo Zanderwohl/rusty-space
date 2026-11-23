@@ -1,10 +1,15 @@
 //! The path a craft was seen on, fitted from where it was seen, so later sightings that keep to
 //! it need hold only their times. See `lightcone/docs/22-provenance.md` §Where craft are.
 //!
-//! Fitted from positions and nothing about how the craft is flown: a conic about the body whose
-//! influence holds it, of any eccentricity, or a straight line between systems. Five places pin
-//! a conic in its plane, and the body's `G m` is public, so the times then fix where on it the
-//! craft is. A fit is accepted only if every place it was made from lies on it.
+//! Fitted from positions and nothing about how the craft is flown: a conic of any eccentricity, or
+//! a straight line. Five places pin a conic in its plane, and a body's `G m` is public, so the
+//! times then fix where on it the craft is. A fit is accepted only if every place it was made from
+//! lies on it.
+//!
+//! **The primary is found, not assumed.** A coast keeps the body it was solved about until it is
+//! repatched, which need not be the body whose sphere it is in now; a conic about the wrong one
+//! holds for a while and then drifts off. So the body holding the latest place is tried, then each
+//! body it goes round, out to the star.
 
 use em_foundations::kepler::anomaly;
 use glam::{DMat3, DVec3};
@@ -62,7 +67,11 @@ impl Trajectory {
         let holds = |fitted: &Trajectory| {
             places.iter().all(|p| fitted.place_at(system, p.at_s).is_some_and(|at| at.distance(p.position_ly) <= tolerance_ly))
         };
-        system.and_then(|system| conic(system, places)).filter(holds).or_else(|| line(places).filter(holds))
+        let conics = system.into_iter().flat_map(|system| {
+            std::iter::successors(places.last().map(|p| system.holding(p.position_ly, p.at_s)), |&k| system.sim().parent(k))
+                .filter_map(|about| conic(system, about, places))
+        });
+        conics.chain(line(places)).find(|fitted| holds(fitted))
     }
 
     /// Where the path puts the craft at coordinate time `at_s`, light-years. A conic needs the
@@ -105,9 +114,7 @@ fn mean_at(true_anomaly: f64, eccentricity: f64) -> Option<f64> {
 /// The plane from the area the places sweep, the shape from `1/r = A + B cos θ + C sin θ` in it,
 /// and the time of periapsis from each place's mean anomaly. Only the epoch is fitted in time:
 /// the body's `G m` gives the rate.
-fn conic(system: &LocalSystem, places: &[Place]) -> Option<Trajectory> {
-    let last = places.last()?;
-    let index = system.holding(last.position_ly, last.at_s);
+fn conic(system: &LocalSystem, index: em_sim::id::BodyIndex, places: &[Place]) -> Option<Trajectory> {
     let mu = system.sim().gravitational_constant() * system.sim().mass(index);
     if mu <= 0.0 || !mu.is_finite() {
         return None;
@@ -275,6 +282,29 @@ mod tests {
             })
             .collect();
         assert_eq!(Trajectory::fit(Some(&system), &places, KM_LY), None);
+    }
+
+    /// A coast solved about Jupiter, seen from inside Io's sphere: the conic about Io, which
+    /// holds the craft by sphere, drifts off it; the one about Jupiter is the path.
+    #[test]
+    fn a_coast_is_fitted_about_the_body_it_goes_round_not_the_sphere_it_is_in() {
+        let system = sol();
+        let jupiter = system.body_named("Jupiter").unwrap();
+        let io = system.body_named("Io").unwrap();
+        let (io_at, io_v) = system.body_state_at(io, 0.0).unwrap();
+        let (j_at, j_v) = system.body_state_at(jupiter, 0.0).unwrap();
+        let mu = system.sim().gravitational_constant() * system.sim().mass(jupiter);
+        let r = io_at - j_at;
+        let at_ly = system.origin_ly + (io_at + r.normalize() * 2.0e6) / M_PER_LY;
+        let speed = (mu / (r.length() + 2.0e6)).sqrt();
+        let velocity = j_v + (io_v - j_v).normalize() * speed * 1.02;
+        let coast = Coast::about(&system, jupiter, at_ly, velocity, 0.0).expect("a coast about Jupiter");
+        let places: Vec<Place> =
+            (0..6).map(|k| Place { at_s: 600.0 * k as f64, position_ly: coast.at(&system, 600.0 * k as f64).unwrap().0 }).collect();
+        assert_eq!(system.holding(places[5].position_ly, 3000.0), io, "premise: Io's sphere holds it");
+        let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a conic");
+        let Trajectory::Conic { about, .. } = fitted else { panic!("{fitted:?}") };
+        assert_eq!(about, BodyId::of(system.star, "Jupiter"));
     }
 
     /// Drifting is a straight line wherever it happens, a system included.
