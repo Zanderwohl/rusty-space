@@ -673,6 +673,10 @@ clock and its identifier counter. Written every twenty real seconds and again on
 what it loses is *orders*, not flight: every motive is stamped in absolute coordinate time, so
 a checkpoint replayed forward puts a ship exactly where it would have been anyway.
 
+A checkpoint keeps no history, so after a restart a distant observer loses sight of a living ship
+until light that left it after the save arrives: up to `d / c` for an observer at distance `d`.
+Keep restarts rare. [08-networking.md](08-networking.md#after-a-restart) has the details.
+
 **Restarting the database restarts the shard.** Its connections do not reopen, so on finding one
 closed the shard exits with an error and `--restart unless-stopped` brings it back from its last
 checkpoint, retrying until the database answers. Nothing needs doing by hand. A write that merely

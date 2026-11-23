@@ -310,6 +310,12 @@ impl Craft {
         self.known_from_s
     }
 
+    /// Answer for nothing before `at_s`. For a craft read back without its past, whose motive read
+    /// backward would show the order that began it before that order's light could arrive.
+    pub fn known_only_from(&mut self, at_s: f64) {
+        self.known_from_s = self.known_from_s.max(at_s);
+    }
+
     /// What to call it on screen: its name, or its kind and number.
     pub fn designation(&self) -> String {
         match &self.name {
