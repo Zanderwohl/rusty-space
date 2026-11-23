@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use glam::DVec3;
-use lc_proto::ShipId;
+use lc_proto::{Payload, ShipId};
 use lc_spacetime::Worldline;
 use lc_world::craft::{Craft, CraftId, Kind};
 use lc_world::motion::LIGHT_US_PER_LY;
@@ -279,10 +279,21 @@ pub struct Event {
     /// Where, light-microseconds. Taken from the source's worldline at `t` and stored, because
     /// the worldline will have changed by the time anyone is told.
     pub at: DVec3,
-    pub kind: i16,
     /// What the source put out, for the inverse-square falloff. Zero for anything silent.
     pub power_w: f64,
-    pub payload: String,
+    pub payload: Payload,
+}
+
+impl Event {
+    pub fn kind(&self) -> i16 {
+        self.payload.kind()
+    }
+}
+
+/// A stored row's payload, or `None` and a warning: a row this build cannot read is light it
+/// cannot deliver, and stopping the shard over it would deliver nothing at all.
+pub fn read_payload(event_id: i64, kind: i16, json: &str) -> Option<Payload> {
+    Payload::from_json(kind, json).map_err(|why| eprintln!("WARNING: event {event_id} is unreadable: {why}")).ok()
 }
 
 /// An event's light reaching an observer, found as it lands. See [`crate::front`].
@@ -408,7 +419,7 @@ mod tests {
     }
 
     fn pulse(t: i64, at: DVec3, power_w: f64) -> Event {
-        Event { id: 1, source: ShipId(0), t, at, kind: 1, power_w, payload: "{}".into() }
+        Event { id: 1, source: ShipId(0), t, at, power_w, payload: Payload::Transmit { power_w } }
     }
 
     /// A light-microsecond of distance is a microsecond of delay, by definition. This is the

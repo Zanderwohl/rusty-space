@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 
+use lc_proto::Payload;
 use lc_world::craft::{Craft, CraftId, Fleet};
 use lc_spacetime::Worldline;
 use lc_world::signal::Beam;
@@ -254,8 +255,8 @@ impl Front {
                 g: self.event.at.round().as_i64vec3().to_array(),
                 system_id: None,
                 local: None,
-                kind: self.event.kind,
-                payload: self.event.payload.clone(),
+                kind: self.event.kind(),
+                payload: self.event.payload.to_json(),
             },
             until_t: self.until_t,
             spread: serde_json::to_string(&spread).ok()?,
@@ -275,9 +276,8 @@ impl Front {
                 source: lc_proto::ShipId(row.event.source_id),
                 t: row.event.t,
                 at: glam::DVec3::from_array(spread.at),
-                kind: row.event.kind,
                 power_w: spread.power_w,
-                payload: row.event.payload.clone(),
+                payload: crate::world::read_payload(row.event.id.get(), row.event.kind, &row.event.payload)?,
             },
             beam: Beam::along(glam::DVec3::from_array(spread.axis), spread.half_angle_rad),
             also: spread.also.into_iter().map(CraftId).collect(),
@@ -309,15 +309,23 @@ impl<J: Journal> Server<J> {
         for (index, landing) in found {
             let front = self.fronts.get(index).clone();
             let observer = CraftId(landing.observer.0);
-            if let Some(said) = &front.said {
-                let sender = CraftId(front.event.source.0);
-                self.landed_on(front.event.id, sender, said, observer, landing.arrive_t, landing.strength);
-                self.owe(sender, front.event.at, !front.beam.is_omni(), said, observer, landing.arrive_t);
+            let event = &front.event;
+            match &event.payload {
+                Payload::Message(_) | Payload::Key(_) | Payload::Report(_) => {
+                    if let Some(said) = &front.said {
+                        let sender = CraftId(event.source.0);
+                        self.landed_on(event.id, sender, said, observer, landing.arrive_t, landing.strength);
+                        self.owe(sender, event.at, !front.beam.is_omni(), said, observer, landing.arrive_t);
+                    }
+                    self.heard_claim(event, observer, landing.arrive_t);
+                    self.heard_place(event, observer, landing.arrive_t, landing.strength);
+                    self.schedule_landings(std::slice::from_ref(event), std::slice::from_ref(&landing));
+                }
+                Payload::Drive(_) => self.heard_place(event, observer, landing.arrive_t, landing.strength),
+                Payload::Emit(_) | Payload::Collapse { .. } => self.queue_landings(event, std::slice::from_ref(&landing)),
+                // Seen, and nothing more: what a client makes of them is its own business.
+                Payload::Transmit { .. } | Payload::Burn(_) | Payload::Cut(_) | Payload::Vanish | Payload::Appear | Payload::Shade(_) => {}
             }
-            self.heard_claim(&front.event, observer, landing.arrive_t);
-            self.heard_place(&front.event, observer, landing.arrive_t, landing.strength);
-            self.queue_landings(&front.event, std::slice::from_ref(&landing));
-            self.schedule_landings(std::slice::from_ref(&front.event), std::slice::from_ref(&landing));
             self.fronts.crossed.push(landing);
         }
     }
@@ -364,7 +372,7 @@ mod tests {
         server.admit(ClientId(1), still(ShipId(1), DVec3::ZERO), 0.0);
         wire.client_says(ClientId(1), transmit(power_w));
         server.tick(wire).await.unwrap();
-        let sent = server.journal().events.iter().find(|e| e.kind == KIND_TRANSMIT).expect("it went out");
+        let sent = server.journal().events.iter().find(|e| e.kind() == KIND_TRANSMIT).expect("it went out");
         (sent.t, sent.at)
     }
 
@@ -469,7 +477,7 @@ mod tests {
                     _ => 0.0,
                 };
                 at += if source == 4 && jump != 0.0 { DVec3::X * jump * LIGHT_HOUR_US } else { velocity * step as f64 };
-                let event = Event { id: source * 1_000 + k, source: ShipId(100 + source), t, at, kind: 1, power_w: 1.0e30, payload: "{}".into() };
+                let event = Event { id: source * 1_000 + k, source: ShipId(100 + source), t, at, power_w: 1.0e30, payload: lc_proto::Payload::Transmit { power_w: 1.0e30 } };
                 fronts.push(Front::new(event, Beam::OMNI, Vec::new(), None, None));
             }
         }

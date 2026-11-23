@@ -67,7 +67,7 @@ async fn a_full_ship_behind_a_burn_walks_to_collapse_and_one_beside_does_not() {
         while server.now_t() < 60_000_000 && died.is_none() {
             server.tick(&mut wire).await.unwrap();
             told.extend(illuminated(&wire.take(ClientId(2))));
-            died = server.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(2)).map(|e| e.t);
+            died = server.journal().events.iter().find(|e| e.kind() == KIND_COLLAPSE && e.source == ShipId(2)).map(|e| e.t);
             if !behind {
                 assert_eq!(server.emissions.beamed_w(CraftId(2)), 0.0, "fed from beside the burn");
             }
@@ -291,7 +291,7 @@ async fn the_thrusters_changing_is_no_drive_event() {
     let mut wire = Loopback::new();
     until(&mut server, &mut wire, end_s * 1.0e6).await;
     let drives: Vec<i64> =
-        server.journal().events.iter().filter(|e| e.kind == crate::server::KIND_DRIVE && e.source == ShipId(1)).map(|e| e.t).collect();
+        server.journal().events.iter().filter(|e| e.kind() == crate::server::KIND_DRIVE && e.source == ShipId(1)).map(|e| e.t).collect();
     assert!(drives.is_empty(), "the main drive never changed, yet it was said to at {drives:?}");
 }
 
@@ -415,7 +415,7 @@ async fn a_drive_stated_after_its_ship_collapsed_is_never_sent() {
     let mut wire = Loopback::new();
     server.tick(&mut wire).await.unwrap();
 
-    let died_t = server.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(2)).expect("premise: it collapsed").t;
+    let died_t = server.journal().events.iter().find(|e| e.kind() == KIND_COLLAPSE && e.source == ShipId(2)).expect("premise: it collapsed").t;
     assert!((died_t as f64) < lights_s * 1.0e6 && lights_s * 1.0e6 < server.now_t() as f64, "premise: it would have lit later that tick");
     assert!(drive_said(&server, ShipId(2)).is_empty(), "a wreck's drive went out on the journal");
     let written: Vec<i64> = server.journal().events.iter().map(|e| e.id).collect();
@@ -474,7 +474,7 @@ async fn a_watcher_that_saw_the_burn_hears_the_cut() {
 
     wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order: Order::CutDrive, issued_at_client_t: i64::MAX }));
     server.tick(&mut wire).await.unwrap();
-    let cut = server.journal().events.iter().find(|e| e.kind == crate::server::KIND_CUT).expect("the cut was ordered").clone();
+    let cut = server.journal().events.iter().find(|e| e.kind() == crate::server::KIND_CUT).expect("the cut was ordered").clone();
     let drive_w = lc_world::ignition::putting_out_w(&burning, &Balance::DEFAULT, cut.t as f64 * 1.0e-6);
     assert!(drive_w > 1.0e15, "premise: the drive ran at {drive_w} W");
     assert_eq!(cut.power_w, crate::world::CANCEL_MARGIN * drive_w);

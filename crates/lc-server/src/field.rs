@@ -19,7 +19,7 @@ use lc_world::craft::{Craft, CraftId};
 use lc_world::field::{CONTACT_FRACTION, received_fraction};
 
 use crate::journal::Journal;
-use crate::server::{KIND_COLLAPSE, Server};
+use crate::server::Server;
 use crate::transport::Transport;
 use crate::world::Event;
 
@@ -195,9 +195,11 @@ impl<J: Journal> Server<J> {
         craft.end(at_s);
         self.afterglows.insert(id, lc_world::afterglow::Afterglow::of(from, at_s, released_j, &balance));
         self.emissions.lit_by.remove(&id);
-        let released = serde_json::to_value(lc_proto::Released { released_j }).unwrap_or_default();
-        let payload = crate::emit::carrying(released, &crate::emit::burst(from, spike_j, balance.collapse_spike_k));
-        self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events);
+        let payload = lc_proto::Payload::Collapse {
+            released: lc_proto::Released { released_j },
+            emission: Some(crate::emit::burst(from, spike_j, balance.collapse_spike_k)),
+        };
+        self.emit_from(id, from, spike_j / SPIKE_S, payload, at_t, events);
 
         self.pursuits.remove(&id);
         self.parks.remove(&id);
@@ -352,7 +354,7 @@ mod tests {
     }
 
     fn collapse_events(server: &Server<Memory>) -> Vec<&Event> {
-        server.journal().events.iter().filter(|e| e.kind == KIND_COLLAPSE).collect()
+        server.journal().events.iter().filter(|e| e.kind() == lc_proto::kind::COLLAPSE).collect()
     }
 
     /// At the instant the account predicted, as an event where the ship was, releasing `Q_max` and
@@ -384,7 +386,7 @@ mod tests {
         let stored_j = fitting.stored_j_at(&then.motion, at_s);
         assert!(stored_j > committed_j, "premise: storage holds the commitment");
         assert!((collapsed.released_j - (heat_max_j + stored_j)).abs() < 1.0e-12 * collapsed.released_j);
-        let released: lc_proto::Released = serde_json::from_str(&event.payload).unwrap();
+        let lc_proto::Payload::Collapse { released, .. } = &event.payload else { panic!("not a collapse: {:?}", event.payload) };
         assert_eq!(released.released_j, collapsed.released_j);
     }
 
@@ -456,7 +458,7 @@ mod tests {
                         seen_until_t = server.now_t();
                     }
                     Outbound::Sightings(list) => heard.extend(
-                        list.into_iter().map(|s| s.get().clone()).filter(|s| s.kind == KIND_COLLAPSE).map(|s| (server.now_t(), s)),
+                        list.into_iter().map(|s| s.get().clone()).filter(|s| s.kind == lc_proto::kind::COLLAPSE).map(|s| (server.now_t(), s)),
                     ),
                     _ => {}
                 }

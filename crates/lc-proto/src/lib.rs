@@ -506,6 +506,13 @@ pub struct Sighting {
     pub payload: String,
 }
 
+impl Sighting {
+    /// What [`Sighting::payload`] says, as the kind it is.
+    pub fn read_payload(&self) -> Result<Payload, PayloadError> {
+        Payload::from_json(self.kind, &self.payload)
+    }
+}
+
 /// One craft as another sees it: where it appeared to be, and when that light left.
 ///
 /// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
@@ -920,6 +927,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// a format that is not self-describing cannot notice a field that moved, so this is what
 /// notices.
 pub mod golden;
+mod event;
 mod gate;
 mod field;
 mod fitting;
@@ -927,6 +935,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
+pub use event::{Addressing, Burned, Cut, Emitted, Payload, PayloadError};
 pub use gate::{Arrives, Cleared, Illumination, Withheld};
 pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};

@@ -43,9 +43,8 @@ fn said(minter: &mut Minter, t: i64) -> Event {
         source: ShipId(1),
         t,
         at: DVec3::ZERO,
-        kind: 1,
         power_w: 1.0,
-        payload: "{}".into(),
+        payload: lc_proto::Payload::Transmit { power_w: 1.0 },
     }
 }
 
@@ -63,8 +62,8 @@ fn front(event: &Event, reach_us: i64) -> lc_store::fronts::Front {
             g: [0, 0, 0],
             system_id: None,
             local: None,
-            kind: event.kind,
-            payload: event.payload.clone(),
+            kind: event.kind(),
+            payload: event.payload.to_json(),
         },
         until_t: event.t + reach_us,
         spread: "{}".into(),

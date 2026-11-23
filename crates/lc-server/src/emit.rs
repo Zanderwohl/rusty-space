@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use glam::DVec3;
-use lc_proto::{Aim, Apertures, Cleared, Glare, Illumination, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
+use lc_proto::{Aim, Apertures, Cleared, Glare, Illumination, Payload, Lead, Order, Outbound, Refusal, ShipId, Spectrum};
 use lc_spacetime::LIGHT_MICROSECOND_M;
 use lc_world::craft::CraftId;
 use lc_world::emit::{Boost, Jet};
@@ -54,29 +54,21 @@ const WAVELENGTH_M: (f64, f64) = (1.0e-9, 0.03);
 /// Between the two sightings a burn is measured from. A steady burn reads the same over any.
 const LEAD_BASELINE_US: i64 = 1_000_000;
 
-/// What an emitting event carries to every craft it reaches, in its payload under `emission`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Emitted {
-    /// The event that lit it, which names the beam to a receiver.
-    pub beam: i64,
-    /// Where it left, light-microseconds. The event's own position is rounded by the store.
-    pub from: [f64; 3],
-    pub axis: [f64; 3],
-    pub half_angle_rad: f64,
-    pub spectrum: Spectrum,
-    /// Sustained watts from this event on. Zero is going out.
-    pub power_w: f64,
-    /// Joules let go of at once.
-    pub burst_j: f64,
+pub use lc_proto::Emitted;
+
+/// How an [`Emitted`] falls on what it reaches.
+pub(crate) trait Falls {
+    fn cone(&self) -> Beam;
+    /// Of what leaves along the cone, the share a shadow of `shadow_m2` at `distance_m` intercepts.
+    /// Isotropic light is capped at what a receiver in contact faces, as a neighbor's glow is.
+    fn fraction(&self, shadow_m2: f64, distance_m: f64) -> f64;
 }
 
-impl Emitted {
+impl Falls for Emitted {
     fn cone(&self) -> Beam {
         Beam::along(DVec3::from_array(self.axis), self.half_angle_rad)
     }
 
-    /// Of what leaves along the cone, the share a shadow of `shadow_m2` at `distance_m` intercepts.
-    /// Isotropic light is capped at what a receiver in contact faces, as a neighbor's glow is.
     fn fraction(&self, shadow_m2: f64, distance_m: f64) -> f64 {
         if self.cone().is_omni() {
             lc_world::field::received_fraction(shadow_m2, distance_m)
@@ -84,27 +76,6 @@ impl Emitted {
             lc_world::emit::received_fraction(self.half_angle_rad, shadow_m2, distance_m)
         }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Carrying {
-    emission: Emitted,
-}
-
-/// `payload`, a JSON object, with the emission beside what it already says.
-pub(crate) fn carrying(payload: serde_json::Value, emission: &Emitted) -> String {
-    let mut payload = match payload {
-        serde_json::Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    if let Ok(emission) = serde_json::to_value(emission) {
-        payload.insert("emission".into(), emission);
-    }
-    serde_json::Value::Object(payload).to_string()
-}
-
-fn emitted(payload: &str) -> Option<Emitted> {
-    serde_json::from_str::<Carrying>(payload).ok().map(|c| c.emission)
 }
 
 /// An emission its source has lit or will light, until the event of its going out is written.
@@ -369,7 +340,7 @@ impl<J: Journal> Server<J> {
         self.emissions.landings.retain(|l| !unsaid(l.source, l.emitted.beam, l.said_t));
         let mut dropped = Vec::new();
         events.retain(|e| {
-            let drop = e.kind == KIND_EMIT && emitted(&e.payload).is_some_and(|m| unsaid(e.source, m.beam, e.t));
+            let drop = matches!(&e.payload, Payload::Emit(m) if unsaid(e.source, m.beam, e.t));
             if drop {
                 dropped.push(e.id);
             }
@@ -450,10 +421,10 @@ impl<J: Journal> Server<J> {
             Some(beam) => self.fleet.iter().map(|c| c.id).filter(|o| self.emissions.holds(*o, beam)).collect(),
             None => Vec::new(),
         };
-        let payload = |event_id: i64| carrying(serde_json::json!({}), &emission(event_id));
+        let payload = |event_id: i64| Payload::Emit(emission(event_id));
         // Going out, it is seen by the light it puts out.
         let seen_w = if power_w > 0.0 { power_w } else { crate::world::CANCEL_MARGIN * lighting.power_w };
-        let event_id = self.fan_out(id, from, KIND_EMIT, seen_w, payload, at, &cone, &holding, events)?;
+        let event_id = self.fan_out(id, from, seen_w, payload, at, &cone, &holding, events)?;
         let said = self.emissions.said.entry(id).or_default();
         said.push(Said { t: at, emitted: emission(event_id) });
         said.sort_by_key(|s| s.t);
@@ -467,9 +438,8 @@ impl<J: Journal> Server<J> {
         &mut self,
         id: CraftId,
         from: DVec3,
-        kind: i16,
         power_w: f64,
-        payload: impl FnOnce(i64) -> String,
+        payload: impl FnOnce(i64) -> Payload,
         at: i64,
         cone: &Beam,
         also: &[CraftId],
@@ -477,7 +447,7 @@ impl<J: Journal> Server<J> {
     ) -> Option<i64> {
         let event_id = self.minter.mint(at)?.get();
         let power_w = self.seen_w(id, at, power_w);
-        let event = Event { id: event_id, source: ShipId(id.0), t: at, at: from, kind, power_w, payload: payload(event_id) };
+        let event = Event { id: event_id, source: ShipId(id.0), t: at, at: from, power_w, payload: payload(event_id) };
         self.launch(crate::front::Front::new(event.clone(), *cone, also.to_vec(), None, None));
         events.push(event);
         Some(event_id)
@@ -486,7 +456,7 @@ impl<J: Journal> Server<J> {
     /// Queue a landing for every delivery of `event` to a craft other than its source, if it
     /// carries an emission. Called as its light lands.
     pub(crate) fn queue_landings(&mut self, event: &Event, deliveries: &[Scheduled]) {
-        let Some(emitted) = emitted(&event.payload) else { return };
+        let Some(&emitted) = event.payload.emission() else { return };
         let landings = deliveries
             .iter()
             .filter(|d| d.event == event.id && d.observer != event.source)

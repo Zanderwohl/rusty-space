@@ -163,17 +163,6 @@ impl Journal for Memory {
         deliveries: &[Scheduled],
         fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
-        // The payload column is `jsonb`, so a payload that is not JSON is a row the real
-        // journal refuses. A fake that took it let a burn built with `format!` out of a
-        // `DVec3` past four hundred tests and fail on the shard.
-        for event in events {
-            if serde_json::from_str::<serde_json::Value>(&event.payload).is_err() {
-                return Err(JournalError(format!(
-                    "event {} carries a payload that is not JSON: {}",
-                    event.id, event.payload,
-                )));
-            }
-        }
         self.events.extend_from_slice(events);
         self.deliveries.extend_from_slice(deliveries);
         self.fronts.extend_from_slice(fronts);
@@ -300,7 +289,7 @@ mod tests {
     use super::*;
 
     fn event(id: i64, t: i64, at: DVec3) -> Event {
-        Event { id, source: ShipId(1), t, at, kind: 1, power_w: 1.0, payload: "{}".into() }
+        Event { id, source: ShipId(1), t, at, power_w: 1.0, payload: lc_proto::Payload::Transmit { power_w: 1.0 } }
     }
 
     #[tokio::test]

@@ -335,15 +335,16 @@ impl<J: Journal> Server<J> {
     /// Note where this tick's reports will land. Read off the deliveries, which already hold
     /// who was covered, when, and how loud.
     pub(crate) fn schedule_landings(&mut self, events: &[Event], deliveries: &[Scheduled]) {
-        for event in events.iter().filter(|e| e.kind == lc_proto::kind::REPORT) {
+        for event in events {
+            if !matches!(event.payload, lc_proto::Payload::Report(_)) {
+                continue;
+            }
             for scheduled in deliveries.iter().filter(|d| d.event == event.id) {
                 // Redacted as a client is sent it, so a sealed report teaches only its addressee.
                 let observer = CraftId(scheduled.observer.0);
-                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer, |key| {
+                let lc_proto::Payload::Report(reported) = crate::radio::redact(&event.payload, scheduled.observer, |key| {
                     self.factions.holds(observer, key, scheduled.arrive_t)
-                });
-                let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
-                    eprintln!("WARNING: report {} is not a report; it will not land", event.id);
+                }) else {
                     continue;
                 };
                 if reported.format != lc_proto::REPORT_FORMAT {

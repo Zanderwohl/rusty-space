@@ -83,7 +83,7 @@ fn lit_w(server: &Server<Memory>, id: i64) -> f64 {
 
 /// The emitting events `id` has written, oldest first: `(t, emission)`.
 fn emissions_of(server: &Server<Memory>, id: ShipId) -> Vec<(i64, Emitted)> {
-    server.journal().events.iter().filter(|e| e.kind == KIND_EMIT && e.source == id).map(|e| (e.t, emitted(&e.payload).unwrap())).collect()
+    server.journal().events.iter().filter(|e| e.kind() == KIND_EMIT && e.source == id).map(|e| (e.t, *e.payload.emission().unwrap())).collect()
 }
 
 async fn until<J: Journal>(server: &mut Server<J>, wire: &mut Loopback, t: f64) {
@@ -507,7 +507,7 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
         let mut wire = Loopback::new();
         wire.client_says(EMITTING, emit(along(DVec3::X), Apertures::Both, 1.0e17, 1.0e-9, 0.0, 1.0));
         server.tick(&mut wire).await.unwrap();
-        let died_t = server.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(10)).expect("premise: it collapsed").t;
+        let died_t = server.journal().events.iter().find(|e| e.kind() == KIND_COLLAPSE && e.source == ShipId(10)).expect("premise: it collapsed").t;
         let lit_t = emissions_of(&server, EMITTER)[0].0;
         let (spike_t, beam_t) = ((died_t as f64 + victim_at.length()).ceil() as i64, (lit_t as f64 + 300.0).ceil() as i64);
         assert!(spike_t > server.now_t() && beam_t > server.now_t(), "premise: both still in flight");
@@ -521,7 +521,7 @@ async fn a_spike_and_a_beam_in_flight_across_a_restart_still_land() {
             restarted.tick(&mut wire).await.unwrap();
             told.extend(illuminated(&wire.take(ClientId(2))));
         }
-        let victim_died = restarted.journal().events.iter().find(|e| e.kind == KIND_COLLAPSE && e.source == ShipId(11)).map(|e| e.t);
+        let victim_died = restarted.journal().events.iter().find(|e| e.kind() == KIND_COLLAPSE && e.source == ShipId(11)).map(|e| e.t);
         if resume {
             assert_eq!(victim_died, Some(spike_t), "the spike landed off its arrival");
         } else {
@@ -796,8 +796,11 @@ async fn stated_emit(apertures: Apertures, power_w: f64, spread_rad: f64) -> Sta
         .journal()
         .events
         .iter()
-        .filter(|e| e.kind == crate::server::KIND_DRIVE && e.source == EMITTER)
-        .map(|e| serde_json::from_str(&e.payload).unwrap())
+        .filter(|e| e.source == EMITTER)
+        .filter_map(|e| match &e.payload {
+            lc_proto::Payload::Drive(change) => Some(*change),
+            _ => None,
+        })
         .collect();
     Stated { along, beside, drives }
 }

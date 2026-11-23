@@ -9,7 +9,7 @@ use lc_proto::DriveChange;
 use lc_world::craft::CraftId;
 
 use crate::journal::Journal;
-use crate::server::{KIND_DRIVE, Server};
+use crate::server::Server;
 use crate::world::Event;
 
 impl<J: Journal> Server<J> {
@@ -42,13 +42,12 @@ impl<J: Journal> Server<J> {
                 emit_fore_w: transition.emit.fore_w,
                 emit_aft_w: transition.emit.aft_w,
             };
-            let payload = serde_json::to_string(&change).unwrap_or_else(|_| "{}".into());
             // A plume going out is as visible as the plume was, so a cut carries what it cut.
             let total = |drive_w: f64, emit: lc_world::emit::Ends| drive_w + emit.fore_w + emit.aft_w;
             let power_w = total(transition.power_w, transition.emit).max(total(transition.was_w, transition.was_emit));
             // Rounded up, never into the tick before: that is where the cursor already stands.
             let at_t = ((transition.at_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
-            self.emit(id, KIND_DRIVE, power_w, payload, at_t, events);
+            self.emit(id, power_w, lc_proto::Payload::Drive(change), at_t, events);
         }
     }
 }
