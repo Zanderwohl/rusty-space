@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use glam::DVec3;
-use lc_proto::{
+use lc_proto::{Burned, Cut, Payload, 
     ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting, Withheld,
 };
@@ -779,19 +779,14 @@ impl<J: Journal> Server<J> {
         // for that recipient for good.
         let mut reported = None;
 
-        let (kind, power_w, payload, applied) = match &intent.order {
+        let (power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
                 let power_w = *power_w;
                 // `<= 0.0` is false for NaN, so the finite check is not redundant with it.
                 if power_w <= 0.0 || !power_w.is_finite() {
                     return Err(Refusal::Impossible);
                 }
-                (
-                    KIND_TRANSMIT,
-                    power_w,
-                    format!("{{\"power_w\":{power_w}}}"),
-                    Order::Transmit { power_w },
-                )
+                (power_w, Payload::Transmit { power_w }, Order::Transmit { power_w })
             }
             Order::Burn { beta } => {
                 let beta = DVec3::from_array(*beta);
@@ -808,12 +803,8 @@ impl<J: Journal> Server<J> {
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    // Serialized, not formatted: `DVec3`'s `Debug` writes `DVec3(x, y, z)`,
-                    // which the payload column will not take, and a store that refuses a row
-                    // stops the shard.
-                    serde_json::json!({ "beta": beta.to_array() }).to_string(),
+                    Payload::Burn(Burned { beta: Some(beta.to_array()), ..Burned::default() }),
                     Order::Burn { beta: beta.to_array() },
                 )
             }
@@ -840,9 +831,8 @@ impl<J: Journal> Server<J> {
                     .apply(&Change_ { ship: motion_id(id), at_t: at as f64 * 1.0e-6, change })
                     .map_err(refusal_for)?;
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"accel_g\":{}}}", drive.accel_g),
+                    Payload::Burn(Burned { accel_g: Some(drive.accel_g), ..Burned::default() }),
                     // The clamped acceleration, not the one that was asked for. This is the
                     // whole reason the message exists.
                     Order::SetCourse {
@@ -874,9 +864,8 @@ impl<J: Journal> Server<J> {
                     })
                     .map_err(refusal_for)?;
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"cross\":{star},\"accel_g\":{}}}", drive.accel_g),
+                    Payload::Burn(Burned { cross: Some(*star), accel_g: Some(drive.accel_g), ..Burned::default() }),
                     Order::Cross { star: *star, accel_g: drive.accel_g, max_beta: drive.max_beta },
                 )
             }
@@ -893,7 +882,7 @@ impl<J: Journal> Server<J> {
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 // Whatever it had lit goes out with it.
                 self.put_out(id, at, false, events);
-                (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
+                (0.0, Payload::Cut(Cut::default()), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness, approach } => {
                 let quarry = *ship_id;
@@ -932,9 +921,8 @@ impl<J: Journal> Server<J> {
                     last_seen,
                 });
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"intercept\":{}}}", quarry.0),
+                    Payload::Burn(Burned { intercept: Some(quarry.0), ..Burned::default() }),
                     Order::Intercept { ship_id: quarry, closeness: *closeness, approach: *approach },
                 )
             }
@@ -952,23 +940,23 @@ impl<J: Journal> Server<J> {
                         })
                         .map_err(refusal_for)?;
                 }
-                (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
+                (0.0, Payload::Cut(Cut::default()), Order::BreakOff)
             }
             Order::Park => {
                 let accel_g = self.fly_to_park(id, at_s)?;
                 self.pursuits.remove(&id);
-                (KIND_BURN, BURN_POWER_W, format!("{{\"accel_g\":{accel_g}}}"), Order::Park)
+                (BURN_POWER_W, Payload::Burn(Burned { accel_g: Some(accel_g), ..Burned::default() }), Order::Park)
             }
             Order::Refit { target } => {
                 self.refit(id, target, at_s)?;
                 // Drones are quiet. What a refit does to the hull is seen when its light arrives,
                 // as the form any contact is drawn in; see `chase::contacts`.
-                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: target.clone() })
+                (0.0, Payload::Cut(Cut { refit: Some(true) }), Order::Refit { target: target.clone() })
             }
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
-                (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
+                (0.0, Payload::Cut(Cut { refit: Some(false) }), Order::CancelRefit)
             }
             // Returned from above, before anything is put on the air.
             Order::SetDuty { .. }
@@ -989,7 +977,7 @@ impl<J: Journal> Server<J> {
                 transmitted = true;
                 utterance = spoken.said;
                 reported = spoken.reported;
-                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
+                (crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
             }
             // Unreachable: `handle` takes it before it gets here, because it makes no event.
             Order::AutoAck { .. } | Order::ShareLocation { .. } => return Err(Refusal::Impossible),
@@ -1007,7 +995,7 @@ impl<J: Journal> Server<J> {
             self.parks.remove(&id);
         }
 
-        let event_id = self.put_on_air(id, at, kind, power_w, payload, &beam, transmitted, utterance, events)?;
+        let event_id = self.put_on_air(id, at, power_w, payload, &beam, transmitted, utterance, events)?;
         if let Some((to, seal, through)) = reported {
             self.reported(id, to, seal, through);
         }
@@ -1021,9 +1009,8 @@ impl<J: Journal> Server<J> {
         &mut self,
         id: CraftId,
         at: i64,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         beam: &Beam,
         transmitted: bool,
         utterance: Option<crate::radio::Utterance>,
@@ -1035,12 +1022,11 @@ impl<J: Journal> Server<J> {
             source: ShipId(id.0),
             t: at,
             at: at_position,
-            kind,
             power_w: self.seen_w(id, at, power_w),
             payload,
         };
         // Charged from storage, not heat: a dish is not an engine (31 §Radio).
-        if transmitted || kind == KIND_TRANSMIT {
+        if transmitted || matches!(event.payload, Payload::Transmit { .. }) {
             if let Some(craft) = self.fleet.get_mut(id) {
                 craft.drain(power_w * crate::radio::TRANSMISSION_S, at as f64 * 1.0e-6);
             }
@@ -1256,7 +1242,7 @@ impl<J: Journal> Server<J> {
             }
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
             // that this craft maneuvered, at light delay, exactly as they would for any other.
-            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events);
+            self.emit(id, BURN_POWER_W, Payload::Burn(Burned::default()), now, events);
             // Its owner learns *what* it is flying, at once and directly. Nobody else does:
             // this is a ship being told about itself.
             self.tell_flying(wire, id);
@@ -1268,14 +1254,13 @@ impl<J: Journal> Server<J> {
     pub(crate) fn emit(
         &mut self,
         id: CraftId,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         at: i64,
         events: &mut Vec<Event>,
     ) -> Option<i64> {
         let from = self.fleet.get(id)?.position_at(at as f64);
-        self.emit_from(id, from, kind, power_w, payload, at, events)
+        self.emit_from(id, from, power_w, payload, at, events)
     }
 
     /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
@@ -1285,23 +1270,21 @@ impl<J: Journal> Server<J> {
         &mut self,
         id: CraftId,
         from: DVec3,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         at: i64,
         events: &mut Vec<Event>,
     ) -> Option<i64> {
         // Omnidirectional: everything that reaches here is a plume, a hull or an engine going
         // out, and none of those are pointed at anybody.
-        self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events)
+        self.fan_out(id, from, power_w, |_| payload, at, &Beam::OMNI, &[], events)
     }
 
-    /// Release what has arrived. **The only place anything reaches a client.**
+    /// Release the sightings and contacts that have arrived.
     ///
-    /// Every sighting and every contact here goes through a [`Cleared::clear`], which is the
-    /// only constructor of the only type [`Outbound::Sightings`] and [`Outbound::Present`] can
-    /// hold. Adding a second path out would mean adding a second way to build a `Cleared`, and
-    /// there is not one.
+    /// Each goes through [`Cleared::arrived`], the only constructor of the only type
+    /// [`Outbound::Sightings`], [`Outbound::Present`] and [`Outbound::Illuminated`] can hold. A beam
+    /// is released where it lands, in `crate::emit`, through the same gate.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         let emissions = &self.emissions;
@@ -1357,10 +1340,11 @@ impl<J: Journal> Server<J> {
                     emitted_t: event.t,
                     direction: direction.to_array(),
                     strength: scheduled.strength,
-                    kind: event.kind,
-                    payload: crate::radio::redact(event.kind, &event.payload, ship_id, |key| {
+                    kind: event.kind(),
+                    payload: crate::radio::redact(&event.payload, ship_id, |key| {
                         factions.holds(CraftId(ship_id.0), key, scheduled.arrive_t)
-                    }),
+                    })
+                    .to_json(),
                 };
                 match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {
@@ -1955,6 +1939,56 @@ use crate::transport::Loopback;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.
         assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
+    }
+
+    /// **A contact's nose is where it pointed when its light left.** The quarry sets off after a
+    /// third craft and cuts within a few ticks; for the two hours its old light is still landing,
+    /// the watcher must go on seeing the nose it had before. Reading the facing from the current
+    /// motive shows the turn before any light of it has arrived.
+    #[tokio::test]
+    async fn a_contact_does_not_turn_before_the_light_of_its_turn_arrives() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.see_everything(true);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(2);
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
+        server.admit(ClientId(1), crate::world::still(ShipId(1), far), 0.0);
+        server.admit(ClientId(3), crate::world::still(ShipId(3), far + DVec3::Y * 1.0e6), 0.0);
+        for _ in 0..2 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let now_s = |server: &Server<Memory>| server.now_t() as f64 * 1.0e-6;
+        let nose = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+
+        let ordered_t = server.now_t();
+        let chase = Order::Intercept { ship_id: ShipId(3), closeness: lc_proto::Closeness::Company, approach: lc_proto::Approach::Direct };
+        for order in [chase, Order::CutDrive] {
+            wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order, issued_at_client_t: server.now_t() }));
+            for _ in 0..3 {
+                server.tick(&mut wire).await.unwrap();
+            }
+        }
+        let turned = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+        assert!(turned.dot(nose) < 0.99, "premise: the burn turned it, from {nose} to {turned}");
+
+        wire.take(watcher);
+        let mut checked = 0;
+        while (server.now_t() as f64) < ordered_t as f64 + TWO_LIGHT_HOURS - 2.0 * TICK_US as f64 {
+            server.tick(&mut wire).await.unwrap();
+            for contact in presences(&wire.take(watcher)).into_iter().filter(|c| c.ship_id == ShipId(1)) {
+                assert!(contact.emitted_t < ordered_t, "premise: light from before the order");
+                let seen = DVec3::from_array(contact.facing);
+                assert!(
+                    seen.dot(nose) > 1.0 - 1.0e-9,
+                    "at {} the watcher sees a nose of {seen} in light that left at {}, before the order at {ordered_t}; it was {nose}",
+                    server.now_t(),
+                    contact.emitted_t,
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "premise: the watcher saw it");
     }
 
     /// **Where another ship is drawn, and when.**
@@ -2580,7 +2614,7 @@ pub(crate) mod course_tests {
             panic!("a course is a crossing, not {:?}", craft.motion.motive)
         };
         assert!(cruise.duration_s() > 0.0, "a crossing that takes no time went nowhere");
-        let said = server.journal().events.iter().filter(|e| e.kind != crate::emit::KIND_EMIT).count();
+        let said = server.journal().events.iter().filter(|e| e.kind() != crate::emit::KIND_EMIT).count();
         assert_eq!(said, 1, "and it is one event, beside the drive's light");
     }
 
@@ -2664,7 +2698,10 @@ pub(crate) mod course_tests {
 
         let ceiling = Kind::Ship.drive().accel_g;
         let written = &server.journal().events[0].payload;
-        assert!(written.contains(&format!("{ceiling}")), "{written} does not record {ceiling} g");
+        assert!(
+            matches!(written, Payload::Burn(Burned { accel_g: Some(g), .. }) if *g == ceiling),
+            "{written:?} does not record {ceiling} g",
+        );
 
         // And a nonsense acceleration is refused rather than clamped into something flyable.
         for accel_g in [0.0, -1.0, f64::NAN] {

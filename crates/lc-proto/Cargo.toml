@@ -10,3 +10,5 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 base64 = "0.22"
+# Event payloads are JSON in the journal and on the wire; see `event`.
+serde_json = { version = "1", features = ["float_roundtrip"] }

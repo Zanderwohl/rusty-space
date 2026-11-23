@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use glam::DVec3;
-use lc_proto::{ClientId, kind};
+use lc_proto::ClientId;
 use lc_world::craft::CraftId;
 use lc_world::knowledge::BodyId;
 use lc_spacetime::Worldline;
@@ -154,8 +154,8 @@ impl<J: Journal> Server<J> {
         self.pursuits.remove(&id);
         // As loud as a burn, so that at a distance neither end is told apart from one by its
         // brightness alone.
-        self.emit_from(id, left, kind::VANISH, BURN_POWER_W, "{}".into(), at, events);
-        self.emit_from(id, landed, kind::APPEAR, BURN_POWER_W, "{}".into(), at, events);
+        self.emit_from(id, left, BURN_POWER_W, lc_proto::Payload::Vanish, at, events);
+        self.emit_from(id, landed, BURN_POWER_W, lc_proto::Payload::Appear, at, events);
         // No client can reach this by folding anything it sent.
         self.tell_flying(wire, id);
         Ok(name)

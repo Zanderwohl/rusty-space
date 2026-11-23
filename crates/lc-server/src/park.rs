@@ -9,7 +9,7 @@ use lc_world::motion::{Change, Event as Change_};
 use lc_world::parking;
 use lc_world::solar::SOLAR_STEP_S;
 
-use crate::server::{BURN_POWER_W, KIND_BURN, Server, motion_id, refusal_for};
+use crate::server::{BURN_POWER_W, Server, motion_id, refusal_for};
 use crate::journal::Journal;
 use crate::transport::Transport;
 use crate::world::Event;
@@ -92,7 +92,7 @@ impl<J: Journal> Server<J> {
             if !wants_repark(held_m, wanted_m) || self.fly_to_park(id, now_s).is_err() {
                 continue;
             }
-            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events);
+            self.emit(id, BURN_POWER_W, lc_proto::Payload::Burn(lc_proto::Burned::default()), now, events);
             self.tell_flying(wire, id);
         }
     }

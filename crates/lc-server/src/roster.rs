@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use glam::DVec3;
-use lc_proto::{Chat, FactionId, Outbound, Reported, Scope, ShipId, Spoken, Stated};
+use lc_proto::{Chat, FactionId, Outbound, Payload, Scope, ShipId, Stated};
 use lc_spacetime::{LIGHT_MICROSECOND_M, Worldline};
 use lc_world::craft::CraftId;
 use lc_world::flight::JULIAN_YEAR_S;
@@ -224,19 +224,13 @@ impl<J: Journal> Server<J> {
         if observer == sender {
             return;
         }
-        let (to, sealed, under, stated) = match event.kind {
-            lc_proto::kind::MESSAGE | lc_proto::kind::KEY => match serde_json::from_str::<Spoken>(&event.payload) {
-                Ok(s) => (s.to, s.sealed, s.under, s.stated),
-                Err(_) => return,
-            },
-            lc_proto::kind::REPORT => match serde_json::from_str::<Reported>(&event.payload) {
-                Ok(r) => (r.to, r.sealed, r.under, r.stated),
-                Err(_) => return,
-            },
-            lc_proto::kind::DRIVE => (None, false, None, None),
+        let addressing = match (&event.payload, event.payload.addressing()) {
+            (_, Some(addressing)) => addressing,
+            (Payload::Drive(_), None) => lc_proto::Addressing { to: None, sealed: false, under: None },
             _ => return,
         };
-        let readable = !(sealed && to != Some(observer.0)) && under.is_none_or(|key| self.factions.holds(observer, key, arrive_t));
+        let readable = addressing.readable_by(observer.0, |key| self.factions.holds(observer, key, arrive_t));
+        let stated = event.payload.stated().copied();
         let Some(here) = self.fleet.get(observer).map(|c| c.position_at(arrive_t as f64) / LIGHT_US_PER_LY) else { return };
         let emitted_s = event.t as f64 * 1.0e-6;
         let observed_s = arrive_t as f64 * 1.0e-6;
@@ -249,7 +243,7 @@ impl<J: Journal> Server<J> {
                     emitted_s,
                     system: self.world.star_containing(position_ly),
                     fix: Fix::Place { position_ly, beta: DVec3::from_array(stated.beta), sigma_ly: 0.0 },
-                    witnesses: held(scope_of(to, under)),
+                    witnesses: held(scope_of(addressing.to, addressing.under)),
                 }
             }
             None => {

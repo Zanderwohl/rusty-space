@@ -114,6 +114,11 @@ days is twelve of the old spans, so a slot that still holds old ones (named `_p`
 are `_s`) is filled out at their width rather than overlapping them, until retention has taken
 them.
 
+`payload` is `lc_proto::Payload` as JSON: one variant per `kind`, written by `Payload::to_json` and
+read back once by `Payload::from_json`, so nothing past the store parses text. Each variant's JSON
+is the shape the column already held, which is what lets old rows decode. A row this build cannot
+read is skipped with a warning (`lc_server::world::read_payload`) rather than stopping the shard.
+
 `lx/ly/lz/lt` carry the exact local-frame values. The global `gx/gy/gz/t` are the index.
 Both are stored because recomputing one from the other loses the 150 m of the grid.
 
@@ -165,7 +170,7 @@ a front's surface passed during the tick — whichever craft there are by then, 
 actually flew — and each of those is a delivery, written as it lands. Light put out during the
 tick is crossed as it is put out, so a collapse's spike lands in time order among the collapses
 still to come in that tick. Speech is received, owed an answer, and teaches its keys at the same
-moment; an emission feeds energy; a report teaches what it carries.
+moment; an emission feeds energy; a report teaches what it carries. Which of those a landing does is one exhaustive match on its payload, in `Server::landed`, so a new kind does not compile until it says what its light does.
 
 This replaced working deliveries out when the event was written, which was exact only for a craft
 that already existed and never changed course. Light is decades to millennia on the way, so a

@@ -139,7 +139,7 @@ fn burn_changed(pursuer: &Craft, burn: Option<glam::DVec3>) -> bool {
 /// Whether `observer` sees `quarry`, whose light leaving at `left_s` from `at` (light-microseconds)
 /// reaches it at `here`: its reflected starlight and its field's glow against the observer's
 /// instrument, over [`lc_world::glow::DETECTION_EXPOSURE_S`]. Not the light's arrival, which is
-/// [`Cleared::clear`]'s alone. See `lightcone/docs/05-observation.md` §Seeing other craft.
+/// the retarded solve's alone. See `lightcone/docs/05-observation.md` §Seeing other craft.
 pub fn detects(observer: &Craft, quarry: &Craft, balance: &Balance, left_s: f64, at: DVec3, here: DVec3) -> bool {
     let to_observer = here - at;
     let glow = quarry.glow_at(left_s).unwrap_or_else(|| Glow::unfitted(balance));
@@ -198,6 +198,78 @@ pub fn sighting(
     detects(watcher, craft, balance, seen.emitted_s, at, here).then_some(seen)
 }
 
+/// A craft as its light left it. Every reading is taken at the instant of emission, so a contact
+/// built from this alone cannot say anything about the craft as it is now.
+struct AsItLeft<'a> {
+    craft: &'a Craft,
+    left_s: f64,
+}
+
+impl AsItLeft<'_> {
+    fn facing(&self) -> DVec3 {
+        // A craft always has a nose now — see `lc_world::attitude`.
+        self.craft.facing_at(self.left_s).unwrap_or(DVec3::X)
+    }
+
+    fn drive_w(&self, balance: &Balance) -> f64 {
+        lc_world::emit::drive_w(self.craft, balance, self.left_s)
+    }
+
+    fn emit(&self) -> lc_world::emit::Ends {
+        lc_world::emit::emit_w(self.craft, self.left_s)
+    }
+
+    fn emit_cone(&self) -> Option<lc_world::signal::Beam> {
+        lc_world::emit::emit_cone(self.craft, self.left_s)
+    }
+
+    /// Its form and the refit step under way, running back after a cancel.
+    fn form(&self) -> (lc_proto::Form, Option<lc_proto::Building>) {
+        let then = self.craft.seen_at(self.left_s);
+        let form = then.map(|then| (&*then.form).into()).unwrap_or_default();
+        (form, then.and_then(|then| then.underway(self.left_s)).map(Into::into))
+    }
+
+    fn glow(&self, balance: &Balance) -> Glow {
+        self.craft.glow_at(self.left_s).unwrap_or_else(|| Glow::unfitted(balance))
+    }
+}
+
+/// What a contact is told about `then`, by an observer at `here_ly`. Takes no [`Craft`], so nothing
+/// here can read one as it is now; the observer's own state is the caller's to fill in.
+fn presence(sighted: &pursuit::Sighting, then: &AsItLeft, here_ly: DVec3, balance: &Balance, now_t: i64) -> Presence {
+    let emit = then.emit();
+    // Its cone only to an observer it glances, out of either end it leaves; the rest see its faces.
+    let offset = here_ly - sighted.position_ly;
+    let cone = then.emit_cone().filter(|fore| {
+        let aft = lc_world::signal::Beam::along(-fore.axis, fore.half_angle_rad);
+        (emit.fore_w > 0.0 && lc_world::emit::glanced(fore, offset)) || (emit.aft_w > 0.0 && lc_world::emit::glanced(&aft, offset))
+    });
+    let (form, building) = then.form();
+    Presence {
+        ship_id: ShipId(sighted.target.0),
+        length_m: sighted.length_m,
+        at_ly: sighted.position_ly.to_array(),
+        beta: sighted.beta.to_array(),
+        facing: then.facing().to_array(),
+        drive_w: then.drive_w(balance),
+        emit_fore_w: emit.fore_w,
+        emit_aft_w: emit.aft_w,
+        emit_axis: cone.map_or([0.0; 3], |c| c.axis.to_array()),
+        emit_spread_rad: cone.map_or(0.0, |c| c.half_angle_rad),
+        emitted_t: (sighted.emitted_s * 1.0e6) as i64,
+        // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by construction.
+        // So the gate cannot refuse this; what keeps a contact in the past is `AsItLeft`.
+        arrive_t: now_t,
+        observer_ly: [0.0; 3],
+        observer_beta: [0.0; 3],
+        form,
+        building,
+        glow: Some(then.glow(balance).into()),
+        glare: None,
+    }
+}
+
 /// Where everybody else appeared to be, per connection.
 ///
 /// Every contact is a **retarded** sample. A craft a light-hour away is reported where it was
@@ -223,45 +295,12 @@ pub fn contacts(
             let Some(sighted) = sighting(fleet, balance, everything, observer.id, ShipId(craft.id.0), now_t) else {
                 continue;
             };
-            let then = craft.seen_at(sighted.emitted_s);
-            let emit = lc_world::emit::emit_w(craft, sighted.emitted_s);
-            // Its cone only to an observer it glances, out of either end it leaves; the rest see its faces.
-            let offset = here_ly - sighted.position_ly;
-            let cone = lc_world::emit::emit_cone(craft, sighted.emitted_s).filter(|fore| {
-                let aft = lc_world::signal::Beam::along(-fore.axis, fore.half_angle_rad);
-                (emit.fore_w > 0.0 && lc_world::emit::glanced(fore, offset)) || (emit.aft_w > 0.0 && lc_world::emit::glanced(&aft, offset))
-            });
+            let then = AsItLeft { craft, left_s: sighted.emitted_s };
             let presence = Presence {
-                ship_id: ShipId(craft.id.0),
-                length_m: sighted.length_m,
-                at_ly: sighted.position_ly.to_array(),
-                beta: sighted.beta.to_array(),
-                // Where the nose actually was when the light left, part-way through a turn
-                // included. A craft always has one now — see `lc_world::attitude` — so there is
-                // no "undecided" case left for the receiver to paper over.
-                facing: craft
-                    .facing_at(sighted.emitted_s)
-                    .unwrap_or(glam::DVec3::X)
-                    .to_array(),
-                // At the moment the light left, not now. A burn that has since stopped is
-                // still burning as far as this observer is concerned.
-                drive_w: lc_world::emit::drive_w(craft, balance, sighted.emitted_s),
-                emit_fore_w: emit.fore_w,
-                emit_aft_w: emit.aft_w,
-                emit_axis: cone.map_or([0.0; 3], |c| c.axis.to_array()),
-                emit_spread_rad: cone.map_or(0.0, |c| c.half_angle_rad),
-                emitted_t: (sighted.emitted_s * 1.0e6) as i64,
-                // The solve *is* the arrival: `emitted + |x_o - w(emitted)|` equals `now` by
-                // construction, so this is the light landing at this instant.
-                arrive_t: now_t,
                 observer_ly: here_ly.to_array(),
                 observer_beta: here_beta.to_array(),
-                // As its light left it, as everything else here is: a ship seen mid-refit is seen
-                // in the shape it had then, and a new one only once that light arrives.
-                form: then.map(|then| (&*then.form).into()).unwrap_or_default(),
-                building: then.and_then(|then| then.underway(sighted.emitted_s)).map(Into::into),
-                glow: Some(craft.glow_at(sighted.emitted_s).unwrap_or_else(|| Glow::unfitted(balance)).into()),
                 glare: glare(observer.id, ShipId(craft.id.0)),
+                ..presence(&sighted, &then, here_ly, balance, now_t)
             };
             match Cleared::<Presence>::clear(presence, now_t) {
                 Ok(pass) => seen.push(pass),

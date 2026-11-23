@@ -22,7 +22,7 @@ use lc_world::craft::Craft;
 use lc_world::fitting::Balance;
 
 use super::drives::first;
-use super::{Emitted, Landing, Said};
+use super::{Emitted, Falls, Landing, Said};
 use crate::field::{radius_us, shadow_toward_m2};
 use crate::journal::Journal;
 use crate::server::Server;

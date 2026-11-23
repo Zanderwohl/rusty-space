@@ -72,7 +72,7 @@ pub(super) fn fold(
                 .iter()
                 .filter(|s| matches!(s.kind, lc_proto::kind::MESSAGE | lc_proto::kind::KEY))
             {
-                let Ok(spoken) = serde_json::from_str::<lc_proto::Spoken>(&sighting.payload)
+                let Ok(lc_proto::Payload::Message(spoken) | lc_proto::Payload::Key(spoken)) = sighting.read_payload()
                 else {
                     continue;
                 };
@@ -134,8 +134,7 @@ pub(super) fn fold(
             // gains the hop that says it came from over there. See
             // `lightcone/docs/22-provenance.md`.
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::REPORT) {
-                let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&sighting.payload)
-                else {
+                let Ok(lc_proto::Payload::Report(reported)) = sighting.read_payload() else {
                     continue;
                 };
                 let from = ShipId(sighting.source_id);
@@ -182,7 +181,7 @@ pub(super) fn fold(
                 ui.0.heard(from, format!("{who} {what}"), sighting.arrive_t as f64 * 1e-6);
             }
             for sighting in seen.iter().filter(|s| s.kind == lc_proto::kind::DRIVE) {
-                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else {
+                let Ok(lc_proto::Payload::Drive(change)) = sighting.read_payload() else {
                     continue;
                 };
                 let drives = uplink.drives.entry(ShipId(sighting.source_id)).or_default();

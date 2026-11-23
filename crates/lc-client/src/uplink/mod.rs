@@ -337,7 +337,8 @@ fn fold(
         }
         // The welcome to the successor follows.
         Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
-        Outbound::Illuminated { ship_id, beam, bearing, spectrum, power_w, arrive_t } => {
+        Outbound::Illuminated(lit) => {
+            let lc_proto::Illumination { ship_id, beam, bearing, spectrum, power_w, arrive_t } = lit.into_inner();
             uplink.incoming.illuminated(ship_id, beam, bearing, spectrum, power_w, arrive_t)
         }
         Outbound::Presets(list) => game.0.presets = list,
@@ -496,13 +497,16 @@ mod tests {
 
         fold(&mut uplink, &mut game, &mut ui, emit(ShipId(7), 32));
         assert_eq!(drawn(&uplink), 1, "this ship's own");
-        let lit = |power_w| Outbound::Illuminated {
-            ship_id: ShipId(7),
-            beam: 40,
-            bearing: [0.0, 1.0, 0.0],
-            spectrum: lc_proto::Spectrum::Line { wavelength_m: 1.0e-6 },
-            power_w,
-            arrive_t: 500_000,
+        let lit = |power_w| {
+            let lit = lc_proto::Illumination {
+                ship_id: ShipId(7),
+                beam: 40,
+                bearing: [0.0, 1.0, 0.0],
+                spectrum: lc_proto::Spectrum::Line { wavelength_m: 1.0e-6 },
+                power_w,
+                arrive_t: 500_000,
+            };
+            Outbound::Illuminated(lc_proto::Cleared::arrived(lit, 500_000).unwrap())
         };
         fold(&mut uplink, &mut game, &mut ui, lit(1.0e17));
         assert_eq!(drawn(&uplink), 2, "one landing here");

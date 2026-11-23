@@ -634,7 +634,10 @@ pub fn collapses(
         let name = last.map_or_else(|| uplink.name_of(from), |l| l.name.clone());
         let arrive_s = sighting.arrive_t as f64 * 1e-6;
         ui.0.heard(from, format!("{name} collapsed"), arrive_s);
-        let released_j = serde_json::from_str::<lc_proto::Released>(&sighting.payload).map_or(0.0, |r| r.released_j);
+        let released_j = match sighting.read_payload() {
+            Ok(lc_proto::Payload::Collapse { released, .. }) => released.released_j,
+            _ => 0.0,
+        };
         let observer_ly = game.0.ship.motion.position_ly;
         wrecks.fell.push(Wreck {
             event_id: sighting.event_id,
