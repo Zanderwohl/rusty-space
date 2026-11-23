@@ -42,6 +42,10 @@ pub struct Delivery {
     pub event_id: EventId,
     /// For gating against the receiver's noise floor on arrival.
     pub strength: f32,
+    /// Unit, toward where the light left, in the frame of `g`. Written with every delivery and
+    /// read only by a catch-up: the tick works it out from the worldline it has. `None` as read
+    /// by the tick, and for a row written before it was kept.
+    pub direction: Option<[f32; 3]>,
 }
 
 /// The width of one partition, microseconds: 360 days, about an hour at the design rate.
@@ -156,12 +160,14 @@ pub async fn insert_deliveries(client: &Client, rows: &[Delivery]) -> Result<u64
     let arrivals: Vec<i64> = rows.iter().map(|d| d.arrive_t).collect();
     let events: Vec<i64> = rows.iter().map(|d| d.event_id.get()).collect();
     let strengths: Vec<f32> = rows.iter().map(|d| d.strength).collect();
+    let axis = |k: usize| rows.iter().map(|d| d.direction.map(|v| v[k])).collect::<Vec<Option<f32>>>();
+    let (dx, dy, dz) = (axis(0), axis(1), axis(2));
     client
         .execute(
-            "INSERT INTO deliveries (observer_id, arrive_t, event_id, strength)
-             SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[], $4::real[])
+            "INSERT INTO deliveries (observer_id, arrive_t, event_id, strength, dx, dy, dz)
+             SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::bigint[], $4::real[], $5::real[], $6::real[], $7::real[])
              ON CONFLICT DO NOTHING",
-            &[&observers, &arrivals, &events, &strengths],
+            &[&observers, &arrivals, &events, &strengths, &dx, &dy, &dz],
         )
         .await
 }
@@ -192,6 +198,7 @@ pub async fn deliveries_for(
                 arrive_t: row.get(1),
                 event_id: EventId::from_raw(row.get(2))?,
                 strength: row.get(3),
+                direction: None,
             })
         })
         .collect())
@@ -375,6 +382,7 @@ mod tests {
                 arrive_t: base + (step * 7_919) % SPAN_US,
                 event_id: minter.mint(step * 1_000).unwrap(),
                 strength: 1.0,
+                direction: None,
             });
         }
         insert_deliveries(&client, &rows).await.unwrap();
@@ -419,6 +427,7 @@ mod tests {
                 arrive_t: step * 1_000_000,
                 event_id: minter.mint(step * 1_000_000).unwrap(),
                 strength: 0.5,
+                direction: None,
             })
             .collect();
         insert_deliveries(&client, &rows).await.unwrap();

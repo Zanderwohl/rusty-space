@@ -154,6 +154,7 @@ pub struct Exhausts {
 }
 
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct Cone(pub Option<ShipId>, pub Jet);
 
 /// One lit face's glow, under its craft's [`ShipHull`], by its place in its [`crate::lit_faces::Lit`].

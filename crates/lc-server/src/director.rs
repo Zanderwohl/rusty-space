@@ -495,7 +495,7 @@ mod tests {
             ),
             "the cast is in a private copy of the system",
         );
-        let seen = crate::chase::sighting(&server.fleet, &server.balance, true, bystander.id, ShipId(cast.id.0), server.now_t());
+        let seen = crate::chase::sighting(server.seeable(), &server.balance, true, bystander.id, ShipId(cast.id.0), server.now_t());
         assert!(seen.is_some(), "nobody can see the cast");
     }
 

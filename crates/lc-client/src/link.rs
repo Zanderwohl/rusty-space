@@ -125,14 +125,14 @@ mod native {
                 Draining::Empty => {}
                 Draining::Failed(why) => break why,
                 // The app dropped its end: nobody is listening and nobody will send.
-                Draining::AppGone => return,
+                Draining::AppGone => return say_goodbye(&mut socket),
             }
 
             match socket.read() {
                 Ok(Message::Binary(bytes)) => match lc_proto::decode::<Outbound>(&bytes) {
                     Ok(message) => {
                         if to_app.send(message).is_err() {
-                            return;
+                            return say_goodbye(&mut socket);
                         }
                     }
                     // The peer is not speaking this version, whatever it claimed. There is
@@ -156,6 +156,12 @@ mod native {
             }
         };
         *status.lock().unwrap() = Status::Closed(closed);
+    }
+
+    /// Close with a frame, so the shard sees a close rather than a reset.
+    fn say_goodbye(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
+        let _ = socket.close(None);
+        let _ = socket.flush();
     }
 
     enum Draining {

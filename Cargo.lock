@@ -5011,6 +5011,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lc-catchup"
+version = "0.1.0"
+dependencies = [
+ "lc-proto",
+ "lc-store",
+ "serde_json",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "lc-client"
 version = "0.1.0"
 dependencies = [
@@ -5078,6 +5089,7 @@ dependencies = [
  "glam",
  "jsonwebtoken",
  "lc-books",
+ "lc-catchup",
  "lc-proto",
  "lc-spacetime",
  "lc-store",

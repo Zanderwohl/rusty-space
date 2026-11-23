@@ -29,6 +29,9 @@ impl std::fmt::Display for JournalError {
 
 impl std::error::Error for JournalError {}
 
+/// One page of a catch-up: what to send, and through when it reaches.
+pub type CaughtUp = (Vec<lc_proto::Cleared<lc_proto::Sighting>>, i64);
+
 pub trait Journal {
     /// Make ready for writes in `[from_t, to_t]`.
     ///
@@ -61,6 +64,20 @@ pub trait Journal {
         after_t: i64,
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+
+    /// What landed on `observer` in `(after_t, until_t]` as a client is told it at `now_t`, a page at
+    /// a time, from wherever retention has put it, and how far the page reaches. `None` from a
+    /// journal that keeps every delivery where [`Journal::due`] reads it, which has nothing to catch
+    /// up from. See `lc_catchup`.
+    fn caught_up(
+        &self,
+        _observer: ShipId,
+        _noise_floor: f32,
+        _span: (i64, i64),
+        _now_t: i64,
+    ) -> impl std::future::Future<Output = Result<Option<CaughtUp>, JournalError>> + Send {
+        async { Ok(None) }
+    }
 
     /// Every front something could still detect at `now_t`, with what was said for any that are
     /// speech. Read once, when a shard comes back.
@@ -299,9 +316,9 @@ mod tests {
             .write(
                 &[event(1, 0, DVec3::ZERO), event(2, 0, DVec3::ZERO)],
                 &[
-                    Scheduled { observer: ShipId(9), event: 2, arrive_t: 300, strength: 1.0 },
-                    Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0 },
-                    Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0 },
+                    Scheduled { observer: ShipId(9), event: 2, arrive_t: 300, strength: 1.0, direction: None },
+                    Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0, direction: None },
+                    Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0, direction: None },
                 ],
                 &[],
             )
@@ -323,7 +340,7 @@ mod tests {
     async fn a_delivery_with_no_event_is_dropped() {
         let mut journal = Memory::default();
         journal
-            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }], &[])
+            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0, direction: None }], &[])
             .await
             .unwrap();
         assert!(journal.due(ShipId(9), 0, 1_000).await.unwrap().is_empty());

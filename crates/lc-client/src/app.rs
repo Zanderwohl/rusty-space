@@ -88,6 +88,13 @@ pub struct Ui(pub UiState);
 #[derive(Resource, Deref, DerefMut)]
 pub struct Game(pub Session);
 
+impl Game {
+    /// The placeholder held until a sky loads and `enter_game` replaces it.
+    pub fn before_the_game() -> Self {
+        Game(Session::new(&AuthoredStars::sample(), 3))
+    }
+}
+
 /// Which sky to load, if any.
 ///
 /// An **asset path**, not a filesystem path: the asset server reads a file on the desktop and
@@ -150,7 +157,7 @@ impl Plugin for ClientPlugin {
             .init_state::<AppState>()
             .add_message::<Requested>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             .init_resource::<Catalog>()
             .init_resource::<crate::dev::DevEntry>()
             .init_resource::<Looking>()
@@ -428,31 +435,24 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-/// Take down what the scene systems spawned, which run only in game and so would otherwise leave
-/// it all drawn behind the Unreachable screen. Each respawns what it wants on the way back in.
+/// Despawned when the game is left. Every scene root requires it, so a new kind of root cannot
+/// forget its way out of `leave_scene`'s reach, as the drones and the wrecks once did.
+pub type InGameOnly = DespawnOnExit<AppState>;
+
+pub const fn in_game_only() -> InGameOnly {
+    DespawnOnExit(AppState::InGame)
+}
+
+/// Let go of what the scene's entities were drawn from; [`InGameOnly`] takes the entities, which
+/// run only in game and would otherwise be left drawn behind the Unreachable screen.
 fn leave_scene(
-    mut commands: Commands,
-    placed: Query<
-        Entity,
-        Or<(
-            With<crate::resolved::ResolvedBody>,
-            With<crate::envelope::EnvelopeMesh>,
-            With<crate::envelope::RingMesh>,
-            With<crate::hull::Hull>,
-            With<crate::ship_hull::ShipHull>,
-            With<crate::parts::FormRoot>,
-            With<crate::plume::Cone>,
-        )>,
-    >,
     mut envelopes: ResMut<crate::envelope::Envelopes>,
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut bakes: ResMut<crate::procedural::Bakes>,
 ) {
-    for entity in &placed {
-        commands.entity(entity).despawn();
-    }
     // It respawns only on a change of star.
     envelopes.star = None;
+    envelopes.shells.clear();
     surfaces.keep(None, [], &mut bakes);
 }
 
@@ -760,7 +760,7 @@ mod tests {
             .add_message::<Requested>()
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             // The dispatcher routes orders to it. Absent, not connected: these tests are the
             // single-process game, which is what a session with no server still is.
             .init_resource::<crate::uplink::Uplink>()
@@ -977,7 +977,7 @@ mod tests {
             .add_message::<Requested>()
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             .init_resource::<crate::uplink::Uplink>()
             .init_resource::<Seen>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())

@@ -146,6 +146,12 @@ impl Uplink {
         self.state = State::Connecting;
     }
 
+    /// Drop the link, and with it everything it said: all of it belongs to the account that
+    /// opened it. Back to [`State::Offline`], so `connect` opens again once there is a ticket.
+    pub fn close(&mut self) {
+        *self = Self::default();
+    }
+
     /// Put a session where the server has it, if the server has said.
     ///
     /// Idempotent, and called both when the welcome arrives and again whenever the session is

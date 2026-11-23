@@ -85,10 +85,12 @@ pub fn ring_opacity(rings: &lc_world::rings::RingSystem) -> f32 {
 }
 
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct EnvelopeMesh(pub usize);
 
 /// A ring system, which unlike a population is attached to a body and therefore moves.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct RingMesh {
     /// The body's place in this frame's drawables.
     ///

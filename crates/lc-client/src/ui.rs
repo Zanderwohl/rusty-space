@@ -613,6 +613,26 @@ impl Default for UiState {
 }
 
 impl UiState {
+    /// Back to a fresh interface, keeping only how this machine draws: everything else was
+    /// picked, heard, drafted or read by the account that has signed out.
+    pub fn forget_account(&mut self) {
+        *self = Self {
+            screen: self.screen,
+            menu_page: self.menu_page,
+            boom_lengths: self.boom_lengths,
+            distant: self.distant,
+            local: self.local,
+            bodies: self.bodies,
+            envelope_gain: self.envelope_gain,
+            exposure_offset: self.exposure_offset,
+            preset: self.preset,
+            integration_s: self.integration_s,
+            beauty_shots: self.beauty_shots,
+            time_rate: self.time_rate,
+            ..Self::default()
+        };
+    }
+
     pub fn is_open(&self, panel: Panel) -> bool {
         self.open.contains(&panel)
     }

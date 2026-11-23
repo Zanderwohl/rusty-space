@@ -34,7 +34,7 @@ impl<J: Journal> Server<J> {
     ) {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let ids: Vec<CraftId> =
-            self.fleet.iter().filter(|c| c.ended_s().is_none() && c.fitting().is_some()).map(|c| c.id).collect();
+            self.fleet.iter().filter(|c| c.fitting().is_some()).map(|c| c.id).collect();
         for id in ids {
             while self.keep_field_mode(id, now_s, after_t, events) {
                 self.tell_fitted(wire, id);

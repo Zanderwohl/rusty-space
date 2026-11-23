@@ -303,6 +303,9 @@ pub struct Scheduled {
     pub event: i64,
     pub arrive_t: i64,
     pub strength: f32,
+    /// Unit, from the observer toward where the light left, as solved. Kept with the delivery
+    /// for a reader with no worldline; `None` as the tick reads one back.
+    pub direction: Option<[f32; 3]>,
 }
 
 /// Strength at the receiver: power over the square of the distance traveled, with the
@@ -368,6 +371,7 @@ pub fn schedule(event: &Event, beam: &Beam, observer: &Craft) -> Option<Schedule
         // watts through a smaller solid angle, which is why the gain is the *only* thing that
         // changes and the inverse square underneath it does not.
         strength,
+        direction: Some((-offset).normalize_or_zero().as_vec3().to_array()),
     })
 }
 

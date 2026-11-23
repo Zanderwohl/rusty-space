@@ -35,7 +35,8 @@ pub enum Key {
 #[derive(Component)]
 pub struct MapCone(Key);
 
-/// One mesh per shape: a balance fixes the drive's, and beams' spreads are rounded to a few.
+/// One mesh per shape drawn this frame. Not kept past it: an emit's spread is whatever was asked
+/// for, so a cache of every one seen grew for the whole session.
 #[derive(Default)]
 pub(crate) struct Held {
     material: Option<Handle<MapLineMaterial>>,
@@ -92,6 +93,7 @@ pub(crate) fn lay_cones(
         for (entity, ..) in &drawn {
             commands.entity(entity).despawn();
         }
+        held.meshes.clear();
         return;
     }
     let Some(frame) = map.frame.as_ref().filter(|_| map.due) else { return };
@@ -102,17 +104,6 @@ pub(crate) fn lay_cones(
             materials.add(line_material(crate::ui::HAZARD, LINE_TUBE_FRACTION, LINE_PX, LINE_COLOR_SCALE))
         })
         .clone();
-    let mut mesh_of = |cone: &Drawn| {
-        // The same ratio at any power, but from two roots rounded apart, so held to six places.
-        let cooking = (cone.cooking_m / cone.length_m * 1.0e6).round() / 1.0e6;
-        held.meshes
-            .entry((cone.half_angle_rad.to_bits(), cooking.to_bits()))
-            .or_insert_with(|| {
-                meshes.add(wire_mesh::tube_curves(&cone_curves(cone.half_angle_rad, cooking), BASE_TUBE_RADIUS, 4, 1.0))
-            })
-            .clone()
-    };
-
     let here_ly = game.0.ship.motion.position_ly;
     // Past the view on any zoom, so a line back along a bearing leaves the picture.
     let reach_m = 4.0 * frame.eye_ly.distance(here_ly) * M_PER_LY;
@@ -127,6 +118,19 @@ pub(crate) fn lay_cones(
         .map(|c| (Key::Exhaust(c.craft, c.jet), c))
         .chain(beams.iter().map(|(key, c)| (Key::Beam(*key), c)))
         .collect();
+
+    let shapes: Vec<(u64, u64)> = cones.iter().map(|(_, c)| shape_of(c)).collect();
+    held.meshes.retain(|shape, _| shapes.contains(shape));
+    let mut mesh_of = |cone: &Drawn| {
+        let shape = shape_of(cone);
+        held.meshes
+            .entry(shape)
+            .or_insert_with(|| {
+                let cooking = f64::from_bits(shape.1);
+                meshes.add(wire_mesh::tube_curves(&cone_curves(cone.half_angle_rad, cooking), BASE_TUBE_RADIUS, 4, 1.0))
+            })
+            .clone()
+    };
 
     let mut kept = Vec::with_capacity(cones.len());
     for (entity, of, mut transform, mut mesh) in drawn.iter_mut() {
@@ -151,6 +155,13 @@ pub(crate) fn lay_cones(
             MapCone(*key),
         ));
     }
+}
+
+/// What a cone's mesh is built from: its spread, and where the cooking ring falls along it.
+fn shape_of(cone: &Drawn) -> (u64, u64) {
+    // The same ratio at any power, but from two roots rounded apart, so held to six places.
+    let cooking = (cone.cooking_m / cone.length_m * 1.0e6).round() / 1.0e6;
+    (cone.half_angle_rad.to_bits(), cooking.to_bits())
 }
 
 #[cfg(test)]

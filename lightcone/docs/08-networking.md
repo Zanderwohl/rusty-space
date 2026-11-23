@@ -1,6 +1,6 @@
 # Networking
 
-**Status: partly built.** The gate and its channels are `lc_proto::{Cleared, Outbound}`; the tick, `Journal` (memory and Postgres), the WebSocket `Transport`, the rate limit and catch-up are `lc_server::{server, journal, websocket, rate}`, with sighting and pursuit in `lc_server::chase` and `lc_world::{sighted, ignition, pursuit, escort, consort}`, and the client half is `lc_client::link`. Not built: QUIC and WebTransport; separate channels (one reliable WebSocket carries everything, with no unreliable local-state or bulk channel); level-3 subscription; a stored per-observer fold for catch-up (`Inbound::ResumeFrom` only rewinds the cursor); the spatial bound on presence solves; and more than one shard.
+**Status: partly built.** The gate and its channels are `lc_proto::{Cleared, Outbound}`; the tick, `Journal` (memory and Postgres), the WebSocket `Transport`, the rate limit and catch-up are `lc_server::{server, journal, websocket, rate}`, with sighting and pursuit in `lc_server::chase` and `lc_world::{sighted, ignition, pursuit, escort, consort}`, and the client half is `lc_client::link`. Not built: QUIC and WebTransport; separate channels (one reliable WebSocket carries everything, with no unreliable local-state or bulk channel); level-3 subscription; a stored per-observer fold for catch-up (`Inbound::ResumeFrom` rewinds the cursor, and from before the retention cutoff reads the archive through `lc_catchup`; see [02 §Catching up](02-event-store.md#catching-up)); the spatial bound on presence solves; and more than one shard.
 
 ## Shape of the problem
 
@@ -537,7 +537,9 @@ Event IDs must be locally generatable if shards exist: a snowflake layout of
 A client that disconnects for an hour missed 8766 in-game hours of deliveries. On reconnect:
 
 1. Client sends the coordinate time of the last reception it has.
-2. Server replays `deliveries` from that point, ordered by `arrive_t`, paginated.
+2. Server replays `deliveries` from that point, ordered by `arrive_t`, paginated. From before the
+   retention cutoff they come from the archive first, a page a flush, by `lc_catchup`; see
+   [02 §Catching up](02-event-store.md#catching-up).
 3. Client folds them through `lc_world::motion` to rebuild its known-world snapshot.
 
 The same path serves a brand-new client, from `t = 0` or from a compacted snapshot. Store a

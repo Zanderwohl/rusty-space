@@ -169,7 +169,16 @@ pub fn adopt_fitted(
     mut own: ResMut<OwnForm>,
     mut adopted: Local<Option<(lc_proto::Form, Option<f64>)>>,
 ) {
-    let Some(hull) = uplink.hull.as_ref().filter(|_| dev.form.is_none() && dev.refit.is_none()) else { return };
+    if dev.form.is_some() || dev.refit.is_some() {
+        return;
+    }
+    let Some(hull) = uplink.hull.as_ref() else {
+        // The uplink forgot it, which is a sign-out: the form was that account's ship.
+        if adopted.take().is_some() {
+            *own = OwnForm::default();
+        }
+        return;
+    };
     let round = refit.as_deref().map(|r| r.plan.round());
     let key = (hull.form.clone(), round.map(|r| r.start_s));
     if adopted.as_ref() == Some(&key) {
@@ -244,6 +253,7 @@ pub(crate) fn local(piece: &Piece, scale: Vec3) -> Transform {
 /// The ship's frame, placed and turned. Scaled from meters to render units. Holds which moment
 /// of a refit its pieces were spawned for, so they are respawned only when a step changes.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct FormRoot(Option<(usize, Option<usize>)>);
 
 /// A copy drawn solid. Its mesh is built at `reach_m` and scaled to the copy's size each frame.

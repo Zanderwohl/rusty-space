@@ -519,7 +519,7 @@ impl<J: Journal> Server<J> {
                 // Unreachable: the `let else` above is this arm.
                 Aim::Omni => return Ok(Beam::OMNI),
                 Aim::Ship(target) => {
-                    let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, sender, *target, at)
+                    let seen = chase::sighting(self.seeable(), &self.balance, self.sees_everything, sender, *target, at)
                         .ok_or(Refusal::NotInSight)?;
                     lc_world::signal::aim_at(
                         from,
@@ -728,25 +728,7 @@ impl<J: Journal> Server<J> {
 
 /// A message payload as this observer may have it.
 ///
-/// **The sealing, and the whole of it.** One event is stored with its body intact and each
-/// receiver is handed a copy with the body removed unless they are the addressee. Doing it here
-/// rather than at write time is what keeps one transmission one event: a sealed message
-/// duplicated per receiver would be several events sharing an emission time, and everything
-/// about the light cone rests on an event being a point.
-///
-/// An eavesdropper still learns that *something* was sent, by whom, to whom, and when — which
-/// is the truth about a signal you cannot decrypt, not a concession. What they do not get is the
-/// text.
-///
-/// Anything but a transmission passes through untouched.
-///
-/// `holds` answers whether the observer holds a faction key as of this landing.
-pub(crate) fn redact(payload: &Payload, observer: ShipId, holds: impl FnOnce(FactionId) -> bool) -> Payload {
-    match payload.addressing() {
-        Some(addressing) if !addressing.readable_by(observer.0, holds) => payload.clone().unreadable(),
-        _ => payload.clone(),
-    }
-}
+pub(crate) use lc_proto::redact;
 
 /// Whether `observer` may read a transmission landing on it at `arrive_t`: [`redact`]'s rule,
 /// for the paths that have the store's row rather than the payload.

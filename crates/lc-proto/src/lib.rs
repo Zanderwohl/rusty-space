@@ -935,7 +935,7 @@ pub mod form;
 mod knowing;
 mod radio;
 
-pub use event::{Addressing, Burned, Cut, Emitted, Payload, PayloadError};
+pub use event::{Addressing, Burned, Cut, Emitted, Payload, PayloadError, redact};
 pub use gate::{Arrives, Cleared, Illumination, Withheld};
 pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};

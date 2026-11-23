@@ -19,6 +19,7 @@
 pub mod ability;
 #[cfg(feature = "storage")]
 pub mod archive;
+pub mod bright;
 #[cfg(feature = "storage")]
 pub mod admin;
 #[cfg(feature = "storage")]

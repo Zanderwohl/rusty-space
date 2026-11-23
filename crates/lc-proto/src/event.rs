@@ -244,6 +244,19 @@ impl Addressing {
     }
 }
 
+/// A transmission as `observer` may have it: **the sealing, and the whole of it.** One event is
+/// stored with its body intact and each receiver is handed a copy with the body removed unless they
+/// are the addressee, so one transmission stays one event. The shard and a catch-up apply this one
+/// rule. Anything but a transmission passes through untouched.
+///
+/// `holds` answers whether the observer holds a faction key as of this landing.
+pub fn redact(payload: &Payload, observer: crate::ShipId, holds: impl FnOnce(crate::FactionId) -> bool) -> Payload {
+    match payload.addressing() {
+        Some(addressing) if !addressing.readable_by(observer.0, holds) => payload.clone().unreadable(),
+        _ => payload.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

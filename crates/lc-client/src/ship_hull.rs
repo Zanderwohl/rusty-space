@@ -158,6 +158,13 @@ fn take_texels(mut palette: ResMut<Palette>, mut images: ResMut<Assets<Image>>) 
         images.add(tile_array(&albedo, TILE_TEXELS, Tile::Albedo)),
         images.add(tile_array(&lights, TILE_TEXELS, Tile::Lights)),
     ));
+    // The arrays hold their own copy; the eighteen bakes and their bytes are ~18 MiB kept for nothing.
+    for sources in [&mut palette.albedo, &mut palette.lights] {
+        sources.clear();
+    }
+    for texels in [&mut palette.albedo_texels, &mut palette.light_texels] {
+        texels.clear();
+    }
 }
 
 /// A finished hull at `at_ly` wearing `glow`, lit by `star`, its open faces by `faces`. See [`lit`]
@@ -271,6 +278,7 @@ impl RealHulls {
 /// One craft's hull: a root placed in its frame each frame, with the mesh under it and, until
 /// that has landed, placeholders beside it.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct ShipHull {
     craft: Option<ShipId>,
     /// The form handed to the mesher, and the roll it is drawn at once its mesh is up.

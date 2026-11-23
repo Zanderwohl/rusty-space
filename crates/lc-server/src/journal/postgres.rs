@@ -3,7 +3,7 @@
 use glam::DVec3;
 use lc_proto::ShipId;
 
-use super::{Journal, JournalError, Memory, Transcript};
+use super::{CaughtUp, Journal, JournalError, Memory, Transcript};
 use crate::world::{Event, Scheduled};
 
 impl From<tokio_postgres::Error> for JournalError {
@@ -81,6 +81,11 @@ fn from_grid(g: [i64; 3]) -> DVec3 {
 }
 
 impl Journal for Postgres {
+    async fn caught_up(&self, observer: ShipId, noise_floor: f32, span: (i64, i64), now_t: i64) -> Result<Option<CaughtUp>, JournalError> {
+        let page = lc_catchup::page(&self.client, observer, noise_floor, span, now_t, lc_catchup::PAGE).await?;
+        Ok(Some((page.sightings, page.through_t)))
+    }
+
     async fn prepare(&mut self, from_t: i64, to_t: i64) -> Result<(), JournalError> {
         if let Some((lo, hi)) = self.prepared
             && from_t >= lo
@@ -141,6 +146,7 @@ impl Journal for Postgres {
                     arrive_t: d.arrive_t,
                     event_id: lc_store::id::EventId::from_raw(d.event)?,
                     strength: d.strength,
+                    direction: d.direction,
                 })
             })
             .collect();
@@ -224,6 +230,7 @@ impl Journal for Postgres {
                     event: delivery.event_id.get(),
                     arrive_t: delivery.arrive_t,
                     strength: delivery.strength,
+                    direction: None,
                 },
                 event.clone(),
             ));
@@ -344,6 +351,10 @@ impl Journal for Store {
         until_t: i64,
     ) -> Result<Vec<(Scheduled, Event)>, JournalError> {
         either!(self, due(observer, after_t, until_t))
+    }
+
+    async fn caught_up(&self, observer: ShipId, noise_floor: f32, span: (i64, i64), now_t: i64) -> Result<Option<CaughtUp>, JournalError> {
+        either!(self, caught_up(observer, noise_floor, span, now_t))
     }
 
     async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {
