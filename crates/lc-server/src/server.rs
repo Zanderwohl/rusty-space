@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use glam::DVec3;
-use lc_proto::{
+use lc_proto::{Burned, Cut, Payload, 
     ClientId, Cleared, Inbound, Intent, Order, Outbound, PROTOCOL_VERSION, Refusal, ShipId,
     Sighting, Withheld,
 };
@@ -92,6 +92,18 @@ pub struct Connected {
     pub analyzing_sent: usize,
     /// The last [`Outbound::Doing`] this connection was sent.
     pub doing_sent: Option<Outbound>,
+    /// Whether this connection has been told of the wrecks whose light reached its craft before
+    /// it could be delivered. See [`crate::field::wrecks_in_progress`].
+    pub wrecks_told: bool,
+    /// Through when it is still being caught up on deliveries retention has archived, a page a
+    /// flush, before its live ones are read. Set by a [`Inbound::ResumeFrom`] from before the cutoff.
+    pub catching_up: Option<i64>,
+    /// The furthest the cursor has reached. An intent is floored here, not at a cursor a resume
+    /// has wound back, or a client could stamp orders as far back as it asked to be caught up from.
+    pub resolved_t: i64,
+    /// Collapses a catch-up has told it of, so [`crate::field::wrecks_in_progress`] does not tell
+    /// them again.
+    pub collapses_told: Vec<i64>,
 }
 
 impl Connected {
@@ -116,6 +128,10 @@ impl Connected {
             retained_sent: false,
             analyzing_sent: 0,
             doing_sent: None,
+            wrecks_told: false,
+            catching_up: None,
+            resolved_t: i64::MIN,
+            collapses_told: Vec::new(),
         }
     }
 }
@@ -227,8 +243,9 @@ pub struct Server<J: Journal> {
     pub(crate) destroyed: Vec<i64>,
     /// What each craft has lit, what lands on each now, and what is on its way. See [`crate::emit`].
     pub(crate) emissions: crate::emit::Emissions,
-    /// Each wreck's collapse, for as long as it is kept. See [`crate::field`].
-    pub(crate) afterglows: HashMap<CraftId, lc_world::afterglow::Afterglow>,
+    /// Long-lived light seen from far off: every wreck, until its afterglow has faded everywhere.
+    /// Not craft, so nothing that loops over the fleet each tick meets them. See [`crate::bright`].
+    pub(crate) brights: crate::bright::Brights,
 }
 
 impl<J: Journal> Server<J> {
@@ -281,7 +298,7 @@ impl<J: Journal> Server<J> {
             commands: std::collections::VecDeque::new(),
             destroyed: Vec::new(),
             emissions: Default::default(),
-            afterglows: HashMap::new(),
+            brights: Default::default(),
         }
     }
 
@@ -441,6 +458,15 @@ impl<J: Journal> Server<J> {
 
     pub fn ship(&self, id: ShipId) -> Option<&Craft> {
         self.fleet.get(CraftId(id.0))
+    }
+
+    pub fn wreck(&self, id: ShipId) -> Option<&crate::bright::Wreck> {
+        self.brights.wreck(CraftId(id.0))
+    }
+
+    /// Every craft, and every wreck's hull: what a sighting may be of.
+    pub(crate) fn seeable(&self) -> crate::bright::Seeable<'_> {
+        crate::bright::Seeable { fleet: &self.fleet, brights: &self.brights }
     }
 
     /// What a client has actually sent. The measurement that will one day replace the guess in
@@ -642,9 +668,13 @@ impl<J: Journal> Server<J> {
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
-                // cursor back is the whole of catch-up; the next flush replays from there.
+                // cursor back is the whole of catch-up within the retention window; from further
+                // back the archive is read first, a page a flush, until the window is reached.
+                let cutoff = retention_cutoff(self.now_t);
                 if let Some(state) = self.clients.get_mut(&from) {
+                    state.resolved_t = state.resolved_t.max(state.cursor_t);
                     state.cursor_t = arrive_t.min(self.now_t);
+                    state.catching_up = cutoff.filter(|cutoff| state.cursor_t < *cutoff);
                 }
             }
         }
@@ -725,7 +755,7 @@ impl<J: Journal> Server<J> {
         // cursor would be written, scheduled, and then never looked at again. The client's own
         // transmission would vanish. The last reception is always at or behind the cursor, so
         // this floor implies the doc's and adds the part that keeps deliveries findable.
-        let floor = state.cursor_t.saturating_add(1);
+        let floor = state.cursor_t.max(state.resolved_t).saturating_add(1);
         let at = intent.issued_at_client_t.clamp(floor.min(self.now_t), self.now_t);
         let at_s = at as f64 * 1.0e-6;
         // Orders about what a craft knows or is watching put nothing on the air, so they are
@@ -779,19 +809,14 @@ impl<J: Journal> Server<J> {
         // for that recipient for good.
         let mut reported = None;
 
-        let (kind, power_w, payload, applied) = match &intent.order {
+        let (power_w, payload, applied) = match &intent.order {
             Order::Transmit { power_w } => {
                 let power_w = *power_w;
                 // `<= 0.0` is false for NaN, so the finite check is not redundant with it.
                 if power_w <= 0.0 || !power_w.is_finite() {
                     return Err(Refusal::Impossible);
                 }
-                (
-                    KIND_TRANSMIT,
-                    power_w,
-                    format!("{{\"power_w\":{power_w}}}"),
-                    Order::Transmit { power_w },
-                )
+                (power_w, Payload::Transmit { power_w }, Order::Transmit { power_w })
             }
             Order::Burn { beta } => {
                 let beta = DVec3::from_array(*beta);
@@ -808,12 +833,8 @@ impl<J: Journal> Server<J> {
                 // A burn is not silent -- it is the most visible thing a ship does -- but what
                 // it radiates is the drive's business. Nominal, until there is a drive model.
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    // Serialized, not formatted: `DVec3`'s `Debug` writes `DVec3(x, y, z)`,
-                    // which the payload column will not take, and a store that refuses a row
-                    // stops the shard.
-                    serde_json::json!({ "beta": beta.to_array() }).to_string(),
+                    Payload::Burn(Burned { beta: Some(beta.to_array()), ..Burned::default() }),
                     Order::Burn { beta: beta.to_array() },
                 )
             }
@@ -840,9 +861,8 @@ impl<J: Journal> Server<J> {
                     .apply(&Change_ { ship: motion_id(id), at_t: at as f64 * 1.0e-6, change })
                     .map_err(refusal_for)?;
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"accel_g\":{}}}", drive.accel_g),
+                    Payload::Burn(Burned { accel_g: Some(drive.accel_g), ..Burned::default() }),
                     // The clamped acceleration, not the one that was asked for. This is the
                     // whole reason the message exists.
                     Order::SetCourse {
@@ -874,9 +894,8 @@ impl<J: Journal> Server<J> {
                     })
                     .map_err(refusal_for)?;
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"cross\":{star},\"accel_g\":{}}}", drive.accel_g),
+                    Payload::Burn(Burned { cross: Some(*star), accel_g: Some(drive.accel_g), ..Burned::default() }),
                     Order::Cross { star: *star, accel_g: drive.accel_g, max_beta: drive.max_beta },
                 )
             }
@@ -893,7 +912,7 @@ impl<J: Journal> Server<J> {
                 // who could see it lit — `crate::drive` states it — and after that the ship is.
                 // Whatever it had lit goes out with it.
                 self.put_out(id, at, false, events);
-                (KIND_CUT, 0.0, "{}".to_string(), Order::CutDrive)
+                (0.0, Payload::Cut(Cut::default()), Order::CutDrive)
             }
             Order::Intercept { ship_id, closeness, approach } => {
                 let quarry = *ship_id;
@@ -901,7 +920,7 @@ impl<J: Journal> Server<J> {
                 // player who presses the button sees the ship move on the same round trip as
                 // any other order. What keeps it flying is the standing policy below.
                 let now_s = at as f64 * 1.0e-6;
-                let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, quarry, at)
+                let seen = chase::sighting(self.seeable(), &self.balance, self.sees_everything, id, quarry, at)
                     .ok_or(Refusal::NotInSight)?;
                 // Closing in on the quarry already being chased keeps what has been measured of
                 // it, so an escort does not lose its acceleration for a tick.
@@ -909,7 +928,7 @@ impl<J: Journal> Server<J> {
                     self.pursuits.get(&id).filter(|p| p.quarry == quarry).and_then(|p| p.last_seen);
                 let craft = self.fleet.get(id).ok_or(Refusal::NotYours)?;
                 let arrival = chase::arrival(*approach, &self.balance, craft, now_s);
-                match chase::plan(&self.fleet, craft, &seen, last_seen.as_ref(), (*closeness).into(), arrival, now_s) {
+                match chase::plan(self.seeable(), craft, &seen, last_seen.as_ref(), (*closeness).into(), arrival, now_s) {
                     Ok(plan) => {
                         let craft = self.fleet.get_mut(id).ok_or(Refusal::NotYours)?;
                         let before = craft.clone();
@@ -932,9 +951,8 @@ impl<J: Journal> Server<J> {
                     last_seen,
                 });
                 (
-                    KIND_BURN,
                     BURN_POWER_W,
-                    format!("{{\"intercept\":{}}}", quarry.0),
+                    Payload::Burn(Burned { intercept: Some(quarry.0), ..Burned::default() }),
                     Order::Intercept { ship_id: quarry, closeness: *closeness, approach: *approach },
                 )
             }
@@ -952,23 +970,23 @@ impl<J: Journal> Server<J> {
                         })
                         .map_err(refusal_for)?;
                 }
-                (KIND_CUT, 0.0, "{}".to_string(), Order::BreakOff)
+                (0.0, Payload::Cut(Cut::default()), Order::BreakOff)
             }
             Order::Park => {
                 let accel_g = self.fly_to_park(id, at_s)?;
                 self.pursuits.remove(&id);
-                (KIND_BURN, BURN_POWER_W, format!("{{\"accel_g\":{accel_g}}}"), Order::Park)
+                (BURN_POWER_W, Payload::Burn(Burned { accel_g: Some(accel_g), ..Burned::default() }), Order::Park)
             }
             Order::Refit { target } => {
                 self.refit(id, target, at_s)?;
                 // Drones are quiet. What a refit does to the hull is seen when its light arrives,
                 // as the form any contact is drawn in; see `chase::contacts`.
-                (KIND_CUT, 0.0, "{\"refit\":true}".to_string(), Order::Refit { target: target.clone() })
+                (0.0, Payload::Cut(Cut { refit: Some(true) }), Order::Refit { target: target.clone() })
             }
             Order::CancelRefit => {
                 self.fleet.get_mut(id).ok_or(Refusal::NotYours)?.cancel_refit(at_s);
                 self.refitting.remove(&id);
-                (KIND_CUT, 0.0, "{\"refit\":false}".to_string(), Order::CancelRefit)
+                (0.0, Payload::Cut(Cut { refit: Some(false) }), Order::CancelRefit)
             }
             // Returned from above, before anything is put on the air.
             Order::SetDuty { .. }
@@ -989,7 +1007,7 @@ impl<J: Journal> Server<J> {
                 transmitted = true;
                 utterance = spoken.said;
                 reported = spoken.reported;
-                (spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
+                (crate::radio::SIGNAL_POWER_W, spoken.payload, intent.order.clone())
             }
             // Unreachable: `handle` takes it before it gets here, because it makes no event.
             Order::AutoAck { .. } | Order::ShareLocation { .. } => return Err(Refusal::Impossible),
@@ -1007,7 +1025,7 @@ impl<J: Journal> Server<J> {
             self.parks.remove(&id);
         }
 
-        let event_id = self.put_on_air(id, at, kind, power_w, payload, &beam, transmitted, utterance, events)?;
+        let event_id = self.put_on_air(id, at, power_w, payload, &beam, transmitted, utterance, events)?;
         if let Some((to, seal, through)) = reported {
             self.reported(id, to, seal, through);
         }
@@ -1021,9 +1039,8 @@ impl<J: Journal> Server<J> {
         &mut self,
         id: CraftId,
         at: i64,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         beam: &Beam,
         transmitted: bool,
         utterance: Option<crate::radio::Utterance>,
@@ -1035,12 +1052,11 @@ impl<J: Journal> Server<J> {
             source: ShipId(id.0),
             t: at,
             at: at_position,
-            kind,
             power_w: self.seen_w(id, at, power_w),
             payload,
         };
         // Charged from storage, not heat: a dish is not an engine (31 §Radio).
-        if transmitted || kind == KIND_TRANSMIT {
+        if transmitted || matches!(event.payload, Payload::Transmit { .. }) {
             if let Some(craft) = self.fleet.get_mut(id) {
                 craft.drain(power_w * crate::radio::TRANSMISSION_S, at as f64 * 1.0e-6);
             }
@@ -1235,7 +1251,7 @@ impl<J: Journal> Server<J> {
     ) {
         let now = self.now_t;
         let now_s = now as f64 * 1.0e-6;
-        for (id, plan) in chase::decide(&self.fleet, &mut self.pursuits, &self.balance, self.sees_everything, now) {
+        for (id, plan) in chase::decide(crate::bright::Seeable { fleet: &self.fleet, brights: &self.brights }, &mut self.pursuits, &self.balance, self.sees_everything, now) {
             let Some(craft) = self.fleet.get_mut(id) else { continue };
             let Some(plan) = plan else {
                 self.pursuits.remove(&id);
@@ -1256,7 +1272,7 @@ impl<J: Journal> Server<J> {
             }
             // A burn, and burns are the loudest thing a ship does. Everyone in range learns
             // that this craft maneuvered, at light delay, exactly as they would for any other.
-            self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), now, events);
+            self.emit(id, BURN_POWER_W, Payload::Burn(Burned::default()), now, events);
             // Its owner learns *what* it is flying, at once and directly. Nobody else does:
             // this is a ship being told about itself.
             self.tell_flying(wire, id);
@@ -1268,14 +1284,13 @@ impl<J: Journal> Server<J> {
     pub(crate) fn emit(
         &mut self,
         id: CraftId,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         at: i64,
         events: &mut Vec<Event>,
     ) -> Option<i64> {
         let from = self.fleet.get(id)?.position_at(at as f64);
-        self.emit_from(id, from, kind, power_w, payload, at, events)
+        self.emit_from(id, from, power_w, payload, at, events)
     }
 
     /// [`Server::emit`] from a stated position, light-microseconds: at a jump the worldline has
@@ -1285,31 +1300,71 @@ impl<J: Journal> Server<J> {
         &mut self,
         id: CraftId,
         from: DVec3,
-        kind: i16,
         power_w: f64,
-        payload: String,
+        payload: Payload,
         at: i64,
         events: &mut Vec<Event>,
     ) -> Option<i64> {
         // Omnidirectional: everything that reaches here is a plume, a hull or an engine going
         // out, and none of those are pointed at anybody.
-        self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events)
+        self.fan_out(id, from, power_w, |_| payload, at, &Beam::OMNI, &[], events)
     }
 
-    /// Release what has arrived. **The only place anything reaches a client.**
+    /// One page of catch-up for each client resuming from before the retention cutoff, read by
+    /// `lc_catchup` from the store alone, so the reading can move to a service of its own. Its live
+    /// deliveries wait until it is through: the cursor is one line, and it is read in order.
+    async fn catch_up(&mut self, clients: &[ClientId], wire: &mut impl Transport) {
+        let now = self.now_t;
+        // Retention archives up to here as the clock moves on, so a catch-up runs to the cutoff of
+        // now, not of when it began: the live read that follows sees only the live table.
+        let cutoff = retention_cutoff(now);
+        for &id in clients {
+            let Some(state) = self.clients.get(&id) else { continue };
+            let (ship, after_t, Some(until_t)) = (state.ship, state.cursor_t, state.catching_up) else { continue };
+            let until_t = cutoff.map_or(until_t, |cutoff| cutoff.max(until_t));
+            let Some(noise_floor) = self.fleet.get(CraftId(ship.0)).map(|craft| craft.noise_floor) else { continue };
+            let page = self.journal.caught_up(ship, noise_floor, (after_t, until_t), now).await;
+            let Some(state) = self.clients.get_mut(&id) else { continue };
+            state.catching_up = Some(until_t);
+            // One client's archive read failing is that client's catch-up given up, not every
+            // client's flush: it goes on from the live table.
+            let page = page.unwrap_or_else(|why| {
+                eprintln!("ERROR: catching connection {} up failed, going on live: {why}", id.0);
+                state.cursor_t = until_t;
+                None
+            });
+            let Some((sightings, through_t)) = page else {
+                state.catching_up = None;
+                continue;
+            };
+            state.cursor_t = through_t.max(after_t);
+            if let Some(latest) = sightings.iter().map(|s| s.get().arrive_t).max() {
+                state.last_reception_t = state.last_reception_t.max(latest);
+            }
+            if through_t >= until_t {
+                state.catching_up = None;
+            }
+            state.collapses_told.extend(sightings.iter().map(|s| s.get()).filter(|s| s.kind == KIND_COLLAPSE).map(|s| s.event_id));
+            if !sightings.is_empty() {
+                wire.send(id, Outbound::Sightings(sightings));
+            }
+        }
+    }
+
+    /// Release the sightings and contacts that have arrived.
     ///
-    /// Every sighting and every contact here goes through a [`Cleared::clear`], which is the
-    /// only constructor of the only type [`Outbound::Sightings`] and [`Outbound::Present`] can
-    /// hold. Adding a second path out would mean adding a second way to build a `Cleared`, and
-    /// there is not one.
+    /// Each goes through [`Cleared::arrived`], the only constructor of the only type
+    /// [`Outbound::Sightings`], [`Outbound::Present`] and [`Outbound::Illuminated`] can hold. A beam
+    /// is released where it lands, in `crate::emit`, through the same gate.
     async fn flush(&mut self, wire: &mut impl Transport) -> Result<(), JournalError> {
         let now = self.now_t;
         let emissions = &self.emissions;
         let mut contacts =
-            chase::contacts(&self.fleet, &self.clients, &self.balance, self.sees_everything, now, |observer, source| emissions.glare(observer, source));
+            chase::contacts(self.seeable(), &self.clients, &self.balance, self.sees_everything, now, |observer, source| emissions.glare(observer, source));
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());
+        let mut catching: Vec<ClientId> = Vec::new();
         for id in ids {
             let Some(state) = self.clients.get_mut(&id) else { continue };
             // Every tick there is anything to say, and once more when there stops being: a
@@ -1321,7 +1376,7 @@ impl<J: Journal> Server<J> {
                 state.had_contacts = !seen.is_empty();
                 wire.send(id, Outbound::Present(seen));
             }
-            let (ship, cursor_t, backlog_sent) = (state.ship, state.cursor_t, state.backlog_sent);
+            let (ship, cursor_t, backlog_sent, catching_up) = (state.ship, state.cursor_t, state.backlog_sent, state.catching_up.is_some());
             if self.fleet.get(CraftId(ship.0)).is_none() {
                 continue;
             }
@@ -1329,8 +1384,13 @@ impl<J: Journal> Server<J> {
             if !backlog_sent {
                 self.send_backlog(id, ship, now, wire).await;
             }
-            reading.push((id, ship, cursor_t));
+            if catching_up {
+                catching.push(id);
+            } else {
+                reading.push((id, ship, cursor_t));
+            }
         }
+        self.catch_up(&catching, wire).await;
 
         // The proven read, one range scan over `(observer_id, arrive_t)` per client, all asked
         // at once: one connection pipelines them, so the tick waits one round trip rather than
@@ -1357,10 +1417,11 @@ impl<J: Journal> Server<J> {
                     emitted_t: event.t,
                     direction: direction.to_array(),
                     strength: scheduled.strength,
-                    kind: event.kind,
-                    payload: crate::radio::redact(event.kind, &event.payload, ship_id, |key| {
+                    kind: event.kind(),
+                    payload: crate::radio::redact(&event.payload, ship_id, |key| {
                         factions.holds(CraftId(ship_id.0), key, scheduled.arrive_t)
-                    }),
+                    })
+                    .to_json(),
                 };
                 match Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
                     Ok(pass) => {
@@ -1371,6 +1432,18 @@ impl<J: Journal> Server<J> {
                     // A client that could tell the two apart could tell that *something*
                     // happened it was not told about, which is faster-than-light information.
                     Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
+                }
+            }
+            if !state.wrecks_told {
+                state.wrecks_told = true;
+                let mut delivered: Vec<i64> = cleared.iter().map(|pass| pass.get().event_id).collect();
+                delivered.append(&mut state.collapses_told);
+                let missed = crate::field::wrecks_in_progress(&self.brights, ship, now, |id| delivered.contains(&id));
+                for sighting in missed {
+                    if let Ok(pass) = Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
+                        latest = latest.max(pass.get().arrive_t);
+                        cleared.push(pass);
+                    }
                 }
             }
             state.cursor_t = now;
@@ -1390,6 +1463,18 @@ impl<J: Journal> Server<J> {
 /// answer. It is told which, and corrects.
 /// A craft's identifier as [`lc_world::motion`] names it. The two are the same number: a craft
 /// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
+/// Where retention has archived deliveries up to, at `now_t`: a resume from before it is caught up
+/// from the archive. `None` for a shard that keeps nothing, and so archives nothing.
+fn retention_cutoff(now_t: i64) -> Option<i64> {
+    #[cfg(feature = "storage")]
+    return Some(now_t.saturating_sub(crate::journal::RETENTION.kept_us));
+    #[cfg(not(feature = "storage"))]
+    {
+        let _ = now_t;
+        None
+    }
+}
+
 /// A welcome for a ship the fleet does not have, which is a state that should not arise: the
 /// sign-in that reached here either found a craft or made one. Still at rest at the origin
 /// rather than a panic, because losing a connection is better than losing the shard.
@@ -1955,6 +2040,56 @@ use crate::transport::Loopback;
         // One step or forty, the closed form is the same place to the last bit -- and it stays
         // exact across the conversion into light-years the world model works in and back.
         assert_eq!(ship.position_at(after as f64), at + beta * after as f64);
+    }
+
+    /// **A contact's nose is where it pointed when its light left.** The quarry sets off after a
+    /// third craft and cuts within a few ticks; for the two hours its old light is still landing,
+    /// the watcher must go on seeing the nose it had before. Reading the facing from the current
+    /// motive shows the turn before any light of it has arrived.
+    #[tokio::test]
+    async fn a_contact_does_not_turn_before_the_light_of_its_turn_arrives() {
+        let mut server = Server::new(Memory::default(), 0, 1);
+        server.see_everything(true);
+        let mut wire = Loopback::new();
+        let watcher = ClientId(2);
+        let far = DVec3::new(TWO_LIGHT_HOURS, 0.0, 0.0);
+        server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
+        server.admit(ClientId(1), crate::world::still(ShipId(1), far), 0.0);
+        server.admit(ClientId(3), crate::world::still(ShipId(3), far + DVec3::Y * 1.0e6), 0.0);
+        for _ in 0..2 {
+            server.tick(&mut wire).await.unwrap();
+        }
+        let now_s = |server: &Server<Memory>| server.now_t() as f64 * 1.0e-6;
+        let nose = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+
+        let ordered_t = server.now_t();
+        let chase = Order::Intercept { ship_id: ShipId(3), closeness: lc_proto::Closeness::Company, approach: lc_proto::Approach::Direct };
+        for order in [chase, Order::CutDrive] {
+            wire.client_says(ClientId(1), Inbound::Act(Intent { ship_id: ShipId(1), order, issued_at_client_t: server.now_t() }));
+            for _ in 0..3 {
+                server.tick(&mut wire).await.unwrap();
+            }
+        }
+        let turned = server.ship(ShipId(1)).unwrap().facing_at(now_s(&server)).unwrap();
+        assert!(turned.dot(nose) < 0.99, "premise: the burn turned it, from {nose} to {turned}");
+
+        wire.take(watcher);
+        let mut checked = 0;
+        while (server.now_t() as f64) < ordered_t as f64 + TWO_LIGHT_HOURS - 2.0 * TICK_US as f64 {
+            server.tick(&mut wire).await.unwrap();
+            for contact in presences(&wire.take(watcher)).into_iter().filter(|c| c.ship_id == ShipId(1)) {
+                assert!(contact.emitted_t < ordered_t, "premise: light from before the order");
+                let seen = DVec3::from_array(contact.facing);
+                assert!(
+                    seen.dot(nose) > 1.0 - 1.0e-9,
+                    "at {} the watcher sees a nose of {seen} in light that left at {}, before the order at {ordered_t}; it was {nose}",
+                    server.now_t(),
+                    contact.emitted_t,
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "premise: the watcher saw it");
     }
 
     /// **Where another ship is drawn, and when.**
@@ -2580,7 +2715,7 @@ pub(crate) mod course_tests {
             panic!("a course is a crossing, not {:?}", craft.motion.motive)
         };
         assert!(cruise.duration_s() > 0.0, "a crossing that takes no time went nowhere");
-        let said = server.journal().events.iter().filter(|e| e.kind != crate::emit::KIND_EMIT).count();
+        let said = server.journal().events.iter().filter(|e| e.kind() != crate::emit::KIND_EMIT).count();
         assert_eq!(said, 1, "and it is one event, beside the drive's light");
     }
 
@@ -2664,7 +2799,10 @@ pub(crate) mod course_tests {
 
         let ceiling = Kind::Ship.drive().accel_g;
         let written = &server.journal().events[0].payload;
-        assert!(written.contains(&format!("{ceiling}")), "{written} does not record {ceiling} g");
+        assert!(
+            matches!(written, Payload::Burn(Burned { accel_g: Some(g), .. }) if *g == ceiling),
+            "{written:?} does not record {ceiling} g",
+        );
 
         // And a nonsense acceleration is refused rather than clamped into something flyable.
         for accel_g in [0.0, -1.0, f64::NAN] {

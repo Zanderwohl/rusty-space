@@ -5,7 +5,7 @@
 //! reads deliveries through exactly the index-only range scan phase 7 demonstrated, and is there
 //! only with the `storage` feature.
 //!
-//! Nothing here decides *what* may be sent. That is [`lc_proto::Cleared::clear`], and it sits
+//! Nothing here decides *what* may be sent. That is [`lc_proto::Cleared::arrived`], and it sits
 //! between this and the wire.
 
 use lc_proto::ShipId;
@@ -28,6 +28,9 @@ impl std::fmt::Display for JournalError {
 }
 
 impl std::error::Error for JournalError {}
+
+/// One page of a catch-up: what to send, and through when it reaches.
+pub type CaughtUp = (Vec<lc_proto::Cleared<lc_proto::Sighting>>, i64);
 
 pub trait Journal {
     /// Make ready for writes in `[from_t, to_t]`.
@@ -61,6 +64,20 @@ pub trait Journal {
         after_t: i64,
         until_t: i64,
     ) -> impl std::future::Future<Output = Result<Vec<(Scheduled, Event)>, JournalError>> + Send;
+
+    /// What landed on `observer` in `(after_t, until_t]` as a client is told it at `now_t`, a page at
+    /// a time, from wherever retention has put it, and how far the page reaches. `None` from a
+    /// journal that keeps every delivery where [`Journal::due`] reads it, which has nothing to catch
+    /// up from. See `lc_catchup`.
+    fn caught_up(
+        &self,
+        _observer: ShipId,
+        _noise_floor: f32,
+        _span: (i64, i64),
+        _now_t: i64,
+    ) -> impl std::future::Future<Output = Result<Option<CaughtUp>, JournalError>> + Send {
+        async { Ok(None) }
+    }
 
     /// Every front something could still detect at `now_t`, with what was said for any that are
     /// speech. Read once, when a shard comes back.
@@ -163,17 +180,6 @@ impl Journal for Memory {
         deliveries: &[Scheduled],
         fronts: &[crate::front::Front],
     ) -> Result<(), JournalError> {
-        // The payload column is `jsonb`, so a payload that is not JSON is a row the real
-        // journal refuses. A fake that took it let a burn built with `format!` out of a
-        // `DVec3` past four hundred tests and fail on the shard.
-        for event in events {
-            if serde_json::from_str::<serde_json::Value>(&event.payload).is_err() {
-                return Err(JournalError(format!(
-                    "event {} carries a payload that is not JSON: {}",
-                    event.id, event.payload,
-                )));
-            }
-        }
         self.events.extend_from_slice(events);
         self.deliveries.extend_from_slice(deliveries);
         self.fronts.extend_from_slice(fronts);
@@ -300,7 +306,7 @@ mod tests {
     use super::*;
 
     fn event(id: i64, t: i64, at: DVec3) -> Event {
-        Event { id, source: ShipId(1), t, at, kind: 1, power_w: 1.0, payload: "{}".into() }
+        Event { id, source: ShipId(1), t, at, power_w: 1.0, payload: lc_proto::Payload::Transmit { power_w: 1.0 } }
     }
 
     #[tokio::test]
@@ -310,9 +316,9 @@ mod tests {
             .write(
                 &[event(1, 0, DVec3::ZERO), event(2, 0, DVec3::ZERO)],
                 &[
-                    Scheduled { observer: ShipId(9), event: 2, arrive_t: 300, strength: 1.0 },
-                    Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0 },
-                    Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0 },
+                    Scheduled { observer: ShipId(9), event: 2, arrive_t: 300, strength: 1.0, direction: None },
+                    Scheduled { observer: ShipId(9), event: 1, arrive_t: 100, strength: 1.0, direction: None },
+                    Scheduled { observer: ShipId(8), event: 1, arrive_t: 150, strength: 1.0, direction: None },
                 ],
                 &[],
             )
@@ -334,7 +340,7 @@ mod tests {
     async fn a_delivery_with_no_event_is_dropped() {
         let mut journal = Memory::default();
         journal
-            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0 }], &[])
+            .write(&[], &[Scheduled { observer: ShipId(9), event: 404, arrive_t: 1, strength: 1.0, direction: None }], &[])
             .await
             .unwrap();
         assert!(journal.due(ShipId(9), 0, 1_000).await.unwrap().is_empty());

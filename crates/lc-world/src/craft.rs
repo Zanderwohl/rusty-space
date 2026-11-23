@@ -23,8 +23,11 @@ use crate::navigation::Waypoint;
 use crate::seen::{Glows, History, Refitting, Seen, running};
 use crate::solar;
 use crate::system::LocalSystem;
+mod account;
 mod emit;
 mod field;
+
+pub use account::HISTORY_ACCOUNTS;
 
 /// A craft, by the identifier whoever owns it uses. Opaque here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -184,6 +187,8 @@ pub struct Craft {
     /// Private for the reason `past` is: every change of motive has to settle it, and that
     /// happens in [`Craft::remembering`].
     fitting: Option<Fitting>,
+    /// The accounts it has had, so a moment already settled past is read from its own.
+    accounts: account::Accounts,
     /// The forms it has had, oldest first, so an observer is shown the one its light left with.
     /// See [`Craft::seen_at`]. Not saved, as `past` is not.
     seen: History,
@@ -216,6 +221,7 @@ impl Craft {
             // about its past as there is.
             known_from_s: f64::NEG_INFINITY,
             fitting: None,
+            accounts: account::Accounts::default(),
             seen: History::default(),
             glows: Glows::default(),
             lits: Vec::new(),
@@ -245,7 +251,7 @@ impl Craft {
         // order — this is the one place the two motives are both in hand, so it is the only
         // place that hand-over can happen.
         let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
-        let nose = self.facing_of(&before, began, at_s);
+        let nose = self.facing_of(&before, self.system.as_deref(), began, at_s);
         // **The plan is made from where the nose is, not from where the last order left it.**
         // A plan holds its start attitude as a parameter and is re-planned from it on the far
         // side of a wire or a checkpoint — see [`crate::resume`] — and what is re-planned from
@@ -304,6 +310,12 @@ impl Craft {
         self.known_from_s
     }
 
+    /// Answer for nothing before `at_s`. For a craft read back without its past, whose motive read
+    /// backward would show the order that began it before that order's light could arrive.
+    pub fn known_only_from(&mut self, at_s: f64) {
+        self.known_from_s = self.known_from_s.max(at_s);
+    }
+
     /// What to call it on screen: its name, or its kind and number.
     pub fn designation(&self) -> String {
         match &self.name {
@@ -340,20 +352,13 @@ impl Craft {
             self.motion.attitude = facing;
         }
         self.ended_s = Some(at_s);
-        self.fitting = None;
+        if let Some(last) = self.fitting.take() {
+            self.accounts.retire(last);
+        }
     }
 
     pub fn ended_s(&self) -> Option<f64> {
         self.ended_s
-    }
-
-    /// How fast it can turn, radians a second: from its form's moments if it has one, and from
-    /// its length if it is the ovoid. See [`crate::attitude`].
-    pub fn slew_rate_rad_s(&self) -> f64 {
-        match &self.fitting {
-            Some(fitting) => crate::attitude::rate_for_gyration(fitting.hull().gyration_m),
-            None => crate::attitude::rate_rad_s(self.length_m),
-        }
     }
 
     /// `drive`, turning at *this hull's* rate rather than at whatever was stamped on it.
@@ -386,15 +391,6 @@ impl Craft {
             * (half * HEIGHT_PER_LENGTH)
     }
 
-    /// What it weighs at a coordinate second, kilograms: its modules and its stored energy if it
-    /// has a fitting, and [`Craft::mass_kg`] if it does not.
-    pub fn mass_kg_at(&self, now_s: f64) -> f64 {
-        match &self.fitting {
-            Some(fitting) => fitting.mass_kg_at(&self.motion, now_s),
-            None => self.mass_kg(),
-        }
-    }
-
     /// What an unfitted craft weighs, kilograms.
     ///
     /// Size times what that size is made of. Nothing stores a mass, because a stored one could
@@ -405,9 +401,18 @@ impl Craft {
     }
 
     /// Which way the nose points at a coordinate second, or `None` when nothing decides it.
+    ///
+    /// Read from the stretch in force at `now_s`, as [`Craft::motion_at`] is, and with the hull of
+    /// [`Craft::fitting_at`]: the current motive or form read backward would show an observer an
+    /// order whose light has not reached them.
     pub fn facing_at(&self, now_s: f64) -> Option<DVec3> {
-        let began = self.past.last().map_or(f64::NEG_INFINITY, |entry| entry.until_s);
-        Some(self.facing_of(&self.motion, began, now_s))
+        let k = self.past.partition_point(|entry| entry.until_s <= now_s);
+        let began = k.checked_sub(1).map_or(f64::NEG_INFINITY, |j| self.past[j].until_s);
+        let (state, system) = match self.past.get(k) {
+            Some(entry) => (&entry.motion, entry.system.as_deref()),
+            None => (&self.motion, self.system.as_deref()),
+        };
+        Some(self.facing_of(state, system, began, now_s))
     }
 
     /// Where `state`'s nose points at `now_s`, for a motive that began at `began_s`.
@@ -417,26 +422,18 @@ impl Craft {
     /// `lightcone/docs/20-solar-power.md` — swinging from the attitude its last order left it at,
     /// at its hull's rate. The nose leans to the broadside's angle by the smallest turn; the
     /// renderer rolls the hull to its broadside's roll about it.
-    fn facing_of(&self, state: &ShipState, began_s: f64, now_s: f64) -> DVec3 {
+    fn facing_of(&self, state: &ShipState, system: Option<&LocalSystem>, began_s: f64, now_s: f64) -> DVec3 {
         let broadside = self
-            .fitting
-            .as_ref()
+            .fitting_at(now_s)
             .filter(|_| !state.is_under_way())
-            .zip(self.to_star(state, now_s))
+            .zip(to_star(state, system, now_s))
             .map(|(fitting, to_star)| solar::idle_nose(state.attitude, to_star, solar::idle_cos(fitting.geometry())));
         match broadside {
-            Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_rad_s(), now_s - began_s),
-            None => motion::facing_at(state, self.length_m, now_s),
+            Some(to) => crate::attitude::turned(state.attitude, to, self.slew_rate_at(now_s), now_s - began_s),
+            None => motion::facing_at(state, self.hull_m_at(now_s), now_s),
         }
     }
 
-    /// Unit vector from `state`'s position toward its system's primary at `t`.
-    fn to_star(&self, state: &ShipState, t: f64) -> Option<DVec3> {
-        let system = self.system.as_deref()?;
-        let star = system.star_position_at(t)?;
-        let (at, _) = motion::state_at(state, Some(system), t)?;
-        Some((star - at).normalize_or_zero()).filter(|d| *d != DVec3::ZERO)
-    }
 
     /// Where it is at a coordinate microsecond, light-microseconds from the world origin.
     pub fn position_at(&self, t_us: f64) -> DVec3 {
@@ -456,6 +453,7 @@ impl Craft {
     pub fn fit(&mut self, fitting: Option<Fitting>) {
         self.fitting = fitting;
         self.sync_length();
+        self.accounts.clear();
         self.glows.clear();
         self.lits.clear();
         self.note_lit();
@@ -508,7 +506,11 @@ impl Craft {
         let ended = fitting.steps_ending(fitting.since_s(), at_s);
         // Before the settlement, which drops a round it finds done.
         let running = running(&fitting);
-        fitting.settle(before.unwrap_or(&self.motion), at_s);
+        if at_s > fitting.since_s() {
+            self.accounts.settling(&fitting);
+            fitting.settle(before.unwrap_or(&self.motion), at_s);
+            self.accounts.settled(&fitting);
+        }
         self.fitting = Some(fitting);
         let was = self.length_m;
         self.sync_length();
@@ -568,7 +570,7 @@ impl Craft {
             return 0.0;
         }
         let (Some(distance_m), Some(to_star), Some(nose)) =
-            (self.star_distance_m_at(t), self.to_star(&self.motion, t), self.facing_at(t))
+            (self.star_distance_m_at(t), to_star(&self.motion, self.system.as_deref(), t), self.facing_at(t))
         else {
             return 0.0;
         };
@@ -613,42 +615,6 @@ impl Craft {
     pub fn settle(&mut self, now_s: f64) {
         self.collect_to(now_s);
         self.settle_fitting(None, now_s);
-    }
-
-    /// The drive a new order is clamped against: the kind's, turning at this hull's rate, and
-    /// pulling what its aft engines can move this mass at if it has a form.
-    pub fn rated_drive(&self, now_s: f64) -> crate::flight::Drive {
-        let mut drive = self.turning(self.kind.drive());
-        if let Some(fitting) = &self.fitting {
-            drive.accel_g = fitting.rated_g_at(&self.motion, now_s);
-        }
-        drive
-    }
-
-    /// Energy stored and not committed, joules. Unlimited for a craft with no fitting.
-    pub fn free_j_at(&self, now_s: f64) -> f64 {
-        match &self.fitting {
-            Some(fitting) => fitting.free_j_at(&self.motion, now_s),
-            None => f64::INFINITY,
-        }
-    }
-
-    /// Whether a refit is under way at `now_s`. Flying and refitting exclude each other.
-    pub fn is_refitting(&self, now_s: f64) -> bool {
-        self.fitting.as_ref().and_then(Fitting::refit).is_some_and(|r| !r.is_done(now_s))
-    }
-
-    /// What folding `event` would commit, joules, without folding it. Zero for an unfitted craft.
-    ///
-    /// The plan's whole remaining rapidity at this craft's mass now. [`Craft::apply`] commits the
-    /// same number, because it is the same arithmetic on the same state.
-    pub fn cost_of(&self, event: &Event) -> Result<f64, Rejected> {
-        let Some(fitting) = &self.fitting else { return Ok(0.0) };
-        let mut trial = self.motion.clone();
-        motion::apply(&mut trial, self.system.as_deref(), event)?;
-        let mut account = fitting.clone();
-        account.settle(&self.motion, event.at_t);
-        Ok(account.commit(&trial, event.at_t))
     }
 
     /// Settle to `now_s`, then change the account there.
@@ -992,6 +958,14 @@ impl Fleet {
             craft.advance(now_s, elapsed_s);
         }
     }
+}
+
+/// Unit vector from `state`'s position toward `system`'s primary at `t`.
+fn to_star(state: &ShipState, system: Option<&LocalSystem>, t: f64) -> Option<DVec3> {
+    let system = system?;
+    let star = system.star_position_at(t)?;
+    let (at, _) = motion::state_at(state, Some(system), t)?;
+    Some((star - at).normalize_or_zero()).filter(|d| *d != DVec3::ZERO)
 }
 
 #[cfg(test)]
@@ -1390,6 +1364,95 @@ mod tests {
         assert!(turning_w < 0.9 * broadside_w, "{turning_w} while turning, {broadside_w} broadside");
         let round_w = craft.starlight_w_at(cut_at + quarter * 1.01);
         assert!((round_w / broadside_w - 1.0).abs() < 1.0e-2, "{round_w} against {broadside_w}");
+    }
+
+    /// How a craft read before `t` looked, sampled across a crossing begun at 0, before and after
+    /// `then` is applied at `t`.
+    fn looks_before(t: f64, then: Change) -> Vec<(f64, [Looks; 2])> {
+        let Some(system) = sol() else { return Vec::new() };
+        let balance = crate::fitting::Balance::DEFAULT;
+        let mut craft = near_the_sun(&system, 0.1, None);
+        let drive = craft.rated_drive(0.0);
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let times: Vec<f64> = (0..60).map(|k| k as f64 * t / 60.0).collect();
+        let looks = |craft: &Craft, t: f64| {
+            let ends = crate::emit::emit_w(craft, t);
+            Looks {
+                position: craft.position_at(t * 1.0e6),
+                facing: craft.facing_at(t).unwrap_or(DVec3::NAN),
+                drive_w: crate::emit::drive_w(craft, &balance, t),
+                emit_w: ends.fore_w + ends.aft_w,
+                length_m: craft.seen_length_m_at(t),
+            }
+        };
+        let before: Vec<Looks> = times.iter().map(|&s| looks(&craft, s)).collect();
+        craft.apply(&Event { ship: ShipId(9), at_t: t, change: then }).unwrap();
+        times.iter().zip(before).map(|(&s, was)| (s, [was, looks(&craft, s)])).collect()
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct Looks {
+        position: DVec3,
+        facing: DVec3,
+        drive_w: f64,
+        emit_w: f64,
+        length_m: f64,
+    }
+
+    /// **An order at `t` does not change how the craft looked before `t`.** That light is still on
+    /// its way to observers further off, and a server that read the new motive backward would show
+    /// them the order before its light arrived.
+    #[test]
+    fn an_order_does_not_rewrite_how_the_craft_looked_before_it() {
+        for (t, [was, is]) in looks_before(600.0, Change::CutDrive) {
+            assert_eq!(was.position, is.position, "position at {t} s");
+            assert!((was.facing - is.facing).length() < 1.0e-12, "facing at {t} s was {} and is now {}", was.facing, is.facing);
+            assert_eq!(was.emit_w, is.emit_w, "emits at {t} s");
+            assert_eq!(was.length_m, is.length_m, "length at {t} s");
+        }
+    }
+
+    /// The same, for the drive's power, which is read from the mass: the cut settles the account, and
+    /// the account it settled is still the one asked about the burn before it.
+    #[test]
+    fn an_order_does_not_rewrite_the_drive_power_before_it() {
+        for (t, [was, is]) in looks_before(600.0, Change::CutDrive) {
+            assert_eq!(was.drive_w, is.drive_w, "drive at {t} s");
+        }
+    }
+
+    /// **A refit at `t` does not change how the craft looked before `t`** either: the idle lean
+    /// turns at the hull's rate and toward its broadside, and its exhaust leaves its engines' faces,
+    /// all the form's in force then.
+    #[test]
+    fn a_refit_does_not_rewrite_how_the_craft_looked_before_it() {
+        let Some(system) = sol() else { return };
+        let mut craft = near_the_sun(&system, 0.5, None);
+        let mut target = crate::form::Form::reference();
+        for part in &mut target.parts {
+            part.volume_m3 *= 1.5;
+        }
+        // Sent straight out and stopped, so the nose is swinging back to broadside from `cut_s`.
+        let drive = craft.rated_drive(0.0);
+        let to = craft.motion.position_ly + DVec3::X * 0.05;
+        craft.apply(&Event { ship: ShipId(9), at_t: 0.0, change: Change::Cross { to_ly: to, drive } }).unwrap();
+        let cut_s = 600.0;
+        craft.apply(&Event { ship: ShipId(9), at_t: cut_s, change: Change::CutDrive }).unwrap();
+        let quarter_s = 0.5 * std::f64::consts::PI / craft.slew_rate_rad_s();
+        let looks = |craft: &Craft, t: f64| (craft.facing_at(t).unwrap(), crate::emit::exhaust_face_m2(craft, t), craft.mass_kg_at(t));
+        let at_s = cut_s + 0.5 * quarter_s;
+        let times: Vec<f64> = (0..30).map(|k| 0.5 * cut_s + k as f64 * (at_s - 0.5 * cut_s) / 30.0).collect();
+        let before: Vec<_> = times.iter().map(|&t| looks(&craft, t)).collect();
+        let (rate, face) = (craft.slew_rate_rad_s(), before[0].1);
+        assert!((looks(&craft, at_s).0 - before[29].0).length() > 1.0e-3, "premise: the nose is still swinging");
+
+        assert!(craft.refit_at_once(target, at_s));
+        assert!((craft.slew_rate_rad_s() / rate - 1.0).abs() > 1.0e-3, "premise: the refit changed the turn rate");
+        assert!((crate::emit::exhaust_face_m2(&craft, at_s) / face - 1.0).abs() > 1.0e-3, "premise: and the faces");
+        for (&t, was) in times.iter().zip(before) {
+            assert_eq!(was, looks(&craft, t), "at {t} s");
+        }
     }
 
     /// **A plan is planned from the attitude the craft then records.** They are two halves of one

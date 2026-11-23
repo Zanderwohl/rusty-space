@@ -284,10 +284,10 @@ pub fn faces_w(craft: &Craft, balance: &Balance, now_s: f64) -> Ends {
     emit_w(craft, now_s).with_drive(drive_w(craft, balance, now_s))
 }
 
-/// The open faces a craft's exhaust leaves through, m²: its aft engines', or an unfitted hull's
-/// cross-section.
-pub fn exhaust_face_m2(craft: &Craft) -> f64 {
-    let faces = craft.fitting().and_then(|f| crate::form::capacity::aft_apertures(f.form(), f.balance()));
+/// The open faces a craft's exhaust leaves through at `now_s`, m²: its aft engines' then, or an
+/// unfitted hull's cross-section.
+pub fn exhaust_face_m2(craft: &Craft, now_s: f64) -> f64 {
+    let faces = craft.fitting_at(now_s).and_then(|f| crate::form::capacity::aft_apertures(f.form(), f.balance()));
     match faces {
         Some(faces) if !faces.is_empty() => faces.iter().map(|a| std::f64::consts::PI * a.radius_m * a.radius_m).sum(),
         _ => std::f64::consts::PI * (0.5 * BEAM_PER_LENGTH * craft.length_m).powi(2),

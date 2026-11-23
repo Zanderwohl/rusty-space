@@ -19,7 +19,7 @@
 //! `lightcone/docs/05-observation.md`.
 
 use lc_proto::{
-    ACK_DEPTH, Aim, Body, FactionId, MESSAGE_LIMIT, MessageKey, Order, Outbound, Refusal, Reported, Said,
+    ACK_DEPTH, Aim, Body, FactionId, MESSAGE_LIMIT, MessageKey, Order, Payload, Outbound, Refusal, Reported, Said,
     Secrecy, ShipId, Spoken,
 };
 use glam::DVec3;
@@ -107,8 +107,7 @@ const ANSWERED_DEPTH: usize = 64;
 
 /// What a transmission order becomes: an event to write, and a line for the transcript.
 pub(crate) struct Transmission {
-    pub kind: i16,
-    pub payload: String,
+    pub payload: Payload,
     pub beam: Beam,
     /// The transcript line, for the kinds that make one. `None` for a survey report, which is
     /// a transmission and not something anybody said.
@@ -189,8 +188,7 @@ impl<J: Journal> Server<J> {
                     stated: self.stated_by(id, *to, under, at),
                 };
                 Ok(Transmission {
-                    kind: lc_proto::kind::REPORT,
-                    payload: serde_json::to_string(&reported).unwrap_or_else(|_| "{}".into()),
+                    payload: Payload::Report(reported),
                     beam,
                     // In the transcript as a line saying it happened, never what it said: what it
                     // does at the far end is fold into what that craft knows, and nothing
@@ -234,15 +232,10 @@ impl<J: Journal> Server<J> {
         if observer.0 == event.source.0 {
             return;
         }
-        let claim = match event.kind {
-            lc_proto::kind::MESSAGE | lc_proto::kind::KEY => serde_json::from_str::<Spoken>(&event.payload).ok().and_then(|s| s.claim),
-            lc_proto::kind::REPORT => serde_json::from_str::<Reported>(&event.payload).ok().and_then(|r| r.claim),
-            _ => None,
-        };
-        let Some(claim) = claim else { return };
+        let Some(claim) = event.payload.claim() else { return };
         let sender = Witness(event.source.0 as u64);
         let hop = Hop { from: sender, to: Witness(observer.0 as u64), sent_s: event.t as f64 * 1.0e-6, received_s: arrive_t as f64 * 1.0e-6 };
-        self.aboard(observer).knowledge.heard_claim(sender, &claim, vec![hop]);
+        self.aboard(observer).knowledge.heard_claim(sender, claim, vec![hop]);
     }
 
     /// Whether a transmission is sealed to its addressee, and the faction key it is under.
@@ -298,11 +291,10 @@ impl<J: Journal> Server<J> {
             stated: self.stated_by(id, to, under, at),
         };
         Ok(Transmission {
-            kind: match content {
-                Content::Key | Content::Faction(_) => lc_proto::kind::KEY,
-                _ => lc_proto::kind::MESSAGE,
+            payload: match content {
+                Content::Key | Content::Faction(_) => Payload::Key(spoken),
+                _ => Payload::Message(spoken),
             },
-            payload: serde_json::to_string(&spoken).unwrap_or_else(|_| "{}".into()),
             beam,
             said: Some(Utterance { to, idem, sealed, under, content, acks, claim: self.claim_of(id).map(|c| c.name) }),
             reported: None,
@@ -430,7 +422,6 @@ impl<J: Journal> Server<J> {
             let sent = self.put_on_air(
                 id,
                 at,
-                spoken.kind,
                 SIGNAL_POWER_W,
                 spoken.payload,
                 &spoken.beam,
@@ -528,7 +519,7 @@ impl<J: Journal> Server<J> {
                 // Unreachable: the `let else` above is this arm.
                 Aim::Omni => return Ok(Beam::OMNI),
                 Aim::Ship(target) => {
-                    let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, sender, *target, at)
+                    let seen = chase::sighting(self.seeable(), &self.balance, self.sees_everything, sender, *target, at)
                         .ok_or(Refusal::NotInSight)?;
                     lc_world::signal::aim_at(
                         from,
@@ -737,46 +728,7 @@ impl<J: Journal> Server<J> {
 
 /// A message payload as this observer may have it.
 ///
-/// **The sealing, and the whole of it.** One event is stored with its body intact and each
-/// receiver is handed a copy with the body removed unless they are the addressee. Doing it here
-/// rather than at write time is what keeps one transmission one event: a sealed message
-/// duplicated per receiver would be several events sharing an emission time, and everything
-/// about the light cone rests on an event being a point.
-///
-/// An eavesdropper still learns that *something* was sent, by whom, to whom, and when — which
-/// is the truth about a signal you cannot decrypt, not a concession. What they do not get is the
-/// text.
-///
-/// Anything but a message passes through untouched, and a payload that will not parse does too:
-/// this is a filter on what is released, not a validator of what was written.
-///
-/// `holds` answers whether the observer holds a faction key as of this landing.
-pub(crate) fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(FactionId) -> bool) -> String {
-    let may_read = |to: Option<i64>, sealed: bool, under: Option<FactionId>| {
-        !(sealed && to != Some(observer.0)) && under.is_none_or(&holds)
-    };
-    if kind == lc_proto::kind::REPORT {
-        let Ok(mut reported) = serde_json::from_str::<Reported>(payload) else {
-            return payload.to_string();
-        };
-        if !may_read(reported.to, reported.sealed, reported.under) {
-            reported.body = None;
-            reported.stated = None;
-        }
-        return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
-    }
-    if kind != lc_proto::kind::MESSAGE && kind != lc_proto::kind::KEY {
-        return payload.to_string();
-    }
-    let Ok(mut spoken) = serde_json::from_str::<Spoken>(payload) else {
-        return payload.to_string();
-    };
-    if !may_read(spoken.to, spoken.sealed, spoken.under) {
-        spoken.body = Body::Unreadable;
-        spoken.stated = None;
-    }
-    serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
-}
+pub(crate) use lc_proto::redact;
 
 /// Whether `observer` may read a transmission landing on it at `arrive_t`: [`redact`]'s rule,
 /// for the paths that have the store's row rather than the payload.

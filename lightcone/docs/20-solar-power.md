@@ -250,7 +250,8 @@ perpendicular; a cluster, whose shadow is nearly as large from any side, leans i
 the star. A craft that has been idle since before anything is already there, having had
 forever to turn. A ship given an order starts the plan's turn from wherever the broadside turn had
 got to, which is what `Craft::remembering` already hands over. Nothing unfitted turns: a probe
-keeps the attitude it was left with.
+keeps the attitude it was left with. A moment already past is turned with the form the ship had
+then (`Craft::fitting_at`), so a refit does not reach back into light still on its way.
 
 That changes what a `Presence` carries, which is honest — a ship charging is a ship turned to its
 star — and it costs no protocol change, because `facing` is already on the wire.

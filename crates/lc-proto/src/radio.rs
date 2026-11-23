@@ -246,3 +246,4 @@ pub struct Said {
     /// What the sender called itself when it sent this. Appended last.
     pub claim: Option<String>,
 }
+

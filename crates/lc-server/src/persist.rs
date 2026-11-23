@@ -74,6 +74,10 @@ pub struct Saved {
     pub light: Light,
     /// A wreck's collapse, whose afterglow outlasts the light of its end.
     pub afterglow: Option<Afterglow>,
+    /// The collapse's event, so a craft that joins while its afterglow is still arriving is told
+    /// of it by the id everyone else heard. See [`crate::field::wrecks_in_progress`].
+    #[serde(default)]
+    pub collapse_event: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -149,6 +153,7 @@ pub fn save(
     radio: Radio,
     light: Light,
     afterglow: Option<Afterglow>,
+    collapse_event: Option<i64>,
     saved_t: i64,
 ) -> Ship {
     // A wreck as it was at its end, and read back there: its motive goes on changing after it, a
@@ -180,6 +185,7 @@ pub fn save(
         ended_s: craft.ended_s(),
         light,
         afterglow,
+        collapse_event,
     };
     Ship {
         ship_id: craft.id.0,
@@ -204,13 +210,17 @@ pub fn load(row: &Ship, system: Option<&lc_world::system::LocalSystem>) -> Resul
     craft.name = saved.name;
     craft.noise_floor = saved.noise_floor;
     craft.length_m = saved.length_m;
-    // Assigned rather than changed, and it leaves the craft with no history — so the motive it
-    // was saved on extrapolates backwards for any time before the save. That is the best answer
-    // there is: the shard genuinely does not know what this craft was doing before it was
-    // written down, and the saved motive is what it *was* doing at the moment it was. It is not
-    // a leak either way, because nothing after the save is involved. From here on the craft
-    // records its stretches like any other, and `catch_up` fills the gap to now with real ones.
-    craft.motion = snapshot.restore(system, row.saved_t as f64 * 1.0e-6);
+    // Assigned rather than changed, so the craft comes back with no history. A living craft then
+    // answers for nothing before the save: read backward, the saved motive would show the order
+    // that began it before that order's light reached observers. Those observers see nothing
+    // until light from after the save arrives. A wreck is exempt, because hiding it would hide all
+    // the light of its end still in flight; its last motive is read backward instead, which can
+    // show its last order early. See `lightcone/docs/08-networking.md` §After a restart.
+    let saved_s = row.saved_t as f64 * 1.0e-6;
+    craft.motion = snapshot.restore(system, saved_s);
+    if saved.ended_s.is_none() {
+        craft.known_only_from(saved_s);
+    }
     let fitting = saved.fitting.as_ref().map(|fitting| Fitting::from_wire(fitting, saved.field.as_ref()));
     let starlight_w = fitting.as_ref().map(Fitting::starlight_w);
     craft.fit(fitting);
@@ -295,9 +305,14 @@ impl<J: Journal> Server<J> {
                             .map(|with| with.iter().copied().collect())
                             .unwrap_or_default(),
                     };
-                    let afterglow = self.afterglows.get(&craft.id).copied();
-                    save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), afterglow, self.now_t)
+                    save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), None, None, self.now_t)
                 })
+                // A wreck is nobody's and resumes nothing: its end, its light, and its afterglow.
+                .chain(self.brights.wrecks().map(|wreck| {
+                    let id = wreck.craft.id;
+                    let light = self.emissions.light_of(id);
+                    save(&wreck.craft, None, Standing::default(), None, Radio::default(), light, Some(wreck.afterglow), wreck.event_id, self.now_t)
+                }))
                 .collect(),
         }
     }
@@ -341,11 +356,12 @@ impl<J: Journal> Server<J> {
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Nobody's, and nothing to resume: it is there for its light and the sweep.
                     if craft.ended_s().is_some() {
-                        if let Some(afterglow) = decode(row).ok().and_then(|saved| saved.afterglow) {
-                            self.afterglows.insert(craft.id, afterglow);
-                        }
                         self.next_ship = self.next_ship.max(craft.id.0 + 1);
-                        self.fleet.insert(craft);
+                        match decode(row).ok().and_then(|saved| Some((saved.afterglow?, saved.collapse_event))) {
+                            Some((afterglow, event_id)) => self.brights.push(Box::new(crate::bright::Wreck { craft, afterglow, event_id })),
+                            // An end with no light to follow is nothing to keep.
+                            None => self.destroyed.push(craft.id.0),
+                        }
                         continue;
                     }
                     // Its owner is told of each step from here, as before the restart.
@@ -471,7 +487,7 @@ mod tests {
     #[test]
     fn a_craft_saved_and_read_back_is_the_same_craft() {
         let craft = a_craft();
-        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, 7_000_000);
+        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, None, 7_000_000);
         assert_eq!(row.ship_id, 5);
         assert_eq!(row.account.as_deref(), Some("acct-1"));
 
@@ -484,6 +500,28 @@ mod tests {
         assert_ne!(back.length_m, back.kind.length_m(), "premise: it is not the kind's default");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.motive, craft.motion.motive);
+    }
+
+    /// **A restarted craft answers for nothing before its save.** It comes back without the stretches
+    /// it flew, so its saved motive read backward would put it where its last order sent it before
+    /// that order was given. A wreck is exempt, so the light of its end stays in flight.
+    #[test]
+    fn a_restarted_craft_answers_for_nothing_before_its_save() {
+        use lc_spacetime::Worldline;
+        let mut craft = a_craft();
+        let at = craft.motion.position_ly;
+        craft.drift_from(at, DVec3::new(1.0e-3, 0.0, 0.0), 2.0);
+        let (saved_t, before_s) = (7_000_000, 1.0);
+        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, saved_t);
+
+        let back = load(&row, None).expect("it reads");
+        assert_eq!(back.worldline().defined_over().0, saved_t as f64);
+        let backward = lc_world::motion::state_at(&back.motion, None, before_s).unwrap().0;
+        assert!(backward.distance(craft.motion_at(before_s).position_ly) > 0.0, "premise: read backward, it would have moved early");
+
+        craft.end(5.0);
+        let wreck = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, saved_t), None).unwrap();
+        assert_eq!(wreck.known_from_s(), f64::NEG_INFINITY, "a wreck lost the light of its end");
     }
 
     /// The numbers are a storage format and may never move. A kind written as 2 has to read
@@ -513,7 +551,7 @@ mod tests {
         craft.motion.position_ly = DVec3::new(4.200079062537049, awkward, 0.0);
         craft.motion.beta = DVec3::new(awkward, 0.0, 1.0e-9);
 
-        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.position_ly, craft.motion.position_ly);
         assert_eq!(back.motion.beta, craft.motion.beta);
         assert_eq!(
@@ -533,7 +571,7 @@ mod tests {
     /// A row written at another format is refused, not guessed at.
     #[test]
     fn a_row_from_another_format_is_refused() {
-        let mut row = save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, 0);
+        let mut row = save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, None, 0);
         row.format = SAVE_FORMAT - 1;
         let why = load(&row, None).expect_err("it should refuse");
         assert!(why.contains(&format!("format {}", SAVE_FORMAT - 1)), "{why}");
@@ -548,18 +586,19 @@ mod tests {
         let mut craft = a_craft();
         craft.end(12.5);
         let afterglow = Afterglow { from: [1.0, 2.0, 3.0], at_s: 12.5, spike_j: 1.0e30, spike_k: 4.0e6, energy_j: 2.0e29, duration_s: 3.0, limit_k: 1.0e4 };
-        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), Some(afterglow), 0);
+        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), Some(afterglow), Some(41), 0);
         assert_eq!(decode(&row).unwrap().afterglow, Some(afterglow), "premise: it is written");
+        assert_eq!(decode(&row).unwrap().collapse_event, Some(41), "premise: it is written");
 
         let Value::Map(mut fields) = crate::cbor::decode::<Value>(&row.state).unwrap() else { panic!("a map") };
         let before = fields.len();
-        fields.retain(|(key, _)| key.as_text() != Some("afterglow"));
-        assert_eq!(fields.len(), before - 1, "premise: the field was there to take out");
+        fields.retain(|(key, _)| !matches!(key.as_text(), Some("afterglow" | "collapse_event")));
+        assert_eq!(fields.len(), before - 2, "premise: the fields were there to take out");
         let older = Ship { state: crate::cbor::encode(&Value::Map(fields)), ..row.clone() };
 
         let read = decode(&older).expect("an older row reads");
-        assert_eq!(read.afterglow, None);
-        assert_eq!(read, Saved { afterglow: None, ..decode(&row).unwrap() }, "and the rest of it is as written");
+        assert_eq!((read.afterglow, read.collapse_event), (None, None));
+        assert_eq!(read, Saved { afterglow: None, collapse_event: None, ..decode(&row).unwrap() }, "and the rest of it is as written");
     }
 
     /// A pursuit is written down with the craft, so a ship hanging about with another is still
@@ -571,13 +610,13 @@ mod tests {
             closeness: lc_proto::Closeness::Intimate,
             approach: lc_proto::Approach::Direct,
         };
-        let row = save(&a_craft(), None, Standing { pursuit: Some(pursuit), parked: false }, None, Radio::default(), Light::default(), None, 0);
+        let row = save(&a_craft(), None, Standing { pursuit: Some(pursuit), parked: false }, None, Radio::default(), Light::default(), None, None, 0);
         assert_eq!(decode(&row).expect("it reads").pursuit, Some(pursuit));
     }
 
     #[test]
     fn a_standing_parking_orbit_survives_the_round_trip() {
-        let row = save(&a_craft(), None, Standing { pursuit: None, parked: true }, None, Radio::default(), Light::default(), None, 0);
+        let row = save(&a_craft(), None, Standing { pursuit: None, parked: true }, None, Radio::default(), Light::default(), None, None, 0);
         assert!(decode(&row).expect("it reads").parked);
     }
 
@@ -588,7 +627,7 @@ mod tests {
             owed: vec![Owed { due_t: 9, from: ShipId(7), idem: 3, beamed: true, source_at: [1.0, 2.0, 3.0] }],
             sharing: vec![lc_proto::Chat::Faction(lc_proto::FactionId(4))],
         };
-        let row = save(&a_craft(), None, Standing::default(), None, radio.clone(), Light::default(), None, 0);
+        let row = save(&a_craft(), None, Standing::default(), None, radio.clone(), Light::default(), None, None, 0);
         assert_eq!(decode(&row).expect("it reads").radio, radio);
     }
 
@@ -611,7 +650,7 @@ mod tests {
         }
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)));
-        let row = save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0);
+        let row = save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, None, 0);
         let mut state = crate::cbor::decode::<Value>(&row.state).unwrap();
         assert!(strip(&mut state) > 0, "premise: the balance is saved");
         let older = Ship { state: crate::cbor::encode(&state), ..row };
@@ -628,7 +667,7 @@ mod tests {
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::full(Form::reference(), Balance::DEFAULT, 0.0)));
         craft.drain(3.0e25, 5.0);
-        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 20_000_000), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, None, 20_000_000), None).expect("it reads");
         assert_eq!(back.fitting(), craft.fitting());
         assert_eq!(back.length_m, craft.length_m);
 
@@ -640,7 +679,7 @@ mod tests {
         let mid_s = 10.0 + 0.5 * (plan.steps()[0].ends_s() + plan.steps()[1].ends_s());
         craft.settle(mid_s);
         let saved_t = (mid_s * 1.0e6) as i64;
-        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, saved_t), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, None, saved_t), None).expect("it reads");
         assert!(back.is_refitting(mid_s));
         assert_eq!(back.fitting(), craft.fitting());
         assert_ne!(back.fitting().unwrap().form(), &Form::reference(), "premise: a step had finished");
@@ -661,7 +700,7 @@ mod tests {
         let full = Fitting::full(lc_world::form::Form::reference(), b, 0.0);
         let mut craft = Craft::at(CraftId(5), Kind::Ship, DVec3::ZERO);
         craft.fit(Some(Fitting::from_account(&Account { heat_j: 3.0 * b.module_energy_j(), waste_j: b.module_energy_j(), ..full.account() }, b)));
-        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, Some("acct"), Standing::default(), None, Radio::default(), Light::default(), None, None, 0), None).expect("it reads");
         assert_eq!(back.fitting().unwrap().heat_j_at(&back.motion, 0.0), 3.0 * b.module_energy_j());
         assert_eq!(back.fitting().unwrap().account().waste_j, b.module_energy_j());
         assert_eq!(back.fitting(), craft.fitting());
@@ -673,10 +712,10 @@ mod tests {
     fn a_wreck_comes_back_ended_and_owning_nothing() {
         let mut craft = a_craft();
         craft.end(12.5);
-        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, 20_000_000);
+        let row = save(&craft, Some("acct-1"), Standing::default(), None, Radio::default(), Light::default(), None, None, 20_000_000);
         assert_eq!(row.account, None);
         assert_eq!(load(&row, None).expect("it reads").ended_s(), Some(12.5));
-        assert_eq!(load(&save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).unwrap().ended_s(), None);
+        assert_eq!(load(&save(&a_craft(), None, Standing::default(), None, Radio::default(), Light::default(), None, None, 0), None).unwrap().ended_s(), None);
     }
 
     /// Its crossing arrived after it was destroyed and before the save: it comes back where it
@@ -696,7 +735,7 @@ mod tests {
         let end_t = end_s * 1.0e6;
         let died = craft.position_at(end_t);
 
-        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, (2.0 * arrive_s * 1.0e6) as i64);
+        let row = save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, (2.0 * arrive_s * 1.0e6) as i64);
         let back = load(&row, None).expect("it reads");
         assert!(back.position_at(end_t).distance(died) < 1.0e-3, "{} {died}", back.position_at(end_t));
         assert!(back.worldline().velocity_at(end_t).distance(craft.worldline().velocity_at(end_t)) < 1.0e-12);
@@ -721,7 +760,7 @@ mod tests {
     fn the_crews_clock_survives_the_round_trip() {
         let mut craft = a_craft();
         craft.motion.clock_s = 86_400.0 * 365.0;
-        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 0), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, 0), None).expect("it reads");
         assert_eq!(back.motion.clock_s, craft.motion.clock_s);
     }
 
@@ -730,7 +769,7 @@ mod tests {
         let mut craft = a_craft();
         craft.motion.beta = DVec3::new(0.0, 0.1, 0.0);
         craft.motion.resume_drifting(DVec3::new(9.0, 0.0, 0.0), 1_234.0);
-        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, 5_000_000), None).expect("it reads");
+        let back = load(&save(&craft, None, Standing::default(), None, Radio::default(), Light::default(), None, None, 5_000_000), None).expect("it reads");
         match back.motion.motive {
             Motive::Drifting { from_ly, since_t } => {
                 assert_eq!(from_ly, DVec3::new(9.0, 0.0, 0.0));

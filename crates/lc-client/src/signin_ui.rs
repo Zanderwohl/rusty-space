@@ -262,6 +262,10 @@ fn handle(
     mut requests: MessageReader<Requested>,
     mut signin: ResMut<Signin>,
     mut ui: ResMut<Ui>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
+    mut ticket: ResMut<crate::Ticket>,
+    mut game: ResMut<crate::app::Game>,
+    mut wrecks: ResMut<crate::field::Wrecks>,
 ) {
     for request in requests.read() {
         match &request.0 {
@@ -278,6 +282,16 @@ fn handle(
                 let _ = signin.vault.clear();
                 signin.grant = None;
                 signin.session = Session::SignedOut;
+                // The socket opens at the menu, so it is already joined as this account, and the
+                // session already holds what it learned. The next account gets neither.
+                uplink.close();
+                ticket.0 = None;
+                // A ticket still being minted is this account's, and would reopen the socket.
+                *signin.minting.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                *game = crate::app::Game::before_the_game();
+                // Which collapses it has heard of: the next account hears them for itself.
+                *wrecks = default();
+                ui.forget_account();
             }
             // Opening the form is all this does; submitting it is `password_submit`, which
             // the egui panel calls directly because it owns the typed text.
@@ -796,5 +810,56 @@ mod tests {
         signin.to_main.send((signin.attempt, granted())).unwrap();
         take_reports(&mut signin);
         assert!(matches!(signin.session, Session::SignedIn(_)), "the current one still lands");
+    }
+
+    /// The socket is open at the menu, joined as whoever signed in. Signing out closes it and
+    /// forgets what it said, and nothing reopens it until another account has a ticket.
+    #[test]
+    fn signing_out_closes_the_game_socket() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<Requested>>();
+        let mut ui = crate::ui::UiState::default();
+        ui.selected_craft = Some(lc_proto::ShipId(7));
+        ui.heard(lc_proto::ShipId(7), "a's news", 0.0);
+        ui.exposure_offset = Some(1.5);
+        world.insert_resource(Ui(ui));
+        world.init_resource::<crate::field::Wrecks>();
+        world.insert_resource(crate::Ticket(Some("a's ticket".into())));
+        let mut game = crate::app::Game::before_the_game();
+        game.0.issue_charts(crate::session::CHARTED_LY);
+        let learned = game.0.knowledge.len();
+        world.insert_resource(game);
+        let mut uplink = crate::uplink::Uplink::default();
+        uplink.open(Box::new(crate::link::Offline::new()));
+        uplink.parked = true;
+        world.insert_resource(uplink);
+        let (to_ticket, minting) = channel();
+        world.insert_resource(Signin {
+            broker: Some(Broker::new("https://accounts.example", "shard-1")),
+            vault: Vault::memory(),
+            session: Session::SignedIn(Identity { account_id: "a".into(), display_name: "Ada".into() }),
+            grant: Some("a's grant".into()),
+            form: None,
+            from_tasks: Mutex::new(channel().1),
+            to_main: channel().0,
+            attempt: 0,
+            minting: Mutex::new(Some(minting)),
+        });
+
+        world.write_message(Requested(Action::SignOut));
+        world.run_system_once(handle).unwrap();
+
+        let uplink = world.resource::<crate::uplink::Uplink>();
+        assert_eq!(uplink.state, crate::uplink::State::Offline);
+        assert!(!uplink.parked, "the old account's state outlived its socket");
+        assert_eq!(world.resource::<crate::Ticket>().0, None);
+        assert!(learned > 0 && world.resource::<crate::app::Game>().0.knowledge.is_empty(), "the next account inherits {learned} pages");
+        assert!(to_ticket.send(Ok("late".into())).is_err(), "a ticket still being minted would reopen it");
+        let ui = &world.resource::<Ui>().0;
+        assert_eq!(ui.selected_craft, None, "the next account sees what the last one picked");
+        assert!(ui.notifications.is_empty(), "the next account reads what the last one heard");
+        assert_eq!(ui.exposure_offset, Some(1.5), "how this machine draws is not the account's");
     }
 }

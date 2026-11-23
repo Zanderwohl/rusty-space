@@ -506,6 +506,13 @@ pub struct Sighting {
     pub payload: String,
 }
 
+impl Sighting {
+    /// What [`Sighting::payload`] says, as the kind it is.
+    pub fn read_payload(&self) -> Result<Payload, PayloadError> {
+        Payload::from_json(self.kind, &self.payload)
+    }
+}
+
 /// One craft as another sees it: where it appeared to be, and when that light left.
 ///
 /// An **appearance**, never a state. [`Motion`] is a recipe, and a recipe for someone else's
@@ -568,94 +575,6 @@ pub struct Presence {
     pub glow: Option<Glow>,
     /// Only for an observer inside one of the craft's beams whose light is arriving.
     pub glare: Option<Glare>,
-}
-
-/// A sighting that has passed the gate, and the only thing the event channel can carry.
-///
-/// The point of the wrapper is that it cannot be built any other way. "Every outbound message
-/// passes one gate" is then a fact the compiler enforces rather than a rule a reviewer has to
-/// notice being broken: there is no second path to a socket because there is no second way to
-/// make one of these.
-///
-/// The field is private, so nothing in this process can make one except the gate:
-///
-/// ```compile_fail
-/// # use lc_proto::{Cleared, Sighting};
-/// let forged: Cleared<Sighting> = Cleared { inner: todo!() };
-/// ```
-///
-/// and none through a pattern either:
-///
-/// ```compile_fail
-/// # use lc_proto::{Cleared, Sighting};
-/// fn unwrap(c: Cleared<Sighting>) -> Sighting {
-///     let Cleared { inner } = c;
-///     inner
-/// }
-/// ```
-///
-/// Deserializing one is not a hole in that, and it is worth being exact about why. A `Cleared`
-/// read off the wire is a claim by whoever sent it — it says *a server released this*, not
-/// *this passed our gate*. The invariant is about what a process emits, and a server only ever
-/// emits ones it built with [`Cleared::clear`]; the client is the end that decodes them.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Cleared<T> {
-    inner: T,
-}
-
-/// Why a sighting was not cleared. Returned rather than logged, so a caller cannot ignore it
-/// by accident.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Withheld {
-    /// Its light has not reached the observer yet. The hard gate.
-    StillInFlight,
-    /// It reached the observer, below the noise floor. Arrival is not detection.
-    BelowNoiseFloor,
-}
-
-impl Cleared<Sighting> {
-    /// **The gate.** The only way a sighting becomes sendable.
-    ///
-    /// Two tests, in the order they matter. The light cone is the one that cannot be relaxed:
-    /// `arrive_t <= now_t` or the client is being told something it could not know, and there
-    /// is no threshold, subscription or optimization that may be allowed to reverse it. The
-    /// noise floor is second and prunes far more, but it is a detection rule rather than a
-    /// causality one.
-    pub fn clear(sighting: Sighting, now_t: i64, noise_floor: f32) -> Result<Self, Withheld> {
-        if sighting.arrive_t > now_t {
-            return Err(Withheld::StillInFlight);
-        }
-        if sighting.strength < noise_floor {
-            return Err(Withheld::BelowNoiseFloor);
-        }
-        Ok(Self { inner: sighting })
-    }
-}
-
-impl Cleared<Presence> {
-    /// **The same gate, for what a client is told about other craft.**
-    ///
-    /// One test rather than two: `arrive_t <= now_t` or the client is being shown a ship where
-    /// it has not yet been seen to be. There is no second test here because there is no
-    /// `strength` to compare — whether a hull is large enough to make out is a question about
-    /// the observer and the distance, which the caller has and this does not, so the visibility
-    /// cull happens before a `Presence` is built at all. Causality is what the type enforces.
-    pub fn clear(presence: Presence, now_t: i64) -> Result<Self, Withheld> {
-        if presence.arrive_t > now_t {
-            return Err(Withheld::StillInFlight);
-        }
-        Ok(Self { inner: presence })
-    }
-}
-
-impl<T> Cleared<T> {
-    pub fn get(&self) -> &T {
-        &self.inner
-    }
-
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
 }
 
 /// A book on the shelf.
@@ -885,14 +804,8 @@ pub enum Outbound {
     /// This client's ship reached `Q_max` at `at_t` and released `released_j` as light. The
     /// account now flies `successor`, a new starting ship. Observers learn of it from the light.
     Collapsed { ship_id: ShipId, at_t: i64, released_j: f64, successor: ShipId },
-    /// A beam's power at this ship changed at `arrive_t`, told when that light arrives and not
-    /// before: first when it lands, again whenever the emitter's power changes, and with
-    /// `power_w` zero when it stops. `power_w` reaches the field before its absorptivity.
-    ///
-    /// No end time: an emitter can stop early, and when it meant to stop is its own business
-    /// until the light of stopping arrives. `beam` is the emit's event id, so two beams on one
-    /// bearing stay apart. `bearing` is a unit vector toward the source, in world axes.
-    Illuminated { ship_id: ShipId, beam: i64, bearing: [f64; 3], spectrum: Spectrum, power_w: f64, arrive_t: i64 },
+    /// A beam on this ship changed. Cleared, by construction.
+    Illuminated(Cleared<Illumination>),
     /// The account's presets, whole. Sent after `Welcome` and after each change.
     Presets(Vec<Preset>),
     /// A standing [`Order::Park`], stated on sign-in as [`Outbound::Pursuing`] is.
@@ -1014,12 +927,16 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, postcard::Er
 /// a format that is not self-describing cannot notice a field that moved, so this is what
 /// notices.
 pub mod golden;
+mod event;
+mod gate;
 mod field;
 mod fitting;
 pub mod form;
 mod knowing;
 mod radio;
 
+pub use event::{Addressing, Burned, Cut, Emitted, Payload, PayloadError, redact};
+pub use gate::{Arrives, Cleared, Illumination, Withheld};
 pub use field::{Apertures, Field, FieldMode, Glare, Glow, Lead, Lit, Shade, Spectrum, Switch};
 pub use fitting::{Balance, Building, Change, Fitting, Round, Shortfall};
 pub use form::{Form, FormFault, Hull, Preset};
@@ -1384,14 +1301,15 @@ mod tests {
     }
 
     fn illuminated() -> Outbound {
-        Outbound::Illuminated {
+        let lit = Illumination {
             ship_id: ShipId(42),
             beam: 9,
             bearing: [0.0, 0.6, 0.8],
             spectrum: Spectrum::Line { wavelength_m: 1.0e-6 },
             power_w: 2.5e17,
             arrive_t: 1_000_000,
-        }
+        };
+        Outbound::Illuminated(Cleared::arrived(lit, 1_000_000).unwrap())
     }
 
     fn fitted() -> Outbound {
@@ -2010,6 +1928,11 @@ mod tests {
         // The boundary is inclusive: light arriving exactly now has arrived.
         assert!(Cleared::<Sighting>::clear(sighting(now, 1.0), now, 0.0).is_ok());
         assert!(Cleared::<Sighting>::clear(sighting(now - 1, 1.0), now, 0.0).is_ok());
+
+        let Outbound::Illuminated(lit) = illuminated() else { unreachable!() };
+        let lit = lit.into_inner();
+        assert_eq!(Cleared::arrived(lit.clone(), lit.arrive_t - 1), Err(Withheld::StillInFlight), "a beam one microsecond early");
+        assert!(Cleared::arrived(lit.clone(), lit.arrive_t).is_ok());
     }
 
     /// Arrival is not detection, and the two refusals are distinguishable — a client that is

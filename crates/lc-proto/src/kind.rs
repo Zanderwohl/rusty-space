@@ -1,5 +1,6 @@
 //! Event kinds, as [`Sighting::kind`](crate::Sighting::kind) carries them. Named here because both
-//! ends read them.
+//! ends read them. What each carries is [`Payload`](crate::Payload), whose `kind` is the only place
+//! a variant and its number are paired.
 
 pub const TRANSMIT: i16 = 1;
 /// An order that lights the drive, stamped when it was given.

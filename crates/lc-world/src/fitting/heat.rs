@@ -206,7 +206,7 @@ impl Fitting {
         let mut edges = motion.map_or_else(Vec::new, |m| cost::lit_edges(m, self.since_s, until_s));
         edges.extend(self.lit.iter().flat_map(|lit| [lit.from_s, lit.until_s]).filter(|&t| t > self.since_s && t < until_s));
         edges.extend(self.posture.switch.map(|s| s.done_s).filter(|&t| t > self.since_s && t < until_s));
-        for piece in pieces(self.refit.as_ref(), &self.balance, self.since_s, until_s, &edges) {
+        for piece in pieces(self.refit.as_deref(), &self.balance, self.since_s, until_s, &edges) {
             let dt_s = piece.until_s - at_s;
             let emitted_w = motion.map_or(0.0, |m| self.emitted_w(m, at_s, piece.until_s));
             let waste_w = motion.map_or(0.0, |m| self.waste_w(m, at_s, piece.until_s));

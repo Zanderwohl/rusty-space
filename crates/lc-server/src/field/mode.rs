@@ -34,7 +34,7 @@ impl<J: Journal> Server<J> {
     ) {
         let now_s = self.now_t() as f64 * 1.0e-6;
         let ids: Vec<CraftId> =
-            self.fleet.iter().filter(|c| c.ended_s().is_none() && c.fitting().is_some()).map(|c| c.id).collect();
+            self.fleet.iter().filter(|c| c.fitting().is_some()).map(|c| c.id).collect();
         for id in ids {
             while self.keep_field_mode(id, now_s, after_t, events) {
                 self.tell_fitted(wire, id);
@@ -81,10 +81,9 @@ impl<J: Journal> Server<J> {
         let clear_absorptivity = craft.fitting().map_or(0.0, |f| f.balance().clear_absorptivity);
         // What changes is the starlight it reflects.
         let power_w = craft.starlight_w_at(done_s) * (1.0 - clear_absorptivity);
-        let payload = serde_json::to_string(&ShadeChange { shade: switch.to.into() }).unwrap_or_else(|_| "{}".into());
         // The clamp moves the stamp only on the order path, for a switch shorter than a tick.
         let at_t = ((done_s * 1.0e6).ceil() as i64).clamp(after_t + 1, self.now_t());
-        self.emit(id, lc_proto::kind::SHADE, power_w, payload, at_t, events);
+        self.emit(id, power_w, lc_proto::Payload::Shade(ShadeChange { shade: switch.to.into() }), at_t, events);
         true
     }
 
@@ -200,8 +199,11 @@ mod tests {
             .journal()
             .events
             .iter()
-            .filter(|e| e.kind == lc_proto::kind::SHADE && e.source == SHIP)
-            .map(|e| (e.t, serde_json::from_str::<ShadeChange>(&e.payload).unwrap().shade))
+            .filter(|e| e.source == SHIP)
+            .filter_map(|e| match &e.payload {
+                lc_proto::Payload::Shade(change) => Some((e.t, change.shade)),
+                _ => None,
+            })
             .collect()
     }
 
@@ -272,7 +274,7 @@ mod tests {
         }
         let flipped_t = to_us(done_s);
         assert_eq!(flips(&server), vec![(flipped_t, Shade::Black)]);
-        let event = server.journal().events.iter().find(|e| e.kind == lc_proto::kind::SHADE).unwrap();
+        let event = server.journal().events.iter().find(|e| e.kind() == lc_proto::kind::SHADE).unwrap();
         assert!(event.at.distance(server.ship(SHIP).unwrap().position_at(flipped_t as f64)) < 1.0);
         let [(told_t, sighting)] = &heard[..] else { panic!("{heard:?}") };
         assert_eq!((sighting.emitted_t, sighting.arrive_t), (flipped_t, flipped_t + APART_US as i64));

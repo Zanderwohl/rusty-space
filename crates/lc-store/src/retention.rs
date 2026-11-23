@@ -7,7 +7,8 @@
 //! it away would leave a tick holding an identifier with nothing behind it.
 //!
 //! And the third tier is archive, not drop: replays and the god view read old events, so it has
-//! to be reversible. Deliveries are dropped. See `lightcone/docs/02-event-store.md`.
+//! to be reversible. Deliveries are archived too, for a client catching up from before the cutoff
+//! (`lc-catchup`). See `lightcone/docs/02-event-store.md`.
 
 use tokio_postgres::{Client, Error};
 
@@ -63,7 +64,9 @@ pub struct Policy {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Swept {
-    pub dropped: Vec<Partition>,
+    /// Delivery partitions moved to `deliveries_archive`.
+    pub deliveries: Vec<Partition>,
+    /// Event partitions moved to `events_archive`.
     pub archived: Vec<Partition>,
     /// Fronts forgotten, which are rows and not partitions.
     pub fronts: u64,
@@ -72,7 +75,7 @@ pub struct Swept {
 impl Swept {
     /// Partitions retired, which is what [`Policy::most`] counts.
     pub fn len(&self) -> usize {
-        self.dropped.len() + self.archived.len()
+        self.deliveries.len() + self.archived.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -91,8 +94,11 @@ pub async fn sweep(client: &Client, now_t: i64, policy: Policy) -> Result<Swept,
         if partition.to_t > cutoff || swept.len() >= policy.most {
             break;
         }
-        if drop_partition(client, "deliveries", &partition.child).await? {
-            swept.dropped.push(partition);
+        // Archived, not dropped: what landed on a craft is what a client back after longer than
+        // this is told, and the light-arrival solve that found it cannot be run again without
+        // the worldline it was run against.
+        if detach(client, "deliveries", &partition.child).await? {
+            swept.deliveries.push(partition);
         }
     }
     for partition in older_and_unreferenced(client, cutoff, policy.most - swept.len()).await? {
@@ -309,6 +315,7 @@ mod tests {
             arrive_t: now + SPAN_US / 2,
             event_id: ancient.id,
             strength: 1.0,
+            direction: None,
         }])
         .await
         .unwrap();

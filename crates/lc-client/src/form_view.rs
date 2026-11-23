@@ -832,8 +832,13 @@ fn put_away(
     mut commands: Commands,
     mut surface: ResMut<FormSurface>,
     placed: Query<Entity, Or<(With<FormViewRoot>, With<Chrome>, With<Picture>)>>,
+    mut cameras: Query<&mut Camera, Or<(With<FormCamera>, With<FormHandleCamera>)>>,
 ) {
     surface.laid = None;
+    // Only `place` switches them, and it runs only in game: left on, they render an empty target forever.
+    for mut camera in &mut cameras {
+        camera.is_active = false;
+    }
     for entity in &placed {
         commands.entity(entity).despawn();
     }

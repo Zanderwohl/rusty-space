@@ -316,25 +316,6 @@ impl Flare {
     }
 }
 
-/// What an EMIT sighting carries under `emission`, as far as an eye needs it.
-#[derive(serde::Deserialize)]
-struct Emitted {
-    beam: i64,
-    /// Where it left, light-microseconds.
-    from: [f64; 3],
-    axis: [f64; 3],
-    half_angle_rad: f64,
-    spectrum: Spectrum,
-    power_w: f64,
-    #[serde(default)]
-    burst_j: f64,
-}
-
-#[derive(serde::Deserialize)]
-struct Carrying {
-    emission: Emitted,
-}
-
 /// Burns and emissions from their sightings, until each has gone out and been shown.
 #[derive(Resource, Default)]
 pub struct Flares {
@@ -358,21 +339,23 @@ impl Flares {
             self.taken.insert(sighting.event_id);
             let source = ShipId(sighting.source_id);
             let arrive_s = sighting.arrive_t as f64 * 1e-6;
-            let (beam, lit) = if sighting.kind == lc_proto::kind::DRIVE {
-                let Ok(change) = serde_json::from_str::<lc_proto::DriveChange>(&sighting.payload) else { continue };
-                let ends = Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w }.with_drive(change.power_w);
-                (None, (!ends.is_dark()).then_some(Lit::Faces(ends)))
-            } else {
-                let Ok(Carrying { emission }) = serde_json::from_str::<Carrying>(&sighting.payload) else { continue };
-                if emission.burst_j > 0.0 {
-                    continue;
+            let (beam, lit) = match sighting.read_payload() {
+                Ok(lc_proto::Payload::Drive(change)) => {
+                    let ends = Ends { fore_w: change.emit_fore_w, aft_w: change.emit_aft_w }.with_drive(change.power_w);
+                    (None, (!ends.is_dark()).then_some(Lit::Faces(ends)))
                 }
-                let distance_m = (sighting.arrive_t - sighting.emitted_t) as f64 * 1e-6 * lc_world::flight::C_M_S;
-                let offset = here_ly - DVec3::from_array(emission.from) / lc_world::motion::LIGHT_US_PER_LY;
-                let covers = Beam::along(DVec3::from_array(emission.axis), emission.half_angle_rad).covers(offset);
-                let power_w = if covers { emission.power_w } else { 0.0 };
-                let flux_w_m2 = lc_world::emit::flux_w_m2(power_w, emission.half_angle_rad, distance_m);
-                (Some(emission.beam), (flux_w_m2 > 0.0).then_some(Lit::Glare(Glare { spectrum: emission.spectrum, flux_w_m2 })))
+                Ok(lc_proto::Payload::Emit(emission)) => {
+                    if emission.burst_j > 0.0 {
+                        continue;
+                    }
+                    let distance_m = (sighting.arrive_t - sighting.emitted_t) as f64 * 1e-6 * lc_world::flight::C_M_S;
+                    let offset = here_ly - DVec3::from_array(emission.from) / lc_world::motion::LIGHT_US_PER_LY;
+                    let covers = Beam::along(DVec3::from_array(emission.axis), emission.half_angle_rad).covers(offset);
+                    let power_w = if covers { emission.power_w } else { 0.0 };
+                    let flux_w_m2 = lc_world::emit::flux_w_m2(power_w, emission.half_angle_rad, distance_m);
+                    (Some(emission.beam), (flux_w_m2 > 0.0).then_some(Lit::Glare(Glare { spectrum: emission.spectrum, flux_w_m2 })))
+                }
+                _ => continue,
             };
             for open in self.flares.iter_mut().filter(|f| f.source == source && f.beam == beam && f.out_s.is_none()) {
                 open.out_s = Some(arrive_s);

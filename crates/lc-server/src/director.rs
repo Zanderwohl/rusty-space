@@ -27,7 +27,7 @@ use lc_world::scenario::{Act, Formed, Member, Scenario, Slot, Start};
 use lc_world::system::{LocalSystem, M_PER_LY};
 
 use crate::journal::Journal;
-use crate::server::{BURN_POWER_W, KIND_BURN, Server};
+use crate::server::{BURN_POWER_W, Server};
 use crate::transport::Transport;
 use crate::world::Event;
 
@@ -275,7 +275,7 @@ impl<J: Journal> Server<J> {
                 self.reported(id, to, seal, through);
             }
             let _ = self.put_on_air(
-                id, at, spoken.kind, crate::radio::SIGNAL_POWER_W, spoken.payload, &spoken.beam, true, spoken.said, events,
+                id, at, crate::radio::SIGNAL_POWER_W, spoken.payload, &spoken.beam, true, spoken.said, events,
             );
         }
         true
@@ -367,7 +367,7 @@ impl<J: Journal> Server<J> {
         }
         // A burn, and burns are the loudest thing a ship does. Everyone in range learns that
         // this craft maneuvered, at light delay, exactly as they would for any other.
-        self.emit(id, KIND_BURN, BURN_POWER_W, "{}".into(), at_t, events);
+        self.emit(id, BURN_POWER_W, lc_proto::Payload::Burn(lc_proto::Burned::default()), at_t, events);
         self.tell_flying(wire, id);
     }
 
@@ -495,7 +495,7 @@ mod tests {
             ),
             "the cast is in a private copy of the system",
         );
-        let seen = crate::chase::sighting(&server.fleet, &server.balance, true, bystander.id, ShipId(cast.id.0), server.now_t());
+        let seen = crate::chase::sighting(server.seeable(), &server.balance, true, bystander.id, ShipId(cast.id.0), server.now_t());
         assert!(seen.is_some(), "nobody can see the cast");
     }
 
@@ -950,7 +950,7 @@ mod tests {
         let deaths: Vec<(i64, DVec3)> = line
             .iter()
             .map(|id| {
-                let event = server.journal().events.iter().find(|e| e.kind == crate::server::KIND_COLLAPSE && e.source.0 == id.0);
+                let event = server.journal().events.iter().find(|e| e.kind() == crate::server::KIND_COLLAPSE && e.source.0 == id.0);
                 event.map(|e| (e.t, e.at)).unwrap_or_else(|| panic!("{id:?} never collapsed"))
             })
             .collect();

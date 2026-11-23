@@ -49,6 +49,7 @@ const BUMP: f32 = 2.0;
 
 /// Which body a resolved sphere stands for.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct ResolvedBody(pub String);
 
 /// The shell a resolved body's air is drawn on, and that child of the sphere.

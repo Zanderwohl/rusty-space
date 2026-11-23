@@ -21,7 +21,8 @@ the latter has no `deterministic` feature.
 | `crates/lc-proto` | wire messages, serialization, versioning | serde, postcard; nothing of the game's, so `lc-world` can name its types |
 | `crates/lc-store` | Postgres schema, migrations, queries, the light-cone cursor | tokio-postgres, lc-spacetime |
 | `crates/lc-books` | epubs: the archive, the spine, the document model, pagination over a caller's `Measure` | zip, quick-xml, serde |
-| `crates/lc-server` | authoritative server binary | lc-store, lc-world, lc-proto, tokio |
+| `crates/lc-catchup` | what landed on a craft before the retention cutoff, read from the store alone; the shard calls it today, a service of its own later | lc-store, lc-proto, tokio-postgres |
+| `crates/lc-server` | authoritative server binary | lc-store, lc-catchup, lc-world, lc-proto, tokio |
 | `crates/lc-client` | Bevy client, native and WASM | em-render, em-ui, em-map, lc-books, lc-world, lc-proto, bevy |
 | `.` (`exotic-matters`) | the existing TTRPG app | em-foundations, em-sim, em-render, bevy |
 

@@ -3,7 +3,7 @@
 use glam::DVec3;
 use lc_proto::ShipId;
 
-use super::{Journal, JournalError, Memory, Transcript};
+use super::{CaughtUp, Journal, JournalError, Memory, Transcript};
 use crate::world::{Event, Scheduled};
 
 impl From<tokio_postgres::Error> for JournalError {
@@ -81,6 +81,11 @@ fn from_grid(g: [i64; 3]) -> DVec3 {
 }
 
 impl Journal for Postgres {
+    async fn caught_up(&self, observer: ShipId, noise_floor: f32, span: (i64, i64), now_t: i64) -> Result<Option<CaughtUp>, JournalError> {
+        let page = lc_catchup::page(&self.client, observer, noise_floor, span, now_t, lc_catchup::PAGE).await?;
+        Ok(Some((page.sightings, page.through_t)))
+    }
+
     async fn prepare(&mut self, from_t: i64, to_t: i64) -> Result<(), JournalError> {
         if let Some((lo, hi)) = self.prepared
             && from_t >= lo
@@ -120,8 +125,8 @@ impl Journal for Postgres {
                 g: to_grid(e.at),
                 system_id: None,
                 local: None,
-                kind: e.kind,
-                payload: e.payload.clone(),
+                kind: e.kind(),
+                payload: e.payload.to_json(),
             })
             .collect();
         // Both tables at once, and before either insert.
@@ -141,6 +146,7 @@ impl Journal for Postgres {
                     arrive_t: d.arrive_t,
                     event_id: lc_store::id::EventId::from_raw(d.event)?,
                     strength: d.strength,
+                    direction: d.direction,
                 })
             })
             .collect();
@@ -185,29 +191,32 @@ impl Journal for Postgres {
             .await?;
         let mut found: Vec<Event> = events
             .iter()
-            .map(|row| Event {
-                id: row.get(0),
-                source: ShipId(row.get(1)),
-                t: row.get(2),
-                at: from_grid([row.get(3), row.get(4), row.get(5)]),
-                kind: row.get(6),
-                // Not stored: what a source radiated is in the delivery's own strength,
-                // which is the only thing anything downstream reads it for.
-                power_w: 0.0,
-                payload: row.get(7),
+            .filter_map(|row| {
+                let id: i64 = row.get(0);
+                Some(Event {
+                    id,
+                    source: ShipId(row.get(1)),
+                    t: row.get(2),
+                    at: from_grid([row.get(3), row.get(4), row.get(5)]),
+                    // Not stored: what a source radiated is in the delivery's own strength,
+                    // which is the only thing anything downstream reads it for.
+                    power_w: 0.0,
+                    payload: crate::world::read_payload(id, row.get(6), row.get(7))?,
+                })
             })
             .collect();
         // Light landing long after it left may be about an archived event; its front kept a copy.
         let missing: Vec<i64> = ids.iter().copied().filter(|id| !found.iter().any(|e| e.id == *id)).collect();
         if !missing.is_empty() {
-            found.extend(lc_store::fronts::of(&self.client, &missing).await?.iter().map(|row| Event {
-                id: row.event.id.get(),
-                source: ShipId(row.event.source_id),
-                t: row.event.t,
-                at: from_grid(row.event.g),
-                kind: row.event.kind,
-                power_w: 0.0,
-                payload: row.event.payload.clone(),
+            found.extend(lc_store::fronts::of(&self.client, &missing).await?.iter().filter_map(|row| {
+                Some(Event {
+                    id: row.event.id.get(),
+                    source: ShipId(row.event.source_id),
+                    t: row.event.t,
+                    at: from_grid(row.event.g),
+                    power_w: 0.0,
+                    payload: crate::world::read_payload(row.event.id.get(), row.event.kind, &row.event.payload)?,
+                })
             }));
         }
         let mut out = Vec::with_capacity(rows.len());
@@ -221,6 +230,7 @@ impl Journal for Postgres {
                     event: delivery.event_id.get(),
                     arrive_t: delivery.arrive_t,
                     strength: delivery.strength,
+                    direction: None,
                 },
                 event.clone(),
             ));
@@ -341,6 +351,10 @@ impl Journal for Store {
         until_t: i64,
     ) -> Result<Vec<(Scheduled, Event)>, JournalError> {
         either!(self, due(observer, after_t, until_t))
+    }
+
+    async fn caught_up(&self, observer: ShipId, noise_floor: f32, span: (i64, i64), now_t: i64) -> Result<Option<CaughtUp>, JournalError> {
+        either!(self, caught_up(observer, noise_floor, span, now_t))
     }
 
     async fn fronts(&self, now_t: i64) -> Result<Vec<crate::front::Front>, JournalError> {

@@ -15,11 +15,13 @@
 use glam::DVec3;
 use lc_proto::{Outbound, ShipId};
 use lc_spacetime::LIGHT_MICROSECOND_M;
+use lc_world::afterglow::Afterglow;
 use lc_world::craft::{Craft, CraftId};
 use lc_world::field::{CONTACT_FRACTION, received_fraction};
 
+use crate::bright::{Brights, Wreck};
 use crate::journal::Journal;
-use crate::server::{KIND_COLLAPSE, Server};
+use crate::server::Server;
 use crate::transport::Transport;
 use crate::world::Event;
 
@@ -193,11 +195,17 @@ impl<J: Journal> Server<J> {
         let name = craft.name.clone();
         let from = craft.position_at(at_t as f64);
         craft.end(at_s);
-        self.afterglows.insert(id, lc_world::afterglow::Afterglow::of(from, at_s, released_j, &balance));
+        let afterglow = Afterglow::of(from, at_s, released_j, &balance);
         self.emissions.lit_by.remove(&id);
-        let released = serde_json::to_value(lc_proto::Released { released_j }).unwrap_or_default();
-        let payload = crate::emit::carrying(released, &crate::emit::burst(from, spike_j, balance.collapse_spike_k));
-        self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events);
+        let payload = lc_proto::Payload::Collapse {
+            released: lc_proto::Released { released_j },
+            emission: Some(crate::emit::burst(from, spike_j, balance.collapse_spike_k)),
+        };
+        let event_id = self.emit_from(id, from, spike_j / SPIKE_S, payload, at_t, events);
+        // Out of the fleet: from here it is light, and only what looks for light meets it.
+        if let Some(craft) = self.fleet.remove(id) {
+            self.brights.push(Box::new(Wreck { craft, afterglow, event_id }));
+        }
 
         self.pursuits.remove(&id);
         self.parks.remove(&id);
@@ -228,23 +236,11 @@ impl<J: Journal> Server<J> {
         self.welcome(from, successor, name, &account, wire);
     }
 
-    /// Drop each wreck once the last of its light, its afterglow's, has passed every craft there is.
+    /// Drop each wreck once its light has faded everywhere. See [`crate::bright`].
     pub(crate) fn sweep_wrecks(&mut self) {
-        let now_t = self.now_t as f64;
-        let ended: Vec<(CraftId, f64)> =
-            self.fleet.iter().filter_map(|craft| Some((craft.id, craft.ended_s()? * 1.0e6))).collect();
-        for (id, end_t) in ended {
-            let Some(at) = self.fleet.get(id).map(|wreck| wreck.position_at(end_t)) else { continue };
-            let last_t = self.afterglows.get(&id).map_or(end_t, |afterglow| afterglow.ends_s() * 1.0e6);
-            let passed = self.fleet.iter().filter(|craft| craft.ended_s().is_none()).all(|craft| {
-                lc_spacetime::arrival_time_at(last_t, at, &craft.worldline()).is_none_or(|t| t <= now_t)
-            });
-            if passed {
-                self.fleet.remove(id);
-                self.afterglows.remove(&id);
-                self.destroyed.push(id.0);
-            }
-        }
+        let gone = self.brights.sweep(self.now_t);
+        self.roster.forget(&gone);
+        self.destroyed.extend(gone);
     }
 
     /// Wrecks swept since this was last called, whose saved rows are to be deleted.
@@ -258,6 +254,38 @@ impl<J: Journal> Server<J> {
     }
 }
 
+/// Each bright event `observer` should be watching now, as the sighting its first light would have
+/// made, landing where the craft is when it did, so a client plays it from as far along as it is.
+///
+/// For a connection's first flush. Fronts deliver to whichever craft exist as they pass, so a
+/// craft made after a spike went by (a newcomer, a successor) is told nothing by them, though the
+/// wreck still glows in its sky. `delivered` is what the journal has already replayed to it.
+pub(crate) fn wrecks_in_progress(brights: &Brights, observer: &Craft, now_t: i64, delivered: impl Fn(i64) -> bool) -> Vec<lc_proto::Sighting> {
+    let here = observer.position_at(now_t as f64);
+    let mut told = Vec::new();
+    for lit in brights.arriving(here, now_t as f64) {
+        let bright = lit.event;
+        let Some(event_id) = bright.event_id() else { continue };
+        if bright.source_id() == observer.id.0 || delivered(event_id) {
+            continue;
+        }
+        let emitted_t = (bright.begins_s() * 1.0e6).round() as i64;
+        told.push(lc_proto::Sighting {
+            event_id,
+            source_id: bright.source_id(),
+            // Rounded up, as a delivery's is: never a microsecond before the light could be here.
+            arrive_t: (emitted_t + lit.distance_us.ceil() as i64).min(now_t),
+            emitted_t,
+            direction: (bright.position() - here).normalize_or_zero().to_array(),
+            // What reaches it now: the first light went by before it was here.
+            strength: crate::world::strength(bright.power_w(lit.left_s), lit.distance_us),
+            kind: bright.kind(),
+            payload: bright.payload(),
+        });
+    }
+    told
+}
+
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
@@ -267,6 +295,8 @@ mod tests {
     use lc_world::motion::LIGHT_US_PER_LY;
 
     use super::*;
+    use crate::bright::BrightEvent;
+    use crate::server::KIND_COLLAPSE;
     use crate::journal::Memory;
     use crate::server::course_tests::{a_star, a_system};
     use crate::transport::Loopback;
@@ -352,7 +382,7 @@ mod tests {
     }
 
     fn collapse_events(server: &Server<Memory>) -> Vec<&Event> {
-        server.journal().events.iter().filter(|e| e.kind == KIND_COLLAPSE).collect()
+        server.journal().events.iter().filter(|e| e.kind() == lc_proto::kind::COLLAPSE).collect()
     }
 
     /// At the instant the account predicted, as an event where the ship was, releasing `Q_max` and
@@ -384,7 +414,7 @@ mod tests {
         let stored_j = fitting.stored_j_at(&then.motion, at_s);
         assert!(stored_j > committed_j, "premise: storage holds the commitment");
         assert!((collapsed.released_j - (heat_max_j + stored_j)).abs() < 1.0e-12 * collapsed.released_j);
-        let released: lc_proto::Released = serde_json::from_str(&event.payload).unwrap();
+        let lc_proto::Payload::Collapse { released, .. } = &event.payload else { panic!("not a collapse: {:?}", event.payload) };
         assert_eq!(released.released_j, collapsed.released_j);
     }
 
@@ -437,6 +467,67 @@ mod tests {
         assert_eq!(collapsed.at_t, to_us(end_s));
     }
 
+    /// A craft made after the spike went by is told of the wreck on its first flush, as landing
+    /// when the light passed where it is, so its client plays the afterglow from that far along;
+    /// and a ship that heard it live is not told twice.
+    #[tokio::test]
+    async fn a_newcomer_is_told_of_a_wreck_whose_light_passed_before_it_was_there() {
+        const NEWCOMER: ClientId = ClientId(9);
+        let Some((mut server, mut wire)) = scene() else { return };
+        let collapsed = until_collapse(&mut server, &mut wire).await;
+        let [event] = collapse_events(&server)[..] else { panic!("{:?}", collapse_events(&server)) };
+        let (event_id, from) = (event.id, event.at);
+        let passed_t = collapsed.at_t + (APART_US / 2.0) as i64;
+        let mut watched = Vec::new();
+        while server.now_t() < passed_t + (DAY_S * 1.0e6) as i64 {
+            server.tick(&mut wire).await.unwrap();
+            watched.extend(wire.take(WATCHER));
+        }
+
+        server.admit(NEWCOMER, still(ShipId(9), from + DVec3::Y * APART_US / 2.0), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        server.tick(&mut wire).await.unwrap();
+        let told = |messages: Vec<Outbound>| -> Vec<Sighting> {
+            messages
+                .into_iter()
+                .filter_map(|m| match m {
+                    Outbound::Sightings(list) => Some(list.into_iter().map(|s| s.get().clone()).collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|s| s.kind == KIND_COLLAPSE)
+                .collect()
+        };
+        let [sighting] = &told(wire.take(NEWCOMER))[..] else { panic!("told once, and only once") };
+        assert_eq!((sighting.event_id, sighting.source_id, sighting.emitted_t), (event_id, DYING.0, collapsed.at_t));
+        assert!((sighting.arrive_t - passed_t).abs() <= 1, "landing when the light passed, not now: {} vs {passed_t}", sighting.arrive_t);
+        assert!(sighting.arrive_t < server.now_t());
+        let released = serde_json::from_str::<lc_proto::Released>(&sighting.payload).unwrap();
+        assert!((released.released_j - collapsed.released_j).abs() <= 1.0e-9 * collapsed.released_j);
+        while server.now_t() < collapsed.at_t + (APART_US + DAY_S * 1.0e6) as i64 {
+            watched.extend(wire.take(WATCHER));
+            server.tick(&mut wire).await.unwrap();
+        }
+        watched.extend(wire.take(WATCHER));
+        assert_eq!(told(watched).len(), 1, "the watcher hears it live, once");
+    }
+
+    /// Once the last of its afterglow has gone by, there is nothing left to be told of.
+    #[test]
+    fn a_wreck_whose_afterglow_has_gone_by_is_not_in_progress() {
+        let afterglow = Afterglow::of(DVec3::ZERO, 0.0, 1.0e20, &Balance::DEFAULT);
+        let mut craft = still(ShipId(1), DVec3::ZERO);
+        craft.end(0.0);
+        let mut brights = Brights::default();
+        brights.push(Box::new(Wreck { craft, afterglow, event_id: Some(77) }));
+        let observer = still(ShipId(2), DVec3::X * 1.0e6);
+        let at = |s: f64| wrecks_in_progress(&brights, &observer, (s * 1.0e6) as i64, |_| false);
+        assert!(at(0.5).is_empty(), "not yet: its light is a second away");
+        assert_eq!(at(2.0).len(), 1);
+        assert!(at(afterglow.ends_s() + 2.0).is_empty(), "the afterglow has gone by");
+        assert!(wrecks_in_progress(&brights, &observer, 2_000_000, |id| id == 77).is_empty(), "already delivered");
+    }
+
     /// Its light reaches a ship three light-days off three days later, and not before; until then
     /// that ship goes on seeing it, and afterwards not.
     #[tokio::test]
@@ -456,7 +547,7 @@ mod tests {
                         seen_until_t = server.now_t();
                     }
                     Outbound::Sightings(list) => heard.extend(
-                        list.into_iter().map(|s| s.get().clone()).filter(|s| s.kind == KIND_COLLAPSE).map(|s| (server.now_t(), s)),
+                        list.into_iter().map(|s| s.get().clone()).filter(|s| s.kind == lc_proto::kind::COLLAPSE).map(|s| (server.now_t(), s)),
                     ),
                     _ => {}
                 }
@@ -474,7 +565,7 @@ mod tests {
         assert!(*told_t >= arrives_t);
         assert!(seen_until_t > at_t, "the ship vanished from sight when it collapsed, not when its light arrived");
         assert!(seen_until_t < arrives_t + 60 * crate::server::TICK_US, "still seen after its light had passed");
-        assert!(server.ship(DYING).is_some(), "the wreck went before its afterglow");
+        assert!(server.wreck(DYING).is_some() && server.ship(DYING).is_none(), "a wreck, and not a craft");
     }
 
     /// Its owner flies a new starting ship at the spawn point, knowing nothing, and the wreck is
@@ -499,7 +590,7 @@ mod tests {
         let knows = server.instruments.aboard.get(&CraftId(successor.0)).map(|a| a.knowledge.files().map(|(s, _)| s).collect::<Vec<_>>());
         let seen = |s: &lc_world::knowledge::Subject| matches!(s, lc_world::knowledge::Subject::Craft(_) | lc_world::knowledge::Subject::Collapse(_));
         assert!(knows.unwrap_or_default().iter().all(seen));
-        assert_eq!(server.ship(DYING).unwrap().ended_s(), Some(collapsed.at_t as f64 * 1.0e-6));
+        assert_eq!(server.wreck(DYING).unwrap().craft.ended_s(), Some(collapsed.at_t as f64 * 1.0e-6));
 
         wire.client_says(OWNER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         wire.client_says(OWNER, act(successor, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
@@ -838,8 +929,9 @@ mod tests {
     /// to collapse again.
     #[cfg(feature = "storage")]
     fn assert_inert(server: &Server<Memory>, id: CraftId) {
-        let wreck = server.fleet.get(id).expect("the wreck came back");
+        let wreck = &server.wreck(ShipId(id.0)).expect("the wreck came back").craft;
         assert!(wreck.ended_s().is_some() && wreck.fitting().is_none());
+        assert!(server.fleet.get(id).is_none(), "a wreck is not a craft");
         assert!(!server.owners.contains_key(&id) && !server.by_account.values().any(|ship| ship.0 == id.0));
         assert!(!server.pursuits.contains_key(&id) && !server.refitting.contains_key(&id) && !server.reserved.contains_key(&id));
         assert!(!server.instruments.aboard.contains_key(&id));
@@ -847,8 +939,8 @@ mod tests {
     }
 
     /// Restarted after the collapse and before its light reaches a ship three light-days off, the
-    /// shard goes on showing that ship the wreck until the light arrives, and deletes its row once
-    /// the afterglow's has passed too.
+    /// shard goes on showing that ship the wreck until the light arrives, and keeps it after the
+    /// afterglow's has passed too: others may yet see it.
     #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_wreck_outlives_a_restart_until_its_light_arrives() {
@@ -903,9 +995,8 @@ mod tests {
         }
         assert!(seen_until_t + tick_us >= arrives_t, "the restart ended its view early: {seen_until_t} {arrives_t}");
         assert!(seen_until_t < arrives_t + tick_us, "still seen after its light had passed");
-        let swept_t = swept_t.expect("the wreck was never swept");
-        assert!(swept_t >= glow_passes_t && swept_t < glow_passes_t + tick_us, "{swept_t} {glow_passes_t}");
-        assert!(restarted.ship(DYING).is_none());
+        assert_eq!(swept_t, None, "swept when its afterglow passed the ships there are, not when it faded");
+        assert!(restarted.wreck(DYING).is_some_and(|w| w.faded_t() > restarted.now_t()));
         assert!(collapse_events(&restarted).is_empty(), "it collapsed again");
     }
 
@@ -975,8 +1066,9 @@ mod tests {
         assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: lc_proto::Refusal::NotYours } if *ship_id == first)), "{said:?}");
     }
 
-    /// Four ships collapse hours apart; every wreck comes back from one restart, and each is swept
-    /// on the tick the last of its afterglow passes the watcher.
+    /// Four ships collapse hours apart; every wreck comes back from one restart by its own collapse,
+    /// is kept long after the last of its afterglow has passed every ship there is, and is swept
+    /// once its light has faded everywhere, each in turn.
     #[cfg(feature = "storage")]
     #[tokio::test]
     async fn a_cascade_of_wrecks_restores_and_sweeps_one_by_one() {
@@ -995,49 +1087,51 @@ mod tests {
         let wrecks: Vec<ShipId> = std::iter::once(DYING).chain(wrecks).collect();
         for _ in 0..500 {
             server.tick(&mut wire).await.unwrap();
-            if wrecks.iter().all(|id| server.ship(*id).is_some_and(|c| c.ended_s().is_some())) {
+            if wrecks.iter().all(|id| server.wreck(*id).is_some()) {
                 break;
             }
         }
         let watcher = server.ship(WATCHING).unwrap().position_at(0.0);
-        let arrives: Vec<i64> = wrecks
+        let faded: Vec<i64> = wrecks.iter().map(|id| server.wreck(*id).expect("premise: all collapsed").faded_t()).collect();
+        let passed_watcher = wrecks
             .iter()
             .map(|id| {
-                let wreck = server.ship(*id).expect("premise: none swept before the restart");
-                let end_t = wreck.ended_s().expect("premise: all collapsed") * 1.0e6;
-                let last_t = server.afterglows[&CraftId(id.0)].ends_s() * 1.0e6;
-                (last_t + wreck.position_at(end_t).distance(watcher)).ceil() as i64
+                let wreck = server.wreck(*id).unwrap();
+                (wreck.afterglow.ends_s() * 1.0e6 + wreck.afterglow.position().distance(watcher)).ceil() as i64
             })
-            .collect();
-        let mut distinct = arrives.clone();
+            .max()
+            .unwrap();
+        let mut distinct = faded.clone();
         distinct.sort();
         distinct.dedup();
         assert_eq!(distinct.len(), wrecks.len(), "premise: they collapse apart");
-        assert!(server.take_destroyed().is_empty());
+        let events = |server: &Server<Memory>| wrecks.iter().map(|id| server.wreck(*id).map(|w| w.event_id)).collect::<Vec<_>>();
 
         let mut restarted = restart(&server);
+        assert_eq!(events(&restarted), events(&server), "a newcomer after the restart is told them by the same ids");
+        assert!(events(&restarted).iter().all(|e| e.is_some_and(|id| id.is_some())));
         drop(server);
         for id in &wrecks {
             assert_inert(&restarted, CraftId(id.0));
         }
         let mut wire = Loopback::new();
-        let mut swept: Vec<(i64, i64)> = Vec::new();
-        let mut last_t = restarted.now_t();
-        for _ in 0..300 {
+        while restarted.now_t() <= passed_watcher {
             restarted.tick(&mut wire).await.unwrap();
-            let (from_t, now_t) = (last_t, restarted.now_t());
-            last_t = now_t;
-            for id in restarted.take_destroyed() {
-                let k = wrecks.iter().position(|w| w.0 == id).expect("only wrecks are swept");
-                assert!(arrives[k] > from_t && arrives[k] <= now_t, "{id} swept at {now_t}, its light arrives {}", arrives[k]);
-                swept.push((id, now_t));
-            }
-            if swept.len() == wrecks.len() {
-                break;
-            }
         }
-        assert_eq!(swept.len(), wrecks.len(), "{swept:?}");
-        assert!(collapse_events(&restarted).is_empty(), "a wreck collapsed again");
+        assert!(restarted.take_destroyed().is_empty(), "kept past every ship there is");
+        assert_eq!(restarted.brights.len(), wrecks.len());
+
+        let mut order: Vec<usize> = (0..wrecks.len()).collect();
+        order.sort_by_key(|&k| faded[k]);
+        for k in order {
+            restarted.now_t = faded[k] - 1;
+            restarted.sweep_wrecks();
+            assert!(restarted.take_destroyed().is_empty(), "{} swept before its light faded", wrecks[k].0);
+            restarted.now_t = faded[k];
+            restarted.sweep_wrecks();
+            assert_eq!(restarted.take_destroyed(), vec![wrecks[k].0]);
+        }
+        assert!(restarted.brights.is_empty(), "swept with their wrecks");
     }
 
     /// Six ships stacked at one point, as the spawn point stacks them, together take no more than

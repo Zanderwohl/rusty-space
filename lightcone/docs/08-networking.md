@@ -1,6 +1,6 @@
 # Networking
 
-**Status: partly built.** The gate and its channels are `lc_proto::{Cleared, Outbound}`; the tick, `Journal` (memory and Postgres), the WebSocket `Transport`, the rate limit and catch-up are `lc_server::{server, journal, websocket, rate}`, with sighting and pursuit in `lc_server::chase` and `lc_world::{sighted, ignition, pursuit, escort, consort}`, and the client half is `lc_client::link`. Not built: QUIC and WebTransport; separate channels (one reliable WebSocket carries everything, with no unreliable local-state or bulk channel); level-3 subscription; a stored per-observer fold for catch-up (`Inbound::ResumeFrom` only rewinds the cursor); the spatial bound on presence solves; and more than one shard.
+**Status: partly built.** The gate and its channels are `lc_proto::{Cleared, Outbound}`; the tick, `Journal` (memory and Postgres), the WebSocket `Transport`, the rate limit and catch-up are `lc_server::{server, journal, websocket, rate}`, with sighting and pursuit in `lc_server::chase` and `lc_world::{sighted, ignition, pursuit, escort, consort}`, and the client half is `lc_client::link`. Not built: QUIC and WebTransport; separate channels (one reliable WebSocket carries everything, with no unreliable local-state or bulk channel); level-3 subscription; a stored per-observer fold for catch-up (`Inbound::ResumeFrom` rewinds the cursor, and from before the retention cutoff reads the archive through `lc_catchup`; see [02 §Catching up](02-event-store.md#catching-up)); the spatial bound on presence solves; a craft's history across a restart (see [After a restart](#after-a-restart)); and more than one shard.
 
 ## Shape of the problem
 
@@ -66,11 +66,42 @@ say anything; the Postgres one has its own, which skip when there is none.
 Make this one function, in one place, with tests that assert the negative case. Every other
 send path calls it. Do not allow a second code path to emit to a socket.
 
-**Built as a type, not a convention.** `Cleared<T>` has a private field and no constructor but
-its `clear` gates; `Outbound::Sightings` and `Outbound::Present` can hold nothing else. "There
+**Built as a type, not a convention.** `Cleared<T>` has a private field and one constructor,
+`Cleared::arrived`, for any `T: Arrives` — anything that states when its light lands — with the
+noise floor a second test for a sighting. `Outbound::Sightings`, `Outbound::Present` and
+`Outbound::Illuminated` can hold nothing else. "There
 is no second path to a socket" is then a fact the compiler enforces rather than a rule a
-reviewer has to notice being broken, and the two `compile_fail` doctests on the type are what
-say so — one for a struct literal, one for a destructuring pattern.
+reviewer has to notice being broken, and the `compile_fail` doctests on the type are what
+say so — a struct literal, a destructuring pattern, and a beam sent without the gate.
+
+The gate is only as good as the `arrive_t` it is handed. A contact's is the present by
+construction, since the retarded solve makes it so, so for `Present` what actually keeps the
+client in the past is that every reading is taken at the emission instant: `lc_server::chase`
+builds a contact from a craft as its light left it and nothing else, and
+`a_contact_does_not_turn_before_the_light_of_its_turn_arrives` is the test. What a reading takes
+from the ship's form and energy — the mass its drive's power follows, the turn rate and broadside
+its nose swings by, the faces its exhaust leaves — comes from the account in force at that instant,
+which a craft keeps one of per settlement as it keeps a motive per stretch (`Craft::fitting_at`).
+`an_order_does_not_rewrite_the_drive_power_before_it` and
+`a_refit_does_not_rewrite_how_the_craft_looked_before_it` are the tests.
+
+### After a restart
+
+A checkpoint saves each craft's current motive and settled account, not its history: neither the
+stretches it flew nor the accounts it kept. A restarted craft therefore answers for nothing before
+the instant it was saved (`Craft::known_only_from`), and an observer far enough away that the light
+it wants left before the save sees nothing of that craft until light from after the save arrives.
+For an observer at distance `d`, the gap lasts up to `d / c` after the restart. The alternative was
+to read the saved motive backward, which would show the order that began it before that order's
+light could arrive.
+
+Wrecks are the exception. A wreck is saved at its end, so the same rule would hide all the light of
+its end still in flight. A restarted wreck reads its last motive backward instead, which can show
+its last order early, for as long as the light of its end takes to reach each observer.
+
+Saving the history would close both gaps. It is not done because a craft's row is written every
+few seconds and the kept accounts alone run to hundreds of entries a ship. Restarts are kept rare
+instead. `a_restarted_craft_answers_for_nothing_before_its_save` is the test.
 
 ### Seeing other ships
 
@@ -527,7 +558,9 @@ Event IDs must be locally generatable if shards exist: a snowflake layout of
 A client that disconnects for an hour missed 8766 in-game hours of deliveries. On reconnect:
 
 1. Client sends the coordinate time of the last reception it has.
-2. Server replays `deliveries` from that point, ordered by `arrive_t`, paginated.
+2. Server replays `deliveries` from that point, ordered by `arrive_t`, paginated. From before the
+   retention cutoff they come from the archive first, a page a flush, by `lc_catchup`; see
+   [02 §Catching up](02-event-store.md#catching-up).
 3. Client folds them through `lc_world::motion` to rebuild its known-world snapshot.
 
 The same path serves a brand-new client, from `t = 0` or from a compacted snapshot. Store a

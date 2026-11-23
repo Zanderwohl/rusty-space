@@ -235,7 +235,8 @@ impl<J: Journal> Server<J> {
             let instruments = &mut self.instruments;
             let sky = instruments.sky.get_or_insert_with(|| Sky::new(stars));
             let Some(aboard) = instruments.aboard.get_mut(&id) else { continue };
-            let lights = crate::field::Seen { fleet: &self.fleet, afterglows: &self.afterglows, balance: &self.balance, observer: id };
+            let seeable = crate::bright::Seeable { fleet: &self.fleet, brights: &self.brights };
+            let lights = crate::field::Seen { seeable, balance: &self.balance, observer: id };
             aboard.observatory.tick_lit(sky, system.as_deref(), &lights, &mut aboard.knowledge, at, now_s);
         }
         self.stages.mark("observe");
@@ -335,15 +336,16 @@ impl<J: Journal> Server<J> {
     /// Note where this tick's reports will land. Read off the deliveries, which already hold
     /// who was covered, when, and how loud.
     pub(crate) fn schedule_landings(&mut self, events: &[Event], deliveries: &[Scheduled]) {
-        for event in events.iter().filter(|e| e.kind == lc_proto::kind::REPORT) {
+        for event in events {
+            if !matches!(event.payload, lc_proto::Payload::Report(_)) {
+                continue;
+            }
             for scheduled in deliveries.iter().filter(|d| d.event == event.id) {
                 // Redacted as a client is sent it, so a sealed report teaches only its addressee.
                 let observer = CraftId(scheduled.observer.0);
-                let payload = crate::radio::redact(event.kind, &event.payload, scheduled.observer, |key| {
+                let lc_proto::Payload::Report(reported) = crate::radio::redact(&event.payload, scheduled.observer, |key| {
                     self.factions.holds(observer, key, scheduled.arrive_t)
-                });
-                let Ok(reported) = serde_json::from_str::<lc_proto::Reported>(&payload) else {
-                    eprintln!("WARNING: report {} is not a report; it will not land", event.id);
+                }) else {
                     continue;
                 };
                 if reported.format != lc_proto::REPORT_FORMAT {
@@ -502,7 +504,7 @@ impl<J: Journal> Server<J> {
                 }
                 // Only a craft it can see, or the order would say which craft exist.
                 if let lc_proto::Duty::Stare { at: lc_proto::Gaze::Craft(craft) } = duty
-                    && crate::chase::sighting(&self.fleet, &self.balance, self.sees_everything, id, ShipId(*craft), self.now_t).is_none()
+                    && crate::chase::sighting(self.seeable(), &self.balance, self.sees_everything, id, ShipId(*craft), self.now_t).is_none()
                 {
                     return Err(Refusal::NotInSight);
                 }
