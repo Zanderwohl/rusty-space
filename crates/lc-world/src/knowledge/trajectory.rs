@@ -52,21 +52,17 @@ pub enum Trajectory {
 
 impl Trajectory {
     /// The path through `places`, oldest first, if they share one: a conic about the body holding
-    /// the latest of them where there is a system, a line where there is none. `None` with fewer
-    /// than [`FIT_PLACES`], or when any place is further than `tolerance_ly` off the fit, which
-    /// is what a craft under thrust gives.
+    /// the latest of them where there is a system, else a line. A craft drifting in a system lies
+    /// on the line and no conic. `None` with fewer than [`FIT_PLACES`], or when no candidate has
+    /// every place within `tolerance_ly`, which is what a craft under thrust gives.
     pub fn fit(system: Option<&LocalSystem>, places: &[Place], tolerance_ly: f64) -> Option<Trajectory> {
         if places.len() < FIT_PLACES {
             return None;
         }
-        let fitted = match system {
-            Some(system) => conic(system, places)?,
-            None => line(places)?,
+        let holds = |fitted: &Trajectory| {
+            places.iter().all(|p| fitted.place_at(system, p.at_s).is_some_and(|at| at.distance(p.position_ly) <= tolerance_ly))
         };
-        places
-            .iter()
-            .all(|p| fitted.place_at(system, p.at_s).is_some_and(|at| at.distance(p.position_ly) <= tolerance_ly))
-            .then_some(fitted)
+        system.and_then(|system| conic(system, places)).filter(holds).or_else(|| line(places).filter(holds))
     }
 
     /// Where the path puts the craft at coordinate time `at_s`, light-years. A conic needs the
@@ -279,6 +275,17 @@ mod tests {
             })
             .collect();
         assert_eq!(Trajectory::fit(Some(&system), &places, KM_LY), None);
+    }
+
+    /// Drifting is a straight line wherever it happens, a system included.
+    #[test]
+    fn a_craft_drifting_in_a_system_is_fitted_with_a_line() {
+        let system = sol();
+        let start = system.origin_ly + DVec3::new(3.0e11, 0.0, 0.0) / M_PER_LY;
+        let places: Vec<Place> =
+            (0..5).map(|k| Place { at_s: 600.0 * k as f64, position_ly: start + DVec3::Y * 1e-9 * k as f64 }).collect();
+        let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a line");
+        assert!(matches!(fitted, Trajectory::Line { .. }), "{fitted:?}");
     }
 
     #[test]

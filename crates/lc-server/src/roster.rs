@@ -140,9 +140,9 @@ impl Filed {
         reckoned.distance(place.position_ly) > (3.0 * sigma_ly).max(floor_ly)
     }
 
-    /// Fold this pass's sight of the craft in. `system` is `None` when the craft is in a system
-    /// that is not loaded, so no conic can be read and none is fitted.
-    fn pass(&self, system: Option<&LocalSystem>, can_fit: bool, place: Place, beta: DVec3, sigma_ly: f64) -> Pass {
+    /// Fold this pass's sight of the craft in. `system` is `None` between systems and in one that
+    /// is not loaded, where only a line can be fitted.
+    fn pass(&self, system: Option<&LocalSystem>, place: Place, beta: DVec3, sigma_ly: f64) -> Pass {
         let tolerance_ly = (3.0 * sigma_ly).max(FIT_FLOOR_M / M_PER_LY);
         let refile = place.at_s - self.emitted_s >= REFILE_S;
         if let Some(trajectory) = self.trajectory {
@@ -156,7 +156,7 @@ impl Filed {
                     Pass::File(Filed { emitted_s: place.at_s, run, ..self.clone() }, Some(trajectory), Vec::new())
                 }
                 // Off a fit from a short arc need not be a burn: the whole run says which.
-                (false, _) => match Trajectory::fit(system, &run, tolerance_ly).filter(|_| can_fit) {
+                (false, _) => match Trajectory::fit(system, &run, tolerance_ly) {
                     Some(refitted) => self.fitted(refitted, run, place),
                     None => Pass::File(Filed::first(self.system, place, beta), None, Vec::new()),
                 },
@@ -167,13 +167,11 @@ impl Filed {
         if gathered {
             next.places.push(place);
         }
-        if can_fit {
-            let mut points: Vec<Place> = next.places.iter().chain(&next.unfolded).copied().chain([place]).collect();
-            points.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
-            points.dedup_by(|a, b| a.at_s.to_bits() == b.at_s.to_bits());
-            if let Some(fitted) = Trajectory::fit(system, &points, tolerance_ly) {
-                return self.fitted(fitted, points, place);
-            }
+        let mut points: Vec<Place> = next.places.iter().chain(&next.unfolded).copied().chain([place]).collect();
+        points.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+        points.dedup_by(|a, b| a.at_s.to_bits() == b.at_s.to_bits());
+        if let Some(fitted) = Trajectory::fit(system, &points, tolerance_ly) {
+            return self.fitted(fitted, points, place);
         }
         if next.places.len() > MOST_PLACES {
             let latest = next.places.len() - 1;
@@ -274,7 +272,7 @@ impl<J: Journal> Server<J> {
                 let local = system.and_then(|id| self.world.loaded_system(id)).map(|s| s.as_ref());
                 let place = Place { at_s: seen.emitted_s, position_ly: seen.position_ly };
                 let pass = match self.roster.filed.get(&(observer, quarry)) {
-                    Some(last) if last.system == system => last.pass(local, system.is_none() || local.is_some(), place, seen.beta, sigma_ly),
+                    Some(last) if last.system == system => last.pass(local, place, seen.beta, sigma_ly),
                     _ => Pass::File(Filed::first(system, place, seen.beta), None, Vec::new()),
                 };
                 news.push((observer, quarry, pass, place, seen.beta, sigma_ly));
