@@ -101,6 +101,7 @@ impl Eye {
 
 /// Which craft a hull stands for; `None` is the player's own.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct Hull(pub Option<ShipId>);
 
 /// The shared ovoid.

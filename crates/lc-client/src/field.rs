@@ -447,6 +447,7 @@ pub struct FieldNode {
 
 /// A wreck's root, placed here rather than by [`crate::ship_hull`], whose craft is gone.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct WreckRoot(i64);
 
 /// A craft as last seen, for drawing its end after it has left the contact list.

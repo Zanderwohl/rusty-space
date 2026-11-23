@@ -244,6 +244,7 @@ pub(crate) fn local(piece: &Piece, scale: Vec3) -> Transform {
 /// The ship's frame, placed and turned. Scaled from meters to render units. Holds which moment
 /// of a refit its pieces were spawned for, so they are respawned only when a step changes.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct FormRoot(Option<(usize, Option<usize>)>);
 
 /// A copy drawn solid. Its mesh is built at `reach_m` and scaled to the copy's size each frame.

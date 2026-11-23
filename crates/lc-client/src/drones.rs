@@ -399,6 +399,7 @@ fn unit(k: u32) -> f64 {
 /// The player's drones. `origin_s` is the coordinate time the view was spawned, which is the
 /// idle clock's zero.
 #[derive(Component)]
+#[require(crate::app::InGameOnly = crate::app::in_game_only())]
 pub struct Swarm {
     material: Handle<DroneMaterial>,
     origin_s: f64,
