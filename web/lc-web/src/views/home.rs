@@ -23,6 +23,9 @@ pub async fn page() -> Markup {
                     "natus error sit voluptatem accusantium doloremque laudantium. Totam rem "
                     "aperiam, eaque ipsa quae ab illo."
                 }
+                div class="actions" {
+                    a class="cta primary-button" href="/play" { "Play Now" }
+                }
             }
 
             section class="stack" {
@@ -32,7 +35,11 @@ pub async fn page() -> Markup {
                     "sed quia consequuntur magni dolores eos qui ratione voluptatem."
                 }
                 table {
-                    caption { "Travel and signal times at the default rate" }
+                    caption {
+                        "Cause and effect in " cite { "Lightcone Frontier" } " travels at the "
+                        "speed of light. Communication and travel take real-life hours, days, or "
+                        "even longer."
+                    }
                     thead {
                         tr {
                             td {}
@@ -45,7 +52,7 @@ pub async fn page() -> Markup {
                         tr { th scope="row" { "Sun to Earth at C" } td { "8 min 19 s" } td { "57 ms" } }
                         tr { th scope="row" { "Earth to Voyager 1 transmission" } td { "23 h 51 min" } td { "9.8 s" } }
                         tr { th scope="row" { "Sun to Proxima Centauri at C" } td { "4.25 years" } td { "4.25 h" } }
-                        tr { th scope="row" { "Across the game galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
+                        tr { th scope="row" { "Across the galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
                     }
                 }
                 p {
@@ -88,14 +95,9 @@ pub async fn page() -> Markup {
                     "est. Omnis dolor repellendus — temporibus autem quibusdam et aut officiis "
                     "debitis aut rerum necessitatibus."
                 }
-                p {
-                    "Itaque earum "
-                    a href=(super::REPO) { "rerum hic tenetur" }
-                    " a sapiente delectus, ut aut reiciendis."
-                }
-                p {
-                    a class="cta" href="/play" { "Play in your browser" }
-                    " "
+                p { "Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis." }
+                div class="actions closing-actions" {
+                    a class="cta primary-button" href="/play" { "Play Now" }
                     a class="cta" href="/blog" { "Read the devlog" }
                 }
             }

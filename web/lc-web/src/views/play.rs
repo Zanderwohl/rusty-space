@@ -122,10 +122,6 @@ fn sign_in_first() -> Markup {
         html! {
             section class="stack" {
                 h1 { "Sign in to play" }
-                p class="lede" {
-                    "This server keeps a world per account, so it needs to know who you are "
-                    "before it can hand you a ship."
-                }
                 p { a class="cta" href="/signin" { "Sign in" } }
             }
         },
