@@ -246,3 +246,44 @@ pub struct Said {
     /// What the sender called itself when it sent this. Appended last.
     pub claim: Option<String>,
 }
+/// **The sealing, and the whole of it.** One event is stored with its body intact and each
+/// receiver is handed a copy with the body removed unless they are the addressee. Doing it here
+/// rather than at write time is what keeps one transmission one event: a sealed message
+/// duplicated per receiver would be several events sharing an emission time, and everything
+/// about the light cone rests on an event being a point.
+///
+/// An eavesdropper still learns that *something* was sent, by whom, to whom, and when — which
+/// is the truth about a signal you cannot decrypt, not a concession. What they do not get is the
+/// text.
+///
+/// Anything but a message passes through untouched, and a payload that will not parse does too:
+/// this is a filter on what is released, not a validator of what was written.
+///
+/// `holds` answers whether the observer holds a faction key as of this landing.
+pub fn redact(kind: i16, payload: &str, observer: ShipId, holds: impl Fn(FactionId) -> bool) -> String {
+    let may_read = |to: Option<i64>, sealed: bool, under: Option<FactionId>| {
+        !(sealed && to != Some(observer.0)) && under.is_none_or(&holds)
+    };
+    if kind == crate::kind::REPORT {
+        let Ok(mut reported) = serde_json::from_str::<Reported>(payload) else {
+            return payload.to_string();
+        };
+        if !may_read(reported.to, reported.sealed, reported.under) {
+            reported.body = None;
+            reported.stated = None;
+        }
+        return serde_json::to_string(&reported).unwrap_or_else(|_| payload.to_string());
+    }
+    if kind != crate::kind::MESSAGE && kind != crate::kind::KEY {
+        return payload.to_string();
+    }
+    let Ok(mut spoken) = serde_json::from_str::<Spoken>(payload) else {
+        return payload.to_string();
+    };
+    if !may_read(spoken.to, spoken.sealed, spoken.under) {
+        spoken.body = Body::Unreadable;
+        spoken.stated = None;
+    }
+    serde_json::to_string(&spoken).unwrap_or_else(|_| payload.to_string())
+}
+

@@ -462,8 +462,8 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
     match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
         Ok(swept) if swept.is_empty() => {}
         Ok(swept) => eprintln!(
-            "retention: dropped {} delivery and archived {} event partitions, forgot {} faded fronts",
-            swept.dropped.len(),
+            "retention: archived {} delivery and {} event partitions, forgot {} faded fronts",
+            swept.deliveries.len(),
             swept.archived.len(),
             swept.fronts,
         ),
@@ -475,13 +475,13 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
 /// planned against thousands of partitions and asks for a lock on each.
 async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
     let started = std::time::Instant::now();
-    let (mut sweeps, mut dropped, mut archived) = (0, 0, 0);
+    let (mut sweeps, mut deliveries, mut archived) = (0, 0, 0);
     loop {
         match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
             Ok(swept) if swept.is_empty() => break,
             Ok(swept) => {
                 sweeps += 1;
-                dropped += swept.dropped.len();
+                deliveries += swept.deliveries.len();
                 archived += swept.archived.len();
             }
             Err(why) => {
@@ -492,7 +492,7 @@ async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
     }
     if sweeps > 0 {
         eprintln!(
-            "retention caught up in {sweeps} sweeps and {:.0} s: dropped {dropped} delivery and archived {archived} event partitions",
+            "retention caught up in {sweeps} sweeps and {:.0} s: archived {deliveries} delivery and {archived} event partitions",
             started.elapsed().as_secs_f64(),
         );
     }

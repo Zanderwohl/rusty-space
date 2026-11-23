@@ -3,8 +3,10 @@
 //! right to make one.
 
 use glam::DVec3;
-use lc_proto::ShipId;
-use lc_server::journal::{DESIGN_HOUR_US, Journal, PREPARE_AHEAD_US, Postgres, RETENTION};
+use lc_proto::{ClientId, Inbound, Outbound, ShipId};
+use lc_server::journal::{DESIGN_HOUR_US, Journal, PREPARE_AHEAD_US, Postgres, RETENTION, Store};
+use lc_server::server::Server;
+use lc_server::transport::Loopback;
 use lc_server::world::{Event, Scheduled};
 use lc_store::id::Minter;
 use lc_store::retention::{Policy, sweep};
@@ -50,7 +52,7 @@ fn said(minter: &mut Minter, t: i64) -> Event {
 }
 
 fn heard(observer: i64, event: &Event, arrive_t: i64) -> Scheduled {
-    Scheduled { observer: ShipId(observer), event: event.id, arrive_t, strength: 1.0 }
+    Scheduled { observer: ShipId(observer), event: event.id, arrive_t, strength: 1.0, direction: None }
 }
 
 /// Light kept as a front, as the shard keeps it, faded `reach_us` after it left.
@@ -235,5 +237,58 @@ async fn a_store_from_before_the_wider_span_keeps_taking_writes() {
     let swept = sweep(journal.client(), later, RETENTION).await.unwrap();
     assert!(swept.archived.iter().any(|p| p.child == "events_p13"), "{swept:?}");
     assert!(swept.archived.iter().any(|p| p.child == "events_s2"), "{swept:?}");
-    assert!(swept.dropped.iter().any(|p| p.child == "deliveries_p13"), "{swept:?}");
+    assert!(swept.deliveries.iter().any(|p| p.child == "deliveries_p13"), "{swept:?}");
+}
+
+/// A client back after three days, where the shard keeps one, is told everything that landed on its
+/// craft while it was away: the archived days a page a flush, then the live one, oldest first and
+/// each once. Before this the first two days were gone.
+#[tokio::test]
+async fn a_client_back_after_longer_than_the_window_is_caught_up_from_the_archive() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let Some(client) = own_database().await else { return };
+    let mut journal = Postgres::with(client);
+    let mut minter = Minter::new(2).unwrap();
+    let ship = ShipId(7);
+    let start = DESIGN_HOUR_US;
+    let mut now = start;
+    let mut said_ids = Vec::new();
+    for hour in 0..3 * 24 {
+        now = start + hour * DESIGN_HOUR_US;
+        journal.prepare(now, now + PREPARE_AHEAD_US).await.unwrap();
+        let event = said(&mut minter, now);
+        said_ids.push(event.id);
+        let landing = Scheduled { direction: Some([0.0, 1.0, 0.0]), ..heard(ship.0, &event, now + 1_000_000) };
+        journal.write(&[event], &[landing], &[]).await.unwrap();
+        sweep(journal.client(), now, RETENTION).await.unwrap();
+    }
+    let archived: i64 = journal
+        .client()
+        .query_one("SELECT count(*) FROM deliveries_archive WHERE observer_id = $1", &[&ship.0])
+        .await
+        .unwrap()
+        .get(0);
+    assert!(archived > 24, "premise: more than a day of it is archived, {archived}");
+    let missed_live = journal.due(ship, start - 1, now + 1_000_000).await.unwrap().len();
+    assert!(missed_live < said_ids.len(), "premise: the live table alone would lose {}", said_ids.len() - missed_live);
+
+    let mut server = Server::new(Store::Durable(journal), now + 2_000_000, 3);
+    let mut wire = Loopback::new();
+    server.admit(ClientId(1), lc_server::world::still(ship, DVec3::ZERO), 0.0);
+    wire.client_says(ClientId(1), Inbound::ResumeFrom { arrive_t: start });
+    let mut told = Vec::new();
+    for _ in 0..10 {
+        server.tick(&mut wire).await.unwrap();
+        for message in wire.take(ClientId(1)) {
+            if let Outbound::Sightings(list) = message {
+                told.extend(list.into_iter().map(|s| s.into_inner()));
+            }
+        }
+    }
+    let ids: Vec<i64> = told.iter().map(|s| s.event_id).collect();
+    assert_eq!(ids, said_ids, "everything, once, in the order it landed");
+    // The archived ones from where they were solved to come from; the live ones the tick works out
+    // from the worldline it still has.
+    let stored = told.iter().filter(|s| s.direction == [0.0, 1.0, 0.0]).count() as i64;
+    assert!(stored >= archived, "{stored} told from the stored direction, of {archived} archived");
 }

@@ -1030,7 +1030,7 @@ pub use knowing::{
 
 pub use radio::{
     ACK_DEPTH, Aim, Body, Chat, Claim, Faction, FactionId, MESSAGE_LIMIT, MessageKey, REPORT_FORMAT, REPORT_LIMIT, Reported, Said, Secrecy, Spoken, Stated,
-    decode_report, encode_report,
+    decode_report, encode_report, redact,
 };
 
 #[cfg(test)]

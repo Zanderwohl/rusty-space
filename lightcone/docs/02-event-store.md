@@ -7,7 +7,9 @@ reads deliveries back. Light is followed as fronts (`lc_server::front`, kept in 
 delivered to whatever craft it lands on, late joiners and ships that turned included. The shard
 sweeps retention after every checkpoint
 (`lc_store::retention::sweep`, under `lc_server::journal::RETENTION`), so the live partitions stay
-near thirty per table however long it runs. `lc_store::cursor::LightConeCursor` and
+near thirty per table however long it runs. Deliveries are archived like events, with the direction
+each came from, and a client resuming from before the cutoff is caught up from the archive by
+`lc_catchup` ([§Catching up](#catching-up)). `lc_store::cursor::LightConeCursor` and
 `lc_store::bvh` are built but run only in `lc-store`'s own tests, over an in-memory event source:
 nothing writes the `sources` or `systems` tables. Shipping the archive to object storage is not
 built.
@@ -348,8 +350,11 @@ on the cursor running on the shard; until then only deliveries read events.
 
 - **Fronts** that faded before the cutoff are forgotten. Until then a delivery they made reads its
   event through them.
-- **Deliveries** landing before the cutoff are dropped. Nothing reads a landed delivery except a
-  client catching up, and the event it was about still says everything it did.
+- **Deliveries** landing before the cutoff are archived, into `deliveries_archive`, the same way.
+  The event says what was said but not who heard it: that took the light-arrival solve against the
+  course the craft actually flew, which nothing stores, so a delivery dropped is one no later reader
+  could work out again. Each keeps the direction it came from (`dx`, `dy`, `dz`), which needs the
+  same worldline; null on a row written before it was kept.
 - **Events** whose partition is wholly before the cutoff, and that no remaining delivery refers
   to, are archived: `lc_detach_partition` moves the rows into `events_archive`, drops the
   partition and records its bounds; `lc_attach_partition` makes it again and moves them back.
@@ -397,6 +402,27 @@ hand, so a detach running alongside a listing yields a row whose bounds come bac
 than a row that is absent. Filtering on `relpartbound IS NOT NULL` does not fix it; the filter
 has to be on the result. A partition whose bound cannot be read is one on its way out, and is
 not a live partition for any purpose.
+
+## Catching up
+
+A client back after longer than the retention window says where it is up to with `ResumeFrom`, as
+any client does, and the deliveries it missed are partly archived. `lc-catchup` reads them: what
+landed on the craft in a span, from `deliveries` and `deliveries_archive` alike, with its events
+from `events` and `events_archive`, sealed payloads redacted (`lc_proto::redact`) against the
+faction keys `lc_faction_keys` says the craft held when each landed, and each through
+`Cleared::clear` against the receiver's noise floor and the clock. It reads the store and nothing
+else: no worldline, no fleet, no shard, because every delivery was solved when it landed. So the
+reading can move to a service of its own, beside the shard and its login, mounting what it needs;
+today the shard calls it from `Server::flush`.
+
+- **A page a flush**, `lc_catchup::PAGE` deliveries, and never part of an instant: a page ends
+  between two arrival times, so the next begins exactly where it ended. The client's live
+  deliveries wait until it reaches the cutoff it resumed against, because its cursor is one line,
+  read in order.
+- **As far back as the craft existed.** A resume is not capped; its cost is a page per tick until it
+  is through, and an observer's deliveries begin with the craft.
+- **Only on a resume.** A brand-new connection still reads the live table from its start, as
+  before: a pilot who never asked for twenty years of history is not sent it.
 
 ## Open
 

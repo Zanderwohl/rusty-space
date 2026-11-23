@@ -95,6 +95,9 @@ pub struct Connected {
     /// Whether this connection has been told of the wrecks whose light reached its craft before
     /// it could be delivered. See [`crate::field::wrecks_in_progress`].
     pub wrecks_told: bool,
+    /// Through when it is still being caught up on deliveries retention has archived, a page a
+    /// flush, before its live ones are read. Set by a [`Inbound::ResumeFrom`] from before the cutoff.
+    pub catching_up: Option<i64>,
 }
 
 impl Connected {
@@ -120,6 +123,7 @@ impl Connected {
             analyzing_sent: 0,
             doing_sent: None,
             wrecks_told: false,
+            catching_up: None,
         }
     }
 }
@@ -656,9 +660,12 @@ impl<J: Journal> Server<J> {
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
-                // cursor back is the whole of catch-up; the next flush replays from there.
+                // cursor back is the whole of catch-up within the retention window; from further
+                // back the archive is read first, a page a flush, until the window is reached.
+                let cutoff = retention_cutoff(self.now_t);
                 if let Some(state) = self.clients.get_mut(&from) {
                     state.cursor_t = arrive_t.min(self.now_t);
+                    state.catching_up = cutoff.filter(|cutoff| state.cursor_t < *cutoff);
                 }
             }
         }
@@ -1310,6 +1317,35 @@ impl<J: Journal> Server<J> {
         self.fan_out(id, from, kind, power_w, |_| payload, at, &Beam::OMNI, &[], events)
     }
 
+    /// One page of catch-up for each client resuming from before the retention cutoff, read by
+    /// `lc_catchup` from the store alone, so the reading can move to a service of its own. Its live
+    /// deliveries wait until it is through: the cursor is one line, and it is read in order.
+    async fn catch_up(&mut self, clients: &[ClientId], wire: &mut impl Transport) -> Result<(), JournalError> {
+        let now = self.now_t;
+        for &id in clients {
+            let Some(state) = self.clients.get(&id) else { continue };
+            let (ship, after_t, Some(until_t)) = (state.ship, state.cursor_t, state.catching_up) else { continue };
+            let Some(noise_floor) = self.fleet.get(CraftId(ship.0)).map(|craft| craft.noise_floor) else { continue };
+            let page = self.journal.caught_up(ship, noise_floor, (after_t, until_t), now).await?;
+            let Some(state) = self.clients.get_mut(&id) else { continue };
+            let Some((sightings, through_t)) = page else {
+                state.catching_up = None;
+                continue;
+            };
+            state.cursor_t = through_t.max(after_t);
+            if let Some(latest) = sightings.iter().map(|s| s.get().arrive_t).max() {
+                state.last_reception_t = state.last_reception_t.max(latest);
+            }
+            if through_t >= until_t {
+                state.catching_up = None;
+            }
+            if !sightings.is_empty() {
+                wire.send(id, Outbound::Sightings(sightings));
+            }
+        }
+        Ok(())
+    }
+
     /// Release what has arrived. **The only place anything reaches a client.**
     ///
     /// Every sighting and every contact here goes through a [`Cleared::clear`], which is the
@@ -1324,6 +1360,7 @@ impl<J: Journal> Server<J> {
         let ids: Vec<ClientId> = self.clients.keys().copied().collect();
 
         let mut reading: Vec<(ClientId, ShipId, i64)> = Vec::with_capacity(ids.len());
+        let mut catching: Vec<ClientId> = Vec::new();
         for id in ids {
             let Some(state) = self.clients.get_mut(&id) else { continue };
             // Every tick there is anything to say, and once more when there stops being: a
@@ -1335,7 +1372,7 @@ impl<J: Journal> Server<J> {
                 state.had_contacts = !seen.is_empty();
                 wire.send(id, Outbound::Present(seen));
             }
-            let (ship, cursor_t, backlog_sent) = (state.ship, state.cursor_t, state.backlog_sent);
+            let (ship, cursor_t, backlog_sent, catching_up) = (state.ship, state.cursor_t, state.backlog_sent, state.catching_up.is_some());
             if self.fleet.get(CraftId(ship.0)).is_none() {
                 continue;
             }
@@ -1343,8 +1380,13 @@ impl<J: Journal> Server<J> {
             if !backlog_sent {
                 self.send_backlog(id, ship, now, wire).await;
             }
-            reading.push((id, ship, cursor_t));
+            if catching_up {
+                catching.push(id);
+            } else {
+                reading.push((id, ship, cursor_t));
+            }
         }
+        self.catch_up(&catching, wire).await?;
 
         // The proven read, one range scan over `(observer_id, arrive_t)` per client, all asked
         // at once: one connection pipelines them, so the tick waits one round trip rather than
@@ -1415,6 +1457,18 @@ impl<J: Journal> Server<J> {
 /// answer. It is told which, and corrects.
 /// A craft's identifier as [`lc_world::motion`] names it. The two are the same number: a craft
 /// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
+/// Where retention has archived deliveries up to, at `now_t`: a resume from before it is caught up
+/// from the archive. `None` for a shard that keeps nothing, and so archives nothing.
+fn retention_cutoff(now_t: i64) -> Option<i64> {
+    #[cfg(feature = "storage")]
+    return Some(now_t.saturating_sub(crate::journal::RETENTION.kept_us));
+    #[cfg(not(feature = "storage"))]
+    {
+        let _ = now_t;
+        None
+    }
+}
+
 /// A welcome for a ship the fleet does not have, which is a state that should not arise: the
 /// sign-in that reached here either found a craft or made one. Still at rest at the origin
 /// rather than a panic, because losing a connection is better than losing the shard.

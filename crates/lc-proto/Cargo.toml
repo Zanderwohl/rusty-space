@@ -10,3 +10,6 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 base64 = "0.22"
+# A transmission's payload is JSON, and `redact` is the one place this crate reads one: the rule a
+# shard and a catch-up both apply. Exact, as the shard's is, so a re-serialized payload is the same.
+serde_json = { version = "1", features = ["float_roundtrip"] }

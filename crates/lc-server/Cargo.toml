@@ -15,6 +15,9 @@ lc-world = { path = "../lc-world", default-features = false }
 em-foundations = { path = "../em-foundations" }
 em-spectra = { path = "../em-spectra" }
 lc-store = { path = "../lc-store", default-features = false }
+# What landed on a craft before the retention cutoff, read from the store alone. A crate of its own
+# so it can become a service of its own; see src/server.rs `flush`.
+lc-catchup = { path = "../lc-catchup", optional = true }
 glam = "0.32"
 # Verifying game tickets. The server depends on a JWT library and a public key, never on the
 # identity broker: see lightcone/docs/16-identity.md.
@@ -43,7 +46,7 @@ ciborium = { version = "0.2", optional = true }
 default = ["storage"]
 # Checkpoints, knowledge, presets, the Postgres journal and the admin routes that read them. Off
 # for the client's single-player shard, which never saves.
-storage = ["dep:ciborium", "dep:tokio-postgres", "dep:axum", "dep:ron", "lc-store/postgres"]
+storage = ["dep:ciborium", "dep:tokio-postgres", "dep:axum", "dep:ron", "dep:lc-catchup", "lc-store/postgres"]
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
