@@ -108,14 +108,16 @@ pub async fn page(
     for l in landed {
         // A delivery outliving its event is an archive shipped away and not restored.
         let Some(event) = said.get(&l.event_id) else { continue };
+        // A row from before directions were kept: nothing can say where it came from now, and a
+        // made-up bearing would be drawn and answered as a real one.
+        let Some(direction) = l.direction else { continue };
         let holds = |key: FactionId| held.get(&key.0).is_some_and(|&learned_t| learned_t <= l.arrive_t);
         let sighting = Sighting {
             event_id: l.event_id,
             source_id: event.source_id,
             arrive_t: l.arrive_t,
             emitted_t: event.t,
-            // Zero for a row written before directions were kept: nothing can say it now.
-            direction: l.direction.map_or([0.0; 3], |d| d.map(f64::from)),
+            direction: direction.map(f64::from),
             strength: l.strength,
             kind: event.kind,
             payload: lc_proto::redact(event.kind, &event.payload, observer, holds),

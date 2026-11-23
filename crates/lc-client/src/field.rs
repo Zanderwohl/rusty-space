@@ -644,9 +644,13 @@ pub fn collapses(
         if !wrecks.taken.insert(sighting.event_id) || Some(from) == me {
             continue;
         }
+        let arrive_s = sighting.arrive_t as f64 * 1e-6;
+        // Over before it was told, as a catch-up tells decades of them: nothing to draw or announce.
+        if game.0.coordinate_time_s() - arrive_s > balance.collapse_afterglow_s {
+            continue;
+        }
         let last = wrecks.last.get(&from);
         let name = last.map_or_else(|| uplink.name_of(from), |l| l.name.clone());
-        let arrive_s = sighting.arrive_t as f64 * 1e-6;
         ui.0.heard(from, format!("{name} collapsed"), arrive_s);
         let released_j = serde_json::from_str::<lc_proto::Released>(&sighting.payload).map_or(0.0, |r| r.released_j);
         let observer_ly = game.0.ship.motion.position_ly;
