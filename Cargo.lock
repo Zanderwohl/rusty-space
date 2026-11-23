@@ -5061,6 +5061,7 @@ dependencies = [
  "base64 0.22.1",
  "postcard",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
