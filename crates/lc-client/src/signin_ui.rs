@@ -265,6 +265,7 @@ fn handle(
     mut uplink: ResMut<crate::uplink::Uplink>,
     mut ticket: ResMut<crate::Ticket>,
     mut game: ResMut<crate::app::Game>,
+    mut wrecks: ResMut<crate::field::Wrecks>,
 ) {
     for request in requests.read() {
         match &request.0 {
@@ -288,10 +289,9 @@ fn handle(
                 // A ticket still being minted is this account's, and would reopen the socket.
                 *signin.minting.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                 *game = crate::app::Game::before_the_game();
-                #[cfg(feature = "godview")]
-                {
-                    ui.may_see_everything = crate::map_source::may_see_everything(None);
-                }
+                // Which collapses it has heard of: the next account hears them for itself.
+                *wrecks = default();
+                ui.forget_account();
             }
             // Opening the form is all this does; submitting it is `password_submit`, which
             // the egui panel calls directly because it owns the typed text.
@@ -820,7 +820,12 @@ mod tests {
 
         let mut world = World::new();
         world.init_resource::<Messages<Requested>>();
-        world.insert_resource(Ui(crate::ui::UiState::default()));
+        let mut ui = crate::ui::UiState::default();
+        ui.selected_craft = Some(lc_proto::ShipId(7));
+        ui.heard(lc_proto::ShipId(7), "a's news", 0.0);
+        ui.exposure_offset = Some(1.5);
+        world.insert_resource(Ui(ui));
+        world.init_resource::<crate::field::Wrecks>();
         world.insert_resource(crate::Ticket(Some("a's ticket".into())));
         let mut game = crate::app::Game::before_the_game();
         game.0.issue_charts(crate::session::CHARTED_LY);
@@ -852,5 +857,9 @@ mod tests {
         assert_eq!(world.resource::<crate::Ticket>().0, None);
         assert!(learned > 0 && world.resource::<crate::app::Game>().0.knowledge.is_empty(), "the next account inherits {learned} pages");
         assert!(to_ticket.send(Ok("late".into())).is_err(), "a ticket still being minted would reopen it");
+        let ui = &world.resource::<Ui>().0;
+        assert_eq!(ui.selected_craft, None, "the next account sees what the last one picked");
+        assert!(ui.notifications.is_empty(), "the next account reads what the last one heard");
+        assert_eq!(ui.exposure_offset, Some(1.5), "how this machine draws is not the account's");
     }
 }

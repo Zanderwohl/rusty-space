@@ -92,6 +92,9 @@ pub struct Connected {
     pub analyzing_sent: usize,
     /// The last [`Outbound::Doing`] this connection was sent.
     pub doing_sent: Option<Outbound>,
+    /// Whether this connection has been told of the wrecks whose light reached its craft before
+    /// it could be delivered. See [`crate::field::wrecks_in_progress`].
+    pub wrecks_told: bool,
 }
 
 impl Connected {
@@ -116,6 +119,7 @@ impl Connected {
             retained_sent: false,
             analyzing_sent: 0,
             doing_sent: None,
+            wrecks_told: false,
         }
     }
 }
@@ -229,6 +233,8 @@ pub struct Server<J: Journal> {
     pub(crate) emissions: crate::emit::Emissions,
     /// Each wreck's collapse, for as long as it is kept. See [`crate::field`].
     pub(crate) afterglows: HashMap<CraftId, lc_world::afterglow::Afterglow>,
+    /// Each wreck's collapse event, beside its afterglow and kept as long.
+    pub(crate) collapse_events: HashMap<CraftId, i64>,
 }
 
 impl<J: Journal> Server<J> {
@@ -282,6 +288,7 @@ impl<J: Journal> Server<J> {
             destroyed: Vec::new(),
             emissions: Default::default(),
             afterglows: HashMap::new(),
+            collapse_events: HashMap::new(),
         }
     }
 
@@ -1371,6 +1378,17 @@ impl<J: Journal> Server<J> {
                     // A client that could tell the two apart could tell that *something*
                     // happened it was not told about, which is faster-than-light information.
                     Err(Withheld::StillInFlight | Withheld::BelowNoiseFloor) => {}
+                }
+            }
+            if !state.wrecks_told {
+                state.wrecks_told = true;
+                let delivered: Vec<i64> = cleared.iter().map(|pass| pass.get().event_id).collect();
+                let missed = crate::field::wrecks_in_progress(&self.afterglows, &self.collapse_events, ship, now, |id| delivered.contains(&id));
+                for sighting in missed {
+                    if let Ok(pass) = Cleared::<Sighting>::clear(sighting, now, ship.noise_floor) {
+                        latest = latest.max(pass.get().arrive_t);
+                        cleared.push(pass);
+                    }
                 }
             }
             state.cursor_t = now;

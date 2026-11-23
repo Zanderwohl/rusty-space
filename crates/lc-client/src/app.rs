@@ -89,7 +89,7 @@ pub struct Ui(pub UiState);
 pub struct Game(pub Session);
 
 impl Game {
-    /// The placeholder held until a sky loads; see [`enter_game`].
+    /// The placeholder held until a sky loads and `enter_game` replaces it.
     pub fn before_the_game() -> Self {
         Game(Session::new(&AuthoredStars::sample(), 3))
     }
@@ -436,7 +436,7 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 /// Despawned when the game is left. Every scene root requires it, so a new kind of root cannot
-/// forget its way out of [`leave_scene`]'s reach, as the drones and the wrecks once did.
+/// forget its way out of `leave_scene`'s reach, as the drones and the wrecks once did.
 pub type InGameOnly = DespawnOnExit<AppState>;
 
 pub const fn in_game_only() -> InGameOnly {
@@ -760,7 +760,7 @@ mod tests {
             .add_message::<Requested>()
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             // The dispatcher routes orders to it. Absent, not connected: these tests are the
             // single-process game, which is what a session with no server still is.
             .init_resource::<crate::uplink::Uplink>()
@@ -977,7 +977,7 @@ mod tests {
             .add_message::<Requested>()
             .add_message::<AppExit>()
             .insert_resource(Ui(UiState::default()))
-            .insert_resource(Game(Session::new(&AuthoredStars::sample(), 3)))
+            .insert_resource(Game::before_the_game())
             .init_resource::<crate::uplink::Uplink>()
             .init_resource::<Seen>()
             .configure_sets(Update, (Stage::Link, Stage::Act, Stage::Scene, Stage::Mark).chain())

@@ -496,9 +496,19 @@ impl Wreck {
         if now_s + self.ahead_s < self.arrive_s {
             return None;
         }
-        let (_, start_s) = *self.shown_at.get_or_insert((real_s, wrapped_s));
         let afterglow_real = played_s(afterglow_s, rate);
+        // Back-dated by however long ago its light landed, which for a client that joined after
+        // it did is past the flash and partway through the afterglow. Held to the afterglow so
+        // the wrapped clock is not pushed back by a collapse long over.
+        let late = self.late_real(now_s, self.arrive_s, rate).min(afterglow_real as f32 + FLASH_S);
+        let (_, start_s) = *self.shown_at.get_or_insert((real_s - late, wrapped_s - late));
         Some(Vec4::new(start_s, FLASH_S, afterglow_real as f32, DEBRIS_REACH))
+    }
+
+    /// Real seconds since light that landed at coordinate `at_s` reached this ship, as the clock
+    /// at `rate` plays them.
+    fn late_real(&self, now_s: f64, at_s: f64, rate: f64) -> f32 {
+        played_s((now_s + self.ahead_s - at_s).max(0.0), rate) as f32
     }
 
     /// How far through the afterglow, by the coordinate clock or as it plays at the design rate,
@@ -522,11 +532,14 @@ impl Wreck {
     }
 
     /// The spike on a craft at `at_ly`, as a hot spot toward the wreck, once its light is here.
-    fn spike_on(&mut self, craft: Option<ShipId>, at_ly: DVec3, observer_ly: DVec3, now_s: f64, real_s: f32, field: (f64, f64, f64)) -> Option<Vec4> {
-        if craft == Some(self.craft) || now_s + self.ahead_s < self.lands_s(at_ly, observer_ly) {
+    #[allow(clippy::too_many_arguments)]
+    fn spike_on(&mut self, craft: Option<ShipId>, at_ly: DVec3, observer_ly: DVec3, now_s: f64, real_s: f32, rate: f64, field: (f64, f64, f64)) -> Option<Vec4> {
+        let lands_s = self.lands_s(at_ly, observer_ly);
+        if craft == Some(self.craft) || now_s + self.ahead_s < lands_s {
             return None;
         }
-        let since = real_s - *self.landed.entry(craft).or_insert(real_s);
+        let late = self.late_real(now_s, lands_s, rate).min(SPIKE_SHOWN_S);
+        let since = real_s - *self.landed.entry(craft).or_insert(real_s - late);
         let fading = (1.0 - since / SPIKE_SHOWN_S).max(0.0).powi(2);
         let (absorbs, kelvin, area_m2) = field;
         let d_m = self.at_ly.distance(at_ly) * M_PER_LY;
@@ -737,7 +750,7 @@ pub fn draw_fields(
         let mut spots: Vec<Vec4> = wrecks
             .fell
             .iter_mut()
-            .filter_map(|w| w.spike_on(d.craft, d.at_ly, observer_ly, now, real_s, field))
+            .filter_map(|w| w.spike_on(d.craft, d.at_ly, observer_ly, now, real_s, ui.time_rate, field))
             .collect();
         if d.craft.is_none() {
             spots.extend(uplink.incoming.spots(absorbs, d.state.kelvin, shell.area_m2));
@@ -1169,6 +1182,28 @@ mod tests {
         assert!((cooled - 0.1).abs() < 1e-3, "cooling at {cooled} of the afterglow");
     }
 
+    /// A sighting whose light landed before this client could draw it, as a shard tells one that
+    /// has just joined, plays from as far along as it is: past the flash, partway through the
+    /// afterglow, on the shader's clock and the meter's alike.
+    #[test]
+    fn a_collapse_landed_before_joining_plays_from_where_it_is() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let afterglow_s = B.collapse_afterglow_s;
+        let landed_s = 20.0;
+        let now_s = landed_s + 0.25 * afterglow_s;
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, (landed_s * 1.0e6) as i64)], wrecks, now_s);
+        let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
+        assert_eq!(wreck.ahead_s, 0.0, "premise: the shard is not ahead");
+        let (real_s, rate) = (100.0, 0.0);
+        let drawn = wreck.collapse(now_s, (real_s, real_s), rate, afterglow_s).expect("its light is here");
+        let behind = real_s - drawn.x;
+        assert!((f64::from(behind) - played_s(0.25 * afterglow_s, rate)).abs() < 1e-3, "started {behind} real seconds ago");
+        assert!(behind > FLASH_S, "the flash went by before it joined");
+        let cooled = wreck.cooled(now_s, real_s, afterglow_s);
+        assert!((cooled - 0.25).abs() < 1e-3, "a quarter cooled, not {cooled}");
+    }
+
     /// A collapse drawn as a point is nothing before its light arrives, and from then plays from
     /// the frame it is first drawn, as the debris does.
     #[test]
@@ -1261,8 +1296,8 @@ mod tests {
         wreck.at_ly = DVec3::X * 10.0 * ls;
         let behind = wreck.at_ly * 2.0;
         let field = (1.0, 4_500.0, 1.0e4);
-        assert_eq!(wreck.spike_on(Some(ShipId(6)), behind, DVec3::ZERO, 15.0 + 19.9, 1.0, field), None);
-        assert!(wreck.spike_on(Some(ShipId(6)), behind, DVec3::ZERO, 15.0 + 20.0, 1.0, field).is_some());
+        assert_eq!(wreck.spike_on(Some(ShipId(6)), behind, DVec3::ZERO, 15.0 + 19.9, 1.0, 0.0, field), None);
+        assert!(wreck.spike_on(Some(ShipId(6)), behind, DVec3::ZERO, 15.0 + 20.0, 1.0, 0.0, field).is_some());
     }
 
     /// A neighbor brightens when the spike's light, bounced off it, reaches the observer: later for
@@ -1283,9 +1318,9 @@ mod tests {
         let lands = wreck.lands_s(beside, observer);
         assert!((lands - (20.0 + 1.0 + 101f64.sqrt() - 10.0)).abs() < 1e-6, "{lands}");
         let field = (1.0, 4_500.0, 1.0e4);
-        assert_eq!(wreck.spike_on(Some(ShipId(6)), beside, observer, lands - 1e-3, 1.0, field), None);
-        let spot = wreck.spike_on(Some(ShipId(6)), beside, observer, lands, 1.0, field).expect("landed");
+        assert_eq!(wreck.spike_on(Some(ShipId(6)), beside, observer, lands - 1e-3, 1.0, 0.0, field), None);
+        let spot = wreck.spike_on(Some(ShipId(6)), beside, observer, lands, 1.0, 0.0, field).expect("landed");
         assert!(spot.w > 0.0 && spot.truncate().dot(sim_to_render(-DVec3::Y).as_vec3()) > 0.99, "{spot}");
-        assert_eq!(wreck.spike_on(Some(ShipId(5)), wreck.at_ly, observer, 30.0, 1.0, field), None, "on itself");
+        assert_eq!(wreck.spike_on(Some(ShipId(5)), wreck.at_ly, observer, 30.0, 1.0, 0.0, field), None, "on itself");
     }
 }

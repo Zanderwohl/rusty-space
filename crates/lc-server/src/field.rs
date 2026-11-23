@@ -12,9 +12,12 @@
 //! any other, so the receiver's collapse re-solves from it, and a cascade is nothing but collapses
 //! and landings taken in time order.
 
+use std::collections::HashMap;
+
 use glam::DVec3;
 use lc_proto::{Outbound, ShipId};
 use lc_spacetime::LIGHT_MICROSECOND_M;
+use lc_world::afterglow::Afterglow;
 use lc_world::craft::{Craft, CraftId};
 use lc_world::field::{CONTACT_FRACTION, received_fraction};
 
@@ -197,7 +200,9 @@ impl<J: Journal> Server<J> {
         self.emissions.lit_by.remove(&id);
         let released = serde_json::to_value(lc_proto::Released { released_j }).unwrap_or_default();
         let payload = crate::emit::carrying(released, &crate::emit::burst(from, spike_j, balance.collapse_spike_k));
-        self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events);
+        if let Some(event_id) = self.emit_from(id, from, KIND_COLLAPSE, spike_j / SPIKE_S, payload, at_t, events) {
+            self.collapse_events.insert(id, event_id);
+        }
 
         self.pursuits.remove(&id);
         self.parks.remove(&id);
@@ -242,6 +247,7 @@ impl<J: Journal> Server<J> {
             if passed {
                 self.fleet.remove(id);
                 self.afterglows.remove(&id);
+                self.collapse_events.remove(&id);
                 self.destroyed.push(id.0);
             }
         }
@@ -256,6 +262,51 @@ impl<J: Journal> Server<J> {
     pub fn untake_destroyed(&mut self, ids: Vec<i64>) {
         self.destroyed.extend(ids);
     }
+}
+
+/// Each wreck whose collapse `observer` should be watching now: its light has reached the craft
+/// and its afterglow is still arriving. As the sighting the spike would have made, landing where
+/// the craft is when it did, so a client plays the wreck from as far along as it is.
+///
+/// For a connection's first flush. Fronts deliver to whichever craft exist as they pass, so a
+/// craft made after a spike went by (a newcomer, a successor) is told nothing by them, though the
+/// wreck still glows in its sky. `delivered` is what the journal has already replayed to it.
+pub(crate) fn wrecks_in_progress(
+    afterglows: &HashMap<CraftId, Afterglow>,
+    collapse_events: &HashMap<CraftId, i64>,
+    observer: &Craft,
+    now_t: i64,
+    delivered: impl Fn(i64) -> bool,
+) -> Vec<lc_proto::Sighting> {
+    let here = observer.position_at(now_t as f64);
+    let mut told = Vec::new();
+    for (wreck, afterglow) in afterglows {
+        let Some(&event_id) = collapse_events.get(wreck) else { continue };
+        if *wreck == observer.id || delivered(event_id) {
+            continue;
+        }
+        let from = afterglow.position();
+        let distance_us = from.distance(here);
+        let left_s = now_t as f64 * 1.0e-6 - distance_us * 1.0e-6;
+        if left_s < afterglow.at_s || left_s >= afterglow.ends_s() {
+            continue;
+        }
+        let emitted_t = (afterglow.at_s * 1.0e6).round() as i64;
+        let released = serde_json::to_value(lc_proto::Released { released_j: afterglow.spike_j + afterglow.energy_j }).unwrap_or_default();
+        told.push(lc_proto::Sighting {
+            event_id,
+            source_id: wreck.0,
+            // Rounded up, as a delivery's is: never a microsecond before the light could be here.
+            arrive_t: (emitted_t + distance_us.ceil() as i64).min(now_t),
+            emitted_t,
+            direction: (from - here).normalize_or_zero().to_array(),
+            // What reaches it now, which is the afterglow: the spike went by before it was here.
+            strength: crate::world::strength(afterglow.power_w(left_s), distance_us),
+            kind: KIND_COLLAPSE,
+            payload: released.to_string(),
+        });
+    }
+    told
 }
 
 #[cfg(test)]
@@ -435,6 +486,65 @@ mod tests {
 
         let collapsed = until_collapse(&mut server, &mut wire).await;
         assert_eq!(collapsed.at_t, to_us(end_s));
+    }
+
+    /// A craft made after the spike went by is told of the wreck on its first flush, as landing
+    /// when the light passed where it is, so its client plays the afterglow from that far along;
+    /// and a ship that heard it live is not told twice.
+    #[tokio::test]
+    async fn a_newcomer_is_told_of_a_wreck_whose_light_passed_before_it_was_there() {
+        const NEWCOMER: ClientId = ClientId(9);
+        let Some((mut server, mut wire)) = scene() else { return };
+        let collapsed = until_collapse(&mut server, &mut wire).await;
+        let [event] = collapse_events(&server)[..] else { panic!("{:?}", collapse_events(&server)) };
+        let (event_id, from) = (event.id, event.at);
+        let passed_t = collapsed.at_t + (APART_US / 2.0) as i64;
+        let mut watched = Vec::new();
+        while server.now_t() < passed_t + (DAY_S * 1.0e6) as i64 {
+            server.tick(&mut wire).await.unwrap();
+            watched.extend(wire.take(WATCHER));
+        }
+
+        server.admit(NEWCOMER, still(ShipId(9), from + DVec3::Y * APART_US / 2.0), 0.0);
+        server.tick(&mut wire).await.unwrap();
+        server.tick(&mut wire).await.unwrap();
+        let told = |messages: Vec<Outbound>| -> Vec<Sighting> {
+            messages
+                .into_iter()
+                .filter_map(|m| match m {
+                    Outbound::Sightings(list) => Some(list.into_iter().map(|s| s.get().clone()).collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|s| s.kind == KIND_COLLAPSE)
+                .collect()
+        };
+        let [sighting] = &told(wire.take(NEWCOMER))[..] else { panic!("told once, and only once") };
+        assert_eq!((sighting.event_id, sighting.source_id, sighting.emitted_t), (event_id, DYING.0, collapsed.at_t));
+        assert!((sighting.arrive_t - passed_t).abs() <= 1, "landing when the light passed, not now: {} vs {passed_t}", sighting.arrive_t);
+        assert!(sighting.arrive_t < server.now_t());
+        let released = serde_json::from_str::<lc_proto::Released>(&sighting.payload).unwrap();
+        assert!((released.released_j - collapsed.released_j).abs() <= 1.0e-9 * collapsed.released_j);
+        while server.now_t() < collapsed.at_t + (APART_US + DAY_S * 1.0e6) as i64 {
+            watched.extend(wire.take(WATCHER));
+            server.tick(&mut wire).await.unwrap();
+        }
+        watched.extend(wire.take(WATCHER));
+        assert_eq!(told(watched).len(), 1, "the watcher hears it live, once");
+    }
+
+    /// Once the last of its afterglow has gone by, there is nothing left to be told of.
+    #[test]
+    fn a_wreck_whose_afterglow_has_gone_by_is_not_in_progress() {
+        let afterglow = Afterglow::of(DVec3::ZERO, 0.0, 1.0e20, &Balance::DEFAULT);
+        let afterglows = HashMap::from([(CraftId(1), afterglow)]);
+        let events = HashMap::from([(CraftId(1), 77)]);
+        let observer = still(ShipId(2), DVec3::X * 1.0e6);
+        let at = |s: f64| wrecks_in_progress(&afterglows, &events, &observer, (s * 1.0e6) as i64, |_| false);
+        assert!(at(0.5).is_empty(), "not yet: its light is a second away");
+        assert_eq!(at(2.0).len(), 1);
+        assert!(at(afterglow.ends_s() + 2.0).is_empty(), "the afterglow has gone by");
+        assert!(wrecks_in_progress(&afterglows, &events, &observer, 2_000_000, |id| id == 77).is_empty(), "already delivered");
     }
 
     /// Its light reaches a ship three light-days off three days later, and not before; until then
@@ -962,6 +1072,8 @@ mod tests {
         assert!(server.take_destroyed().is_empty());
 
         let mut restarted = restart(&server);
+        assert_eq!(restarted.collapse_events, server.collapse_events, "a newcomer after the restart is told them by the same ids");
+        assert_eq!(restarted.collapse_events.len(), wrecks.len());
         drop(server);
         for id in &wrecks {
             assert_inert(&restarted, CraftId(id.0));
@@ -983,6 +1095,7 @@ mod tests {
             }
         }
         assert_eq!(swept.len(), wrecks.len(), "{swept:?}");
+        assert!(restarted.collapse_events.is_empty(), "swept with their wrecks");
         assert!(collapse_events(&restarted).is_empty(), "a wreck collapsed again");
     }
 

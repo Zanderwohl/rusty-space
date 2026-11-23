@@ -378,6 +378,14 @@ seeing it replayed as the light passes.
   successor carries the account and an account holds one row; a restart brings it back as a wreck,
   nobody's, with nothing to resume, and so ends nobody's view of it early. Its row and what it knew
   are deleted at the checkpoint after the sweep.
+- **Joining while it glows.** Fronts deliver to whichever craft exist as they pass, so a craft
+  made after a spike went by its place (a newcomer, a successor) hears nothing from them while the
+  afterglow is still reaching it. A connection's first flush adds a `kind::COLLAPSE` sighting for
+  every wreck whose light has reached its craft and whose afterglow has not gone by
+  (`field::wrecks_in_progress`), unless the journal's replay in that flush already carried it. It
+  has the collapse's own event id, kept beside the afterglow and checkpointed with it, and lands
+  where the light passed the craft's place, so the client starts the debris that far along, past
+  the flash. Its strength is the afterglow's now, against the noise floor like any sighting.
 - **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
   `Collapsed` and then welcomed to it as on signing in.
 
@@ -656,6 +664,9 @@ puts a countdown in the text.
 - **Light delay.** A collapse is observed by a distant client no earlier than the light allows,
   and a neighbor's `Q` jumps no earlier. Break the retarded solve on purpose and watch the test
   fail, per [AGENTS.md](../../AGENTS.md).
+- **Joining late.** A craft admitted after a spike passed its place is told of the wreck once, by
+  its event id, landing when the light passed; a ship that heard it live is not told twice; nothing
+  is told once the afterglow has gone by; and the ids survive a restart.
 - **The afterglow.** It integrates to `(1 − collapse_spike_fraction) E`, starts at the field's limit
   and cools, and the spike is `collapse_spike_k`. A craft staring at a collapse's place records it
   from when its light arrives for `collapse_afterglow_s`, and one staring a tenth of a radian off
