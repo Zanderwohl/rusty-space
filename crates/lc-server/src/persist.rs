@@ -301,10 +301,14 @@ impl<J: Journal> Server<J> {
                             .map(|with| with.iter().copied().collect())
                             .unwrap_or_default(),
                     };
-                    let afterglow = self.afterglows.get(&craft.id).copied();
-                    let collapse_event = self.collapse_events.get(&craft.id).copied();
-                    save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), afterglow, collapse_event, self.now_t)
+                    save(craft, account, standing, instruments, radio, self.emissions.light_of(craft.id), None, None, self.now_t)
                 })
+                // A wreck is nobody's and resumes nothing: its end, its light, and its afterglow.
+                .chain(self.brights.wrecks().map(|wreck| {
+                    let id = wreck.craft.id;
+                    let light = self.emissions.light_of(id);
+                    save(&wreck.craft, None, Standing::default(), None, Radio::default(), light, Some(wreck.afterglow), wreck.event_id, self.now_t)
+                }))
                 .collect(),
         }
     }
@@ -348,16 +352,12 @@ impl<J: Journal> Server<J> {
                     catch_up(&mut craft, row.saved_t, checkpoint.now_t);
                     // Nobody's, and nothing to resume: it is there for its light and the sweep.
                     if craft.ended_s().is_some() {
-                        if let Ok(saved) = decode(row) {
-                            if let Some(afterglow) = saved.afterglow {
-                                self.afterglows.insert(craft.id, afterglow);
-                            }
-                            if let Some(event_id) = saved.collapse_event {
-                                self.collapse_events.insert(craft.id, event_id);
-                            }
-                        }
                         self.next_ship = self.next_ship.max(craft.id.0 + 1);
-                        self.fleet.insert(craft);
+                        match decode(row).ok().and_then(|saved| Some((saved.afterglow?, saved.collapse_event))) {
+                            Some((afterglow, event_id)) => self.brights.push(Box::new(crate::bright::Wreck { craft, afterglow, event_id })),
+                            // An end with no light to follow is nothing to keep.
+                            None => self.destroyed.push(craft.id.0),
+                        }
                         continue;
                     }
                     // Its owner is told of each step from here, as before the restart.

@@ -371,19 +371,26 @@ seeing it replayed as the light passes.
 - **The afterglow is light and nothing else.** A neighbor's field holds at most about 6% of the
   spike's dose there from it, about three weeks on, which moves the lethal radius out by 3%; a sustained
   emission restated as its power fell would cost journal writes for that. It heats nobody.
-- **The wreck** stays in the fleet with its worldline ended at the instant. A ship that could see
-  it goes on seeing it until the light of the end arrives, then stops. The wreck is dropped once its
-  afterglow's last light has passed every craft. A checkpoint keeps it with its end, its afterglow
-  and no account, since the
-  successor carries the account and an account holds one row; a restart brings it back as a wreck,
-  nobody's, with nothing to resume, and so ends nobody's view of it early. Its row and what it knew
-  are deleted at the checkpoint after the sweep.
+- **The wreck** leaves the fleet at the instant and becomes a bright event (`lc_server::bright`):
+  long-lived light seen from far off, kept in a list of its own so nothing that loops over craft
+  each tick meets it, and asked of only by what searches a wide area for long-lived light (the
+  roster's watch for collapses, photometry, a newcomer's first flush). It carries the craft as it
+  ended, and through `Seeable` that hull is still seen as a craft by a ship its end's light has not
+  yet reached, then not; a hull whose end's light has gone by a place is not even solved for there.
+  It is kept until its light has faded below `FAINTEST` everywhere, the afterglow's end plus the
+  reach of its first light, the horizon a front is kept to: for a starting ship's collapse, the
+  edge of the world. Not until it has passed the craft there happen to be, which left a craft made
+  later with a wreck in its sky that the shard had forgotten. A checkpoint keeps it with its end,
+  its afterglow, its collapse event and no account, since the successor carries the account and an
+  account holds one row; a restart brings it back as a wreck, nobody's, with nothing to resume, and
+  so ends nobody's view of it early. Its row and what it knew are deleted at the checkpoint after
+  the sweep. A supernova is the next bright event, and the same shape.
 - **Joining while it glows.** Fronts deliver to whichever craft exist as they pass, so a craft
   made after a spike went by its place (a newcomer, a successor) hears nothing from them while the
-  afterglow is still reaching it. A connection's first flush adds a `kind::COLLAPSE` sighting for
-  every wreck whose light has reached its craft and whose afterglow has not gone by
-  (`field::wrecks_in_progress`), unless the journal's replay in that flush already carried it. It
-  has the collapse's own event id, kept beside the afterglow and checkpointed with it, and lands
+  afterglow is still reaching it. A connection's first flush adds a sighting for every bright
+  event whose light is reaching its craft (`field::wrecks_in_progress`), unless the journal's
+  replay in that flush already carried it. It has the collapse's own event id, kept with the wreck
+  and checkpointed with it, and lands
   where the light passed the craft's place, so the client starts the debris that far along, past
   the flash. Its strength is the afterglow's now, against the noise floor like any sighting.
 - **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
@@ -667,6 +674,9 @@ puts a countdown in the text.
 - **Joining late.** A craft admitted after a spike passed its place is told of the wreck once, by
   its event id, landing when the light passed; a ship that heard it live is not told twice; nothing
   is told once the afterglow has gone by; and the ids survive a restart.
+- **Wrecks are kept to their light.** A wreck is not a craft, is still seen as a hull until its
+  end's light arrives, outlives the afterglow passing every ship there is, and is swept, each in
+  turn, not a microsecond before its light has faded everywhere.
 - **The afterglow.** It integrates to `(1 − collapse_spike_fraction) E`, starts at the field's limit
   and cools, and the spike is `collapse_spike_k`. A craft staring at a collapse's place records it
   from when its light arrives for `collapse_afterglow_s`, and one staring a tenth of a radian off

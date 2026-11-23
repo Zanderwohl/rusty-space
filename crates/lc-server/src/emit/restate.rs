@@ -169,7 +169,7 @@ impl<J: Journal> Server<J> {
                 let reach = said.iter().map(|s| reach_us(&s.emitted, &self.balance)).fold(0.0, f64::max);
                 let mut near: Vec<DVec3> = said.iter().map(|s| DVec3::from_array(s.emitted.from)).collect();
                 near.extend(emitter.map(|e| e.position_at(now as f64)));
-                for receiver in self.fleet.iter().filter(|c| c.id != *source && c.ended_s().is_none()) {
+                for receiver in self.fleet.iter().filter(|c| c.id != *source) {
                     let here = receiver.position_at(now as f64);
                     if near.iter().all(|p| p.distance(here) > reach) {
                         continue;

@@ -1,25 +1,22 @@
 //! What a stare at a place or a craft sees: every craft's field by its light, and every wreck's
 //! spike and afterglow. See `lightcone/docs/30-the-field.md` §Collapse and §What an observer sees.
 
-use std::collections::HashMap;
-
 use em_spectra::{Band, PerBand};
 use glam::DVec3;
 use lc_proto::ShipId;
 use lc_spacetime::{LIGHT_MICROSECOND_M, retarded_times_at};
-use lc_world::afterglow::Afterglow;
-use lc_world::craft::{CraftId, Fleet};
+use lc_world::craft::CraftId;
 use lc_world::fitting::Balance;
 use lc_world::glow::{self, Glow};
 use lc_world::knowledge::observatory::Lights;
 use lc_world::motion::LIGHT_US_PER_LY;
 
 use super::shadow_toward_m2;
+use crate::bright::Seeable;
 
 /// The shard's light, as `observer` receives it.
 pub(crate) struct Seen<'a> {
-    pub(crate) fleet: &'a Fleet,
-    pub(crate) afterglows: &'a HashMap<CraftId, Afterglow>,
+    pub(crate) seeable: Seeable<'a>,
     pub(crate) balance: &'a Balance,
     pub(crate) observer: CraftId,
 }
@@ -29,10 +26,10 @@ impl Lights for Seen<'_> {
     fn sighted(&self, id: i64, here: DVec3, at_s: f64) -> Option<DVec3> {
         let at_t = at_s * 1.0e6;
         let now_t = at_t.round() as i64;
-        if let Some(seen) = crate::chase::retarded(self.fleet, self.observer, ShipId(id), now_t) {
+        if let Some(seen) = crate::chase::retarded(self.seeable, self.observer, ShipId(id), now_t) {
             return Some(seen.position_ly * LIGHT_US_PER_LY);
         }
-        let wreck = self.fleet.get(CraftId(id))?;
+        let wreck = self.seeable.brights.hull(CraftId(id))?;
         let end_t = wreck.ended_s()? * 1.0e6;
         let at = wreck.position_at(end_t);
         (end_t + at.distance(here) <= at_t).then_some(at)
@@ -48,16 +45,16 @@ impl Lights for Seen<'_> {
             Band::ALL.into_iter().filter(|band| apart_rad <= field_rad[*band]).for_each(|band| flux[band] += each[band]);
         };
         let widest_rad = Band::ALL.into_iter().map(|band| field_rad[band]).fold(0.0, f64::max);
-        for afterglow in self.afterglows.values() {
-            let apart = apart_rad(afterglow.position());
+        for bright in self.seeable.brights.iter() {
+            let apart = apart_rad(bright.position());
             if apart > widest_rad {
                 continue;
             }
-            let distance_us = afterglow.position().distance(here);
+            let distance_us = bright.position().distance(here);
             let delay_s = distance_us * 1.0e-6;
-            add(apart, afterglow.mean_flux(from_s - delay_s, to_s - delay_s, distance_us * LIGHT_MICROSECOND_M));
+            add(apart, bright.mean_flux(from_s - delay_s, to_s - delay_s, distance_us * LIGHT_MICROSECOND_M));
         }
-        for craft in self.fleet.iter().filter(|craft| craft.id != self.observer) {
+        for craft in self.seeable.from(here, to_s * 1.0e6).filter(|craft| craft.id != self.observer) {
             let Some(&left_t) = retarded_times_at(to_s * 1.0e6, here, &craft.worldline()).last() else { continue };
             let at = craft.position_at(left_t);
             let apart = apart_rad(at);
@@ -124,7 +121,7 @@ mod tests {
         let resolution_rad = optics.resolution_rad(Band::V);
         assert!(apart_rad > 3.0 * resolution_rad && apart_rad < lc_world::knowledge::survey::FIELD_RAD, "premise: its star glares on it");
         let at_t = until_collapse(&mut server, &mut wire).await.at_t;
-        let afterglow = server.afterglows[&CraftId(DYING.0)];
+        let afterglow = server.wreck(DYING).expect("a wreck").afterglow;
         assert_eq!(afterglow.at_s, at_t as f64 * 1.0e-6);
         let distance_us = afterglow.position().distance(watcher_at);
         let arrives_s = afterglow.at_s + distance_us * 1.0e-6;
@@ -168,9 +165,9 @@ mod tests {
     async fn an_afterglow_outlives_a_restart() {
         let Some((mut server, mut wire)) = scene() else { return };
         until_collapse(&mut server, &mut wire).await;
-        let afterglow = server.afterglows[&CraftId(DYING.0)];
+        let afterglow = server.wreck(DYING).expect("a wreck").afterglow;
         let restarted = crate::field::tests::restart(&server);
-        assert_eq!(restarted.afterglows.get(&CraftId(DYING.0)), Some(&afterglow));
+        assert_eq!(restarted.wreck(DYING).map(|w| w.afterglow), Some(afterglow));
     }
 
     /// A craft moving across the line of sight at a tenth of light is a tenth of a radian from where
@@ -190,7 +187,7 @@ mod tests {
         assert_eq!(refused, Err(Refusal::NotInSight));
         server.act_on_knowledge(CraftId(1), &stare(lc_proto::Gaze::Craft(2), 1.0), now_s).unwrap();
 
-        let seen = Seen { fleet: &server.fleet, afterglows: &server.afterglows, balance: &server.balance, observer: CraftId(1) };
+        let seen = Seen { seeable: server.seeable(), balance: &server.balance, observer: CraftId(1) };
         let sighted = seen.sighted(2, DVec3::ZERO, now_s).unwrap();
         let target = server.fleet.get(CraftId(2)).unwrap();
         let left_t = start_t as f64 - sighted.length();

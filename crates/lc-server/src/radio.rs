@@ -528,7 +528,7 @@ impl<J: Journal> Server<J> {
                 // Unreachable: the `let else` above is this arm.
                 Aim::Omni => return Ok(Beam::OMNI),
                 Aim::Ship(target) => {
-                    let seen = chase::sighting(&self.fleet, &self.balance, self.sees_everything, sender, *target, at)
+                    let seen = chase::sighting(self.seeable(), &self.balance, self.sees_everything, sender, *target, at)
                         .ok_or(Refusal::NotInSight)?;
                     lc_world::signal::aim_at(
                         from,

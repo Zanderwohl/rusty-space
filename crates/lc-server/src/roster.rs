@@ -46,6 +46,16 @@ pub struct Roster {
     collapses_seen: HashSet<(CraftId, CraftId)>,
 }
 
+impl Roster {
+    /// Let go of what was filed about wrecks that have been swept.
+    pub(crate) fn forget(&mut self, gone: &[i64]) {
+        let gone = |id: &CraftId| gone.contains(&id.0);
+        self.filed.retain(|(_, quarry), _| !gone(quarry));
+        self.in_sight.retain(|(_, quarry)| !gone(quarry));
+        self.collapses_seen.retain(|(_, wreck)| !gone(wreck));
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Filed {
     emitted_s: f64,
@@ -123,17 +133,17 @@ impl<J: Journal> Server<J> {
         self.roster.next_t = self.now_t + (PASS_S * 1.0e6) as i64;
         let since_t = self.roster.last_t.replace(self.now_t).unwrap_or(self.now_t - (PASS_S * 1.0e6) as i64);
         self.watch_collapses(since_t);
-        let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
-        // A wreck too, whose hull is seen until the light of its end arrives.
-        let quarries: Vec<CraftId> = self.fleet.iter().map(|c| c.id).collect();
+        let ids: Vec<CraftId> = self.fleet.iter().map(|c| c.id).collect();
+        let seeable = self.seeable();
         let mut news = Vec::new();
         let mut in_sight = HashSet::new();
         for &observer in &ids {
-            let Some(here) = self.fleet.get(observer).map(|c| c.position_at(self.now_t as f64) / LIGHT_US_PER_LY) else {
-                continue;
-            };
+            let Some(here_us) = self.fleet.get(observer).map(|c| c.position_at(self.now_t as f64)) else { continue };
+            let here = here_us / LIGHT_US_PER_LY;
+            // A wreck too, whose hull is seen until the light of its end arrives.
+            let quarries: Vec<CraftId> = seeable.from(here_us, self.now_t as f64).map(|c| c.id).collect();
             for &quarry in &quarries {
-                let Some(seen) = chase::sighting(&self.fleet, &self.balance, self.sees_everything, observer, ShipId(quarry.0), self.now_t)
+                let Some(seen) = chase::sighting(seeable, &self.balance, self.sees_everything, observer, ShipId(quarry.0), self.now_t)
                 else {
                     continue;
                 };
@@ -178,8 +188,9 @@ impl<J: Journal> Server<J> {
             return;
         }
         let mut news = Vec::new();
-        for (&wreck, afterglow) in &self.afterglows {
-            for observer in self.fleet.iter().filter(|c| c.ended_s().is_none()) {
+        for wreck in self.brights.wrecks() {
+            let (afterglow, wreck) = (&wreck.afterglow, wreck.craft.id);
+            for observer in self.fleet.iter() {
                 if self.roster.collapses_seen.contains(&(observer.id, wreck)) {
                     continue;
                 }
@@ -254,7 +265,7 @@ impl<J: Journal> Server<J> {
             }
             None => {
                 if self.roster.filed.contains_key(&(observer, sender))
-                    && chase::sighting(&self.fleet, &self.balance, self.sees_everything, observer, ShipId(sender.0), arrive_t).is_some()
+                    && chase::sighting(self.seeable(), &self.balance, self.sees_everything, observer, ShipId(sender.0), arrive_t).is_some()
                 {
                     return;
                 }
@@ -358,7 +369,7 @@ mod tests {
     #[tokio::test]
     async fn a_craft_too_far_to_see_is_heard_by_what_it_sends() {
         let (mut server, mut wire) = three();
-        assert!(chase::sighting(&server.fleet, &server.balance, false, CraftId(2), ShipId(1), TWO_LIGHT_HOURS as i64).is_none());
+        assert!(chase::sighting(server.seeable(), &server.balance, false, CraftId(2), ShipId(1), TWO_LIGHT_HOURS as i64).is_none());
         let say = Order::Say { to: None, aim: Aim::Omni, secrecy: Secrecy::Open, body: "hello".into(), idem: 1 };
         tell(&server, &mut wire, ADA, say);
         run_for(&mut server, &mut wire, TWO_LIGHT_HOURS).await;

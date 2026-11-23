@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use lc_proto::{Cleared, ClientId, Presence, ShipId, Withheld};
 use lc_spacetime::Worldline;
 use lc_spacetime::worldline::retarded_times_at;
-use lc_world::craft::{Craft, CraftId, Fleet};
+use lc_world::craft::{Craft, CraftId};
 use lc_world::consort;
 use lc_world::courtesy::{Arrival, Manners};
 use lc_world::escort;
@@ -25,6 +25,7 @@ use lc_world::pursuit::{self, Closeness, Refused};
 use glam::DVec3;
 use lc_spacetime::LIGHT_MICROSECOND_M;
 
+use crate::bright::Seeable;
 use crate::server::Connected;
 
 /// A standing intercept, and when it last produced a plan.
@@ -119,7 +120,7 @@ pub const BURN_CHANGE_FRACTION: f64 = 0.25;
 
 /// The quarry's proper acceleration, when it was thrusting at the sighting and two sightings can
 /// measure it.
-pub(crate) fn burn_of(fleet: &Fleet, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
+pub(crate) fn burn_of(fleet: Seeable, seen: &pursuit::Sighting, previous: Option<&pursuit::Sighting>) -> Option<glam::DVec3> {
     let s = seen.emitted_s;
     let lit = fleet
         .get(CraftId(seen.target.0))
@@ -156,7 +157,7 @@ pub fn detects(observer: &Craft, quarry: &Craft, balance: &Balance, left_s: f64,
 
 /// Where `quarry` appears to `observer` now, whether or not it can be seen: the light-cone solve
 /// alone, for what has to account for every craft's light, seen or not.
-pub fn retarded(fleet: &Fleet, observer: CraftId, quarry: ShipId, now_t: i64) -> Option<pursuit::Sighting> {
+pub fn retarded(fleet: Seeable, observer: CraftId, quarry: ShipId, now_t: i64) -> Option<pursuit::Sighting> {
     let observer = fleet.get(observer)?;
     let quarry = fleet.get(CraftId(quarry.0))?;
     if quarry.id == observer.id {
@@ -181,7 +182,7 @@ pub fn retarded(fleet: &Fleet, observer: CraftId, quarry: ShipId, now_t: i64) ->
 /// What one craft can currently see of another, or nothing at all. `everything` skips the
 /// detection, for a test about light delay rather than about seeing.
 pub fn sighting(
-    fleet: &Fleet,
+    fleet: Seeable,
     balance: &Balance,
     everything: bool,
     observer: CraftId,
@@ -206,7 +207,7 @@ pub fn sighting(
 /// itself moving fast.
 /// `glare` is what an observer sees of a source from inside its beams.
 pub fn contacts(
-    fleet: &Fleet,
+    fleet: Seeable,
     clients: &HashMap<ClientId, Connected>,
     balance: &Balance,
     everything: bool,
@@ -215,11 +216,11 @@ pub fn contacts(
 ) -> HashMap<ClientId, Vec<Cleared<Presence>>> {
     let mut out = HashMap::new();
     for (id, state) in clients {
-        let Some(observer) = fleet.get(CraftId(state.ship.0)) else { continue };
+        let Some(observer) = fleet.fleet.get(CraftId(state.ship.0)) else { continue };
         let mut seen = Vec::new();
         let here_ly = observer.position_at(now_t as f64) / LIGHT_US_PER_LY;
         let here_beta = observer.worldline().velocity_at(now_t as f64);
-        for craft in fleet.iter() {
+        for craft in fleet.from(observer.position_at(now_t as f64), now_t as f64) {
             let Some(sighted) = sighting(fleet, balance, everything, observer.id, ShipId(craft.id.0), now_t) else {
                 continue;
             };
@@ -328,7 +329,7 @@ pub fn should_close(
 /// fraction of `c` is the most expensive thing there is to keep patching into spheres of
 /// influence.
 pub fn plan(
-    fleet: &Fleet,
+    fleet: Seeable,
     pursuer: &Craft,
     seen: &pursuit::Sighting,
     previous: Option<&pursuit::Sighting>,
@@ -372,7 +373,7 @@ pub fn arrival(approach: lc_proto::Approach, balance: &Balance, pursuer: &Craft,
 /// moving too fast to match the way this plans a match. An entry missing altogether means
 /// carry on doing whatever it is doing.
 pub fn decide(
-    fleet: &Fleet,
+    fleet: Seeable,
     pursuits: &mut HashMap<CraftId, Pursuit>,
     balance: &Balance,
     everything: bool,
@@ -381,7 +382,7 @@ pub fn decide(
     let now_s = now_t as f64 * 1.0e-6;
     let mut decided = Vec::new();
     for (id, pursuit) in pursuits.iter_mut() {
-        let Some(pursuer) = fleet.get(*id) else { continue };
+        let Some(pursuer) = fleet.fleet.get(*id) else { continue };
         // Out of sight is the end of it. A policy that survived would be one waiting to act on
         // a craft this one is no longer entitled to know about.
         let Some(seen) = sighting(fleet, balance, everything, *id, pursuit.quarry, now_t) else {
@@ -566,11 +567,12 @@ mod tests {
     fn a_dark_craft_is_seen_close_by_its_glow_and_not_far_off() {
         let au_us = lc_world::navigation::AU / LIGHT_MICROSECOND_M;
         let seen_at = |au: f64| {
-            let mut fleet = Fleet::default();
+            let mut fleet = lc_world::craft::Fleet::default();
             fleet.insert(still(ShipId(1), DVec3::ZERO));
             fleet.insert(still(ShipId(2), DVec3::X * au * au_us));
             let now_t = (au * au_us) as i64 + 1;
-            sighting(&fleet, &Balance::DEFAULT, false, CraftId(1), ShipId(2), now_t).is_some()
+            let brights = crate::bright::Brights::default();
+            sighting(Seeable { fleet: &fleet, brights: &brights }, &Balance::DEFAULT, false, CraftId(1), ShipId(2), now_t).is_some()
         };
         assert!(seen_at(0.5), "close enough to see by its heat");
         assert!(!seen_at(50.0), "too far for a 400 K hull with no star on it");

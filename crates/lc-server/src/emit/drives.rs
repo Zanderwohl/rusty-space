@@ -83,7 +83,7 @@ impl<J: Journal> Server<J> {
     pub(crate) fn light_drives(&mut self, after_t: i64, events: &mut Vec<Event>) {
         let now = self.now_t;
         let (after_s, now_s) = (after_t as f64 * 1.0e-6, now as f64 * 1.0e-6);
-        let ids: Vec<CraftId> = self.fleet.iter().filter(|c| c.ended_s().is_none()).map(|c| c.id).collect();
+        let ids: Vec<CraftId> = self.fleet.iter().map(|c| c.id).collect();
         for id in ids {
             let Some(craft) = self.fleet.get(id) else { continue };
             let mut marks: Vec<i64> = lc_world::ignition::transitions(craft, &self.balance, after_s, now_s)
