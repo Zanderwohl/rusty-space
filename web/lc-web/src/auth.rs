@@ -120,9 +120,25 @@ pub async fn signin(State(state): State<AppState>, headers: HeaderMap) -> Respon
     if let Some(session) = state.who(&headers) {
         return already(&session).into_response();
     }
+    to_broker(&state, &identity, BrokerPage::SignIn)
+}
+
+/// Which of the broker's two forms a player is sent to. Both end at [`RETURN_PATH`], which
+/// lands on `/play`.
+pub enum BrokerPage {
+    SignIn,
+    Register,
+}
+
+/// Redirect to the broker with a fresh nonce.
+pub fn to_broker(state: &AppState, identity: &Identity<'_>, page: BrokerPage) -> Response {
+    let path = match page {
+        BrokerPage::SignIn => "/signin",
+        BrokerPage::Register => "/register",
+    };
     let nonce = session::nonce();
     let url = format!(
-        "{}/signin?return_to={}&state={nonce}",
+        "{}{path}?return_to={}&state={nonce}",
         identity.base,
         urlencode(&format!("{}{RETURN_PATH}", state.base_url)),
     );

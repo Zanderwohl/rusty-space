@@ -73,15 +73,19 @@ pub async fn page(
     // A deployment with no broker launches the game for anyone, which is the development and
     // single-player case and the state this site shipped in. One with a broker needs to know
     // who is asking, because the ticket is minted for an account.
-    let ticket = match (state.identity().is_some(), state.who(&headers)) {
-        (false, _) => None,
-        (true, Some(session)) => match crate::auth::ticket(&state, &session).await {
+    let ticket = match (state.identity(), state.who(&headers)) {
+        (None, _) => None,
+        (Some(_), Some(session)) => match crate::auth::ticket(&state, &session).await {
             Some(ticket) => Some(ticket),
             // Signed in, and the broker would not mint. Not a sign-in problem, so do not send
             // them round the loop again: they would arrive back here and fail the same way.
             None => return unreachable_broker().into_response(),
         },
-        (true, None) => return sign_in_first().into_response(),
+        // Most people arriving signed out have no account yet; the register page links to
+        // sign-in for those who do.
+        (Some(identity), None) => {
+            return crate::auth::to_broker(&state, &identity, crate::auth::BrokerPage::Register);
+        }
     };
 
     document(
@@ -113,19 +117,6 @@ pub async fn page(
         },
     )
     .into_response()
-}
-
-/// Signed out, on a deployment that needs an account.
-fn sign_in_first() -> Markup {
-    super::shell(
-        Head::new("Play", DESCRIPTION),
-        html! {
-            section class="stack" {
-                h1 { "Sign in to play" }
-                p { a class="cta" href="/signin" { "Sign in" } }
-            }
-        },
-    )
 }
 
 /// Signed in, and the broker would not answer.

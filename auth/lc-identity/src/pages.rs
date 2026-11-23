@@ -236,8 +236,7 @@ pub(crate) fn credentials_page(
                         // Said before it is refused, because a rule a person meets on the first
                         // try is not a rule they had to be told off about.
                         p class="fine-print" {
-                            "At least " (crate::password::MIN_LENGTH) " characters. "
-                            "There is no password reset yet, so keep it somewhere."
+                            "At least " (crate::password::MIN_LENGTH) " characters."
                         }
                     }
                     button type="submit" { (which.title()) }
@@ -287,9 +286,6 @@ pub(crate) fn shell(title: &str, body: Markup) -> Markup {
                 // allowlist, and a masthead is one more place to be sent that is not.
                 p class="wordmark" { "Lightcone Frontier" }
                 main { (body) }
-                footer class="fine-print" {
-                    "A relativistic sandbox in a volume of real stars."
-                }
             }
         }
     }
