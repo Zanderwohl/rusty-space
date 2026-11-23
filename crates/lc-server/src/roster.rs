@@ -156,7 +156,7 @@ impl Filed {
                     Pass::File(Filed { emitted_s: place.at_s, run, ..self.clone() }, Some(trajectory), Vec::new())
                 }
                 // Off a fit from a short arc need not be a burn: the whole run says which.
-                (false, _) => match Trajectory::fit(system, &run, tolerance_ly) {
+                (false, _) => match Trajectory::fit(system, &run, tolerance_ly, Some(&trajectory)) {
                     Some(refitted) => self.fitted(refitted, run, place),
                     None => Pass::File(Filed::first(self.system, place, beta), None, Vec::new()),
                 },
@@ -170,7 +170,7 @@ impl Filed {
         let mut points: Vec<Place> = next.places.iter().chain(&next.unfolded).copied().chain([place]).collect();
         points.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
         points.dedup_by(|a, b| a.at_s.to_bits() == b.at_s.to_bits());
-        if let Some(fitted) = Trajectory::fit(system, &points, tolerance_ly) {
+        if let Some(fitted) = Trajectory::fit(system, &points, tolerance_ly, None) {
             return self.fitted(fitted, points, place);
         }
         if next.places.len() > MOST_PLACES {

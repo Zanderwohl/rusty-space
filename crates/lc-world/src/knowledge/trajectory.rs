@@ -1,34 +1,35 @@
 //! The path a craft was seen on, fitted from where it was seen, so later sightings that keep to
 //! it need hold only their times. See `lightcone/docs/22-provenance.md` §Where craft are.
 //!
-//! Fitted from positions and nothing about how the craft is flown: a conic of any eccentricity, or
-//! a straight line. Five places pin a conic in its plane, and a body's `G m` is public, so the
-//! times then fix where on it the craft is. A fit is accepted only if every place it was made from
-//! lies on it.
+//! Fitted from positions and times and nothing about how the craft is flown: a conic of any
+//! eccentricity, or a straight line. A body's `G m` is public, so a conic about it is six numbers,
+//! a position and a velocity at one instant, and least squares over every place finds them. A fit
+//! is accepted only if every place it was made from lies on it.
+//!
+//! **Dynamical, not geometric.** The plane-and-`1/r` solve the body fitter uses (`knowledge::arc`)
+//! needs the arc to bend; a craft coasting round a star moves a few millionths of a turn between
+//! places, the shape comes out wrong, and the conic falls off within days. Propagating a state by
+//! Kepler's equation and fitting it to the places works on any arc.
 //!
 //! **The primary is found, not assumed.** A coast keeps the body it was solved about until it is
 //! repatched, which need not be the body whose sphere it is in now; a conic about the wrong one
 //! holds for a while and then drifts off. So the body holding the latest place is tried, then each
 //! body it goes round, out to the star.
 
-use em_foundations::kepler::anomaly;
-use glam::{DMat3, DVec3};
+use em_foundations::kepler::state;
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use super::BodyId;
-use super::arc::basis;
+use crate::coast::{Coast, PARABOLIC_TOLERANCE};
 use crate::flight::JULIAN_YEAR_S;
 use crate::system::{LocalSystem, M_PER_LY};
 
-/// Places a fit needs: five pin a conic in its plane.
+/// Places a fit needs.
 pub const FIT_PLACES: usize = 5;
 
-/// Closer to parabolic than this is nudged off it: neither anomaly solver converges at `e = 1`.
-const PARABOLIC_TOLERANCE: f64 = 1e-6;
-
-/// Below this the places do not bend enough to say which plane they are in, relative to the
-/// largest radius squared.
-const FLAT: f64 = 1e-12;
+/// Gauss-Newton steps before a fit is given up.
+const MOST_STEPS: usize = 30;
 
 /// Where a craft was seen: coordinate seconds the light left it, and light-years.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,28 +40,21 @@ pub struct Place {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub enum Trajectory {
-    /// A conic about `about`, in its frame: `pole` is the plane's normal, the craft going round
-    /// it counterclockwise; `periapsis_rad` is measured in [`basis`] of the pole. Meters and
-    /// seconds; `mu` is the body's `G m`. Hyperbolic when `eccentricity > 1`.
-    Conic {
-        about: BodyId,
-        mu: f64,
-        pole: DVec3,
-        semi_latus_m: f64,
-        eccentricity: f64,
-        periapsis_rad: f64,
-        periapsis_s: f64,
-    },
+    /// A conic about `about`: where the craft was relative to it at `epoch_s`, meters, and how fast,
+    /// meters a second. `mu` is the body's `G m`. Any eccentricity.
+    Conic { about: BodyId, mu: f64, position_m: DVec3, velocity_m_s: DVec3, epoch_s: f64 },
     /// A straight line, light-years and a fraction of c.
     Line { position_ly: DVec3, beta: DVec3, epoch_s: f64 },
 }
 
 impl Trajectory {
-    /// The path through `places`, oldest first, if they share one: a conic about the body holding
-    /// the latest of them where there is a system, else a line. A craft drifting in a system lies
-    /// on the line and no conic. `None` with fewer than [`FIT_PLACES`], or when no candidate has
-    /// every place within `tolerance_ly`, which is what a craft under thrust gives.
-    pub fn fit(system: Option<&LocalSystem>, places: &[Place], tolerance_ly: f64) -> Option<Trajectory> {
+    /// The path through `places`, oldest first, if they share one: a conic about a body of the
+    /// system where there is one, else a line. A craft drifting in a system lies on the line and
+    /// no conic. `seed` is a trajectory the places are thought to lie near, which a refit over a
+    /// long run needs: a velocity differenced across places hours apart is no start for one. `None`
+    /// with fewer than [`FIT_PLACES`], or when no candidate has every place within `tolerance_ly`,
+    /// which is what a craft under thrust gives.
+    pub fn fit(system: Option<&LocalSystem>, places: &[Place], tolerance_ly: f64, seed: Option<&Trajectory>) -> Option<Trajectory> {
         if places.len() < FIT_PLACES {
             return None;
         }
@@ -68,8 +62,11 @@ impl Trajectory {
             places.iter().all(|p| fitted.place_at(system, p.at_s).is_some_and(|at| at.distance(p.position_ly) <= tolerance_ly))
         };
         let conics = system.into_iter().flat_map(|system| {
-            std::iter::successors(places.last().map(|p| system.holding(p.position_ly, p.at_s)), |&k| system.sim().parent(k))
-                .filter_map(|about| conic(system, about, places))
+            let held = places.last().map(|p| system.holding(p.position_ly, p.at_s));
+            std::iter::successors(held, |&k| system.sim().parent(k)).flat_map(move |about| {
+                let seeded = seed.and_then(|seed| conic(system, about, places, Some(seed)));
+                seeded.into_iter().chain(std::iter::once_with(move || conic(system, about, places, None)).flatten())
+            })
         });
         conics.chain(line(places)).find(|fitted| holds(fitted))
     }
@@ -79,108 +76,120 @@ impl Trajectory {
     pub fn place_at(&self, system: Option<&LocalSystem>, at_s: f64) -> Option<DVec3> {
         match *self {
             Trajectory::Line { position_ly, beta, epoch_s } => Some(position_ly + beta * ((at_s - epoch_s) / JULIAN_YEAR_S)),
-            Trajectory::Conic { about, mu, pole, semi_latus_m, eccentricity, periapsis_rad, periapsis_s } => {
+            Trajectory::Conic { about, mu, position_m, velocity_m_s, epoch_s } => {
                 let system = system?;
                 let index = system.sim().indices().find(|&k| BodyId::of(system.star, system.sim().name(k)) == about)?;
                 let (center_m, _) = system.body_state_at(index, at_s)?;
-                let mean = rate(mu, semi_latus_m, eccentricity)? * (at_s - periapsis_s);
-                let true_anomaly = anomaly::true_from_mean(mean, eccentricity)?;
-                let r = semi_latus_m / (1.0 + eccentricity * true_anomaly.cos());
-                let (u, v) = basis(pole);
-                let angle = periapsis_rad + true_anomaly;
-                let local = (u * angle.cos() + v * angle.sin()) * r;
+                let local = propagate(mu, position_m, velocity_m_s, at_s - epoch_s)?;
                 Some(system.origin_ly + (center_m + local) / M_PER_LY)
             }
         }
     }
 }
 
-/// Mean motion, radians a second, of the conic with this shape about `mu`.
-fn rate(mu: f64, semi_latus_m: f64, eccentricity: f64) -> Option<f64> {
-    let a = semi_latus_m / (1.0 - eccentricity * eccentricity);
-    let n = (mu / a.abs().powi(3)).sqrt();
-    n.is_finite().then_some(n)
-}
-
-/// Mean anomaly at a true anomaly, on an ellipse or a hyperbola.
-fn mean_at(true_anomaly: f64, eccentricity: f64) -> Option<f64> {
-    if eccentricity < 1.0 {
-        Some(anomaly::mean_from_eccentric(anomaly::eccentric_from_true(true_anomaly, eccentricity), eccentricity))
-    } else {
-        Some(anomaly::mean_from_hyperbolic(anomaly::hyperbolic_from_true(true_anomaly, eccentricity)?, eccentricity))
+/// Where a craft on the conic through `position_m` and `velocity_m_s` is `dt_s` later, meters
+/// from the body.
+fn propagate(mu: f64, position_m: DVec3, velocity_m_s: DVec3, dt_s: f64) -> Option<DVec3> {
+    let mut elements = state::from_state(mu, position_m, velocity_m_s)?;
+    let e = elements.eccentricity;
+    if (e - 1.0).abs() < PARABOLIC_TOLERANCE {
+        elements.eccentricity = 1.0 + PARABOLIC_TOLERANCE.copysign(e - 1.0);
     }
+    let coast = Coast { primary: String::new(), mu, elements, epoch_s: 0.0 };
+    coast.local_state_at(dt_s).map(|(at, _)| at)
 }
 
-/// The plane from the area the places sweep, the shape from `1/r = A + B cos θ + C sin θ` in it,
-/// and the time of periapsis from each place's mean anomaly. Only the epoch is fitted in time:
-/// the body's `G m` gives the rate.
-fn conic(system: &LocalSystem, index: em_sim::id::BodyIndex, places: &[Place]) -> Option<Trajectory> {
-    let mu = system.sim().gravitational_constant() * system.sim().mass(index);
+/// Least squares over the state at the middle place, by Gauss-Newton with a forward-difference
+/// Jacobian. Seeded from `seed` carried to that instant, or from the places either side of it.
+fn conic(system: &LocalSystem, about: em_sim::id::BodyIndex, places: &[Place], seed: Option<&Trajectory>) -> Option<Trajectory> {
+    let mu = system.sim().gravitational_constant() * system.sim().mass(about);
     if mu <= 0.0 || !mu.is_finite() {
         return None;
     }
     let mut local = Vec::with_capacity(places.len());
     for p in places {
-        let (center_m, _) = system.body_state_at(index, p.at_s)?;
+        let (center_m, _) = system.body_state_at(about, p.at_s)?;
         local.push(((p.position_ly - system.origin_ly) * M_PER_LY - center_m, p.at_s));
     }
-    // Twice the area each step sweeps, so it points along the motion's own normal; a chord's
-    // cross product would be the arc's curvature, far smaller on a short arc.
-    let mut pole = DVec3::ZERO;
-    let mut scale = 0.0f64;
-    for pair in local.windows(2) {
-        pole += pair[0].0.cross(pair[1].0);
-        scale = scale.max(pair[0].0.length_squared()).max(pair[1].0.length_squared());
-    }
-    if !(pole.length() > FLAT * scale) {
-        return None;
-    }
-    let pole = pole.normalize();
-    let (u, v) = basis(pole);
-
-    let mut normal = DMat3::ZERO;
-    let mut rhs = DVec3::ZERO;
-    let polar: Vec<(f64, f64, f64)> = local.iter().map(|(r, t)| (r.dot(v).atan2(r.dot(u)), r.length(), *t)).collect();
-    for &(theta, r, _) in &polar {
-        let row = DVec3::new(1.0, theta.cos(), theta.sin());
-        normal += DMat3::from_cols(row * row.x, row * row.y, row * row.z);
-        rhs += row / r;
-    }
-    let solved = normal.inverse() * rhs;
-    if !solved.is_finite() || solved.x <= 0.0 {
-        return None;
-    }
-    let semi_latus_m = 1.0 / solved.x;
-    let mut eccentricity = solved.y.hypot(solved.z) / solved.x;
-    if (eccentricity - 1.0).abs() < PARABOLIC_TOLERANCE {
-        eccentricity = 1.0 + PARABOLIC_TOLERANCE.copysign(eccentricity - 1.0);
-    }
-    let periapsis_rad = solved.z.atan2(solved.y);
-    let n = rate(mu, semi_latus_m, eccentricity)?;
-
-    // Each place says when periapsis was; on an ellipse only up to whole periods, so each is
-    // carried to the turn nearest the first before they are averaged.
-    let period_s = (eccentricity < 1.0).then(|| std::f64::consts::TAU / n);
-    let mut sum = 0.0;
-    let mut first = None;
-    for &(theta, _, t) in &polar {
-        let mean = mean_at(anomaly::wrap_pi(theta - periapsis_rad), eccentricity)?;
-        let mut passed = t - mean / n;
-        let anchor = *first.get_or_insert(passed);
-        if let Some(period) = period_s {
-            passed -= ((passed - anchor) / period).round() * period;
+    let mid = local.len() / 2;
+    let epoch_s = local[mid].1;
+    let start = match seed {
+        Some(seed) => {
+            let ahead = 1.0;
+            let at = |t: f64| Some((seed.place_at(Some(system), t)? - system.origin_ly) * M_PER_LY - system.body_state_at(about, t)?.0);
+            let here = at(epoch_s)?;
+            [here, (at(epoch_s + ahead)? - here) / ahead]
         }
-        sum += passed;
+        None => {
+            let (before, after) = (local[mid - 1], local[mid + 1]);
+            [local[mid].0, (after.0 - before.0) / (after.1 - before.1)]
+        }
+    };
+    let misses = |x: &[DVec3; 2]| -> Option<Vec<DVec3>> {
+        local.iter().map(|(r, t)| Some(propagate(mu, x[0], x[1], t - epoch_s)? - *r)).collect()
+    };
+    let mut x = start;
+    let mut cost: f64 = misses(&x)?.iter().map(|m| m.length_squared()).sum();
+    for _ in 0..MOST_STEPS {
+        let res = misses(&x)?;
+        let mut columns = Vec::with_capacity(6);
+        for k in 0..6 {
+            let (which, axis) = (k / 3, k % 3);
+            let step = (x[which].length() * 1e-7).max(if which == 0 { 1e-3 } else { 1e-6 });
+            let mut nudged = x;
+            nudged[which][axis] += step;
+            let moved = misses(&nudged)?;
+            columns.push(moved.iter().zip(&res).map(|(m, r)| (*m - *r) / step).collect::<Vec<DVec3>>());
+        }
+        let mut normal = [[0.0; 6]; 6];
+        let mut rhs = [0.0; 6];
+        for i in 0..6 {
+            for j in 0..6 {
+                normal[i][j] = columns[i].iter().zip(&columns[j]).map(|(a, b)| a.dot(*b)).sum();
+            }
+            rhs[i] = -columns[i].iter().zip(&res).map(|(a, r)| a.dot(*r)).sum::<f64>();
+        }
+        let delta = solve6(normal, rhs)?;
+        let mut next = x;
+        for k in 0..6 {
+            next[k / 3][k % 3] += delta[k];
+        }
+        let Some(after) = misses(&next).map(|m| m.iter().map(|m| m.length_squared()).sum::<f64>()) else { break };
+        if !(after < cost) {
+            break;
+        }
+        let done = cost - after <= 1e-12 * cost;
+        (x, cost) = (next, after);
+        if done {
+            break;
+        }
     }
-    Some(Trajectory::Conic {
-        about: BodyId::of(system.star, system.sim().name(index)),
-        mu,
-        pole,
-        semi_latus_m,
-        eccentricity,
-        periapsis_rad,
-        periapsis_s: sum / polar.len() as f64,
-    })
+    Some(Trajectory::Conic { about: BodyId::of(system.star, system.sim().name(about)), mu, position_m: x[0], velocity_m_s: x[1], epoch_s })
+}
+
+/// `a x = b` by Gaussian elimination with partial pivoting. `None` when `a` is singular.
+fn solve6(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
+    for col in 0..6 {
+        let pivot = (col..6).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;
+        if !(a[pivot][col].abs() > 0.0) {
+            return None;
+        }
+        a.swap(col, pivot);
+        b.swap(col, pivot);
+        for row in col + 1..6 {
+            let f = a[row][col] / a[col][col];
+            for k in col..6 {
+                a[row][k] -= f * a[col][k];
+            }
+            b[row] -= f * b[col];
+        }
+    }
+    let mut x = [0.0; 6];
+    for row in (0..6).rev() {
+        let tail: f64 = (row + 1..6).map(|k| a[row][k] * x[k]).sum();
+        x[row] = (b[row] - tail) / a[row][row];
+    }
+    x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
 /// Least squares of position on time.
@@ -233,7 +242,7 @@ mod tests {
                 Place { at_s, position_ly: station.place_at(&system, at_s).unwrap() }
             })
             .collect();
-        let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a conic");
+        let fitted = Trajectory::fit(Some(&system), &places, KM_LY, None).expect("a conic");
         assert!(matches!(fitted, Trajectory::Conic { .. }), "{fitted:?}");
         let later = 1.0e5 + 3.0 * 86_400.0;
         let off = m(fitted.place_at(Some(&system), later).unwrap(), station.place_at(&system, later).unwrap());
@@ -259,13 +268,43 @@ mod tests {
                     Place { at_s, position_ly: coast.at(&system, at_s).unwrap().0 }
                 })
                 .collect();
-            let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a conic");
-            let Trajectory::Conic { eccentricity, .. } = fitted else { panic!("{fitted:?}") };
+            let fitted = Trajectory::fit(Some(&system), &places, KM_LY, None).expect("a conic");
+            let Trajectory::Conic { mu, position_m, velocity_m_s, .. } = fitted else { panic!("{fitted:?}") };
+            let eccentricity = state::from_state(mu, position_m, velocity_m_s).unwrap().eccentricity;
             assert_eq!(eccentricity > 1.0, hyperbolic, "e = {eccentricity}");
             let later = 4.0 * 3600.0;
             let off = m(fitted.place_at(Some(&system), later).unwrap(), coast.at(&system, later).unwrap().0);
             assert!(off < 1.0e4, "speed {speed}: off by {off} m four hours on");
         }
+    }
+
+    /// Craft 7 on the dev shard: coasting round the star at 1.8 AU, a few millionths of a turn
+    /// between places. A short arc's fit holds for a day; refitted over three days of refiles,
+    /// seeded with it, it holds for a month.
+    #[test]
+    fn a_coast_round_the_star_is_held_from_a_short_arc_and_then_a_run() {
+        let system = sol();
+        let sun = system.primary();
+        let mu = system.sim().gravitational_constant() * system.sim().mass(sun);
+        let (center, carried) = system.body_state_at(sun, 0.0).unwrap();
+        let r0 = 1.8 * 1.495_978_707e11;
+        let at_ly = system.origin_ly + (center + DVec3::new(r0, 0.0, 0.0)) / M_PER_LY;
+        let velocity = carried + DVec3::new(2.0e3, (mu / r0).sqrt() * 0.97, 300.0);
+        let coast = Coast::about(&system, sun, at_ly, velocity, 0.0).expect("a coast about the Sun");
+        let seen = |t: f64| Place { at_s: t, position_ly: coast.at(&system, t).unwrap().0 };
+        let truth = |t: f64| coast.at(&system, t).unwrap().0;
+
+        let short: Vec<Place> = (0..5).map(|k| seen(600.0 * k as f64)).collect();
+        let first = Trajectory::fit(Some(&system), &short, KM_LY, None).expect("a conic from forty minutes");
+        let day = 86_400.0;
+        let off = m(first.place_at(Some(&system), day).unwrap(), truth(day));
+        assert!(off < 1.0e3, "the short arc is off by {off} m a day on");
+
+        let run: Vec<Place> = short.iter().copied().chain((1..=12).map(|k| seen(21_600.0 * k as f64))).collect();
+        let refit = Trajectory::fit(Some(&system), &run, KM_LY, Some(&first)).expect("a conic over the run");
+        let month = 30.0 * day;
+        let off = m(refit.place_at(Some(&system), month).unwrap(), truth(month));
+        assert!(off < 1.0e3, "the run is off by {off} m a month on");
     }
 
     /// Places under thrust lie on no conic, and are refused rather than fitted loosely.
@@ -281,7 +320,7 @@ mod tests {
                 Place { at_s, position_ly: system.origin_ly + (center + pushed) / M_PER_LY }
             })
             .collect();
-        assert_eq!(Trajectory::fit(Some(&system), &places, KM_LY), None);
+        assert_eq!(Trajectory::fit(Some(&system), &places, KM_LY, None), None);
     }
 
     /// A coast solved about Jupiter, seen from inside Io's sphere: the conic about Io, which
@@ -302,19 +341,20 @@ mod tests {
         let places: Vec<Place> =
             (0..6).map(|k| Place { at_s: 600.0 * k as f64, position_ly: coast.at(&system, 600.0 * k as f64).unwrap().0 }).collect();
         assert_eq!(system.holding(places[5].position_ly, 3000.0), io, "premise: Io's sphere holds it");
-        let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a conic");
+        let fitted = Trajectory::fit(Some(&system), &places, KM_LY, None).expect("a conic");
         let Trajectory::Conic { about, .. } = fitted else { panic!("{fitted:?}") };
         assert_eq!(about, BodyId::of(system.star, "Jupiter"));
     }
 
-    /// Drifting is a straight line wherever it happens, a system included.
+    /// Drifting is a straight line wherever it happens, a system included. Over minutes a conic
+    /// can pass for a line; over days only the line holds.
     #[test]
     fn a_craft_drifting_in_a_system_is_fitted_with_a_line() {
         let system = sol();
         let start = system.origin_ly + DVec3::new(3.0e11, 0.0, 0.0) / M_PER_LY;
         let places: Vec<Place> =
-            (0..5).map(|k| Place { at_s: 600.0 * k as f64, position_ly: start + DVec3::Y * 1e-9 * k as f64 }).collect();
-        let fitted = Trajectory::fit(Some(&system), &places, KM_LY).expect("a line");
+            (0..5).map(|k| Place { at_s: 86_400.0 * k as f64, position_ly: start + DVec3::Y * 1e-7 * k as f64 }).collect();
+        let fitted = Trajectory::fit(Some(&system), &places, KM_LY, None).expect("a line");
         assert!(matches!(fitted, Trajectory::Line { .. }), "{fitted:?}");
     }
 
@@ -322,9 +362,9 @@ mod tests {
     fn between_systems_the_path_is_a_line() {
         let places: Vec<Place> =
             (0..5).map(|k| Place { at_s: 1.0e6 * k as f64, position_ly: DVec3::new(3.0, 0.0, 0.0) + DVec3::Y * 1e-4 * k as f64 }).collect();
-        let fitted = Trajectory::fit(None, &places, 1e-12).expect("a line");
+        let fitted = Trajectory::fit(None, &places, 1e-12, None).expect("a line");
         let at = fitted.place_at(None, 1.0e7).unwrap();
         assert!(at.distance(DVec3::new(3.0, 1e-3, 0.0)) < 1e-12, "{at}");
-        assert!(Trajectory::fit(None, &places[..4], 1e-12).is_none(), "four places are not enough");
+        assert!(Trajectory::fit(None, &places[..4], 1e-12, None).is_none(), "four places are not enough");
     }
 }
