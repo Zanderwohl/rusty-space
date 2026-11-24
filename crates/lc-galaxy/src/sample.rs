@@ -62,12 +62,14 @@ impl Cell {
         Aabb { min, max: min + DVec3::splat(CELL_LY) }
     }
 
-    /// 14 bits per axis.
+    pub fn in_grid(self) -> bool {
+        self.0.to_array().iter().all(|v| (-CELL_HALF_RANGE..CELL_HALF_RANGE).contains(v))
+    }
+
+    /// 14 bits per axis. Only for a cell [`Cell::in_grid`]; one outside would share bits with
+    /// another, which is why the bake refuses such a region.
     pub fn packed(self) -> u64 {
-        let axis = |v: i32| {
-            debug_assert!((-CELL_HALF_RANGE..CELL_HALF_RANGE).contains(&v), "cell {v} is outside the grid");
-            ((v + CELL_HALF_RANGE) as u64) & 0x3fff
-        };
+        let axis = |v: i32| ((v + CELL_HALF_RANGE) as u64) & 0x3fff;
         axis(self.0.x) << 28 | axis(self.0.y) << 14 | axis(self.0.z)
     }
 }
@@ -137,6 +139,8 @@ pub enum BakeError {
     Overfull { cell: Cell, candidates: u64 },
     /// The field exceeded every bound tried; a spike narrower than the sampling lattice.
     Unbounded { cell: Cell },
+    /// A cell outside the grid, whose id would collide with another's.
+    OutsideGrid { cell: Cell },
 }
 
 impl std::fmt::Display for BakeError {
@@ -146,6 +150,7 @@ impl std::fmt::Display for BakeError {
                 write!(f, "cell {} would draw {candidates} candidates, more than 65 536", cell.0)
             }
             BakeError::Unbounded { cell } => write!(f, "the field in cell {} has a spike the bound cannot find", cell.0),
+            BakeError::OutsideGrid { cell } => write!(f, "cell {} is outside the grid", cell.0),
         }
     }
 }
@@ -283,6 +288,9 @@ pub fn default_threads() -> usize {
 pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Result<Bake, BakeError> {
     let cells = cells_in(region);
     let ring = cells_in(Aabb { min: region.min - DVec3::splat(CELL_LY), max: region.max + DVec3::splat(CELL_LY) });
+    if let Some(&cell) = ring.iter().find(|c| !c.in_grid()) {
+        return Err(BakeError::OutsideGrid { cell });
+    }
     let drawn = par_map(&ring, threads, |&c| candidates(compiled, seed, c).map(|v| (c, v)));
     let mut by_cell = std::collections::HashMap::with_capacity(drawn.len());
     for d in drawn {

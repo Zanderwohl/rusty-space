@@ -70,7 +70,7 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
             if response.clicked() {
                 doc.selected = Some(index);
             }
-            if response.drag_started() {
+            if response.drag_started_by(egui::PointerButton::Primary) {
                 dragging = Some(index);
                 doc.selected = Some(index);
             }
@@ -92,9 +92,9 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
     }
     if let Some(from) = dragging {
         let to = drop_target(ui, doc, from, &row_rects);
-        if ui.input(|i| i.pointer.any_released() || !i.pointer.any_down()) {
-            if to != from && doc.timeline.move_row(from, to).is_ok() {
-                doc.selected = Some(to);
+        if ui.input(|i| i.pointer.primary_released() || !i.pointer.primary_down()) {
+            if to != from {
+                move_row(doc, from, to);
             }
             dragging = None;
         }
@@ -217,14 +217,10 @@ fn context_menu(ui: &mut egui::Ui, doc: &Doc, index: usize, action: &mut Option<
         }
     };
     run(ui, "Move up", index > 0 && legal.contains(&(index - 1)), Box::new(move |d| {
-        if d.timeline.move_row(index, index - 1).is_ok() {
-            d.selected = Some(index - 1);
-        }
+        move_row(d, index, index - 1);
     }));
     run(ui, "Move down", legal.contains(&(index + 1)), Box::new(move |d| {
-        if d.timeline.move_row(index, index + 1).is_ok() {
-            d.selected = Some(index + 1);
-        }
+        move_row(d, index, index + 1);
     }));
     if let Some(f) = doc.timeline.rows()[index].feature() {
         let (id, enabled) = (f.id, f.enabled);
@@ -237,6 +233,20 @@ fn context_menu(ui: &mut egui::Ui, doc: &Doc, index: usize, action: &mut Option<
     run(ui, "Roll back to here", true, Box::new(move |d| d.cut = Some(index + 1)));
     ui.separator();
     run(ui, "Delete", true, Box::new(move |d| delete(d, index)));
+}
+
+/// Moves a row, keeping every other row on the side of the rollback bar it was on. The moved row
+/// is evaluated if it lands among evaluated rows, or at their edge having been one.
+fn move_row(doc: &mut Doc, from: usize, to: usize) {
+    if doc.timeline.move_row(from, to).is_err() {
+        return;
+    }
+    doc.selected = Some(to);
+    if let Some(c) = doc.cut {
+        let others = c - usize::from(from < c);
+        let evaluated = to < others || (to == others && from < c);
+        doc.cut = Some(others + usize::from(evaluated));
+    }
 }
 
 pub fn delete(doc: &mut Doc, index: usize) {

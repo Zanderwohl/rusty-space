@@ -134,7 +134,7 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
     } else {
         shortcuts(ctx, doc);
     }
-    doc.rebuild();
+    doc.rebuild(ctx.input(|i| i.pointer.any_down()));
 
     let mut root = egui::Ui::new(
         ctx.clone(),
@@ -292,7 +292,7 @@ fn dialog(ctx: &egui::Context, doc: &mut Doc, state: &mut Ui) {
 /// `--shot`: photograph the window after `frames` frames and quit.
 fn shoot(mut commands: Commands, mut shot: ResMut<Shot>, mut doc: ResMut<Doc>, mut frame: Local<u32>, mut exit: MessageWriter<AppExit>) {
     if let Some(i) = shot.pick.take() {
-        doc.rebuild();
+        doc.rebuild(false);
         doc.picked = doc.stars().get(i).map(|s| s.id);
     }
     let Some(path) = shot.path.clone() else { return };

@@ -17,6 +17,14 @@ pub const DEFAULT_PACKING: f64 = 0.5;
 /// `-ln(1 - nV)` diverges at 1; this keeps the candidate rate finite.
 pub const MAX_PACKING: f64 = 0.9;
 
+/// Half the side of the coordinate box every galaxy feature must lie in, ly. See
+/// `34-galaxy-authoring.md`, "The coordinate box".
+pub const BOX_HALF_LY: f64 = 36_500.0;
+
+pub fn in_box(p: DVec3) -> bool {
+    p.abs().max_element() <= BOX_HALF_LY
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aabb {
     pub min: DVec3,
@@ -304,22 +312,23 @@ impl Compiled {
         out
     }
 
+    /// Terms that can raise a density from zero, whose supports bound where stars can be.
+    fn raising(&self) -> impl Iterator<Item = &Term> {
+        self.terms.iter().filter(|t| matches!((t.target, t.op), (Target::Density(_), Op::Add(_) | Op::Set(_))))
+    }
+
     /// Where any population's density can be nonzero: the union of the supports of the shapes
-    /// that add to one.
+    /// that raise one.
     pub fn bounds(&self) -> Aabb {
-        self.terms
-            .iter()
-            .filter(|t| matches!((t.target, t.op), (Target::Density(_), Op::Add(_))))
+        self.raising()
             .filter_map(|t| self.shapes.get(&t.shape))
             .fold(Aabb::EMPTY, |b, s| b.union(s.bounds()))
     }
 
-    /// Whether any density-adding shape's support reaches within `radius` of `p`. The bake's
+    /// Whether any density-raising shape's support reaches within `radius` of `p`. The bake's
     /// test for skipping a cell, exact up to each shape's Lipschitz bound.
     pub fn may_reach(&self, p: DVec3, radius: f64) -> bool {
-        self.terms
-            .iter()
-            .filter(|t| matches!((t.target, t.op), (Target::Density(_), Op::Add(_))))
+        self.raising()
             .filter_map(|t| self.shapes.get(&t.shape))
             .any(|s| s.distance(p) < radius * s.lipschitz())
     }

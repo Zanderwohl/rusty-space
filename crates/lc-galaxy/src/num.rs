@@ -75,7 +75,8 @@ impl<'de> Deserialize<'de> for Num {
                 Ok(Num::Lit(v as f64))
             }
             // RON's `deserialize_any` hands `Var("x")` over as a one-element sequence, with the
-            // name dropped.
+            // name dropped, so any name around a single string reads as a variable: `Vr("x")`
+            // too. Pinned by a test; a misspelled name comes back written as `Var`.
             fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Num, A::Error> {
                 let name: String = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 if seq.next_element::<de::IgnoredAny>()?.is_some() {

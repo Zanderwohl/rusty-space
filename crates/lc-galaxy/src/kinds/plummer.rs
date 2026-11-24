@@ -71,6 +71,10 @@ impl FeatureKind for Plummer {
         }
         let (x, y, z) = self.center_ly;
         let shape = PlummerShape { center: frame.to_galaxy(DVec3::new(x, y, z)), core, radius, edge };
+        let b = shape.bounds();
+        if !(crate::compiled::in_box(b.min) && crate::compiled::in_box(b.max)) {
+            return Err(Problem::Invalid(format!("reaches outside the ±{} ly box", crate::compiled::BOX_HALF_LY)));
+        }
         let mut terms = Vec::new();
         for Contribution(target, op) in &self.contributes {
             super::check_target(out, *target)?;

@@ -146,12 +146,12 @@ impl Timeline {
         let Some(f) = self.rows[index].feature() else { return Vec::new() };
         let mut out = f.params.depends_on();
         for name in f.params.variables() {
-            if let Some(v) = self.rows[..index]
-                .iter()
-                .rev()
-                .filter_map(Row::feature)
-                .find(|g| g.get::<Variable>().is_some_and(|v| v.name == name))
-            {
+            // As `compile` resolves it: the first enabled definition wins and later ones are
+            // problems. A suppressed one counts only when none is enabled, so reading it is
+            // still reported as reading something suppressed.
+            let defines = |g: &&Feature| g.get::<Variable>().is_some_and(|v| v.name == name);
+            let earlier = || self.rows[..index].iter().filter_map(Row::feature);
+            if let Some(v) = earlier().filter(defines).find(|g| g.enabled).or_else(|| earlier().find(defines)) {
                 out.push(v.id);
             }
         }

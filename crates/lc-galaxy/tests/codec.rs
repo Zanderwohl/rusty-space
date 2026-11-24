@@ -96,3 +96,14 @@ fn only_the_header_can_fail_the_file() {
     assert_eq!(codec::read("", &r).unwrap_err(), ReadError::NoHeader);
     assert_eq!(codec::read("Timeline(format: 2, next_id: 0)", &r).unwrap_err(), ReadError::NewerFormat(2));
 }
+
+/// RON drops the name of `Var("x")` before a deserializer sees it, so any name around one string
+/// reads as a variable. Pinned so a change in that is noticed.
+#[test]
+fn any_name_around_one_string_reads_as_a_variable() {
+    for text in [r#"Var("a")"#, r#"Vr("a")"#] {
+        let n: Num = codec::options().from_str(text).unwrap();
+        assert_eq!(n, Num::Var("a".into()), "{text}");
+    }
+    assert!(codec::options().from_str::<Num>(r#""a""#).is_err());
+}

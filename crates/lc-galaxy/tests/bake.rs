@@ -102,3 +102,32 @@ fn an_edit_moves_only_the_stars_it_touches() {
     let kept = before.intersection(&after).count();
     assert!(kept as f64 > 0.7 * before.len() as f64, "kept {kept} of {}", before.len());
 }
+
+#[test]
+fn a_density_set_without_any_add_still_bakes() {
+    let mut t = Timeline::new(1);
+    let frame = t.push(Box::new(FrameKind::new()), None);
+    let pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
+    t.push(
+        Box::new(Plummer {
+            frame,
+            core_ly: Num::Lit(100.0),
+            radius_ly: Num::Lit(6.0),
+            edge_ly: Num::Lit(0.0),
+            contributes: vec![Contribution(Target::Density(pop), OpSpec::Set(Num::Lit(0.1)))],
+            ..Plummer::new()
+        }),
+        None,
+    );
+    let c = t.compile(t.len(), None);
+    assert!(!c.bounds().is_empty());
+    assert!(!bake(&c, t.seed, c.bounds(), 2).unwrap().stars.is_empty());
+}
+
+#[test]
+fn features_outside_the_box_are_problems() {
+    let mut t = Timeline::new(1);
+    let frame = t.push(Box::new(FrameKind { origin_ly: (70_000.0, 0.0, 0.0), ..FrameKind::new() }), None);
+    let c = t.compile(t.len(), None);
+    assert!(c.problems.contains_key(&frame));
+}

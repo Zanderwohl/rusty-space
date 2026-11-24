@@ -45,6 +45,9 @@ impl FeatureKind for FrameKind {
             return Err(Problem::Invalid("a flat rotation curve needs a positive core".into()));
         }
         let (x, y, z) = self.origin_ly;
+        if !crate::compiled::in_box(DVec3::new(x, y, z)) {
+            return Err(Problem::Invalid(format!("the origin is outside the ±{} ly box", crate::compiled::BOX_HALF_LY)));
+        }
         out.frames.insert(id, Frame { origin: DVec3::new(x, y, z), axes: self.axes(), rotation: self.rotation.clone() });
         Ok(())
     }

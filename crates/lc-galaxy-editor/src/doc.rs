@@ -11,8 +11,15 @@ use lc_galaxy::{Bake, BakedStar, Compiled, FeatureId, Registry, Row, StarId, Tim
 /// is about 10 000.
 pub const LIVE_BAKE_BUDGET: f64 = 100_000.0;
 
+/// Above this many grid cells the editor stops baking on every edit too: a large, sparse field
+/// can be under the star budget and still ask for billions of cells.
+pub const LIVE_CELL_BUDGET: f64 = 200_000.0;
+
 /// Points per axis for the field's expected count.
-const EXPECTED_RESOLUTION: usize = 48;
+const EXPECTED_RESOLUTION: usize = 32;
+
+/// While a drag is changing the timeline, rebuild at most this often.
+const DRAG_REBUILD_INTERVAL: Duration = Duration::from_millis(150);
 
 pub struct Result {
     pub compiled: Compiled,
@@ -40,6 +47,7 @@ pub struct Doc {
     pub notice: Option<String>,
     pub result: Option<Result>,
     built_from: Option<(Timeline, usize)>,
+    built_at: Option<Instant>,
 }
 
 impl Doc {
@@ -58,6 +66,7 @@ impl Doc {
             notice: None,
             result: None,
             built_from: None,
+            built_at: None,
         }
     }
 
@@ -127,10 +136,14 @@ impl Doc {
         }
     }
 
-    /// Recompiles and rebakes if the timeline or the cut changed since the last time.
-    pub fn rebuild(&mut self) {
+    /// Recompiles and rebakes if the timeline or the cut changed since the last time. While
+    /// `dragging`, at most every [`DRAG_REBUILD_INTERVAL`], showing the last result between.
+    pub fn rebuild(&mut self, dragging: bool) {
         let key = (self.timeline.clone(), self.cut());
         if self.built_from.as_ref() == Some(&key) {
+            return;
+        }
+        if dragging && self.built_at.is_some_and(|t| t.elapsed() < DRAG_REBUILD_INTERVAL) {
             return;
         }
         let start = Instant::now();
@@ -139,14 +152,23 @@ impl Doc {
         let bounds = compiled.bounds();
         let expected = stats::expected(&compiled, bounds, EXPECTED_RESOLUTION);
         let total: f64 = expected.iter().map(|(_, n)| n).sum();
+        let cells = if bounds.is_empty() {
+            0.0
+        } else {
+            let span = (bounds.size() / lc_galaxy::sample::CELL_LY).ceil() + glam::DVec3::splat(3.0);
+            span.x * span.y * span.z
+        };
         let bake = if total > LIVE_BAKE_BUDGET {
             Err(format!("{total:.0} stars expected, over the live budget of {LIVE_BAKE_BUDGET:.0}"))
+        } else if cells > LIVE_CELL_BUDGET {
+            Err(format!("{cells:.0} cells to bake, over the live budget of {LIVE_CELL_BUDGET:.0}"))
         } else {
             lc_galaxy::bake(&compiled, self.timeline.seed, bounds, default_threads()).map_err(|e| e.to_string())
         };
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
         self.result = Some(Result { compiled, bake, expected, nearest, took: start.elapsed() });
         self.built_from = Some(key);
+        self.built_at = Some(Instant::now());
     }
 
     pub fn stars(&self) -> &[BakedStar] {

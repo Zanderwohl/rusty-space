@@ -68,3 +68,13 @@ fn a_renamed_variable_leaves_its_reader_with_a_problem() {
     let c = t.compile(t.len(), None);
     assert_eq!(c.problems.get(&FeatureId(3)), Some(&Problem::UnknownVariable("stars".into())));
 }
+
+#[test]
+fn a_reader_depends_on_the_variable_compile_uses() {
+    let mut t = phase_one();
+    // A second `stars` after the first: compile keeps the first and marks the second Invalid.
+    t.insert(3, Box::new(Variable { name: "stars".into(), value: 99.0 }), None);
+    let reader = t.len() - 1;
+    assert!(t.reads(reader).contains(&FeatureId(2)));
+    assert!(!t.reads(reader).contains(&FeatureId(4)));
+}
