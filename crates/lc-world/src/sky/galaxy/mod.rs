@@ -220,7 +220,9 @@ impl GalaxyChunk {
 fn assemble(r: &GalaxyRecord, kinematics: &Kinematics) -> Option<CatalogStar> {
     let id = r.id()?;
     let e = tracks::evolve(r.initial_mass_solar(), r.age_gyr(), r.feh());
-    if e.luminosity_solar <= 0.0 || e.teff_k <= 0.0 {
+    // Neutron stars and black holes are left out: their light is X-rays or nothing, and the sky
+    // has nothing to draw.
+    if matches!(e.state, tracks::State::NeutronStar | tracks::State::BlackHole) || e.luminosity_solar <= 0.0 {
         return None;
     }
     let position_ly = r.position_ly();

@@ -147,7 +147,13 @@ fn a_published_galaxy_loads_as_baked() {
     assert!(chunks.len() > 1, "the ball straddles the origin, so several chunks");
     let decoded: Vec<_> = chunks.iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = lc_world::sky::galaxy::GalaxyProvider::new("t".into(), &decoded);
-    let lit: Vec<_> = b.stars.iter().filter(|s| s.attributes.luminosity_solar > 0.0).collect();
+    use lc_galaxy::attributes::State;
+    // The loader leaves out neutron stars and black holes, which give the sky nothing.
+    let lit: Vec<_> = b
+        .stars
+        .iter()
+        .filter(|s| s.attributes.luminosity_solar > 0.0 && !matches!(s.attributes.state, State::NeutronStar | State::BlackHole))
+        .collect();
     assert_eq!(provider.len(), lit.len());
     for s in lit {
         let loaded = provider.get(s.id).expect("every lit star loads");
