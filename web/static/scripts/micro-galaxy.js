@@ -34,6 +34,10 @@ const DISC_TEXELS = 512;
 const BULGE_TEXELS = 128;
 const SPRITE_TEXELS = 32;
 const STAR_COUNT = 280;
+// The largest stars twinkle by walking this loop of brightness factors, each at its own rate
+// and starting point. Cosine-eased between keys, so a fixed curve rather than per-frame noise.
+const TWINKLERS = 20;
+const TWINKLE_CURVE = [1, 0.72, 0.9, 0.5, 0.95, 0.62, 0.84, 0.45, 0.78, 0.98];
 
 // Kept dark in the light theme too: the galaxy is drawn additively and needs a dark field.
 const SPACE = "#0b0d12";
@@ -151,10 +155,8 @@ function bakeDisc(fbm) {
       const dust = contrast(fbm(u * 11 + 3, v * 11 + 9, 3), 2);
 
       const falloff = Math.exp(-r / 0.42) * (1 - smoothstep(0.6, 1, r));
-      // Ridged noise: thin filaments of gas that bridge the gaps between arms.
-      // The noise is stretched first: raw fractal noise sits near 0.5, which is a ridge crest.
-      const ridge = 1 - Math.abs(2 * contrast(fbm(u * 3.5 + 21, v * 3.5 + 13, 3), 2.2) - 1);
-      const haze = 0.1 + 0.25 * Math.pow(ridge, 3);
+      // Soft clouds of gas between the arms. Ridged noise drew sharp veins here.
+      const haze = 0.2 + 0.2 * contrast(fbm(u * 3.5 + 21, v * 3.5 + 13, 4), 1.8);
       const structure = mix(0.55, haze + arm * (0.35 + 1.1 * cloud), reach);
       const shadow = 1 - 0.7 * lane * reach * dust;
       const bright = falloff * structure * shadow;
@@ -241,7 +243,14 @@ function scatterStars(rand) {
       sprite: color,
       size,
       alpha: 0.35 + 0.6 * rand(),
+      twinkle: null,
     });
+  }
+  const largest = [...stars].sort((a, b) => b.size - a.size).slice(0, TWINKLERS);
+  for (const star of largest) {
+    star.alpha = 1;
+    // Keys per second, so one pass of the curve takes about 11 to 25 s.
+    star.twinkle = { rate: 0.4 + 0.5 * rand(), offset: rand() * TWINKLE_CURVE.length };
   }
   return stars;
 }
@@ -269,8 +278,8 @@ function sizeHost(host) {
   else host.style.aspectRatio = "16 / 9";
 }
 
-// `t` in [0, 1) is the fraction of one turn.
-function draw(ctx, res, t, debug) {
+// `t` in [0, 1) is the fraction of one turn; `seconds` is running time, for twinkling.
+function draw(ctx, res, t, seconds, debug) {
   const { width: w, height: h } = ctx.canvas;
   const cx = w / 2;
   const cy = h / 2;
@@ -307,23 +316,33 @@ function draw(ctx, res, t, debug) {
       continue;
     }
     const inside = Math.hypot((x - cx) / bx, (y - cy) / by);
-    drawStar(ctx, res, star, x, y, starPx, smoothstep(0.25, 0.9, inside));
+    drawStar(ctx, res, star, x, y, starPx, smoothstep(0.25, 0.9, inside), seconds);
   }
 
   ctx.globalAlpha = 1;
   ctx.drawImage(res.bulge, cx - bx, cy - by, 2 * bx, 2 * by);
 
   for (let i = 0; i < near.length; i += 3) {
-    drawStar(ctx, res, near[i], near[i + 1], near[i + 2], starPx, 1);
+    drawStar(ctx, res, near[i], near[i + 1], near[i + 2], starPx, 1, seconds);
   }
 
   if (debug) drawDebug(ctx, cx, cy, radius, bx, by, spin, t);
 }
 
-function drawStar(ctx, res, star, x, y, starPx, visible) {
+function twinkle(star, seconds) {
+  if (!star.twinkle) return 1;
+  const n = TWINKLE_CURVE.length;
+  const at = (star.twinkle.offset + seconds * star.twinkle.rate) % n;
+  const i = Math.floor(at);
+  const ease = 0.5 - 0.5 * Math.cos(Math.PI * (at - i));
+  return mix(TWINKLE_CURVE[i], TWINKLE_CURVE[(i + 1) % n], ease);
+}
+
+function drawStar(ctx, res, star, x, y, starPx, visible, seconds) {
   if (visible <= 0) return;
-  const s = starPx * star.size;
-  ctx.globalAlpha = star.alpha * visible;
+  const glow = twinkle(star, seconds);
+  const s = starPx * star.size * (0.85 + 0.15 * glow);
+  ctx.globalAlpha = star.alpha * visible * glow;
   ctx.drawImage(res.sprites[star.sprite], x - s, y - s, 2 * s, 2 * s);
 }
 
@@ -373,8 +392,8 @@ function start(host) {
 
   const render = (now) => {
     pending = 0;
-    const t = still.matches ? 0 : ((now - epoch) % PERIOD_MS) / PERIOD_MS;
-    draw(ctx, res, t, debug);
+    const elapsed = still.matches ? 0 : now - epoch;
+    draw(ctx, res, (elapsed % PERIOD_MS) / PERIOD_MS, elapsed / 1000, debug);
     if (visible && !still.matches) pending = requestAnimationFrame(render);
   };
   const resume = () => {
