@@ -121,7 +121,10 @@ enum Action {
 }
 
 fn rollback_bar(ui: &mut egui::Ui, action: &mut Option<Action>) {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), Sense::drag());
+    // A fixed id: the bar is laid out between different rows as it moves, and an id from its
+    // place in the layout would change under the drag and end it.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), Sense::hover());
+    let response = ui.interact(rect, egui::Id::new("rollback bar"), Sense::drag());
     let color = if response.hovered() || response.dragged() { palette::ROLLBACK_HOT } else { palette::ROLLBACK };
     ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 2.0)), 2.0, color);
     if response.hovered() || response.dragged() {
