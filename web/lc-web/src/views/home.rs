@@ -1,6 +1,7 @@
 use maud::{Markup, html};
 
 use super::{Head, shell};
+use crate::assets;
 
 const DESCRIPTION: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
                            eiusmod tempor incididunt ut labore et dolore magna aliqua.";
@@ -11,6 +12,9 @@ pub async fn page() -> Markup {
         html! {
             section class="stack" {
                 h1 { "Everything you know is out of date." }
+                // Empty, and so no height, until the script draws into it.
+                div #micro-galaxy width="100%" {}
+                script type="module" src=(assets::url("scripts/micro-galaxy.js")) {}
                 p class="lede" {
                     "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor. "
                     "Ut enim ad minim veniam. Quis nostrud exercitation ullamco laboris nisi ut aliquip, "
