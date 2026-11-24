@@ -28,6 +28,15 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
     let cut = doc.cut();
     let mut row_rects = Vec::with_capacity(doc.timeline.len());
     let mut action = None;
+    let drag_id = egui::Id::new("timeline row drag");
+    let mut dragging: Option<usize> = ui.data(|d| d.get_temp(drag_id)).filter(|&i| i < doc.timeline.len());
+    // While a row is dragged, the rows that bound how far it may go: what it reads above, what
+    // reads it below.
+    let limits = dragging.map(|from| {
+        let reads = doc.timeline.reads(from);
+        let readers = doc.timeline.rows()[from].id().map(|id| doc.timeline.dependants(id)).unwrap_or_default();
+        (reads, readers)
+    });
 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         for index in 0..doc.timeline.len() {
@@ -35,17 +44,34 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
                 rollback_bar(ui, &mut action);
             }
             let rolled_back = index >= cut;
-            let selected = doc.selected == Some(index);
+            let selected = doc.selected == Some(index) || dragging == Some(index);
             let response = ui
                 .scope(|ui| {
                     if rolled_back {
                         ui.multiply_opacity(0.4);
                     }
-                    row(ui, doc, index, selected, problems.as_ref(), &mut action)
+                    row(ui, doc, index, selected, problems.as_ref())
                 })
                 .inner;
             row_rects.push(response.rect);
+            if let (Some((reads, readers)), Some(id)) = (&limits, doc.timeline.rows()[index].id()) {
+                let color = if reads.contains(&id) {
+                    Some(palette::READS)
+                } else if readers.contains(&id) {
+                    Some(palette::READ_BY)
+                } else {
+                    None
+                };
+                if let Some(color) = color {
+                    let r = response.rect;
+                    ui.painter().rect_filled(egui::Rect::from_min_max(r.left_top(), egui::pos2(r.left() + 3.0, r.bottom())), 1.0, color);
+                }
+            }
             if response.clicked() {
+                doc.selected = Some(index);
+            }
+            if response.drag_started() {
+                dragging = Some(index);
                 doc.selected = Some(index);
             }
             response.context_menu(|ui| context_menu(ui, doc, index, &mut action));
@@ -53,6 +79,31 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
         if cut >= doc.timeline.len() {
             rollback_bar(ui, &mut action);
         }
+    });
+
+    // Only over the timeline, so a keystroke meant for another window cannot delete a feature.
+    let typing = ui.ctx().memory(|m| m.focused().is_some());
+    if !typing
+        && ui.ui_contains_pointer()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+        && let Some(s) = doc.selected
+    {
+        delete(doc, s);
+    }
+    if let Some(from) = dragging {
+        let to = drop_target(ui, doc, from, &row_rects);
+        if ui.input(|i| i.pointer.any_released() || !i.pointer.any_down()) {
+            if to != from && doc.timeline.move_row(from, to).is_ok() {
+                doc.selected = Some(to);
+            }
+            dragging = None;
+        }
+    }
+    ui.data_mut(|d| match dragging {
+        Some(i) => {
+            d.insert_temp(drag_id, i);
+        }
+        None => d.remove::<usize>(drag_id),
     });
 
     if let Some(Action::DragCut(y)) = action {
@@ -83,13 +134,30 @@ fn rollback_bar(ui: &mut egui::Ui, action: &mut Option<Action>) {
     }
 }
 
+/// Where a dragged row would land, clamped to its legal range, with the gap marked.
+fn drop_target(ui: &egui::Ui, doc: &Doc, from: usize, rects: &[egui::Rect]) -> usize {
+    let Some(y) = ui.ctx().pointer_interact_pos().map(|p| p.y) else { return from };
+    let others: Vec<&egui::Rect> = rects.iter().enumerate().filter(|(i, _)| *i != from).map(|(_, r)| r).collect();
+    let wanted = others.iter().filter(|r| r.center().y < y).count();
+    let legal = doc.timeline.legal_range(from);
+    let to = wanted.clamp(*legal.start(), *legal.end());
+    let line_y = match others.get(to) {
+        Some(r) => r.top() - 1.0,
+        None => others.last().map_or(rects[from].bottom(), |r| r.bottom() + 1.0),
+    };
+    let x = rects[from].x_range();
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop line")));
+    painter.hline(x, line_y, egui::Stroke::new(2.0, palette::ROLLBACK_HOT));
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    to
+}
+
 fn row(
     ui: &mut egui::Ui,
     doc: &Doc,
     index: usize,
     selected: bool,
     problems: Option<&(std::collections::BTreeMap<lc_galaxy::FeatureId, lc_galaxy::Problem>, std::collections::BTreeSet<lc_galaxy::FeatureId>)>,
-    action: &mut Option<Action>,
 ) -> egui::Response {
     let frame = egui::Frame::new()
         .inner_margin(egui::Margin::symmetric(4, 3))
@@ -102,14 +170,6 @@ fn row(
                 let (id, kind, label, summary, enabled) =
                     (f.id, f.params.kind(), f.label(), f.params.summary(), f.enabled);
                 ui.horizontal(|ui| {
-                    let mut on = enabled;
-                    if ui.checkbox(&mut on, "").changed() {
-                        *action = Some(Action::Run(Box::new(move |d: &mut Doc| {
-                            if let Some(f) = d.timeline.feature_mut(id) {
-                                f.enabled = on;
-                            }
-                        })));
-                    }
                     ui.label(RichText::new(kind).small().color(palette::KIND));
                     let text = RichText::new(&label);
                     ui.label(if enabled { text } else { text.strikethrough() });
@@ -140,7 +200,7 @@ fn row(
             }
         }
     });
-    ui.interact(inner.response.rect, ui.id().with(("row", index)), Sense::click())
+    ui.interact(inner.response.rect, ui.id().with(("row", index)), Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .union(inner.response)
 }
@@ -163,6 +223,14 @@ fn context_menu(ui: &mut egui::Ui, doc: &Doc, index: usize, action: &mut Option<
             d.selected = Some(index + 1);
         }
     }));
+    if let Some(f) = doc.timeline.rows()[index].feature() {
+        let (id, enabled) = (f.id, f.enabled);
+        run(ui, if enabled { "Suppress" } else { "Unsuppress" }, true, Box::new(move |d| {
+            if let Some(f) = d.timeline.feature_mut(id) {
+                f.enabled = !enabled;
+            }
+        }));
+    }
     run(ui, "Roll back to here", true, Box::new(move |d| d.cut = Some(index + 1)));
     ui.separator();
     run(ui, "Delete", true, Box::new(move |d| delete(d, index)));

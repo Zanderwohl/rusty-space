@@ -257,6 +257,7 @@ fn region(
             boxed(painter, &proj, shape.bounds(), Stroke::new(1.0, palette::SUPPORT));
         }
     }
+    selected_gizmo(painter, &proj, doc, cam.distance);
 
     let stars = doc.stars();
     let mut drawn: Vec<(usize, Pos2, f64)> = stars
@@ -294,6 +295,35 @@ fn region(
             .filter(|&(_, d)| d < 10.0)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         doc.picked = nearest.map(|(i, _)| stars[i].id);
+    }
+}
+
+/// The selected feature in the viewport: a frame's axes and its plane, or a shape's support.
+fn selected_gizmo(painter: &egui::Painter, proj: &Projector, doc: &Doc, camera_distance: f64) {
+    let Some(r) = &doc.result else { return };
+    let Some(id) = doc.selected.and_then(|i| doc.timeline.rows().get(i)?.id()) else { return };
+    if let Some(frame) = r.compiled.frames.get(&id) {
+        let len = camera_distance * 0.2;
+        let o = frame.origin;
+        for (i, color) in [palette::AXIS_X, palette::AXIS_Y, palette::AXIS_Z].into_iter().enumerate() {
+            let tip = o + frame.axes.col(i) * len;
+            proj.line(painter, o, tip, Stroke::new(2.5, color));
+            if let Some((p, _)) = proj.project(tip) {
+                painter.text(p, egui::Align2::LEFT_BOTTOM, ["x", "y", "z"][i], egui::FontId::proportional(13.0), color);
+            }
+        }
+        let ring: Vec<DVec3> = (0..=72)
+            .map(|k| {
+                let a = k as f64 / 72.0 * std::f64::consts::TAU;
+                frame.to_galaxy(DVec3::new(a.cos(), a.sin(), 0.0) * len)
+            })
+            .collect();
+        for w in ring.windows(2) {
+            proj.line(painter, w[0], w[1], Stroke::new(1.0, palette::AXIS_Z.gamma_multiply(0.6)));
+        }
+    }
+    for (_, shape) in r.compiled.shapes.iter().filter(|(k, _)| k.feature == id) {
+        boxed(painter, proj, shape.bounds(), Stroke::new(2.0, palette::PICK.gamma_multiply(0.8)));
     }
 }
 

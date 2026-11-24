@@ -5,6 +5,9 @@ use bevy_egui::egui::Color32;
 pub const SELECTED: Color32 = Color32::from_rgb(40, 62, 92);
 pub const ROLLBACK: Color32 = Color32::from_rgb(150, 110, 40);
 pub const ROLLBACK_HOT: Color32 = Color32::from_rgb(230, 170, 60);
+/// While a row is dragged: the rows it reads, and the rows that read it.
+pub const READS: Color32 = Color32::from_rgb(90, 170, 230);
+pub const READ_BY: Color32 = Color32::from_rgb(230, 140, 80);
 pub const KIND: Color32 = Color32::from_rgb(120, 160, 200);
 pub const PROBLEM: Color32 = Color32::from_rgb(235, 110, 90);
 pub const UNREAD: Color32 = Color32::from_rgb(220, 180, 80);

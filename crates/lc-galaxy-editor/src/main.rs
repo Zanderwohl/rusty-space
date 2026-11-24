@@ -123,11 +123,17 @@ fn title(doc: Res<Doc>, mut windows: Query<&mut Window>) {
     }
 }
 
-fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>) {
+fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, shot: Res<Shot>) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let doc = &mut *doc;
     let state = &mut *state;
-    shortcuts(ctx, doc);
+    // A photograph is of the arguments, not of whatever the owner was typing when the window
+    // took focus.
+    if shot.path.is_some() {
+        ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
+    } else {
+        shortcuts(ctx, doc);
+    }
     doc.rebuild();
 
     let mut root = egui::Ui::new(
@@ -178,10 +184,6 @@ fn shortcuts(ctx: &egui::Context, doc: &mut Doc) {
             doc.redo();
         } else if i.consume_shortcut(&undo) {
             doc.undo();
-        } else if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
-            if let Some(s) = doc.selected {
-                timeline_panel::delete(doc, s);
-            }
         }
     });
 }
