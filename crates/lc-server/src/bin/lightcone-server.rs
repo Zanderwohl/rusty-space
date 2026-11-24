@@ -287,6 +287,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(client) = &store {
         catch_up(client, server.now_t()).await;
     }
+    // After the craft are adopted, so a line can name any of them. Run on the first tick, and
+    // again by every restart that keeps the flag: a one-off belongs in a one-off container.
+    for line in args.windows(2).filter(|w| w[0] == "--operator").map(|w| w[1].clone()) {
+        server.enqueue_operator(line);
+    }
 
     let mut wire = WebSocketServer::bind(&bind).await?;
     eprintln!("listening on {}", wire.local_addr);

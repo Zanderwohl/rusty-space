@@ -691,7 +691,11 @@ process was down. The alternative asserts that things happened in the missing ti
 nothing was journalled and nobody was told.
 
 **Point `--sky` at the promoted build's own chunk**, by the CDN's *container* name —
-`http://lightcone-cdn:3101/game/<build>/assets/sky/catalog.lcsky`. Not the public
+`http://lightcone-cdn:3101/game/<build>/assets/sky/catalog.lcsky`, or, for a build that packs an
+authored galaxy (`GALAXY` in `tools/build-wasm.sh`, set during the playtest phases of
+[34-galaxy-authoring.md](34-galaxy-authoring.md)),
+`http://lightcone-cdn:3101/game/<build>/assets/sky/galaxy/manifest.galaxy`. The build's
+`manifest.json` names which, under `sky`. Not the public
 `https://cdn.…` name: that resolves to the host's own address and hairpins, exactly as the
 site's call to the broker does. Same container, same bytes, different route. Both ends place craft into systems by position
 against the same shell radius, so two catalogs is two answers to which system a ship is in —

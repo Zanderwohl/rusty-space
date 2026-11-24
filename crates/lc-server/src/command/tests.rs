@@ -523,3 +523,15 @@ async fn a_ship_kept_in_sight_on_its_orbit_is_one_sighting_and_its_times() {
     assert_eq!(runs.len(), 1, "{runs:?}");
     assert!(runs[0].1 && runs[0].2 >= 10, "{runs:?}");
 }
+
+/// `--operator` lines run at superadmin level with no connection behind them, so they can move
+/// any ship, including one whose owner is offline.
+#[tokio::test]
+async fn an_operator_line_moves_any_ship() {
+    let far = stars()[2].id.get();
+    let (mut server, mut wire) = shard(Level::PLAYER);
+    server.enqueue_operator(format!("teleport {far} altitude:2 ship:2"));
+    server.tick(&mut wire).await.unwrap();
+    let moved = server.fleet.get(CraftId(2)).unwrap();
+    assert_eq!(moved.system.as_ref().map(|s| s.star.get()), Some(far));
+}
