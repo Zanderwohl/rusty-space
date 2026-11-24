@@ -89,7 +89,7 @@ fn lost(state: &State) -> Option<String> {
 
 fn draw(mut contexts: EguiContexts, mut launch: ResMut<Launch>, mut uplink: ResMut<Uplink>) {
     let Ok(context) = contexts.ctx_mut() else { return };
-    let color = crate::signin_ui::color;
+    let color = crate::panels::color;
     // A refusal answers the launch, and a lost link never will.
     let lost = lost(&uplink.state);
     if uplink.launch_refused.is_some() || lost.is_some() {

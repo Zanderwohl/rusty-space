@@ -511,16 +511,7 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
     }
 }
 
-/// A Bevy color as an egui one, so the two surfaces share a palette rather than a guess.
-pub(crate) fn color(from: bevy::prelude::Color) -> egui::Color32 {
-    let rgba = from.to_srgba();
-    egui::Color32::from_rgba_unmultiplied(
-        (rgba.red * 255.0) as u8,
-        (rgba.green * 255.0) as u8,
-        (rgba.blue * 255.0) as u8,
-        (rgba.alpha * 255.0) as u8,
-    )
-}
+pub(crate) use crate::panels::color;
 
 /// What the modal is showing.
 ///
