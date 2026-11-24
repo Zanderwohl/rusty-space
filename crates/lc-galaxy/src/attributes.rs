@@ -5,8 +5,9 @@
 
 use glam::DVec3;
 use lc_world::rng;
-use lc_world::sky::galaxy::{GalaxyRecord, Kinematics, tracks};
+use lc_world::sky::galaxy::{GalaxyRecord, Kinematics};
 
+pub use lc_world::sky::galaxy::tracks;
 pub use lc_world::sky::galaxy::tracks::State;
 
 use crate::compiled::{Age, Compiled, Imf};
@@ -125,20 +126,8 @@ pub fn kinematics(compiled: &Compiled, population: FeatureId) -> Option<Kinemati
 
 /// Inverts the cumulative of a broken power law `ξ(m) ∝ m^-α`.
 pub fn mass(imf: &Imf, u: f64) -> f64 {
-    let segments: &[(f64, f64, f64)] = match imf {
-        Imf::Kroupa => &[(MIN_MASS, 0.5, 1.3), (0.5, MAX_MASS, 2.3)],
-        Imf::Salpeter => &[(MIN_MASS, MAX_MASS, 2.35)],
-    };
-    // Each segment's weight, continuous at the breaks.
-    let mut scale = 1.0;
-    let mut weights = Vec::with_capacity(segments.len());
-    for (i, &(lo, hi, alpha)) in segments.iter().enumerate() {
-        if i > 0 {
-            let (_, prev_hi, prev_alpha) = segments[i - 1];
-            scale *= libm::pow(prev_hi, alpha - prev_alpha);
-        }
-        weights.push(scale * power_integral(lo, hi, alpha));
-    }
+    let (segments, scales) = segments(imf);
+    let weights: Vec<f64> = segments.iter().zip(&scales).map(|(&(lo, hi, alpha), s)| s * power_integral(lo, hi, alpha)).collect();
     let total: f64 = weights.iter().sum();
     let mut pick = u * total;
     for (&(lo, hi, alpha), w) in segments.iter().zip(&weights) {
@@ -150,6 +139,67 @@ pub fn mass(imf: &Imf, u: f64) -> f64 {
         pick -= w;
     }
     MAX_MASS
+}
+
+/// The IMF's power-law segments `(lo, hi, α)`, and each one's scale, continuous at the breaks.
+fn segments(imf: &Imf) -> (&'static [(f64, f64, f64)], Vec<f64>) {
+    let segments: &[(f64, f64, f64)] = match imf {
+        Imf::Kroupa => &[(MIN_MASS, 0.5, 1.3), (0.5, MAX_MASS, 2.3)],
+        Imf::Salpeter => &[(MIN_MASS, MAX_MASS, 2.35)],
+    };
+    let mut scale = 1.0;
+    let scales = segments
+        .iter()
+        .enumerate()
+        .map(|(i, &(_, _, alpha))| {
+            if i > 0 {
+                let (_, prev_hi, prev_alpha) = segments[i - 1];
+                scale *= libm::pow(prev_hi, alpha - prev_alpha);
+            }
+            scale
+        })
+        .collect();
+    (segments, scales)
+}
+
+/// The fraction of stars the IMF draws with initial mass in `[lo, hi]` M☉.
+pub fn imf_fraction(imf: &Imf, lo: f64, hi: f64) -> f64 {
+    let (segments, scales) = segments(imf);
+    let part = |a: f64, b: f64| -> f64 {
+        segments
+            .iter()
+            .zip(&scales)
+            .map(|(&(s_lo, s_hi, alpha), s)| {
+                let (x, y) = (a.max(s_lo), b.min(s_hi));
+                if y > x { s * power_integral(x, y, alpha) } else { 0.0 }
+            })
+            .sum()
+    };
+    part(lo, hi) / part(MIN_MASS, MAX_MASS)
+}
+
+/// The fraction of a population's stars with age in `[lo, hi]` Gyr.
+pub fn age_fraction(age: &Age, lo: f64, hi: f64) -> f64 {
+    match *age {
+        Age::Uniform { min_gyr, max_gyr } if max_gyr > min_gyr => {
+            ((hi.min(max_gyr) - lo.max(min_gyr)) / (max_gyr - min_gyr)).max(0.0)
+        }
+        Age::Uniform { min_gyr, .. } => f64::from(lo <= min_gyr && min_gyr < hi),
+        Age::Burst { gyr, spread_gyr } if spread_gyr > 0.0 => {
+            // Clipped to the age range as the draw is, so the clipped tails pile up at its ends.
+            let cdf = |x: f64| {
+                if x <= 0.0 {
+                    0.0
+                } else if x >= MAX_AGE_GYR {
+                    1.0
+                } else {
+                    0.5 * (1.0 + libm::erf((x - gyr) / (spread_gyr * std::f64::consts::SQRT_2)))
+                }
+            };
+            cdf(hi) - cdf(lo)
+        }
+        Age::Burst { gyr, .. } => f64::from(lo <= gyr && gyr < hi),
+    }
 }
 
 fn power_integral(lo: f64, hi: f64, alpha: f64) -> f64 {

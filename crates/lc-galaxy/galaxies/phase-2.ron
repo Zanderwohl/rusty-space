@@ -1,0 +1,7 @@
+Timeline(format: 1, next_id: 6, seed: 2)
+Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0.0, 0.0, 0.0), tilt_deg: 0.0, azimuth_deg: 0.0, rotation: Static))
+Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Old", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 8.0, max_gyr: 12.0), feh: (zero_age: -0.1, per_gyr: -0.03, per_kly: 0.0, scatter: 0.12), dispersion: (zero_age_km_s: 2.0, exponent: 0.5)))
+Feature(id: 2, kind: "population", version: 1, enabled: true, name: "Young", params: (frame: 0, imf: Kroupa, age: Burst(gyr: 0.3, spread_gyr: 0.1), feh: (zero_age: 0.05, per_gyr: 0.0, per_kly: 0.0, scatter: 0.05), dispersion: (zero_age_km_s: 1.0, exponent: 0.0)))
+Feature(id: 3, kind: "variable", version: 1, enabled: true, params: (name: "radius", value: 8.6))
+Feature(id: 4, kind: "plummer", version: 1, enabled: true, name: "Old core", params: (frame: 0, center_ly: (0.0, 0.0, 0.0), core_ly: 6.0, radius_ly: Var("radius"), edge_ly: 2.0, contributes: [(Density(1), Add(350.0))]))
+Feature(id: 5, kind: "plummer", version: 1, enabled: true, name: "Young knot", params: (frame: 0, center_ly: (2.0, -1.0, 0.5), core_ly: 3.0, radius_ly: 5.0, edge_ly: 1.5, contributes: [(Density(2), Add(150.0))]))

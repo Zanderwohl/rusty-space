@@ -152,27 +152,16 @@ impl World {
         Some(self.stars[self.containing(position_ly)?].id)
     }
 
-    /// The first star in catalog order whose shell holds `position_ly`: where shells overlap,
-    /// the client's linear scan picks that one, so this must too.
+    /// The star whose system holds `position_ly`, by [`lc_world::system::holding`]. Cells are a
+    /// shell wide, so the 27 around the position hold every candidate.
     fn containing(&self, position_ly: DVec3) -> Option<usize> {
         let [x, y, z] = cell_of(position_ly);
-        let mut first = None;
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    let key = [x.saturating_add(dx), y.saturating_add(dy), z.saturating_add(dz)];
-                    let Some(here) = self.cells.get(&key) else { continue };
-                    let inside = here
-                        .iter()
-                        .copied()
-                        .find(|&k| self.stars[k].position_ly.distance(position_ly) < LOCAL_SHELL_LY);
-                    if let Some(k) = inside {
-                        first = Some(first.map_or(k, |f: usize| f.min(k)));
-                    }
-                }
-            }
-        }
-        first
+        let candidates = (-1..=1).flat_map(|dx| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dz| [dx, dy, dz])))
+            .filter_map(|[dx, dy, dz]| self.cells.get(&[x.saturating_add(dx), y.saturating_add(dy), z.saturating_add(dz)]))
+            .flatten()
+            .map(|&k| &self.stars[k]);
+        let star = lc_world::system::holding(position_ly, candidates)?;
+        self.index.get(&star.id).copied()
     }
 
     /// One star's system, by its catalog id, loaded if nothing has asked yet.
@@ -413,7 +402,9 @@ mod tests {
             })
             .collect();
         let world = World::new(stars.clone());
-        let scan = |at: DVec3| stars.iter().position(|s| s.position_ly.distance(at) < LOCAL_SHELL_LY);
+        let scan = |at: DVec3| {
+            lc_world::system::holding(at, &stars).and_then(|s| stars.iter().position(|t| t.id == s.id))
+        };
         let mut inside = 0;
         for i in -12..=12 {
             for j in -12..=12 {

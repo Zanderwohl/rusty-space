@@ -35,6 +35,20 @@ pub const INVENTORY_EPOCH_S: f64 = 0.0;
 /// the same statement as being in the system.
 pub const LOCAL_SHELL_LY: f64 = 1.6;
 
+/// The star whose system holds `at`: the nearest one within [`LOCAL_SHELL_LY`], ties by id.
+///
+/// Nearest rather than first in any list: where stars are closer than two shells apart the
+/// shells overlap, and a ship beside one star is inside its neighbor's shell too. The shard and
+/// the client both decide by this, so they agree on it whatever order each holds its stars in.
+pub fn holding<'a>(at: DVec3, stars: impl IntoIterator<Item = &'a CatalogStar>) -> Option<&'a CatalogStar> {
+    stars
+        .into_iter()
+        .map(|s| (s.position_ly.distance(at), s))
+        .filter(|(d, _)| *d < LOCAL_SHELL_LY)
+        .min_by(|(da, a), (db, b)| da.total_cmp(db).then(a.id.cmp(&b.id)))
+        .map(|(_, s)| s)
+}
+
 /// The catalog name of the system whose data is real rather than generated.
 pub const SOL: &str = "Sol";
 
@@ -704,6 +718,28 @@ fn build_inventory(
 
 #[cfg(test)]
 mod tests {
+    /// Two stars 1.4 ly apart, so each is inside the other's shell. A ship beside either belongs
+    /// to that one, whichever order the stars come in.
+    #[test]
+    fn overlapping_shells_go_to_the_nearer_star() {
+        use crate::sky::{AuthoredStars, StarProvider};
+        let base = AuthoredStars::sample().stars()[0].clone();
+        let star = |id: u64, at: DVec3| {
+            let mut s = base.clone();
+            s.id = StarId::from_raw(id);
+            s.position_ly = at;
+            s
+        };
+        let a = star(1, DVec3::new(0.5, 0.0, 0.0));
+        let b = star(2, DVec3::new(1.9, 0.0, 0.0));
+        for order in [vec![a.clone(), b.clone()], vec![b.clone(), a.clone()]] {
+            let beside = |s: &CatalogStar| s.position_ly + DVec3::new(0.0, 1e-4, 0.0);
+            assert_eq!(holding(beside(&b), &order).map(|s| s.id), Some(b.id));
+            assert_eq!(holding(beside(&a), &order).map(|s| s.id), Some(a.id));
+            assert!(holding(DVec3::new(10.0, 0.0, 0.0), &order).is_none());
+        }
+    }
+
     use crate::sky::{AuthoredStars, StarProvider};
 
     use super::*;

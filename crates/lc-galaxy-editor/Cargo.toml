@@ -11,6 +11,7 @@ lc-galaxy = { path = "../lc-galaxy" }
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
 glam = "0.32"
+em-plot = { path = "../em-plot", features = ["raster"] }
 
 [[bin]]
 name = "lc-galaxy-editor"

@@ -522,3 +522,115 @@ mod scatter_tests {
         assert!(c.density(&[(9.0, 9.0)], 4.0, ColorMap::Magma, 0.4).is_empty());
     }
 }
+
+/// A bin as `(lo, hi, value)` in data units.
+pub type Bin = (f64, f64, f64);
+
+impl Chart<'_> {
+    /// Where bars stand: zero on a linear axis, the bottom of the range on a log one, which has
+    /// no zero.
+    fn baseline(&self) -> f64 {
+        let (lo, hi) = (self.y.range.0.min(self.y.range.1), self.y.range.0.max(self.y.range.1));
+        match self.y.scale {
+            Scale::Log10 => lo,
+            _ => 0.0f64.clamp(lo, hi),
+        }
+    }
+
+    /// A histogram: one bar per bin, from the baseline up, a pixel of gap either side.
+    ///
+    /// Bins of any width on any x scale, so log-spaced bins on a log axis come out even.
+    pub fn histogram(&self, bins: &[Bin], color: Rgba) -> Primitives {
+        let base = self.baseline();
+        let quads = bins
+            .iter()
+            .filter(|(lo, hi, v)| lo.is_finite() && hi.is_finite() && v.is_finite() && *v != base)
+            .map(|&(lo, hi, v)| {
+                let (a, b) = (self.px(lo, base), self.px(hi, v));
+                let (left, right) = (a.x.min(b.x), a.x.max(b.x));
+                let gap = ((right - left) * 0.1).min(1.0);
+                Quad {
+                    min: Point::new(left + gap, a.y.min(b.y)),
+                    max: Point::new(right - gap, a.y.max(b.y)),
+                    color,
+                }
+            })
+            .collect();
+        Primitives { quads, ..Primitives::default() }
+    }
+
+    /// The same bins as one stepped line: a level across each bin, joined at the edges. What a
+    /// histogram is read against, such as the counts a distribution predicts.
+    pub fn steps(&self, bins: &[Bin], color: Rgba) -> Primitives {
+        let points: Vec<Point> = bins
+            .iter()
+            .filter(|(lo, hi, v)| lo.is_finite() && hi.is_finite() && v.is_finite())
+            .flat_map(|&(lo, hi, v)| [self.px(lo, v), self.px(hi, v)])
+            .collect();
+        if points.is_empty() {
+            return Primitives::default();
+        }
+        Primitives {
+            polylines: vec![Polyline { points, color, width: self.style.line_width * 1.5 }],
+            ..Primitives::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod histogram_tests {
+    use super::*;
+    use crate::primitives::Monospace;
+
+    const RED: Rgba = Rgba::opaque(1.0, 0.0, 0.0);
+
+    fn chart(m: &Monospace, x: Scale, y: Scale) -> Chart<'_> {
+        let x_range = if x == Scale::Log10 { (1.0, 100.0) } else { (0.0, 10.0) };
+        let y_range = if y == Scale::Log10 { (1.0, 1000.0) } else { (0.0, 10.0) };
+        Chart::new(
+            Rect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+            Axis { scale: x, range: x_range, ticks: 4 },
+            Axis { scale: y, range: y_range, ticks: 4 },
+            m,
+        )
+    }
+
+    #[test]
+    fn a_bar_spans_its_bin_and_stands_on_zero() {
+        let m = Monospace::default();
+        let c = chart(&m, Scale::Linear, Scale::Linear);
+        let p = c.histogram(&[(2.0, 4.0, 5.0), (4.0, 6.0, 0.0)], RED);
+        assert_eq!(p.quads.len(), 1, "an empty bin draws nothing");
+        let q = p.quads[0];
+        assert!(q.min.x > 40.0 && q.max.x < 80.0 && q.max.x - q.min.x > 37.0, "{q:?}");
+        assert_eq!((q.min.y, q.max.y), (50.0, 100.0));
+    }
+
+    #[test]
+    fn log_bins_on_a_log_axis_are_equally_wide() {
+        let m = Monospace::default();
+        let c = chart(&m, Scale::Log10, Scale::Linear);
+        let p = c.histogram(&[(1.0, 10.0, 1.0), (10.0, 100.0, 1.0)], RED);
+        let w: Vec<f32> = p.quads.iter().map(|q| q.max.x - q.min.x).collect();
+        assert!((w[0] - w[1]).abs() < 1e-3, "{w:?}");
+    }
+
+    #[test]
+    fn on_a_log_y_axis_bars_stand_on_the_bottom_of_the_range() {
+        let m = Monospace::default();
+        let c = chart(&m, Scale::Linear, Scale::Log10);
+        let q = c.histogram(&[(0.0, 5.0, 100.0)], RED).quads[0];
+        assert_eq!(q.max.y, 100.0);
+        assert!((q.min.y - 100.0 / 3.0).abs() < 1e-3, "{q:?}");
+    }
+
+    #[test]
+    fn steps_trace_the_top_of_each_bin() {
+        let m = Monospace::default();
+        let c = chart(&m, Scale::Linear, Scale::Linear);
+        let p = c.steps(&[(0.0, 5.0, 10.0), (5.0, 10.0, 0.0)], RED);
+        let pts: Vec<(f32, f32)> = p.polylines[0].points.iter().map(|p| (p.x, p.y)).collect();
+        assert_eq!(pts, vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (200.0, 100.0)]);
+        assert!(c.steps(&[], RED).is_empty());
+    }
+}

@@ -187,3 +187,38 @@ fn republishing_removes_chunks_the_manifest_no_longer_names() {
     assert_eq!(on_disk, listed);
     std::fs::remove_dir_all(&out).unwrap();
 }
+
+/// Phase I's stars are closer than two shells apart, so shells overlap. A ship beside any star
+/// must be in that star's system, which is what the shard and the client both decide by.
+#[test]
+fn in_phase_one_a_ship_beside_a_star_is_in_its_system() {
+    use lc_world::sky::StarProvider;
+    use lc_world::sky::galaxy::{GalaxyChunk, GalaxyProvider};
+    let (t, c) = phase_one();
+    let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
+    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let provider = GalaxyProvider::new("phase-1".into(), &chunks);
+    let stars = provider.stars();
+    let overlapping = stars.iter().any(|a| stars.iter().any(|b| a.id != b.id && a.position_ly.distance(b.position_ly) < lc_world::system::LOCAL_SHELL_LY));
+    assert!(overlapping, "premise: some shells overlap");
+    for s in stars {
+        let beside = s.position_ly + DVec3::new(1e-6, 0.0, 0.0);
+        assert_eq!(lc_world::system::holding(beside, stars).map(|h| h.id), Some(s.id));
+    }
+}
+
+#[test]
+fn the_imf_and_age_fractions_sum_to_one_and_match_the_draws() {
+    use lc_galaxy::attributes::{age_fraction, imf_fraction, mass};
+    use lc_galaxy::compiled::{Age, Imf};
+    for imf in [Imf::Kroupa, Imf::Salpeter] {
+        assert!((imf_fraction(&imf, 0.08, 100.0) - 1.0).abs() < 1e-12);
+        // The share below 1 M☉ by fraction agrees with the share the sampler draws there.
+        let below = (0..20_000).filter(|i| mass(&imf, (*i as f64 + 0.5) / 20_000.0) < 1.0).count() as f64 / 20_000.0;
+        assert!((below - imf_fraction(&imf, 0.08, 1.0)).abs() < 1e-3, "{imf:?}: {below}");
+    }
+    for age in [Age::Uniform { min_gyr: 1.0, max_gyr: 5.0 }, Age::Burst { gyr: 0.5, spread_gyr: 0.05 }] {
+        assert!((age_fraction(&age, 0.0, 13.8) - 1.0).abs() < 1e-9, "{age:?}");
+    }
+    assert!((age_fraction(&Age::Uniform { min_gyr: 1.0, max_gyr: 5.0 }, 2.0, 3.0) - 0.25).abs() < 1e-12);
+}

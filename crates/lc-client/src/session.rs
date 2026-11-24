@@ -231,18 +231,17 @@ impl Session {
         session
     }
 
-    /// The star whose system the ship is inside, if it is inside one.
+    /// The star whose system the ship is inside, by [`lc_world::system::holding`].
     ///
     /// Only a star whose distance from the origin is within a shell of the ship's can hold it,
     /// and the catalog is sorted by that distance, so this looks at a handful rather than all.
     pub fn local_star(&self) -> Option<&CatalogStar> {
         let shell = crate::starfield::LOCAL_SHELL_LY;
-        let from_origin = self.ship.motion.position_ly.length();
+        let at = self.ship.motion.position_ly;
+        let from_origin = at.length();
         let first = self.stars.partition_point(|s| s.position_ly.length() < from_origin - shell);
-        self.stars[first..]
-            .iter()
-            .take_while(|s| s.position_ly.length() <= from_origin + shell)
-            .find(|s| self.distance_to(s) < shell)
+        let window = self.stars[first..].iter().take_while(|s| s.position_ly.length() <= from_origin + shell);
+        lc_world::system::holding(at, window)
     }
 
     /// Load or drop the local system, and propagate it to now.
@@ -1049,7 +1048,7 @@ mod tests {
     fn the_local_star_is_the_one_a_full_scan_finds() {
         let mut s = Session::new(&AuthoredStars::sample(), 12);
         let shell = crate::starfield::LOCAL_SHELL_LY;
-        let scan = |s: &Session| s.stars.iter().find(|c| s.distance_to(c) < shell).map(|c| c.id);
+        let scan = |s: &Session| lc_world::system::holding(s.ship.motion.position_ly, &s.stars).map(|c| c.id);
         let mut places = vec![DVec3::ZERO, DVec3::new(1.3, -2.1, 0.4)];
         for star in &s.stars {
             for along in [0.0, 0.99, 1.01] {
