@@ -1,5 +1,5 @@
 //! A star's velocity: its frame's rotation curve where it is, plus a dispersion that grows with
-//! age, drawn from its id. Shared by the bake and the loader for the same reason as the tracks.
+//! age, drawn from its id. Shared by the bake and the loader so both compute the same velocity.
 
 use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ pub enum Rotation {
     Flat { speed_km_s: f64, core_ly: f64 },
 }
 
-/// What a population's stars need to move: its frame, and how hot its orbits run.
+/// A population's frame and velocity dispersion.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Kinematics {
     pub origin: DVec3,

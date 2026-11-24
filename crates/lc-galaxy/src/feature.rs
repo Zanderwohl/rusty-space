@@ -77,7 +77,6 @@ pub trait FeatureKind: Clone + PartialEq + Debug + Serialize + DeserializeOwned 
     fn depends_on(&self) -> Vec<FeatureId> {
         Vec::new()
     }
-    /// Names of the variables this feature reads.
     fn variables(&self) -> Vec<String> {
         Vec::new()
     }
@@ -200,7 +199,6 @@ impl Registry {
         Self { kinds: BTreeMap::new() }
     }
 
-    /// Every kind this crate defines.
     pub fn standard() -> Self {
         let mut r = Self::empty();
         crate::kinds::register(&mut r);

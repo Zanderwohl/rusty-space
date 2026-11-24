@@ -76,8 +76,7 @@ pub enum Tier {
     B,
 }
 
-/// A star's address: its cell and its candidate's index there, which is what its id is built
-/// from.
+/// A star's address, from which its id is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StarKey {
     pub cell: Cell,
@@ -239,7 +238,6 @@ pub fn candidates(compiled: &Compiled, seed: u64, cell: Cell) -> Result<Vec<Cand
     Err(BakeError::Unbounded { cell })
 }
 
-/// Every cell that overlaps `region`.
 pub fn cells_in(region: Aabb) -> Vec<Cell> {
     if region.is_empty() {
         return Vec::new();
@@ -257,7 +255,7 @@ pub fn cells_in(region: Aabb) -> Vec<Cell> {
     out
 }
 
-/// Runs `f` over `items` on `threads` threads, keeping input order.
+/// Keeps input order, which the bake's determinism depends on.
 fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = threads.max(1).min(items.len().max(1));
     let chunk = items.len().div_ceil(threads).max(1);
@@ -271,7 +269,6 @@ pub fn default_threads() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }
 
-/// The stars of every cell overlapping `region`.
 pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Result<Bake, BakeError> {
     let cells = cells_in(region);
     let ring = cells_in(Aabb { min: region.min - DVec3::splat(CELL_LY), max: region.max + DVec3::splat(CELL_LY) });

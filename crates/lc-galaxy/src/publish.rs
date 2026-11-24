@@ -1,8 +1,7 @@
 //! A local publish: bake a whole timeline, cut it into chunks, and write them with a manifest.
 //!
 //! Refuses a timeline with any unread line or any problem: a bake that skipped a feature would
-//! publish a different galaxy than the file describes. The CDN upload and the manifest rows of
-//! `34-galaxy-authoring.md` are Phase III; this writes a directory a dev shard loads.
+//! publish a different galaxy than the file describes. The CDN upload is Phase III.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -71,7 +70,6 @@ pub fn publish(timeline: &Timeline, name: &str, out: &Path) -> Result<Manifest, 
         let [x, y, z] = chunk.chunk;
         entries.push(ManifestChunk { chunk: (x, y, z), file, hash, stars: chunk.records.len() as u32 });
     }
-    // Earlier publishes' chunks, which this manifest no longer names.
     let current: std::collections::BTreeSet<String> = entries.iter().map(|e| format!("{}.lcg", e.hash)).collect();
     for entry in std::fs::read_dir(out.join("chunks")).map_err(|e| format!("chunks: {e}"))?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();

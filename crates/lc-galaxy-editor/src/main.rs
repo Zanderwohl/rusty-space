@@ -127,8 +127,7 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let doc = &mut *doc;
     let state = &mut *state;
-    // A photograph is of the arguments, not of whatever the owner was typing when the window
-    // took focus.
+    // Keys pressed while the window takes focus must not change a screenshot.
     if shot.path.is_some() {
         ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
     } else {

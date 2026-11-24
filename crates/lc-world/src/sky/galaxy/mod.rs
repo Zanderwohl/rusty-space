@@ -69,7 +69,7 @@ impl std::fmt::Display for GalaxyError {
 
 impl std::error::Error for GalaxyError {}
 
-/// One chunk: the stars of up to 32³ cells, brightest first, so a prefix is the bright sky.
+/// The stars of up to 32³ cells, brightest first, so a prefix of the file holds the brightest.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GalaxyChunk {
     /// The graph version the bake recorded.
@@ -199,8 +199,7 @@ impl GalaxyChunk {
         Ok(Self { graph, chunk, populations, records })
     }
 
-    /// The chunk's stars, and how many records were remnants that emit nothing, which the sky
-    /// has no use for.
+    /// The chunk's stars, and the number of remnants left out because they emit nothing.
     pub fn stars(&self) -> (Vec<CatalogStar>, usize) {
         let mut skipped = 0;
         let stars = self

@@ -135,7 +135,6 @@ pub struct Population {
     pub dispersion: Dispersion,
 }
 
-/// Which field a term changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Target {
     /// Stars per ly³ of a population.
@@ -155,7 +154,7 @@ impl Target {
     }
 }
 
-/// An operation as written in a feature's `contributes`.
+/// As written in a feature; [`Op`] is the same with its variables resolved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum OpSpec {
     Add(Num),
@@ -182,16 +181,11 @@ impl OpSpec {
     }
 }
 
-/// An operation with its variables resolved.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Op {
-    /// `value += a·w`
     Add(f64),
-    /// `value *= 1 + c·w`
     Scale(f64),
-    /// `value *= 1 - w`
     Subtract,
-    /// `value = lerp(value, v, w)`
     Set(f64),
 }
 
@@ -227,7 +221,6 @@ pub struct Compiled {
     pub held: BTreeSet<FeatureId>,
 }
 
-/// The fields at one point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sample {
     /// Stars per ly³, one per population in `Compiled::populations` order.
@@ -243,7 +236,7 @@ impl Sample {
     }
 }
 
-/// One term's effect at a point, for the inspector.
+/// For the inspector.
 #[derive(Clone, Debug)]
 pub struct Contribution {
     pub source: FeatureId,
@@ -300,8 +293,7 @@ impl Compiled {
         self.terms.iter().filter(|t| matches!((t.target, t.op), (Target::Density(_), Op::Add(_) | Op::Set(_))))
     }
 
-    /// Where any population's density can be nonzero: the union of the supports of the shapes
-    /// that raise one.
+    /// Where any population's density can be nonzero.
     pub fn bounds(&self) -> Aabb {
         self.raising()
             .filter_map(|t| self.shapes.get(&t.shape))

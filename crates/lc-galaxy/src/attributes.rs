@@ -1,9 +1,7 @@
-//! What a placed star is: drawn from its own seed and its population's statistics where it
-//! fell.
+//! A placed star's attributes, drawn from its own seed and its population's statistics.
 //!
-//! The draws go through [`GalaxyRecord`]'s quantization before anything is derived from them,
-//! and the derivation is `lc_world::sky::galaxy`'s, so a baked star is exactly what the game
-//! loads from a published chunk.
+//! The draws are quantized through [`GalaxyRecord`] before anything is derived from them, and
+//! derived with `lc_world::sky::galaxy`, so a baked star matches what the game loads.
 
 use glam::DVec3;
 use lc_world::rng;

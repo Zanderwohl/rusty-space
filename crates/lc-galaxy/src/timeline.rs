@@ -1,4 +1,4 @@
-//! The ordered feature list, the way a parametric CAD model's history is.
+//! The ordered feature list, and its evaluation.
 
 use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
@@ -108,7 +108,6 @@ impl Timeline {
         self.rows.iter().filter_map(Row::feature)
     }
 
-    /// Inserts a new feature at `at` and returns its id.
     pub fn insert(&mut self, at: usize, params: Box<dyn Params>, name: Option<String>) -> FeatureId {
         let id = FeatureId(self.next_id);
         self.next_id += 1;
@@ -189,9 +188,8 @@ impl Timeline {
         Ok(())
     }
 
-    /// Evaluates the first `cut` rows. A feature that fails becomes a [`Problem`] and the rest
-    /// still evaluate. With `held`, a failed feature keeps the outputs it had there, so
-    /// breaking one feature does not blank the view.
+    /// Evaluates the first `cut` rows. A failed feature becomes a [`Problem`] and the rest still
+    /// evaluate; with `held`, it keeps the outputs it had there.
     pub fn compile(&self, cut: usize, held: Option<&Compiled>) -> Compiled {
         let mut out = Compiled::default();
         let mut suppressed = BTreeSet::new();
@@ -218,7 +216,7 @@ impl Timeline {
     }
 }
 
-/// Copies what `id` produced in `from` into `out`. Whether anything was there to copy.
+/// Returns whether `from` had any output of `id` to copy.
 fn hold(from: &Compiled, id: FeatureId, out: &mut Compiled) -> bool {
     let mut any = false;
     if let Some(f) = from.frames.get(&id) {
