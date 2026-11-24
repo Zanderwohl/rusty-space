@@ -182,14 +182,13 @@ impl Session {
 
     /// Take the nearest stars to the origin and model a few of them.
     ///
-    /// An authored galaxy is kept whole and in its own order, brightest first: its origin is
-    /// the galaxy's center rather than Sol, and the in-process shard starts a craft at the first
-    /// star it is handed, which must be the one a standalone shard would choose.
+    /// Always sorted by distance from the origin: [`Session::local_star`] searches by it. An
+    /// authored galaxy is not trimmed, since its origin is the galaxy's center rather than Sol.
     pub fn new(provider: &dyn StarProvider, count: usize) -> Self {
         let mut stars: Vec<CatalogStar> = provider.stars().to_vec();
         let authored = stars.first().is_some_and(|s| s.provenance.source == lc_world::sky::galaxy::SOURCE);
+        stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()).then(a.id.cmp(&b.id)));
         if !authored {
-            stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()));
             stars.truncate(count.max(1));
         }
 
@@ -1025,6 +1024,23 @@ mod tests {
         let mut session = Session::new(&AuthoredStars::sample(), 3);
         session.issue_charts(30.0);
         session
+    }
+
+    /// An authored galaxy arrives in its provider's order and is not trimmed, but the session
+    /// still sorts it, or the search lands on another star's system.
+    #[test]
+    fn an_authored_galaxy_in_any_order_finds_the_local_star() {
+        let mut stars = AuthoredStars::sample().stars().to_vec();
+        for s in &mut stars {
+            s.provenance.source = lc_world::sky::galaxy::SOURCE.into();
+        }
+        stars.reverse();
+        let mut s = Session::new(&AuthoredStars::new("galaxy", stars.clone()), 1);
+        assert_eq!(s.stars.len(), stars.len(), "an authored galaxy is not trimmed");
+        for star in &stars {
+            s.place_at(star.position_ly + DVec3::X * 0.1);
+            assert_eq!(s.local_star().map(|c| c.id), Some(star.id));
+        }
     }
 
     /// The search by distance from the origin finds what a scan of every star finds: at each

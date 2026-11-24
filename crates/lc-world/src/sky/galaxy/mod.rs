@@ -370,8 +370,9 @@ pub struct GalaxyProvider {
 }
 
 impl GalaxyProvider {
-    /// Brightest first across every chunk, ties by id: a shard starts a new craft at its first
-    /// star, and that should not depend on which chunk happened to load first.
+    /// Nearest the origin first, ties by id, as the HYG catalog is: a shard starts a new craft at
+    /// its first star, and a client's session sorts the same way, so a shard in the box and a
+    /// standalone one agree on it whatever order the chunks loaded in.
     pub fn new(name: String, chunks: &[GalaxyChunk]) -> Self {
         let mut stars = Vec::new();
         let mut skipped = 0;
@@ -380,7 +381,9 @@ impl GalaxyProvider {
             stars.extend(s);
             skipped += k;
         }
-        stars.sort_by(|a: &CatalogStar, b: &CatalogStar| b.luminosity_solar.total_cmp(&a.luminosity_solar).then(a.id.cmp(&b.id)));
+        stars.sort_by(|a: &CatalogStar, b: &CatalogStar| {
+            a.position_ly.length().total_cmp(&b.position_ly.length()).then(a.id.cmp(&b.id))
+        });
         let mut cells: HashMap<[i32; 3], Vec<usize>> = HashMap::new();
         for (i, s) in stars.iter().enumerate() {
             cells.entry(cell_containing(s.position_ly)).or_default().push(i);
