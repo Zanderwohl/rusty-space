@@ -100,7 +100,8 @@ impl AssetLoader for GalaxyLoader {
         let dir = load.path().path().parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let mut bytes = Vec::with_capacity(manifest.chunks.len());
         for c in &manifest.chunks {
-            let path = bevy::asset::AssetPath::from_path_buf(dir.join(&c.file));
+            let file = c.checked_file().map_err(SkyLoadError::Galaxy)?;
+            let path = bevy::asset::AssetPath::from_path_buf(dir.join(file));
             bytes.push(load.read_asset_bytes(path).await.map_err(|e| SkyLoadError::Io(std::io::Error::other(e.to_string())))?);
         }
         let provider = manifest.load(&bytes).map_err(SkyLoadError::Galaxy)?;

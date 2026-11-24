@@ -70,8 +70,11 @@ fn no_two_stars_are_closer_than_their_exclusion() {
     let (t, c) = uniform_ball(500.0, 8.6, 7);
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
     let nn = stats::nearest_neighbors(&b.stars);
+    // Thinning saw exact positions; a baked star shows its stored one, up to half a step's
+    // diagonal away, so two stars may close by twice that.
+    let slack = 2.0 * 3f64.sqrt() * lc_galaxy::sample::CELL_LY / 65536.0;
     for (s, d) in b.stars.iter().zip(&nn) {
-        assert!(*d >= s.exclusion_ly * (1.0 - 1e-9), "{d} < {}", s.exclusion_ly);
+        assert!(*d >= s.exclusion_ly - slack, "{d} < {}", s.exclusion_ly);
     }
     let ids: BTreeSet<_> = b.stars.iter().map(|s| s.id).collect();
     assert_eq!(ids.len(), b.stars.len());
@@ -156,4 +159,31 @@ fn a_published_galaxy_loads_as_baked() {
         let (stars, _) = ch.stars();
         assert!(stars.windows(2).all(|w| w[0].luminosity_solar >= w[1].luminosity_solar));
     }
+}
+
+#[test]
+fn a_seventeenth_population_is_a_problem() {
+    let mut t = Timeline::new(1);
+    let frame = t.push(Box::new(FrameKind::new()), None);
+    let pops: Vec<_> = (0..17).map(|_| t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None)).collect();
+    let c = t.compile(t.len(), None);
+    assert_eq!(c.populations.len(), lc_galaxy::kinds::MAX_POPULATIONS);
+    assert!(c.problems.contains_key(pops.last().unwrap()));
+}
+
+#[test]
+fn republishing_removes_chunks_the_manifest_no_longer_names() {
+    let out = std::env::temp_dir().join(format!("lc-galaxy-publish-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    let (mut t, _) = uniform_ball(50.0, 6.0, 1);
+    lc_galaxy::publish::publish(&t, "a", &out).unwrap();
+    t.seed = 2;
+    let m = lc_galaxy::publish::publish(&t, "a", &out).unwrap();
+    let mut on_disk: Vec<String> =
+        std::fs::read_dir(out.join("chunks")).unwrap().map(|e| format!("chunks/{}", e.unwrap().file_name().to_string_lossy())).collect();
+    let mut listed: Vec<String> = m.chunks.iter().map(|c| c.file.clone()).collect();
+    on_disk.sort();
+    listed.sort();
+    assert_eq!(on_disk, listed);
+    std::fs::remove_dir_all(&out).unwrap();
 }

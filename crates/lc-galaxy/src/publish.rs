@@ -71,6 +71,14 @@ pub fn publish(timeline: &Timeline, name: &str, out: &Path) -> Result<Manifest, 
         let [x, y, z] = chunk.chunk;
         entries.push(ManifestChunk { chunk: (x, y, z), file, hash, stars: chunk.records.len() as u32 });
     }
+    // Earlier publishes' chunks, which this manifest no longer names.
+    let current: std::collections::BTreeSet<String> = entries.iter().map(|e| format!("{}.lcg", e.hash)).collect();
+    for entry in std::fs::read_dir(out.join("chunks")).map_err(|e| format!("chunks: {e}"))?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".lcg") && !current.contains(&name) {
+            std::fs::remove_file(entry.path()).map_err(|e| format!("chunks/{name}: {e}"))?;
+        }
+    }
     let manifest = Manifest { format: MANIFEST_FORMAT, name: name.into(), graph: format!("{graph:016x}"), chunks: entries };
     std::fs::write(out.join("manifest.galaxy"), manifest.write()).map_err(|e| format!("manifest: {e}"))?;
     Ok(manifest)

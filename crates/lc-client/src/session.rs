@@ -181,10 +181,17 @@ impl Session {
     }
 
     /// Take the nearest stars to the origin and model a few of them.
+    ///
+    /// An authored galaxy is kept whole and in its own order, brightest first: its origin is
+    /// the galaxy's center rather than Sol, and the in-process shard starts a craft at the first
+    /// star it is handed, which must be the one a standalone shard would choose.
     pub fn new(provider: &dyn StarProvider, count: usize) -> Self {
         let mut stars: Vec<CatalogStar> = provider.stars().to_vec();
-        stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()));
-        stars.truncate(count.max(1));
+        let authored = stars.first().is_some_and(|s| s.provenance.source == lc_world::sky::galaxy::SOURCE);
+        if !authored {
+            stars.sort_by(|a, b| a.position_ly.length().total_cmp(&b.position_ly.length()));
+            stars.truncate(count.max(1));
+        }
 
         let mut targets = HashMap::new();
         for star in stars.iter().take(MODELED_STARS) {

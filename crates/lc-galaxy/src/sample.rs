@@ -296,12 +296,14 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
                 })
             })
             .filter_map(|c| {
+                let attributes = attributes::draw(compiled, seed, c.key, c.position)?;
                 Some(BakedStar {
                     key: c.key,
                     id: c.key.star_id(Tier::B),
-                    position_ly: c.position,
+                    // Where the game will put it: the center of its stored position's step.
+                    position_ly: attributes.record.position_ly(),
                     exclusion_ly: c.exclusion_ly,
-                    attributes: attributes::draw(compiled, seed, c.key, c.position)?,
+                    attributes,
                 })
             })
             .collect::<Vec<_>>()

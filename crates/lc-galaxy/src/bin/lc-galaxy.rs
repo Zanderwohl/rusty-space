@@ -11,7 +11,9 @@ use lc_galaxy::{Registry, Row, codec, publish};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
-    let (Some(command), Some(path)) = (args.first(), args.get(1)) else {
+    // The first argument after the command that is neither a flag nor a flag's value.
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name")).map(|(_, a)| a);
+    let (Some(command), Some(path)) = (args.first(), path) else {
         eprintln!("usage: lc-galaxy check|publish <timeline.ron> [--out <dir>] [--name <name>]");
         return ExitCode::FAILURE;
     };

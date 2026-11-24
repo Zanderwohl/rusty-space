@@ -106,3 +106,22 @@ fn a_region_query_matches_a_scan() {
         assert_eq!(indexed, scanned, "radius {radius}");
     }
 }
+
+#[test]
+fn a_record_whose_cell_leaves_its_chunk_is_refused() {
+    let c = chunk();
+    let mut bytes = c.encode().unwrap();
+    // The first record's cell-within-chunk field sits right after the record count.
+    let header = bytes.len() - c.records.len() * 16;
+    bytes[header..header + 2].copy_from_slice(&0x8000u16.to_le_bytes());
+    assert_eq!(GalaxyChunk::decode(&bytes), Err(GalaxyError::BadRecord(0)));
+}
+
+#[test]
+fn a_manifest_names_only_files_beside_it() {
+    let entry = |file: &str| ManifestChunk { chunk: (0, 0, 0), file: file.into(), hash: String::new(), stars: 0 };
+    assert!(entry("chunks/a.lcg").checked_file().is_ok());
+    for bad in ["../a.lcg", "chunks/../../a.lcg", "/etc/hosts", "./a.lcg", ""] {
+        assert!(entry(bad).checked_file().is_err(), "{bad}");
+    }
+}

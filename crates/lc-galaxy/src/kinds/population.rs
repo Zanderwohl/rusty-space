@@ -15,6 +15,9 @@ pub struct PopulationKind {
 
 pub use lc_world::sky::galaxy::MAX_AGE_GYR;
 
+/// A published record names its population in four bits.
+pub const MAX_POPULATIONS: usize = 16;
+
 impl FeatureKind for PopulationKind {
     const KIND: &'static str = "population";
     const VERSION: u32 = 1;
@@ -44,6 +47,9 @@ impl FeatureKind for PopulationKind {
 
     fn evaluate(&self, id: FeatureId, out: &mut Compiled) -> Result<(), Problem> {
         super::frame(out, self.frame)?;
+        if out.populations.len() >= MAX_POPULATIONS {
+            return Err(Problem::Invalid(format!("a galaxy holds at most {MAX_POPULATIONS} populations")));
+        }
         match self.age {
             Age::Uniform { min_gyr, max_gyr } if !(0.0 <= min_gyr && min_gyr <= max_gyr && max_gyr <= MAX_AGE_GYR) => {
                 return Err(Problem::Invalid(format!("ages must satisfy 0 ≤ min ≤ max ≤ {MAX_AGE_GYR} Gyr")));

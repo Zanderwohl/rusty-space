@@ -177,6 +177,9 @@ impl GalaxyChunk {
         let mut records = Vec::with_capacity(n);
         for i in 0..n {
             let at = r.u16()? as i32;
+            if at >= CHUNK_CELLS * CHUNK_CELLS * CHUNK_CELLS {
+                return Err(GalaxyError::BadRecord(i));
+            }
             let local = [at % CHUNK_CELLS, (at / CHUNK_CELLS) % CHUNK_CELLS, at / (CHUNK_CELLS * CHUNK_CELLS)];
             let cell = [base[0] + local[0], base[1] + local[1], base[2] + local[2]];
             let record = GalaxyRecord {
@@ -300,6 +303,19 @@ pub struct ManifestChunk {
     pub stars: u32,
 }
 
+impl ManifestChunk {
+    /// The file, refused if it is absolute or climbs out of the manifest's directory: a
+    /// manifest names files beside it and nothing else.
+    pub fn checked_file(&self) -> Result<&str, GalaxyError> {
+        let path = std::path::Path::new(&self.file);
+        let escapes = path.components().any(|c| !matches!(c, std::path::Component::Normal(_)));
+        if escapes || self.file.is_empty() {
+            return Err(GalaxyError::Manifest(format!("{:?} is not a file beside the manifest", self.file)));
+        }
+        Ok(&self.file)
+    }
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, GalaxyError> {
         let m: Self = ron::from_str(text).map_err(|e| GalaxyError::Manifest(e.to_string()))?;
@@ -321,7 +337,10 @@ impl Manifest {
         let bytes = manifest
             .chunks
             .iter()
-            .map(|c| std::fs::read(dir.join(&c.file)).map_err(|e| format!("{}: {e}", c.file)))
+            .map(|c| {
+                let file = c.checked_file().map_err(|e| e.to_string())?;
+                std::fs::read(dir.join(file)).map_err(|e| format!("{file}: {e}"))
+            })
             .collect::<Result<Vec<_>, _>>()?;
         manifest.load(&bytes).map_err(|e| e.to_string())
     }

@@ -73,19 +73,30 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Op
         }
     }
     let (slot, population, pop, offset) = found?;
-    let frame = compiled.frames.get(&pop.frame)?;
     let initial = mass(&pop.imf, d.u(1));
     let age = match pop.age {
         Age::Uniform { min_gyr, max_gyr } => min_gyr + d.u(2) * (max_gyr - min_gyr),
         Age::Burst { gyr, spread_gyr } => (gyr + spread_gyr * d.gaussian(2)).clamp(0.0, MAX_AGE_GYR),
     };
-    let local = frame.to_local(position);
-    let radius_kly = libm::hypot(local.x, local.y) / 1000.0;
+    // A held population can outlive its frame; its stars then sit in a static frame at the
+    // origin rather than vanish after surviving thinning.
+    let radius_kly = compiled.frames.get(&pop.frame).map_or(0.0, |f| {
+        let local = f.to_local(position);
+        libm::hypot(local.x, local.y) / 1000.0
+    });
     let feh = pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly + pop.feh.scatter * d.gaussian(3) + offset;
     let record = GalaxyRecord::quantize(key.cell.0.to_array(), key.index, position, initial, age, feh, slot as u8, false);
     let (initial, age) = (record.initial_mass_solar(), record.age_gyr());
     let e = tracks::evolve(initial, age);
-    let velocity = kinematics(compiled, population)?.velocity_km_s(position, age, key.star_id(Tier::B));
+    let kin = kinematics(compiled, population).unwrap_or_else(|| Kinematics {
+        origin: DVec3::ZERO,
+        axes: glam::DMat3::IDENTITY,
+        rotation: lc_world::sky::galaxy::Rotation::Static,
+        dispersion_km_s: pop.dispersion.zero_age_km_s,
+        dispersion_exponent: pop.dispersion.exponent,
+    });
+    // From the stored position, as the loader computes it.
+    let velocity = kin.velocity_km_s(record.position_ly(), age, key.star_id(Tier::B));
     Some(Attributes {
         population: Some(population),
         initial_mass_solar: initial,

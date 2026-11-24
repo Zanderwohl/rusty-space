@@ -10,7 +10,7 @@ mod variable;
 
 pub use frame::FrameKind;
 pub use plummer::{Contribution, Plummer, PlummerShape};
-pub use population::{MAX_AGE_GYR, PopulationKind};
+pub use population::{MAX_AGE_GYR, MAX_POPULATIONS, PopulationKind};
 pub use variable::Variable;
 
 pub fn register(r: &mut Registry) {
