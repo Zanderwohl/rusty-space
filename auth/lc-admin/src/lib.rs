@@ -15,6 +15,7 @@ pub mod catalog;
 pub mod cdn;
 pub mod config;
 pub mod detail;
+pub mod fleet;
 pub mod listing;
 pub mod routes;
 pub mod session;

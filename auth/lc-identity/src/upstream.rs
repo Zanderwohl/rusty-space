@@ -254,7 +254,7 @@ pub async fn account_from_claims(
     let account = store
         .add_link(
             existing,
-            &claims.display_name(),
+            Some(&claims.display_name()),
             Link {
                 provider,
                 subject: claims.sub.clone(),
@@ -635,8 +635,7 @@ mod tests {
         crate::signin::register_password(
             &store,
             "ada@example.test",
-            "a good enough password",
-            "Imposter",
+            "a good enough password"
         )
         .await
         .unwrap();

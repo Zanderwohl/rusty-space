@@ -6,6 +6,8 @@
 
 pub mod cdn;
 pub mod index;
+pub mod ship;
+pub mod ships;
 pub mod system;
 pub mod systems;
 pub mod user;
@@ -18,6 +20,12 @@ use maud::{DOCTYPE, Markup, html};
 
 use crate::assets::Assets;
 use crate::auth::Admin;
+
+/// What an account is called on a page: its name if it has one, else an address it signs in
+/// with, else its identifier.
+pub fn account_label(name: Option<&str>, email: Option<&str>, id: uuid::Uuid) -> String {
+    name.filter(|n| !n.is_empty()).or(email).map_or_else(|| format!("Account {}", &id.to_string()[..8]), str::to_owned)
+}
 
 pub struct Head<'a> {
     pub title: &'a str,
@@ -46,6 +54,7 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                     span class="wordmark-tag" { "administration" }
                     nav {
                         a href=(crate::routes::USERS) { "Users" }
+                        a href=(crate::routes::SHIPS) { "Ships" }
                         a href=(crate::routes::SYSTEMS) { "Systems" }
                         a href=(crate::routes::CDN) { "CDN" }
                     }

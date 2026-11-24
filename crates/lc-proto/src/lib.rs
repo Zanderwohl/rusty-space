@@ -802,8 +802,9 @@ pub enum Outbound {
     /// and only when it changes. Appended last.
     Doing { observing: Option<Subject>, fitting: Vec<Subject> },
     /// This client's ship reached `Q_max` at `at_t` and released `released_j` as light. The
-    /// account now flies `successor`, a new starting ship. Observers learn of it from the light.
-    Collapsed { ship_id: ShipId, at_t: i64, released_j: f64, successor: ShipId },
+    /// connection keeps no ship and hears nothing more of the world until it sends
+    /// [`Inbound::Launch`]. Observers learn of it from the light.
+    Collapsed { ship_id: ShipId, at_t: i64, released_j: f64 },
     /// A beam on this ship changed. Cleared, by construction.
     Illuminated(Cleared<Illumination>),
     /// The account's presets, whole. Sent after `Welcome` and after each change.
@@ -815,6 +816,24 @@ pub enum Outbound {
     /// Every chat this ship shares its location in, whole: on signing in when there is any, and
     /// after each [`Order::ShareLocation`].
     SharingLocation { ship_id: ShipId, chats: Vec<Chat> },
+    /// In place of [`Outbound::Welcome`]: the account has no ship, because it is new or its last
+    /// one collapsed. Nothing else is sent until an [`Inbound::Launch`] is accepted.
+    Unlaunched,
+    LaunchRefused(LaunchRefusal),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LaunchRefusal {
+    /// Empty once trimmed, or longer than [`NAME_LIMIT`] bytes.
+    Name,
+    /// The connection already flies a ship.
+    Flying,
+}
+
+/// A ship name as [`Inbound::Launch`] accepts it: trimmed, non-empty, at most [`NAME_LIMIT`] bytes.
+pub fn ship_name(typed: &str) -> Option<&str> {
+    let name = typed.trim();
+    (!name.is_empty() && name.len() <= NAME_LIMIT).then_some(name)
 }
 
 /// The longest command line a shard will read, in bytes.
@@ -906,6 +925,9 @@ pub enum Inbound {
     /// Keep `form` under `name`, replacing any preset already called that.
     SavePreset { name: String, form: Form },
     DeletePreset { name: String },
+    /// Make a new ship for this account, named `name`, and fly it. Accepted only from a
+    /// connection that was sent [`Outbound::Unlaunched`] or [`Outbound::Collapsed`].
+    Launch { name: String },
 }
 
 /// Encode anything the protocol carries.
@@ -1297,7 +1319,7 @@ mod tests {
     }
 
     fn collapsed() -> Outbound {
-        Outbound::Collapsed { ship_id: ShipId(42), at_t: 1_000_000, released_j: 3.6e24, successor: ShipId(43) }
+        Outbound::Collapsed { ship_id: ShipId(42), at_t: 1_000_000, released_j: 3.6e24 }
     }
 
     fn illuminated() -> Outbound {
@@ -1716,6 +1738,9 @@ mod tests {
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::Short(Shortfall::NoDrones(form::PartId(4))) },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::TooManyPresets },
             Outbound::Refused { ship_id: ShipId(42), reason: Refusal::PresetName },
+            Outbound::Unlaunched,
+            Outbound::LaunchRefused(LaunchRefusal::Name),
+            Outbound::LaunchRefused(LaunchRefusal::Flying),
         ];
         for message in out {
             let bytes = encode(&message);
@@ -1865,6 +1890,7 @@ mod tests {
             }),
             Inbound::SavePreset { name: "Plate".into(), form: two_parts() },
             Inbound::DeletePreset { name: "Plate".into() },
+            Inbound::Launch { name: "Rocinante".into() },
         ];
         for message in inbound {
             let bytes = encode(&message);

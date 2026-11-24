@@ -108,6 +108,35 @@ pub struct Detail {
     pub names: Vec<Name>,
 }
 
+/// Mirrors `lc_server::admin::ShipRow`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ShipRow {
+    pub ship_id: i64,
+    /// The account that launched it, opaque.
+    pub account: Option<String>,
+    pub name: Option<String>,
+    /// Unix seconds.
+    pub launched_at: i64,
+    /// Unix seconds; `None` while it flies.
+    pub ended_at: Option<i64>,
+}
+
+/// Mirrors `lc_server::admin::ShipPage`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ShipPage {
+    pub ships: Vec<ShipRow>,
+    /// Across every page.
+    pub total: i64,
+}
+
+/// Mirrors `lc_server::admin::ShipDetail`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ShipDetail {
+    pub ship: ShipRow,
+    /// Gone once a wreck's light has faded and its checkpoint row with it.
+    pub status: Option<Status>,
+}
+
 /// Why there is nothing to show. Distinct, because a card that says "unavailable" for every
 /// cause is one people learn to ignore.
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +144,7 @@ pub enum Missing {
     NotConfigured,
     NoShip,
     NoSystem,
+    NoSuchShip,
     Unreachable(String),
 }
 
@@ -122,7 +152,8 @@ impl Missing {
     pub fn said(&self) -> String {
         match self {
             Missing::NotConfigured => "This console is not pointed at a shard.".to_owned(),
-            Missing::NoShip => "This account has never entered the world.".to_owned(),
+            Missing::NoShip => "This account flies no ship.".to_owned(),
+            Missing::NoSuchShip => "This shard has no record of a ship with that identifier.".to_owned(),
             Missing::NoSystem => "This shard holds no system with that identifier.".to_owned(),
             Missing::Unreachable(why) => format!("The shard did not answer: {why}"),
         }
@@ -161,6 +192,37 @@ impl Shard<'_> {
     pub async fn system(&self, acting: &str, id: u64) -> Result<Detail, Missing> {
         self.fetch(acting, &format!("/admin/systems/{id}"), Missing::NoSystem)
             .await
+    }
+
+    pub async fn ships(&self, acting: &str, query: &str) -> Result<ShipPage, Missing> {
+        let absent = Missing::Unreachable("it has no ships route".to_owned());
+        self.fetch(acting, &format!("/admin/ships?{query}"), absent).await
+    }
+
+    pub async fn ship(&self, acting: &str, id: i64) -> Result<ShipDetail, Missing> {
+        self.fetch(acting, &format!("/admin/ships/{id}"), Missing::NoSuchShip).await
+    }
+
+    /// The account's standing after a ban or a lift: `None` when no ban is in force. The shard
+    /// otherwise hears of a ban only when the account next asks for a ticket.
+    pub async fn stand(
+        &self,
+        acting: &str,
+        account: uuid::Uuid,
+        sanction: Option<&lc_identity::bans::Sanction>,
+    ) -> Result<(), Missing> {
+        let ticket = self.ticket_for(acting).await?;
+        let response = self
+            .http
+            .post(format!("{}/admin/standing/{account}?{}", self.api, standing_query(sanction)))
+            .bearer_auth(&ticket)
+            .send()
+            .await
+            .map_err(|why| Missing::Unreachable(why.to_string()))?;
+        match response.status() {
+            s if s.is_success() => Ok(()),
+            other => Err(Missing::Unreachable(format!("it answered {other}"))),
+        }
     }
 
     /// `absent` is what a 404 means at `path`.
@@ -223,9 +285,35 @@ impl Shard<'_> {
     }
 }
 
+/// Read by `lc_server::admin::STANDING`.
+fn standing_query(sanction: Option<&lc_identity::bans::Sanction>) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    match sanction {
+        None => {
+            query.append_pair("banned", "false");
+        }
+        Some(sanction) => {
+            query.append_pair("banned", "true");
+            if let Some(until) = sanction.until {
+                query.append_pair("until", &until.timestamp().to_string());
+            }
+        }
+    }
+    query.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_standing_is_sent_as_the_shard_reads_it() {
+        use lc_identity::bans::Sanction;
+        let until = chrono::DateTime::from_timestamp(1_795_000_000, 0);
+        assert_eq!(standing_query(None), "banned=false");
+        assert_eq!(standing_query(Some(&Sanction { count: 1, until: None })), "banned=true");
+        assert_eq!(standing_query(Some(&Sanction { count: 2, until })), "banned=true&until=1795000000");
+    }
 
     /// **A captured payload — the bytes `lc_server::status` actually produced**, not a
     /// hand-written approximation of them. It was printed by that crate's own serializer and
@@ -256,6 +344,22 @@ mod tests {
         assert_eq!(fit.modules[0], ("Engines".to_owned(), 2));
         // Exactly, which is half the reason this is RON rather than JSON.
         assert_eq!(fit.stored_j, 1.5e12);
+    }
+
+    /// **Pinned by `lc_server::admin`'s test** to what its serializer writes.
+    const SHIPS_FROM_THE_SHARD: &str = r#"(ships:[(ship_id:12,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Tachi"),launched_at:1795000000,ended_at:None),(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000))],total:2)"#;
+
+    #[test]
+    fn parses_the_ships_the_shard_sends() {
+        let page: ShipPage = ron::from_str(SHIPS_FROM_THE_SHARD).expect("the shard's shape");
+        assert_eq!(page.total, 2);
+        assert_eq!((page.ships[0].ship_id, page.ships[0].ended_at), (12, None));
+        assert_eq!(page.ships[1].ended_at, Some(1_794_500_000));
+        let detail: ShipDetail = ron::from_str(
+            r#"(ship:(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000)),status:None)"#,
+        )
+        .expect("a ship");
+        assert_eq!((detail.ship.name.as_deref(), detail.status), (Some("Canterbury"), None));
     }
 
     /// **Captured from the shard's own serializer**, like the one above.

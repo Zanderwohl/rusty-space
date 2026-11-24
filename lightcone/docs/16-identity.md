@@ -6,7 +6,7 @@ website and the game both consume and neither implements.
 [14-hosting.md](14-hosting.md) deferred this and named the two places it slots in. This is what
 slots in.
 
-**Status: partly built.** The broker is `auth/lc-identity` (password and Google, PKCE, verified-email alignment, attempt budgets, levels and bans), the console `auth/lc-admin`, the site's half `web/lc-web/src/auth.rs`, the desktop's `lc_client::{auth, broker, vault}`, and the shard's `lc_server::{ticket, ability, admin, status}`. Missing: itch.io; key rotation (the JWKS publishes one key); linking accounts from settings; and the socket rules: no `Hello` deadline, no close on a message before `Hello`, no pre-auth budget keyed by address (unadmitted sockets share the per-connection bucket), and no cap on how far back `ResumeFrom` may rewind. Discord is listed but deliberately refused at boot.
+**Status: partly built.** The broker is `auth/lc-identity` (password and Google, PKCE, verified-email alignment, attempt budgets, levels and bans), the console `auth/lc-admin`, the site's half `web/lc-web/src/auth.rs`, the desktop's `lc_client::{auth, broker, vault}`, and the shard's `lc_server::{ticket, ability, admin, status, launch, standing}`. Missing: itch.io; key rotation (the JWKS publishes one key); linking accounts from settings; and the socket rules: no `Hello` deadline, no close on a message before `Hello`, no pre-auth budget keyed by address (unadmitted sockets share the per-connection bucket), and no cap on how far back `ResumeFrom` may rewind. Discord is listed but deliberately refused at boot.
 
 ## The service is a broker, not a login page
 
@@ -156,7 +156,7 @@ addresses nobody has checked.
 | owns | knows | never sees |
 |---|---|---|
 | `lc-identity` | accounts, links, sessions, keys | anything about the world or the site |
-| game server | `account_id` → craft, progress | email, provider, display name history |
+| game server | `account_id` → its ship, every ship it launched, progress | email, provider, display name history |
 | site | content, releases, subscribers | craft, positions, play history |
 
 The only string that crosses is an **opaque account id** — a UUID that means nothing outside the
@@ -164,10 +164,18 @@ broker. No foreign keys span the three, because they are three deploy units on t
 and a join across them is a coupling that outlives whoever wrote it. This is the same rule
 [14-hosting.md](14-hosting.md) already applies to the build id.
 
-The game additionally receives a **display name** and nothing else. It is a cache, not a fact:
-the broker owns the name, the game shows whatever it was told at connect, and a rename appears
-next session. A game that treats a display name as an identifier has to handle a rename, which
-is the bug this avoids rather than solves.
+The game additionally receives a **display name** and nothing else, and does not use it. An
+account need not have one: registration asks for none, and only an upstream provider such as
+Google supplies one. **A ship's name is the game's**, typed on the launch screen and sent as
+`Inbound::Launch`, because an account flies many ships over its life, one at a time. An account
+with no ship, new or after a collapse, is told `Unlaunched` in place of a welcome; see
+[30-the-field.md](30-the-field.md). The console lists accounts under Users and ships under Ships,
+each linking to the other. A ban is the account's: the broker refuses it a ticket, so it can fly
+none of its ships and launch no new one. A connection signed in before the ban presents no ticket
+again, so the console also posts the account's standing to the shard's `/admin/standing/{account}`
+after each ban and lift (`lc_server::standing`). The shard drops the account's connections with
+`Unauthenticated` and refuses its sign-ins until the ban runs out. It does not save this: after a
+restart every connection signs in again, through the broker.
 
 ## The game does not run an OAuth dance
 
