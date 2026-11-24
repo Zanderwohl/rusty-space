@@ -41,7 +41,7 @@ pub struct Signin {
     /// Behind a lock for the reason `Loopback`'s is: a resource must be `Sync`.
     from_tasks: Mutex<Receiver<(u64, Report)>>,
     to_main: Sender<(u64, Report)>,
-    /// Which sign-in a report must belong to. Starting, cancelling and signing out each begin
+    /// Which sign-in a report must belong to. Starting, canceling and signing out each begin
     /// a new one, so a broker that answers late cannot sign back in a player who left.
     attempt: u64,
     /// A ticket being minted for the connection. See [`mint_ticket`].
@@ -592,7 +592,7 @@ fn draw(
         menu.title(panel, "SIGN IN");
         match &wanted {
             Shown::SignedIn(name) => {
-                // A password account has no name: ships are named, accounts are not.
+                // A password account has no name.
                 let said = if name.is_empty() { "Signed in.".to_owned() } else { format!("Signed in as {name}.") };
                 menu.message(panel, &said);
                 menu.button(panel, "Observe", Emit(Action::StartGame));

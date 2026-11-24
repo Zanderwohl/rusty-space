@@ -819,11 +819,9 @@ pub enum Outbound {
     /// In place of [`Outbound::Welcome`]: the account has no ship, because it is new or its last
     /// one collapsed. Nothing else is sent until an [`Inbound::Launch`] is accepted.
     Unlaunched,
-    /// An [`Inbound::Launch`] was not acted on.
     LaunchRefused(LaunchRefusal),
 }
 
-/// Why an [`Inbound::Launch`] was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LaunchRefusal {
     /// Empty once trimmed, or longer than [`NAME_LIMIT`] bytes.

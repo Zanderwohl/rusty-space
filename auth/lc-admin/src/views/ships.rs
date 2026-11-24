@@ -1,7 +1,7 @@
 //! The ships index: every ship the shard has launched, newest first.
 //!
-//! [`super::systems`]'s shape. A row links to its ship and, separately, to its pilot, so the
-//! row is not one stretched link as a user's is.
+//! [`super::systems`]'s shape. A row links to its ship and, separately, to its pilot, so unlike a
+//! user row it is not a single link.
 
 use std::collections::HashMap;
 

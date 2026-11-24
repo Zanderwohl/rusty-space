@@ -824,8 +824,7 @@ mod endpoint_tests {
         });
         let (status, granted) = call(&broker, post("/signin/register/native", make, None)).await;
         assert_eq!(status, StatusCode::OK);
-        // A name sent by an older client is ignored: the account has none, and ships are named
-        // in the game.
+        // A name sent by an older client is ignored.
         assert_eq!(granted["display_name"], "");
 
         // The grant it handed back is a real one.

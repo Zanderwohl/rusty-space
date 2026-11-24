@@ -4,7 +4,6 @@
 
 use serde::Deserialize;
 
-/// Which ships, by whether they still fly.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Flying {
     #[default]

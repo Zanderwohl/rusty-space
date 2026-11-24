@@ -50,7 +50,6 @@ struct Applied {
     order: Order,
 }
 
-/// What a verified ticket found.
 enum SignedIn {
     Flying { ship: ShipId, name: String, account: String },
     Unlaunched,
@@ -3991,7 +3990,7 @@ mod hello_tests {
         );
     }
 
-    /// The ship a sign-in flies, from its welcome; a new account is told `Unlaunched` first.
+    /// Skips the `Unlaunched` a new account is told first.
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
         let said = wire.take(client);
         match said.iter().find(|m| **m != Outbound::Unlaunched) {

@@ -164,12 +164,10 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
     })
 }
 
-/// Who flew a ship, as a ship's page names them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pilot {
     pub display_name: Option<String>,
     pub email: Option<String>,
-    /// A ban in force stops every ship the account has, and any it would launch.
     pub banned: bool,
 }
 

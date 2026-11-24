@@ -419,8 +419,7 @@ mod tests {
         assert!(page.contains("action=\"/signin/register\""), "{page}");
         assert!(page.contains("https://lightcone.example/auth/return"));
         assert!(page.contains("nonce1"));
-        // A new-password field, not a current-password one, and no name: ships are named in
-        // the game.
+        // A new-password field, not a current-password one, and no name field.
         assert!(!page.contains("display_name"), "{page}");
         assert!(page.contains("new-password"), "{page}");
         assert!(!page.contains("current-password"), "{page}");

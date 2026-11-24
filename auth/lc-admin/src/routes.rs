@@ -734,9 +734,8 @@ async fn lift_ban(
     answered(&state, &admin, &headers, id, outcome).await
 }
 
-/// The account's standing as it now is, which a lift of one ban among several may leave banned.
-/// Best effort: the ban is in force at the broker whether or not the shard hears of it, and a
-/// shard that does not hears of it at the account's next sign-in.
+/// Sends the standing as it now is: lifting one ban of several leaves the account banned. Best
+/// effort, because the broker enforces the ban at the account's next sign-in regardless.
 async fn tell_the_shard(state: &AppState, admin: &Admin, id: Uuid, now: DateTime<Utc>) {
     let Some(shard) = state.shard() else { return };
     let sanction = match state.store().sanction(id, now).await {

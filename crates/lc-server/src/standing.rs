@@ -1,10 +1,9 @@
 //! An account's bans, as the console last stated them.
 //!
 //! The broker refuses a banned account a ticket, but a connection signed in before the ban
-//! presents no ticket again. The console states each change of standing here; the shard drops
-//! the account's connections and refuses its sign-ins until the ban ends, so it can neither fly
-//! a ship it has nor launch another. Not saved: after a restart every connection signs in again,
-//! through the broker.
+//! presents no ticket again. So the shard drops the account's connections and refuses its
+//! sign-ins until the ban ends. Not saved: after a restart every connection signs in through the
+//! broker again.
 
 use lc_proto::{ClientId, Outbound};
 
@@ -19,7 +18,6 @@ pub enum Standing {
     Banned { until_s: Option<i64> },
 }
 
-/// A change of standing, as the console sent it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stated {
     pub account: String,

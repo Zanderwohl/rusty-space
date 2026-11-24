@@ -1,8 +1,6 @@
-//! An account and a ship are separate things: an account may have none, and gets one by launching.
-//!
 //! A signed-in account with no ship is held here, told [`Outbound::Unlaunched`], and hears
 //! nothing of the world until it sends [`Inbound::Launch`](lc_proto::Inbound::Launch). A
-//! collapse puts its owner back here: the wreck is nobody's, and nothing the ship knew passes on.
+//! collapse puts its owner back here, and nothing the old ship knew passes to the new one.
 
 use glam::DVec3;
 use lc_proto::{ClientId, LaunchRefusal, Outbound, ShipId};
@@ -17,7 +15,6 @@ use crate::transport::Transport;
 const LAUNCH_STAR: &str = lc_world::system::SOL;
 const LAUNCH_COURSE: &str = "orbit:Luna:high";
 
-/// A signed-in connection with no ship.
 #[derive(Clone, Debug)]
 pub struct Unlaunched {
     pub account: String,
@@ -25,7 +22,6 @@ pub struct Unlaunched {
 }
 
 impl<J: Journal> Server<J> {
-    /// Hold `from` with no ship and tell it so.
     pub(crate) fn ground(&mut self, from: ClientId, account: String, permission: crate::ability::Level) {
         self.clients.remove(&from);
         self.unlaunched.insert(from, Unlaunched { account, permission });
@@ -40,8 +36,7 @@ impl<J: Journal> Server<J> {
         if !self.unlaunched.contains_key(&from) {
             return;
         }
-        // Another connection for the same account launched first: this one takes the ship over,
-        // as signing in again would, rather than being refused until it reconnects.
+        // Another connection for this account launched first: join its ship, as signing in would.
         if let Some(Unlaunched { account, permission }) = self.unlaunched.get(&from).cloned()
             && let Some(&ship) = self.by_account.get(&account)
         {
@@ -68,17 +63,15 @@ impl<J: Journal> Server<J> {
         self.registered.push(lc_store::registry::Entry { ship_id: ship.0, account, name, ended_t });
     }
 
-    /// Registry entries since this was last called.
     pub fn take_registered(&mut self) -> Vec<lc_store::registry::Entry> {
         std::mem::take(&mut self.registered)
     }
 
-    /// Hand back what [`Server::take_registered`] took, because writing them failed.
+    /// After a failed write.
     pub fn untake_registered(&mut self, entries: Vec<lc_store::registry::Entry>) {
         self.registered.extend(entries);
     }
 
-    /// Bind `from` to `ship` as its pilot.
     pub(crate) fn embark(&mut self, from: ClientId, ship: ShipId, account: String, permission: crate::ability::Level) {
         self.unlaunched.remove(&from);
         if !account.is_empty() {
@@ -183,7 +176,7 @@ mod tests {
         assert!(server.owned_by(other).is_some_and(|id| id.0 == ship_id.0) && server.owned_by(PILOT).is_none());
     }
 
-    /// A launch from a connection that never signed in is not answered: there is nobody to refuse.
+    /// A launch before signing in gets no answer.
     #[tokio::test]
     async fn a_launch_before_signing_in_is_ignored() {
         let mut server = Server::new(Memory::default(), 0, 1);

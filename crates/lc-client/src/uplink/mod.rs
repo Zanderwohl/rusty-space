@@ -128,7 +128,7 @@ pub struct Uplink {
     pub launch_refused: Option<lc_proto::LaunchRefusal>,
 }
 
-/// This client's ship, ended. The connection flies nothing until a launch.
+/// This client's ship, ended.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fallen {
     pub ship_id: ShipId,
@@ -365,8 +365,7 @@ pub(crate) fn fold(
         Outbound::Collapsed { ship_id, at_t, released_j } => {
             ui.0.notify("The field collapsed", at_t as f64 * 1e-6);
             let at_ly = game.0.ship.position_at(at_t as f64) / lc_world::motion::LIGHT_US_PER_LY;
-            // Held where it ended, so the camera stays on the wreck rather than following an
-            // orbit nothing is flying any more.
+            // Held where it ended, so the camera stays on the wreck.
             game.0.ship.motion.position_ly = at_ly;
             game.0.ship.motion.begin_holding(lc_world::navigation::Waypoint::Fixed(at_ly));
             uplink.fallen = Some(Fallen { ship_id, at_t, released_j, at_ly, shown_s: None });

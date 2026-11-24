@@ -15,7 +15,6 @@ pub struct Entry {
     pub ended_t: Option<i64>,
 }
 
-/// One row, as an administrator reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record {
     pub ship_id: i64,
@@ -28,13 +27,11 @@ pub struct Record {
     pub ended_at: Option<i64>,
 }
 
-/// Which records to list.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
     /// Matches the name, case-insensitively, or the account exactly.
     pub search: Option<String>,
     pub account: Option<String>,
-    /// `Some(true)` for ships still flying, `Some(false)` for ended ones.
     pub flying: Option<bool>,
     pub limit: i64,
     pub offset: i64,

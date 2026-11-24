@@ -44,7 +44,6 @@ pub const SHIPS: &str = "/admin/ships";
 /// `{id}` is a ship id.
 pub const SHIP: &str = "/admin/ships/{id}";
 
-/// One ship as [`SHIPS`] lists it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShipRow {
     pub ship_id: i64,
@@ -362,8 +361,8 @@ async fn standing(
     }
 }
 
-/// `None` for a request that says neither, or an `until` that is not a number: read as a
-/// permanent ban, a typo would be one.
+/// `None` for an unknown `banned`, or an `until` that is not a number, which would otherwise
+/// read as a permanent ban.
 fn stand(asked: &Stand) -> Option<crate::standing::Standing> {
     use crate::standing::Standing;
     match asked.banned.as_deref()? {

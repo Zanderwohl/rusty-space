@@ -400,7 +400,7 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
 ///
 /// The system card is deliberately thin — more about the system goes here later.
 fn status_section(detail: &Detail) -> Markup {
-    // The account's own ships need no pilot column filled in from elsewhere: it is this account.
+    // Every ship here is this account's.
     let pilots = std::collections::HashMap::from([(
         detail.account.id,
         crate::users::Pilot {

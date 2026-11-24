@@ -215,7 +215,7 @@ impl<J: Journal> Server<J> {
         self.owed.remove(&id);
         self.answered.remove(&id);
 
-        // The account keeps nothing of the ship: it launches another, knowing nothing.
+        // The account loses the ship, and the next one it launches starts knowing nothing.
         let pilot = self.by_account.iter().find(|(_, ship)| ship.0 == id.0).map(|(account, _)| account.clone());
         if let Some(pilot) = pilot {
             self.by_account.remove(&pilot);

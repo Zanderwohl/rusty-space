@@ -13,7 +13,6 @@ use crate::uplink::{State, Uplink};
 /// Real seconds a collapse is watched before the launch screen.
 pub const WATCH_S: f64 = 10.0;
 
-/// What the launch screen holds between frames.
 #[derive(Resource, Default)]
 pub struct Launch {
     pub name: String,
@@ -57,7 +56,7 @@ fn leave_for_launch(time: Res<Time>, mut uplink: ResMut<Uplink>, mut ui: ResMut<
     }
 }
 
-/// Forget the ship that is gone: none of what it saw, said or was fitted with passes to the next.
+/// None of what the old ship saw, said or was fitted with passes to the next.
 fn reset(mut launch: ResMut<Launch>, mut uplink: ResMut<Uplink>, mut wrecks: ResMut<crate::field::Wrecks>) {
     *launch = Launch::default();
     *wrecks = default();
@@ -76,7 +75,6 @@ fn reset(mut launch: ResMut<Launch>, mut uplink: ResMut<Uplink>, mut wrecks: Res
     uplink.hull = None;
 }
 
-/// Back to the world once the shard welcomes the new ship.
 fn board(uplink: Res<Uplink>, mut ui: ResMut<Ui>, mut next: ResMut<NextState<AppState>>) {
     if uplink.joined().is_some() {
         ui.screen = crate::ui::Screen::InGame;

@@ -13,7 +13,7 @@ use crate::level::Level;
 use crate::providers::Provider;
 
 /// An account as anything outside the broker sees it: an opaque id, a name if it has one, and
-/// what it may do. A password account has none; a ship's name belongs to the shard.
+/// what it may do. A password account has no name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub id: Uuid,

@@ -22,7 +22,7 @@ use crate::assets::Assets;
 use crate::auth::Admin;
 
 /// What an account is called on a page: its name if it has one, else an address it signs in
-/// with, else its identifier. A password account has no name.
+/// with, else its identifier.
 pub fn account_label(name: Option<&str>, email: Option<&str>, id: uuid::Uuid) -> String {
     name.filter(|n| !n.is_empty()).or(email).map_or_else(|| format!("Account {}", &id.to_string()[..8]), str::to_owned)
 }
