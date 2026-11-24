@@ -12,6 +12,8 @@
   --rule: #232935;
   --accent: #7fd4d8;
   --accent-dim: #3f7a7d;
+  // The star map in the gutters, behind the reading column.
+  --map-line: #16191f;
 
   --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
@@ -47,5 +49,6 @@
     --rule: #ddd9d0;
     --accent: #1f6f73;
     --accent-dim: #8cb9bb;
+    --map-line: #e6e3db;
   }
 }
