@@ -4,8 +4,8 @@
 //! egui texture and redraws only when the bake or the size changes.
 
 use bevy_egui::egui;
-use em_plot::chart::{Axis, Chart, Rect, Style};
-use em_plot::primitives::{Anchor, Label, Point, Polyline, Primitives, Quad, Rgba};
+use em_plot::chart::{Axis, Bin, Chart, Rect, Style};
+use em_plot::primitives::{Anchor, Label, Point, Polyline, Primitives, Rgba};
 use em_plot::{raster, scale::Scale};
 use lc_galaxy::attributes::{MAX_MASS, MIN_MASS, age_fraction, imf_fraction, tracks};
 use lc_galaxy::kinds::MAX_AGE_GYR;
@@ -125,29 +125,6 @@ fn titles(c: &Chart, x: &str, y: &str) -> Primitives {
     }
 }
 
-/// Bins as `(lo, hi, count)`.
-fn bars(c: &Chart, bins: &[(f64, f64, f64)]) -> Primitives {
-    let quads = bins
-        .iter()
-        .filter(|(_, _, n)| *n > 0.0)
-        .map(|&(lo, hi, n)| {
-            let (a, b) = (at(c, lo, 0.0), at(c, hi, n));
-            Quad { min: Point::new(a.x.min(b.x) + 1.0, b.y), max: Point::new(a.x.max(b.x) - 1.0, a.y), color: BARS }
-        })
-        .collect();
-    Primitives { quads, ..Primitives::default() }
-}
-
-/// The expected count per bin, as a step line over the bars.
-fn steps(c: &Chart, bins: &[(f64, f64, f64)]) -> Primitives {
-    let mut points = Vec::with_capacity(bins.len() * 2);
-    for &(lo, hi, n) in bins {
-        points.push(at(c, lo, n));
-        points.push(at(c, hi, n));
-    }
-    Primitives { polylines: vec![Polyline { points, color: EXPECTED, width: 1.5 }], ..Primitives::default() }
-}
-
 fn edges(lo: f64, hi: f64, n: usize, log: bool) -> Vec<(f64, f64)> {
     let f = |i: usize| {
         let t = i as f64 / n as f64;
@@ -156,8 +133,8 @@ fn edges(lo: f64, hi: f64, n: usize, log: bool) -> Vec<(f64, f64)> {
     (0..n).map(|i| (f(i), f(i + 1))).collect()
 }
 
-fn count(edges: &[(f64, f64)], values: impl Iterator<Item = f64>) -> Vec<(f64, f64, f64)> {
-    let mut bins: Vec<(f64, f64, f64)> = edges.iter().map(|&(a, b)| (a, b, 0.0)).collect();
+fn count(edges: &[(f64, f64)], values: impl Iterator<Item = f64>) -> Vec<Bin> {
+    let mut bins: Vec<Bin> = edges.iter().map(|&(a, b)| (a, b, 0.0)).collect();
     for v in values {
         if let Some(bin) = bins.iter_mut().find(|(a, b, _)| v >= *a && v < *b) {
             bin.2 += 1.0;
@@ -175,7 +152,7 @@ fn per_population(stars: &[BakedStar], compiled: &Compiled) -> Vec<(FeatureId, f
         .collect()
 }
 
-fn y_axis(bins: &[(f64, f64, f64)], expected: &[(f64, f64, f64)]) -> Axis {
+fn y_axis(bins: &[Bin], expected: &[Bin]) -> Axis {
     let peak = bins.iter().chain(expected).map(|b| b.2).fold(1.0, f64::max);
     Axis { scale: Scale::Linear, range: (0.0, peak * 1.15), ticks: 4 }
 }
@@ -209,7 +186,7 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
         Plot::Mass => {
             let e = edges(MIN_MASS, MAX_MASS, 24, true);
             let bins = count(&e, stars.iter().map(|s| s.attributes.initial_mass_solar));
-            let expected: Vec<(f64, f64, f64)> = e
+            let expected: Vec<Bin> = e
                 .iter()
                 .map(|&(lo, hi)| {
                     let n = counts.iter().map(|(id, n)| n * imf_fraction(&compiled.populations[id].imf, lo, hi)).sum();
@@ -218,12 +195,12 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
                 .collect();
             let x = Axis { scale: Scale::Log10, range: (MIN_MASS, MAX_MASS), ticks: 4 };
             let c = chart(x, y_axis(&bins, &expected), size, &metrics);
-            vec![c.frame(), bars(&c, &bins), steps(&c, &expected), titles(&c, "initial mass (Msun)", "stars")]
+            vec![c.frame(), c.histogram(&bins, BARS), c.steps(&expected, EXPECTED), titles(&c, "initial mass (Msun)", "stars")]
         }
         Plot::Age => {
             let e = edges(0.0, MAX_AGE_GYR, 28, false);
             let bins = count(&e, stars.iter().map(|s| s.attributes.age_gyr));
-            let expected: Vec<(f64, f64, f64)> = e
+            let expected: Vec<Bin> = e
                 .iter()
                 .map(|&(lo, hi)| {
                     let n = counts.iter().map(|(id, n)| n * age_fraction(&compiled.populations[id].age, lo, hi)).sum();
@@ -232,13 +209,13 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
                 .collect();
             let x = Axis::linear((0.0, MAX_AGE_GYR));
             let c = chart(x, y_axis(&bins, &expected), size, &metrics);
-            vec![c.frame(), bars(&c, &bins), steps(&c, &expected), titles(&c, "age (Gyr)", "stars")]
+            vec![c.frame(), c.histogram(&bins, BARS), c.steps(&expected, EXPECTED), titles(&c, "age (Gyr)", "stars")]
         }
         Plot::Feh => {
             let e = edges(-2.5, 1.0, 35, false);
             let bins = count(&e, stars.iter().map(|s| s.attributes.feh));
             let c = chart(Axis::linear((-2.5, 1.0)), y_axis(&bins, &[]), size, &metrics);
-            vec![c.frame(), bars(&c, &bins), titles(&c, "[Fe/H] (dex)", "stars")]
+            vec![c.frame(), c.histogram(&bins, BARS), titles(&c, "[Fe/H] (dex)", "stars")]
         }
     };
     let refs: Vec<&Primitives> = layers.iter().collect();
