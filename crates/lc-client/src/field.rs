@@ -574,6 +574,11 @@ fn own_wreck_id(ship: ShipId) -> i64 {
 }
 
 impl Wrecks {
+    /// Whether this client's own hull has been drawn, so a collapse of it has a wreck to show.
+    pub fn has_own(&self) -> bool {
+        self.own.is_some()
+    }
+
     /// Each wreck's debris for the exposure, as `(where, kelvin, radius_m)`: a disc of what it
     /// covers at the temperature it has cooled to, as the shader draws it. Not the flash, which is
     /// left to overflow. Without these the meter opens up once the last hull has gone, and the

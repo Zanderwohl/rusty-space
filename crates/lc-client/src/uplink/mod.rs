@@ -262,7 +262,7 @@ impl Uplink {
     }
 }
 
-fn fold(
+pub(crate) fn fold(
     uplink: &mut Uplink,
     game: &mut crate::app::Game,
     ui: &mut crate::app::Ui,
