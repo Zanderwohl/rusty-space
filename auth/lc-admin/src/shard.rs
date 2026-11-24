@@ -203,6 +203,28 @@ impl Shard<'_> {
         self.fetch(acting, &format!("/admin/ships/{id}"), Missing::NoSuchShip).await
     }
 
+    /// The account's standing after a ban or a lift: `None` when no ban is in force. The shard
+    /// otherwise hears of a ban only when the account next asks for a ticket.
+    pub async fn stand(
+        &self,
+        acting: &str,
+        account: uuid::Uuid,
+        sanction: Option<&lc_identity::bans::Sanction>,
+    ) -> Result<(), Missing> {
+        let ticket = self.ticket_for(acting).await?;
+        let response = self
+            .http
+            .post(format!("{}/admin/standing/{account}?{}", self.api, standing_query(sanction)))
+            .bearer_auth(&ticket)
+            .send()
+            .await
+            .map_err(|why| Missing::Unreachable(why.to_string()))?;
+        match response.status() {
+            s if s.is_success() => Ok(()),
+            other => Err(Missing::Unreachable(format!("it answered {other}"))),
+        }
+    }
+
     /// `absent` is what a 404 means at `path`.
     async fn fetch<T: serde::de::DeserializeOwned>(
         &self,
@@ -263,9 +285,35 @@ impl Shard<'_> {
     }
 }
 
+/// Read by `lc_server::admin::STANDING`.
+fn standing_query(sanction: Option<&lc_identity::bans::Sanction>) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    match sanction {
+        None => {
+            query.append_pair("banned", "false");
+        }
+        Some(sanction) => {
+            query.append_pair("banned", "true");
+            if let Some(until) = sanction.until {
+                query.append_pair("until", &until.timestamp().to_string());
+            }
+        }
+    }
+    query.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_standing_is_sent_as_the_shard_reads_it() {
+        use lc_identity::bans::Sanction;
+        let until = chrono::DateTime::from_timestamp(1_795_000_000, 0);
+        assert_eq!(standing_query(None), "banned=false");
+        assert_eq!(standing_query(Some(&Sanction { count: 1, until: None })), "banned=true");
+        assert_eq!(standing_query(Some(&Sanction { count: 2, until })), "banned=true&until=1795000000");
+    }
 
     /// **A captured payload — the bytes `lc_server::status` actually produced**, not a
     /// hand-written approximation of them. It was printed by that crate's own serializer and

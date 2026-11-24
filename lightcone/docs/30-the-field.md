@@ -398,7 +398,8 @@ seeing it replayed as the light passes.
   keeps the third-person camera on its own wreck for `onboarding::WATCH_S`, ten real seconds, then
   leaves the world for the launch screen. `Inbound::Launch { name }` makes a new ship, with a new id,
   in high orbit of Luna when the shard holds Sol and at the spawn point otherwise, and welcomes the
-  connection to it as on signing in. Each launch and collapse is written to `ship_registry`, which
+  connection to it as on signing in. A launch from an account whose other connection launched first
+  joins that ship instead. Each launch and collapse is written to `ship_registry`, which
   outlives the wreck's checkpoint row and is what the console's Ships pages read.
 
 ## Proximity

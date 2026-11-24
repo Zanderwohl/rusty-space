@@ -128,6 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Kept to notice the administration surface's connection closing; see the loop.
     let mut admin_db: Option<std::sync::Arc<tokio_postgres::Client>> = None;
+    // Changes of standing the console sends, drained on the tick.
+    let (standings, mut stated) = tokio::sync::mpsc::unbounded_channel();
     // Refused rather than silently skipped: a console pointed at a shard that quietly declined
     // to listen is a card reading "unavailable" with nothing to explain it.
     if let Some(addr) = &admin_bind {
@@ -140,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             client,
             catalog.clone(),
             std::sync::Arc::new(keys),
+            standings,
         );
         let listener = tokio::net::TcpListener::bind(addr).await?;
         eprintln!("administration surface on {addr}, for audience {audience}");
@@ -303,6 +306,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for client in wire.departed() {
             eprintln!("connection {} closed", client.0);
             server.disconnected(client);
+        }
+        while let Ok(change) = stated.try_recv() {
+            eprintln!("standing of {}: {:?}", change.account, change.standing);
+            server.stand(change, &mut wire);
         }
         // **Not `?`.** A tick the store would not take is one tick's events lost; ending the
         // process here lost every connected player instead, socket closed with no close frame,

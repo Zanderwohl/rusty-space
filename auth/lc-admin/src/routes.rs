@@ -11,7 +11,7 @@ use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use lc_identity::ability;
 use lc_identity::actions::Action;
 use lc_identity::bans::{Issue, Reason, Term};
@@ -670,6 +670,7 @@ async fn issue_ban(
                         actor = %admin.id, subject = %id, %ban,
                         reason = reason.slug(), term = term.slug(), "ban issued",
                     );
+                    tell_the_shard(&state, &admin, id, now).await;
                     Ok(Done::Banned)
                 }
             }
@@ -725,11 +726,29 @@ async fn lift_ban(
                     tracing::error!(%why, subject = %id, "a lift went unlogged");
                 }
                 tracing::info!(actor = %admin.id, subject = %id, ban = %form.ban, "ban lifted");
+                tell_the_shard(&state, &admin, id, now).await;
                 Ok(Done::Lifted)
             }
         },
     };
     answered(&state, &admin, &headers, id, outcome).await
+}
+
+/// The account's standing as it now is, which a lift of one ban among several may leave banned.
+/// Best effort: the ban is in force at the broker whether or not the shard hears of it, and a
+/// shard that does not hears of it at the account's next sign-in.
+async fn tell_the_shard(state: &AppState, admin: &Admin, id: Uuid, now: DateTime<Utc>) {
+    let Some(shard) = state.shard() else { return };
+    let sanction = match state.store().sanction(id, now).await {
+        Ok(sanction) => sanction,
+        Err(why) => {
+            tracing::error!(%why, subject = %id, "could not read a standing to send the shard");
+            return;
+        }
+    };
+    if let Err(why) = shard.stand(&admin.id.to_string(), id, sanction.as_ref()).await {
+        tracing::error!(?why, subject = %id, "the shard was not told of a change of standing");
+    }
 }
 
 /// No degraded mode: without the database there is nothing to administer.

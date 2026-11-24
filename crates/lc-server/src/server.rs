@@ -163,6 +163,8 @@ pub struct Server<J: Journal> {
     pub(crate) clients: HashMap<ClientId, Connected>,
     /// Signed in with no ship. See [`crate::launch`].
     pub(crate) unlaunched: HashMap<ClientId, crate::launch::Unlaunched>,
+    /// Banned accounts, each until the Unix second or for good. See [`crate::standing`].
+    pub(crate) banned: HashMap<String, Option<i64>>,
     /// Launches and collapses not yet written to `ship_registry`.
     pub(crate) registered: Vec<lc_store::registry::Entry>,
     pub(crate) journal: J,
@@ -272,6 +274,7 @@ impl<J: Journal> Server<J> {
             owners: HashMap::new(),
             clients: HashMap::new(),
             unlaunched: HashMap::new(),
+            banned: HashMap::new(),
             registered: Vec::new(),
             journal,
             fronts: Default::default(),
@@ -1138,6 +1141,10 @@ impl<J: Journal> Server<J> {
         // for everyone, quietly. Refusing one player loudly is the better failure.
         if let Some(why) = self.blocked.get(&claims.sub) {
             eprintln!("refusing {}: its saved craft will not load: {why}", claims.sub);
+            return None;
+        }
+        // A ticket minted before the ban, presented after it.
+        if self.is_banned(&claims.sub) {
             return None;
         }
 

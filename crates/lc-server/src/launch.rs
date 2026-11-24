@@ -40,17 +40,21 @@ impl<J: Journal> Server<J> {
         if !self.unlaunched.contains_key(&from) {
             return;
         }
+        // Another connection for the same account launched first: this one takes the ship over,
+        // as signing in again would, rather than being refused until it reconnects.
+        if let Some(Unlaunched { account, permission }) = self.unlaunched.get(&from).cloned()
+            && let Some(&ship) = self.by_account.get(&account)
+        {
+            self.embark(from, ship, account.clone(), permission);
+            let name = self.ship(ship).map(Craft::designation).unwrap_or_default();
+            self.welcome(from, ship, name, &account, wire);
+            return;
+        }
         let Some(name) = lc_proto::ship_name(typed).map(str::to_owned) else {
             wire.send(from, Outbound::LaunchRefused(LaunchRefusal::Name));
             return;
         };
         let Some(Unlaunched { account, permission }) = self.unlaunched.remove(&from) else { return };
-        // Another connection for the same account launched first, or still flies.
-        if self.by_account.contains_key(&account) {
-            self.unlaunched.insert(from, Unlaunched { account, permission });
-            wire.send(from, Outbound::LaunchRefused(LaunchRefusal::Flying));
-            return;
-        }
         let ship = self.spawn(Some(name.clone()));
         self.register(ship, &account, None);
         self.embark(from, ship, account.clone(), permission);
@@ -160,6 +164,23 @@ mod tests {
         server.tick(&mut wire).await.unwrap();
         assert_eq!(wire.take(PILOT), vec![Outbound::LaunchRefused(LaunchRefusal::Name)]);
         assert!(server.fleet.is_empty() && server.unlaunched.contains_key(&PILOT));
+    }
+
+    /// Two connections grounded for one account: the second to launch joins the first's ship.
+    #[tokio::test]
+    async fn a_second_connection_joins_the_ship_the_first_launched() {
+        let (mut server, mut wire) = grounded(World::default());
+        let other = ClientId(2);
+        server.ground(other, "acct-1".into(), crate::ability::Level::from_claim(0));
+        wire.client_says(PILOT, Inbound::Launch { name: "Tachi".into() });
+        server.tick(&mut wire).await.unwrap();
+        let _ = wire.take(PILOT);
+        wire.client_says(other, Inbound::Launch { name: "Rocinante".into() });
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(other);
+        let Some(Outbound::Welcome { ship_id, name, .. }) = said.first() else { panic!("{said:?}") };
+        assert_eq!((name.as_str(), server.fleet.len()), ("Tachi", 1), "joined, not launched");
+        assert!(server.owned_by(other).is_some_and(|id| id.0 == ship_id.0) && server.owned_by(PILOT).is_none());
     }
 
     /// A launch from a connection that never signed in is not answered: there is nobody to refuse.

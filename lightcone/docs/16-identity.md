@@ -6,7 +6,7 @@ website and the game both consume and neither implements.
 [14-hosting.md](14-hosting.md) deferred this and named the two places it slots in. This is what
 slots in.
 
-**Status: partly built.** The broker is `auth/lc-identity` (password and Google, PKCE, verified-email alignment, attempt budgets, levels and bans), the console `auth/lc-admin`, the site's half `web/lc-web/src/auth.rs`, the desktop's `lc_client::{auth, broker, vault}`, and the shard's `lc_server::{ticket, ability, admin, status, launch}`. Missing: itch.io; a ban reaching a connection already open, which flies on until its socket closes; key rotation (the JWKS publishes one key); linking accounts from settings; and the socket rules: no `Hello` deadline, no close on a message before `Hello`, no pre-auth budget keyed by address (unadmitted sockets share the per-connection bucket), and no cap on how far back `ResumeFrom` may rewind. Discord is listed but deliberately refused at boot.
+**Status: partly built.** The broker is `auth/lc-identity` (password and Google, PKCE, verified-email alignment, attempt budgets, levels and bans), the console `auth/lc-admin`, the site's half `web/lc-web/src/auth.rs`, the desktop's `lc_client::{auth, broker, vault}`, and the shard's `lc_server::{ticket, ability, admin, status, launch, standing}`. Missing: itch.io; key rotation (the JWKS publishes one key); linking accounts from settings; and the socket rules: no `Hello` deadline, no close on a message before `Hello`, no pre-auth budget keyed by address (unadmitted sockets share the per-connection bucket), and no cap on how far back `ResumeFrom` may rewind. Discord is listed but deliberately refused at boot.
 
 ## The service is a broker, not a login page
 
@@ -171,7 +171,11 @@ Google supplies one. **A ship's name is the game's**, typed on the launch screen
 with no ship, new or after a collapse, is told `Unlaunched` in place of a welcome; see
 [30-the-field.md](30-the-field.md). The console lists accounts under Users and ships under Ships,
 each linking to the other. A ban is the account's: the broker refuses it a ticket, so it can fly
-none of its ships and launch no new one.
+none of its ships and launch no new one. A connection signed in before the ban presents no ticket
+again, so the console also posts the account's standing to the shard's `/admin/standing/{account}`
+after each ban and lift (`lc_server::standing`). The shard drops the account's connections with
+`Unauthenticated` and refuses its sign-ins until the ban runs out. It does not save this: after a
+restart every connection signs in again, through the broker.
 
 ## The game does not run an OAuth dance
 

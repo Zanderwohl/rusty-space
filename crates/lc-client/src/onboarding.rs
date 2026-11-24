@@ -84,10 +84,17 @@ fn board(uplink: Res<Uplink>, mut ui: ResMut<Ui>, mut next: ResMut<NextState<App
     }
 }
 
+/// What the launch screen says in place of its controls when no launch can reach the shard.
+fn lost(state: &State) -> Option<String> {
+    crate::uplink::note(state, None).filter(|(note, _)| *note == crate::uplink::Note::Wrong).map(|(_, said)| said)
+}
+
 fn draw(mut contexts: EguiContexts, mut launch: ResMut<Launch>, mut uplink: ResMut<Uplink>) {
     let Ok(context) = contexts.ctx_mut() else { return };
     let color = crate::signin_ui::color;
-    if uplink.launch_refused.is_some() {
+    // A refusal answers the launch, and a lost link never will.
+    let lost = lost(&uplink.state);
+    if uplink.launch_refused.is_some() || lost.is_some() {
         launch.sent = None;
     }
     let mut send = false;
@@ -114,7 +121,7 @@ fn draw(mut contexts: EguiContexts, mut launch: ResMut<Launch>, mut uplink: ResM
             ui.visuals_mut().extreme_bg_color = color(em_ui::vfd::FIELD_BG);
             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, color(em_ui::vfd::TEXT_DIM));
             ui.set_min_width(320.0);
-            let waiting = launch.sent.is_some();
+            let waiting = launch.sent.is_some() || lost.is_some();
             let field = ui.horizontal(|ui| {
                 ui.label("Ship name");
                 ui.add_enabled(!waiting, egui::TextEdit::singleline(&mut launch.name).char_limit(lc_proto::NAME_LIMIT))
@@ -124,7 +131,9 @@ fn draw(mut contexts: EguiContexts, mut launch: ResMut<Launch>, mut uplink: ResM
                 field.request_focus();
                 launch.focused = true;
             }
-            if let Some(why) = uplink.launch_refused {
+            if let Some(lost) = &lost {
+                ui.colored_label(color(em_ui::vfd::TEXT_DIM), lost);
+            } else if let Some(why) = uplink.launch_refused {
                 let words = match why {
                     lc_proto::LaunchRefusal::Name => "The shard will not take that name.",
                     lc_proto::LaunchRefusal::Flying => "This account already flies a ship.",
@@ -169,6 +178,12 @@ mod tests {
         uplink.fallen.as_mut().unwrap().shown_s = Some(100.0);
         assert!(!due(&uplink, 100.0 + WATCH_S - 0.1));
         assert!(due(&uplink, 100.0 + WATCH_S));
+    }
+
+    #[test]
+    fn a_lost_link_is_said_on_the_launch_screen() {
+        assert_eq!(lost(&State::Unlaunched), None);
+        assert!(lost(&State::Lost("socket closed".into())).is_some_and(|said| said.contains("socket closed")));
     }
 
     #[test]
