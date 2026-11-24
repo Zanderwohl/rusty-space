@@ -153,8 +153,10 @@ conventions that are easy to violate by habit:
   what it looks like. A class used once is a review item; most pages should add none, because
   rendered markdown is bare tags and `_base.scss` styles those.
 - **No JavaScript.** Every page is a document a browser renders on arrival. `/play` is the one
-  exception and all it does is hand over to the game client. Anything that wants real
-  interactivity belongs in the client, which already has a WebGPU context.
+  exception and all it does is hand over to the game client. The `#micro-galaxy` decoration
+  (`static/scripts/micro-galaxy.js`) is the other: self-contained, and absent without
+  JavaScript. Anything that wants real interactivity belongs in the client, which already has
+  a WebGPU context.
 
 The browser build of the game is staged by `tools/build-wasm.sh` and delivered from a CDN that
 never overwrites anything — a new build is a new directory, so rollback is a pointer change.
