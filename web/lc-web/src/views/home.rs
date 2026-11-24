@@ -33,8 +33,9 @@ pub async fn page() -> Markup {
             section class="stack" {
                 h2 { "One in-game year per real hour" }
                 p {
-                    "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, "
-                    "sed quia consequuntur magni dolores eos qui ratione voluptatem."
+                    "Time ticks away, whether you're online or not. Transmit orders or requests "
+                    "across the lightyears, and you may see what happened next time you log on, if "
+                    "things went to plan. If they didn't, you might not know for some time."
                 }
                 table {
                     caption {
@@ -58,9 +59,9 @@ pub async fn page() -> Markup {
                     }
                 }
                 p {
-                    "Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, "
-                    "consectetur, adipisci velit. Sed quia non numquam eius modi tempora "
-                    "incidunt. Ut labore et dolore magnam aliquam quaerat voluptatem."
+                    "Travel at subluminal speed to the next star to set up shop. Communicate with "
+                    "your allies in the stellar neighborhood to coordinate. Relay transmissions, "
+                    "system reports, or news of a battle seen on the galactic horizon."
                 }
             }
 
