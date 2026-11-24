@@ -53,9 +53,9 @@ impl Broker {
         email: &str,
         password: &str,
         label: &str,
-        register_as: Option<&str>,
+        registering: bool,
     ) -> Result<Granted, BrokerError> {
-        let path = if register_as.is_some() {
+        let path = if registering {
             "/signin/register/native"
         } else {
             "/signin/password/native"
@@ -64,7 +64,6 @@ impl Broker {
             "email": email,
             "password": password,
             "label": label,
-            "display_name": register_as,
         });
         let answer = self.post(path, body)?;
         Ok(Granted {

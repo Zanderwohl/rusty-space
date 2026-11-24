@@ -57,7 +57,6 @@ pub struct Signin {
 pub struct Form {
     pub email: String,
     pub password: String,
-    pub display_name: String,
     /// Making an account rather than using one. The reason the password provider exists is
     /// that a development environment needs a hundred of them.
     pub registering: bool,
@@ -429,10 +428,6 @@ pub fn begin(signin: &mut Signin) {
 fn password_submit(signin: &mut Signin) {
     let Some(broker) = signin.broker.clone() else { return };
     let Some(form) = signin.form.take() else { return };
-    let register_as = form.registering.then(|| {
-        let typed = form.display_name.trim();
-        if typed.is_empty() { "Traveler".to_string() } else { typed.to_string() }
-    });
     let label = machine_name();
     let to_main = signin.to_main.clone();
     let attempt = signin.next_attempt();
@@ -440,7 +435,7 @@ fn password_submit(signin: &mut Signin) {
     IoTaskPool::get()
         .spawn(async move {
             let asked =
-                broker.with_password(&form.email, &form.password, &label, register_as.as_deref());
+                broker.with_password(&form.email, &form.password, &label, form.registering);
             let report = match asked {
                 Ok(granted) => Report::Granted { grant: granted.grant, identity: granted.identity },
                 Err(why) => Report::Failed(why.to_string()),
@@ -499,11 +494,6 @@ fn form(mut contexts: EguiContexts, mut signin: ResMut<Signin>, ui_state: Res<Ui
                 // more likely to be streamed or screenshotted than a browser is.
                 ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
                 ui.end_row();
-                if form.registering {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut form.display_name);
-                    ui.end_row();
-                }
             });
             ui.checkbox(&mut form.registering, "Create an account");
             ui.separator();
@@ -602,7 +592,9 @@ fn draw(
         menu.title(panel, "SIGN IN");
         match &wanted {
             Shown::SignedIn(name) => {
-                menu.message(panel, &format!("Signed in as {name}."));
+                // A password account has no name: ships are named, accounts are not.
+                let said = if name.is_empty() { "Signed in.".to_owned() } else { format!("Signed in as {name}.") };
+                menu.message(panel, &said);
                 menu.button(panel, "Observe", Emit(Action::StartGame));
                 menu.button(panel, "Sign out", Emit(Action::SignOut));
             }

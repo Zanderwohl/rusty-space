@@ -32,8 +32,7 @@ pub enum State {
 pub struct Joined {
     pub client_id: ClientId,
     pub ship_id: ShipId,
-    /// The account's display name, as the broker knows it. A cache and not a fact: the broker
-    /// owns it and a rename appears next session.
+    /// The ship's name, given at its launch.
     pub name: String,
 }
 
