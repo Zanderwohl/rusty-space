@@ -14,8 +14,14 @@ fields over space. A headless **bake** turns the fields into stars by drawing a 
 on a fixed global grid of cells and thinning it with a hard-core rule that needs only
 neighboring cells, so any region can be baked alone and the result does not depend on bake
 order or thread count. Stars are **published** by region as immutable files; a published star
-never moves again, whatever later happens to the graph or the generator code. The editor is a
-separate native binary and ships with neither the client nor the shard.
+never moves again, whatever later happens to the graph or the generator code. Every shape in
+the graph also answers a signed distance, which is what lets one ray marcher draw the editor's
+previews and the skybox pictures of galaxies on other shards. The editor is a separate native
+egui binary and ships with neither the client nor the shard.
+
+The data model borrows from two feature editors that already exist: Century's timeline
+(`~/rust/century/crates/century-core/src/{feature,timeline}.rs`, `project/codec.rs`) and
+Grackle's prop modeler (`~/rust/grackle/src/prop/feature.rs`); see [Data types](#data-types).
 
 ## The size of the thing
 
@@ -52,16 +58,24 @@ times the real density on average. Four consequences follow from the count alone
   `StarProvider` do not survive.** Both assume the whole sky is one slice in memory. The
   provider becomes a spatial query; see [What changes outside the tool](#what-changes-outside-the-tool).
 
-### The coordinate box and the satellites
+### The coordinate box, the companions and other shards
 
 The global grid's invariant is `|c| < 2^60` per axis, which is ±36 500 ly
-([01-spacetime.md](01-spacetime.md)). Putting the main galaxy's center at the origin uses
-±18 250 ly of that for the disc and leaves the rest of the box for satellites. A satellite
-galaxy must sit within about 35 000 ly of the origin along each axis, so the satellites are near
-neighbors — about one disc radius beyond the edge, like the Sagittarius dwarf rather than the
-Magellanic Clouds. Anything farther away belongs to the skybox in
-[07-rendering.md](07-rendering.md#the-boundary-and-the-skybox), which is rendered and never
-simulated.
+([01-spacetime.md](01-spacetime.md)). The main galaxy's center sits at the origin, and its disc
+uses a radius of 18 250 ly but only a few thousand light-years of height. The companion galaxies
+therefore sit **above and below the disc**, where the sphere of radius 36 500 ly about the origin
+is nearly empty: a dwarf centered 25 000 ly off the plane, with a radius of a few thousand
+light-years, stays inside both that sphere and the per-axis bound. Each companion is its own
+[frame](#feature-kinds) with its own orientation, so it need not share the disc's plane.
+
+Galaxies farther away than that are **on other shards**. A shard's world ends at its boundary
+([07-rendering.md](07-rendering.md#the-boundary-and-the-skybox)), and from inside it another
+shard's galaxy is a skybox item: rendered, never simulated. Its picture comes from that shard's
+own feature graph, drawn from far away by the ray marcher in
+[Signed distances and ray marching](#signed-distances-and-ray-marching), so it shows the same arms
+and dust lanes a player would find by moving there. Where the shards sit relative to one another
+is a small universe-level file — each shard's galaxy origin and orientation in `f64` light-years,
+outside the integer grid — that only the skybox bake reads.
 
 The galaxy's frame is the global frame with `+Z` toward galactic north. Each system's own pole is
 already drawn from its seed (`generate::pole_for`), so nothing depends on the ecliptic of J2000
@@ -135,15 +149,17 @@ expected.
 The graph is an ordered list, the way a parametric CAD model's history is. Features evaluate in
 order, and each may reference parameters of the ones before it: an arm's width may be a multiple
 of the disc's scale height, a void may sit at a fraction of the way along arm 2, a cluster's
-orbit may be set by the galaxy's rotation curve. References resolve by feature name, not by
-index, so reordering does not silently rebind them.
+orbit may be set by the galaxy's rotation curve. References are by feature id, which is never
+reused, so reordering or deleting a feature does not silently rebind them; a feature may move
+only within the range between what it reads and what reads it, as Century's `legal_range`
+computes.
 
 What a timeline buys over a plain node graph:
 
 - A **rollback marker** shows the galaxy as of any feature, which is how a designer sees what one
   feature did.
-- **Suppress** turns a feature off without deleting it, and suppressing a feature that others
-  reference is an error the editor names.
+- **Suppress** turns a feature off without deleting it. A feature that reads a suppressed one
+  gets a problem of its own and the rest of the timeline still evaluates.
 - **Groups** fold a run of features into one row: "Arm 2" may be a spiral, two noise passes and a
   dust lane.
 
@@ -151,18 +167,253 @@ Expressions are arithmetic over named parameters with units, evaluated once when
 loads. There is no constraint solver; a CAD sketch solver earns its cost on closed profiles, and
 none of these features has one.
 
-### Storage
+## Data types
 
-The graph is RON files in the repository, one file per galaxy frame plus one for populations, so
-two designers editing different galaxies do not touch the same file and every change is a
-reviewable diff. A **graph version** is the content hash of those files together with the hash
-of the generator that read them; it is what a bake records and what a publish pins.
+A first draft, to be argued with. The names are what the code would use; nothing here exists yet.
 
-Texture-graph graphs already travel as RON over the CDN ([07-rendering.md](07-rendering.md)).
-Its node set includes the noise this graph needs, but it evaluates on the GPU, and a star's
-existence must not depend on which GPU ran the bake. If texture-graph's evaluators are reused, it
-is through a CPU path with the same determinism rules as `lc-world`: `f64`, `libm`
+### What comes from Century and what from Grackle
+
+| decision | source | why it fits a galaxy |
+|---|---|---|
+| an open set of kinds behind a trait, registered by name | Century's `FeatureKind` and `Registry` | see below |
+| a feature id that is never reused, with `next_id` stored in the file | both | references survive reordering and deletion |
+| `depends_on`, and a feature may move only between what it reads and what reads it | Century's `legal_range` | keeps references pointing backward |
+| one feature per line of RON | Century's `project/codec.rs` | a bad line damages one feature, not the file, and diffs are one line per change |
+| a kind this build does not know, or a newer version, is kept verbatim and never evaluated | Century's `Unknown` | a file from a newer build survives being opened and saved by an older one |
+| a line that does not parse is kept verbatim and never evaluated | Century's `Damaged` | a hand-edit typo costs one feature |
+| `VERSION` per kind and `migrate(from, ron)` | Century | parameter shapes will change |
+| a failed feature becomes a problem and the rest still evaluate, holding its last good output | Century's `Problem` and `Held` | deleting a disc does not blank the view |
+| the rollback bar is view state, not saved and not undone | Century | |
+| a reference to one of several outputs records how many there were | Grackle's `BodyRef { feature, index, of }` | a spiral that goes from two arms to three makes "arm 2 of 2" name nothing rather than the wrong arm |
+| undo as whole-document snapshots | Grackle | a galaxy timeline is a few kilobytes |
+| numbers written back as they were typed | Grackle's `nice_f32` | `f64`'s shortest round-trip formatting already does this; a test pins it |
+
+Grackle's prop modeler closes its set of kinds into an enum because a boolean there has to know
+the geometry it cuts. A galaxy boolean does not: it combines two weights and two signed distances,
+which every kind provides through one trait, so the open set costs nothing and is what lets an
+older build carry a newer kind.
+
+### Unsupported fields
+
+Century keeps a line verbatim when it does not decode. One case needs more than that here: serde
+ignores fields it does not recognize, so a field written by a newer build would be dropped on read
+and lost on the next save, with no warning. So the reader tells three cases apart:
+
+| case | when | kept | evaluated | the editor shows |
+|---|---|---|---|---|
+| `Unknown` | the kind is not registered, or its version is newer than this build's | the line, verbatim | no | the kind and version |
+| `Unsupported` | the kind is known but the params carry fields this build does not have | the line, verbatim | no | the feature's name and kind, and **each field it does not support** |
+| `Damaged` | the line is not readable RON, or repeats an id | the line, verbatim | no | the parse error |
+
+`Unsupported` is found by reading the params as a `ron::Value` map and comparing its keys with the
+kind's `FIELDS`, so every unfamiliar field is named rather than only the first. A test holds each
+kind's `FIELDS` to what its struct actually serializes. The editor shows such a feature in its
+place in the timeline with its line as editable text; a designer may delete the fields, which turns
+it back into an ordinary feature, or leave it for whoever has the newer build. Features that read
+it get a missing-dependency problem.
+
+The tools differ in how much of this they accept. The editor and `lc-galaxy check` open anything
+and list what they could not use. `bake` and `publish` refuse a timeline with any `Unknown`,
+`Unsupported` or `Damaged` line or any problem, because a bake that silently skipped a feature
+would publish a different galaxy than the file describes.
+
+### The timeline
+
+```rust
+/// Never reused within a timeline.
+pub struct FeatureId(pub u32);
+
+pub trait FeatureKind:
+    Clone + PartialEq + Debug + Serialize + DeserializeOwned + Send + Sync + 'static
+{
+    /// The name in the file. Never changed once shipped.
+    const KIND: &'static str;
+    /// Bumped when the params change shape; the old shape is read by `migrate`.
+    const VERSION: u32;
+    /// Every field the params serialize, for telling `Unsupported` apart.
+    const FIELDS: &'static [&'static str];
+
+    fn new() -> Self;
+    fn depends_on(&self) -> Vec<FeatureId> { Vec::new() }
+    fn summary(&self) -> String;
+    fn evaluate(&self, id: FeatureId, out: &mut Compiled) -> Result<(), Problem>;
+    fn migrate(from: u32, ron: &str) -> Result<Self, String>;
+}
+
+pub struct Feature {
+    pub id: FeatureId,
+    pub enabled: bool,
+    pub name: Option<String>,
+    /// The group row this feature folds under in the timeline.
+    pub group: Option<FeatureId>,
+    pub params: Box<dyn Params>,
+}
+
+/// Unknown, Unsupported and Damaged, each holding its line verbatim.
+pub enum Unread { /* … */ }
+
+pub struct Timeline {
+    features: Vec<Feature>,
+    next_id: u32,
+}
+
+/// One of the outputs of a feature that makes several.
+pub struct Output { pub feature: FeatureId, pub index: u32, pub of: u32 }
+```
+
+`Timeline::compile(cut)` evaluates the first `cut` features into a `Compiled`, which is what the
+bake, the ray marcher and the statistics read:
+
+```rust
+pub struct Compiled {
+    pub variables: BTreeMap<String, f64>,
+    pub frames: BTreeMap<FeatureId, Frame>,
+    pub populations: BTreeMap<FeatureId, Population>,
+    pub shapes: BTreeMap<Output, Arc<dyn Shape>>,
+    /// In timeline order, which is the order they apply in.
+    pub terms: Vec<Term>,
+    pub objects: Vec<PointObject>,
+    pub problems: BTreeMap<FeatureId, Problem>,
+}
+
+pub trait Shape: Debug + Send + Sync {
+    /// Signed distance to the shape's support in ly, negative inside. May underestimate, never
+    /// overestimate by more than `lipschitz` allows: the ray marcher steps by it.
+    fn distance(&self, p: DVec3) -> f64;
+    /// 1 at the profile's peak, falling to 0 at the edge of the support.
+    fn weight(&self, p: DVec3) -> f64;
+    /// Bound on `|∇ distance|`; 1 for an exact distance, above 1 for noise and warps.
+    fn lipschitz(&self) -> f64;
+    fn bounds(&self) -> Aabb;
+}
+
+pub struct Term {
+    pub source: FeatureId,
+    pub target: Target,
+    pub op: Op,
+    pub shape: Output,
+    pub mask: Option<Output>,
+}
+
+pub enum Target {
+    Density(FeatureId),   // a population
+    Exclusion,
+    Age(FeatureId),
+    FeH(FeatureId),
+    Dust,
+    Gas,
+}
+
+pub enum Op {
+    Add(Num),        // value += a·w
+    Scale(Num),      // value *= 1 + c·w
+    Subtract,        // value *= 1 - w
+    Set(Num),        // value = lerp(value, v, w)
+}
+
+/// A number as written: a literal, or a variable defined earlier in the timeline.
+pub enum Num { Lit(f64), Var(String) }
+```
+
+Terms do not commute — a scale applied before an add leaves the add unscaled — so their order is
+the timeline's order and that is what the timeline means.
+
+### Kinds
+
+Most rows of the timeline are a shape that contributes to a field. To keep the common case one
+row, every shape kind carries its own `contributes: Vec<(Target, Op)>`, and a shape with an empty
+list is construction geometry, drawn grayed, that only booleans and masks read.
+
+| kind | outputs | notes |
+|---|---|---|
+| `variable` | a named number | Century's `Variable`, numbers only |
+| `frame` | a frame | origin in ly, tilt and azimuth in degrees, rotation curve; a galaxy or a companion |
+| `population` | a population | IMF, age distribution, age–metallicity relation, binary fraction, age–velocity dispersion |
+| `exponential_disc`, `sersic`, `power_halo` | one shape | analytic profiles, with a truncation radius and edge width so the support is finite |
+| `plummer`, `king` | one shape | clusters |
+| `log_spiral` | one shape per arm | `Output { index, of }` names an arm |
+| `bar`, `ring`, `ellipsoid`, `path` | one shape | |
+| `noise` | one shape | warps or modulates another shape's weight; raises its `lipschitz` |
+| `boolean` | one shape | union, intersection or difference of shapes, with a blend width in ly |
+| `object` | a point object | a black hole, a pulsar, a hand-placed star; inserted before thinning |
+
+Angles are stored in degrees and lengths in light-years, with the unit in the field name. That is
+the storage convention CLAUDE.md allows above `em-foundations`; evaluation converts once.
+
+### The file
+
+One timeline per frame — the main galaxy, and one per companion — so designers working on
+different galaxies do not touch the same file:
+
+```ron
+Timeline(format: 1, next_id: 7)
+Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0, 0, 0), tilt_deg: 0, azimuth_deg: 0, rotation: Flat(speed_km_s: 220, core_ly: 3000)))
+Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Thin disc", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 0, max_gyr: 10), feh: (zero_age: 0.1, per_gyr: -0.05, per_kly: -0.018, scatter: 0.15), binaries: Standard, dispersion: (zero_age_km_s: 10, exponent: 0.5)))
+Feature(id: 2, kind: "variable", version: 1, enabled: true, params: (name: "h_R", value: 3300))
+Feature(id: 3, kind: "exponential_disc", version: 1, enabled: true, name: "Disc", params: (frame: 0, scale_length_ly: Var("h_R"), scale_height_ly: 350, radius_ly: 18250, edge_ly: 1500, contributes: [(Density(1), Add(1.83))]))
+Feature(id: 4, kind: "log_spiral", version: 1, enabled: true, name: "Arms", params: (frame: 0, arms: 2, pitch_deg: 12, inner_ly: 2000, outer_ly: 17000, width_ly: 600, contributes: []))
+Feature(id: 5, kind: "boolean", version: 1, enabled: true, name: "Arms in disc", params: (op: Intersect, blend_ly: 300, of: [(4, 0, 2), (4, 1, 2), 3], contributes: [(Density(1), Scale(1.5))]))
+Feature(id: 6, kind: "ellipsoid", version: 1, enabled: true, name: "Void", params: (frame: 0, center_ly: (6000, 2500, 0), radii_ly: (400, 300, 200), edge_ly: 150, contributes: [(Density(1), Subtract)]))
+```
+
+A **graph version** is the content hash of a shard's timeline files together with the hash of the
+generator that read them; it is what a bake records and what a publish pins.
+
+Texture-graph graphs already travel as RON over the CDN ([07-rendering.md](07-rendering.md)), and
+its node set includes the noise the `noise` kind needs. It evaluates on the GPU, though, and a
+star's existence must not depend on which GPU ran the bake. If its evaluators are reused, it is
+through a CPU path with the same determinism rules as `lc-world`: `f64`, `libm`
 transcendentals, no fused multiply-add.
+
+## Signed distances and ray marching
+
+Every shape answers `distance` as well as `weight`. That gives three uses from one function.
+
+**Skipping empty space in the bake.** Most of the 73 000 ly box is empty. A cell whose center is
+farther than the cell's half-diagonal from every shape that adds density cannot hold a star, so
+the bake skips it without evaluating any profile, and the same test bounds which chunks a region
+bake visits at all.
+
+**Pictures of the galaxy without baking a star.** The ray marcher integrates emission and
+absorption along each ray:
+
+```
+I = ∫ j(s) · exp(-τ(s)) ds        τ(s) = ∫₀ˢ κ·dust(s') ds'
+j(x) = Σ_p n_p(x) · L̄_p(x)        L̄_p: mean luminosity per star of population p at its age there
+```
+
+with color carried the same way, per band. Outside every support it steps by the union's signed
+distance divided by its Lipschitz bound (sphere tracing); inside, it takes steps short enough to
+resolve the narrowest profile it is in. Dust lanes come out dark against the disc behind them
+because absorption is in the integral, which is the "distant dusty picture" a skybox wants.
+
+The mean luminosities `L̄_p` are a table per population, built once from its IMF, age distribution
+and tracks, so the marcher never draws a star. The same table makes the face-on and edge-on
+previews luminosity rather than number density, which is what the galaxy looks like.
+
+| use | evaluated on | notes |
+|---|---|---|
+| editor previews: face-on, edge-on, a free camera | GPU, over the coarse volumes and a distance volume baked from the graph | the volumes rebuild in parallel on the CPU after an edit; at 100 ly voxels that is about 5e6 graph evaluations |
+| stills, tests, and skybox pictures | CPU, straight from the graph, in `lc-galaxy` | deterministic, so a picture is reproducible from a graph version |
+| the far sky inside a shard | the client, over the coarse volumes | the same integral starting at the edge of the loaded stars; see [07-rendering.md](07-rendering.md) |
+
+Translating a timeline into WGSL so the GPU marches the graph itself is possible later. Nothing
+above needs it.
+
+**Skybox pictures of other shards.** For each pair of shards, the CPU marcher renders the other
+shard's galaxy from this shard's origin at the distance and orientation the universe layout gives,
+into an image with alpha so its dust dims what is behind it. The image is placed on the skybox in
+that direction. A shard is 73 000 ly across, so for a galaxy 500 000 ly away, moving from one edge
+of the shard to the other changes the direction to it by about eight degrees and its apparent size
+by about fifteen percent; one picture per pair is enough until shards sit closer than that. A
+picture is regenerated when either graph version changes and goes to the CDN under its content
+hash like any other asset.
+
+**Distances that are only bounds.** Smooth booleans, noise and warps do not give exact distances.
+Each shape declares its Lipschitz bound and the marcher divides by it; a test samples random point
+pairs for every kind and fails if the distance changes faster than the declared bound allows.
+A spiral arm's distance is the radial offset to the nearest winding times the cosine of the pitch
+angle, which is exact on the arm's axis and a bound off it.
 
 ## Placing stars
 
@@ -306,12 +557,14 @@ still holds: the id is the bake's own, and no outside catalog's numbering reache
 The bake is a library function over cells with no shared mutable state, so it parallelizes over
 cells with `rayon` and over machines by region:
 
-1. Load and validate the graph; resolve references; compute the graph version.
-2. Evaluate coarse volumes: per-population density, luminosity and color per voxel, plus dust,
-   on a sparse grid — 100 ly voxels over the disc's slab is 365 × 365 × 40, about 5e6 voxels
-   and on the order of 100 MB across all channels. These drive previews, statistics and the far sky, never star placement.
-3. For each cell in the requested region: candidates, then thinning against neighbors, then
-   attributes.
+1. Load the timelines, refuse any `Unknown`, `Unsupported` or `Damaged` line or any problem,
+   compile them, and compute the graph version.
+2. Evaluate coarse volumes: per-population density, luminosity and color per voxel, dust, and
+   the signed distance to everything that adds density, on a sparse grid. 100 ly voxels over the
+   disc's slab is 365 × 365 × 40, about 5e6 voxels and on the order of 100 MB across all
+   channels. These drive previews, statistics and the far sky, never star placement.
+3. For each cell in the requested region that the signed distance does not rule out:
+   candidates, then thinning against neighbors, then attributes.
 4. Group cells into **chunks** for storage — an octree over the cell grid whose leaves hold about
    2^15 stars — and sort each chunk's stars by luminosity, so that the first bytes of a chunk file
    are its brightest stars and a client can fetch a prefix with an HTTP range request.
@@ -361,9 +614,9 @@ never ships to players.
 
 | view | shows |
 |---|---|
-| face-on and edge-on | projected density, luminosity, `[Fe/H]`, mean age or dust, per population or summed, from the coarse volumes |
+| face-on and edge-on | a ray-marched picture of the galaxy, or projected density, `[Fe/H]`, mean age or dust, per population or summed, from the coarse volumes |
 | slice | the same fields on an arbitrary plane, at full resolution, evaluated from the graph |
-| 3D | the coarse volume as a volume render, with point objects and feature gizmos |
+| 3D | the ray-marched galaxy from a free camera, with each shape's support as a surface at `distance = 0`, point objects and feature gizmos |
 | region | the baked stars of a selected box at their true positions, colored by any attribute |
 | sky | the view from a chosen point, drawn with the client's starfield material from baked tier A, baked tier B nearby and the luminosity volume beyond, which is what a player actually sees |
 
@@ -373,6 +626,8 @@ versions.
 ### Panels
 
 - **Timeline**: the ordered feature list with groups, suppression and the rollback marker.
+  `Unknown`, `Unsupported` and `Damaged` features keep their place in it, marked, with the
+  unsupported fields named.
 - **Parameters**: the selected feature's fields, with units, expressions and references.
 - **Statistics**: total stars by population and tier, the integral of the field rather than a
   count of a bake; for a baked region, a nearest-neighbor histogram against the hard-core
@@ -386,12 +641,9 @@ versions.
 
 ### Toolkit
 
-[18-ui-style.md](18-ui-style.md) puts forms and dense readouts in egui and keeps Bevy UI for the
-menu and the ship editor, whose handles sit on the rendered ship. The galaxy editor is mostly
-forms and readouts, so its panels are egui. Its transform and falloff handles are drawn in the
-viewport the way the ship editor's are, through the same camera controls as the client's World
-and Map views. Whether the panels should instead follow the ship editor into `em-ui` is the
-owner's call; this document assumes egui because the editor is internal.
+egui, decided. [18-ui-style.md](18-ui-style.md) puts forms and dense readouts in egui, and this
+editor is mostly both. Transform and falloff handles are drawn in the viewport, through the same
+camera controls as the client's World and Map views.
 
 ### Without the editor
 
@@ -445,15 +697,30 @@ cargo tree -p lc-server --prefix none | grep -E '^lc-galaxy'   # must be empty
 
 ## Order of work
 
-| phase | what | done when |
-|---|---|---|
-| G1 | graph types, RON, evaluator, `check` and `render` | the reference model renders face-on and edge-on, and its integrated star count matches the table above |
-| G2 | sampler, thinning, tier split | determinism tests pass; nearest-neighbor histograms show the hard-core floor; a region baked alone equals a region cut from a larger bake |
-| G3 | populations, IMF, tracks, attributes | a baked region's HR diagram shows a main sequence, giant branch and white dwarfs in proportions that change with population age |
-| G4 | chunk format, `GalaxyProvider`, region query in `StarProvider` | the shard runs on a baked region instead of HYG |
-| G5 | the editor: timeline, parameters, projections, region view | a designer adds an arm and sees it without editing RON |
-| G6 | sky view in the editor, luminosity volume in the client | the sky from inside the disc shows the band of the galaxy |
-| G7 | publish, manifest, freeze, diff | an edit that touches a published region is reported and does not change it |
+The galaxy is built up through three test galaxies before the real one. These are named
+Phase I to III, in Roman numerals, to keep them apart from the numbered phases of
+[12-buildout.md](12-buildout.md). Each is a timeline file the shard can load in place of HYG, and
+each phase ends with the shard and the client running on it.
+
+| phase | the galaxy | stars | what it is the first to exercise |
+|---|---|---|---|
+| **I** | one cluster, one population, 1.5–2 ly spacing | about 10, in a radius of about 2.3 ly | the file format and its tolerant reader, the timeline, `Compiled`, thinning inside one cell (a 0.86 ly floor at 1.75 ly spacing), attributes, the chunk reader, `GalaxyProvider` on the shard |
+| **II** | a cluster of two populations, one old and one young | 500, in a radius of about 8.6 ly | thinning across cell faces (it spans some 27 cells), the determinism tests, populations, IMF and tracks, an HR diagram, `lc-galaxy check`, `render` and `stats` |
+| **III** | a spiral about 100 ly across: disc, bulge, two arms, a void, a boolean | about 10 000 at 2 ly spacing | arms, booleans, masks, signed distances, the ray-marched preview, the tier split, chunks, the editor, publishing and freezing |
+| full | the reference galaxy and its companions | 1.5e11 | tier A for the whole galaxy, publishing tier B by region, the far sky, and the skybox picture of a second shard |
+
+Phase I's count is a Poisson draw, so "about 10" is whatever its seed gives; the tests pin that
+seed. Phase III is the first galaxy big enough to look like one, and the first where the editor
+earns its cost over editing RON by hand, so the editor is built during it rather than before.
+
+What each phase needs built, cumulatively:
+
+| phase | built |
+|---|---|
+| I | `lc-galaxy` with the timeline, codec, `variable`, `frame`, `population` and `plummer` kinds; the sampler on the fixed grid; attributes with a placeholder track table; the chunk writer; `lc-world::sky::galaxy` and a region query on `StarProvider` |
+| II | the real IMF and tracks; the age–metallicity and age–velocity relations; `check`, `render` and `stats`; determinism tests in separate processes and thread counts |
+| III | the shape kinds, `boolean` and `noise`; signed distances and the CPU ray marcher; coarse volumes; tier A; the manifest, `publish` and `diff`; `lc-galaxy-editor` with timeline, parameters, face-on, edge-on and region views |
+| full | the luminosity volume in the client; the GPU marcher in the editor; the universe layout and skybox pictures |
 
 ## Open
 
@@ -462,7 +729,8 @@ cargo tree -p lc-server --prefix none | grep -E '^lc-galaxy'   # must be empty
 | `L_A` and tier A's cell size | Set by how far the telescopes in [05-observation.md](05-observation.md) resolve a star of a given luminosity. 100 L☉ is a placeholder. |
 | Cell side | 8 ly keeps a dense cell near a thousand candidates and a sparse one near four. Globular cores may want a finer grid, which would be a second grid level rather than a change to this one. |
 | Chunk delivery | Range requests on immutable CDN files are assumed to work through the CDN in [14-hosting.md](14-hosting.md); unverified. |
-| Shell overlap at 1 ly spacing | The hard-core floor bounds the clamp from below. At the 0.8 ly central spacing the floor is a 0.2 ly shell; whether that is still a usable partition boundary for [03-world-model.md](03-world-model.md) is measurable once G2 exists. |
+| Shell overlap at 1 ly spacing | The hard-core floor bounds the clamp from below. At the 0.8 ly central spacing the floor is a 0.2 ly shell; whether that is still a usable partition boundary for [03-world-model.md](03-world-model.md) is measurable from Phase II. |
 | Published tier-B volume | How far ahead of play to publish. Sets CDN storage, which grows with exploration rather than with the galaxy. |
 | Nebulae | Authored as dust and gas fields with a young population inside. How they render and occlude is a separate design. |
-| Editor panels in egui or `em-ui` | See [Toolkit](#toolkit). |
+| The universe layout | Who owns the file that places shards relative to one another, and whether a shard's galaxies can be seen from another in more than a skybox picture. |
+| Lipschitz bounds for noise | A warped shape's bound may be loose enough to make sphere tracing slow; measured in Phase III. |
