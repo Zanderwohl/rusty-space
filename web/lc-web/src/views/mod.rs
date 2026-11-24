@@ -136,6 +136,7 @@ fn colophon() -> Markup {
             a href="/feed.xml" { "RSS" } " · "
             a href="/feed.json" { "JSON feed" }
         }
+        p class="fine-print" { "©2025-2026 " a href="https://pikia.space" { "Pikia Space" } }
     }
 }
 
