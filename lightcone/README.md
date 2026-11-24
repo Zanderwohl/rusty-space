@@ -62,7 +62,7 @@ cross-reference except where a shared crate is the subject.
 | [31-directed-energy.md](docs/31-directed-energy.md) | engines, radios, weapons and power lines as one order: apertures, exhaust from heat, spread against lead, and the star's gain |
 | [32-ship-rendering.md](docs/32-ship-rendering.md) | the hull from a distance field, construction as a function of time, stateless drones, the field shader, and the order of work across 29–32 |
 | [33-ring-habitats.md](docs/33-ring-habitats.md) | Orbitals and the Ringworld: one shape on two hosts, the solar-system demo, levels of detail at astronomical scale, and light delay across a spinning ring |
-| [34-galaxy-authoring.md](docs/34-galaxy-authoring.md) | authoring a galaxy of 10^11 stars as a feature graph of fields, placing stars with a local hard-core process, two tiers, and publishing regions that never move again |
+| [34-galaxy-authoring.md](docs/34-galaxy-authoring.md) | Galaxy Forge, the editor, and authoring a galaxy of 10^11 stars as a feature graph of fields, placing stars with a local hard-core process, two tiers, and publishing regions that never move again |
 
 ## Status
 

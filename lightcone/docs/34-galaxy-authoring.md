@@ -3,7 +3,11 @@
 How designers describe a galaxy of some 10^11 stars without placing any of them, and how that
 description becomes stars the shard and the client can load.
 
-**Status: design exploration.** Nothing here is built. Today's sky is the HYG catalog through
+**Status: partly built.** Steps E1 and E2 of [Before Phase I](#before-phase-i) are built:
+`crates/lc-galaxy` holds the timeline, its tolerant codec, the `variable`, `frame`, `population`
+and `plummer` kinds, placement on the fixed grid and placeholder attributes, and
+`crates/lc-galaxy-editor` is **Galaxy Forge**, the editor. E3 (chunks and the shard) and
+everything after it are not started. Today's sky is still the HYG catalog through
 `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -17,7 +21,7 @@ order or thread count. Stars are **published** by region as immutable files; a p
 never moves again, whatever later happens to the graph or the generator code. Every shape in
 the graph also answers a signed distance, which is what lets one ray marcher draw the editor's
 previews and the skybox pictures of galaxies on other shards. The editor is a separate native
-egui binary, built before any test galaxy, and ships with neither the client nor the shard.
+egui binary, Galaxy Forge, built before any test galaxy, and ships with neither the client nor the shard.
 Test galaxies reach players in playtest phases I to III, each of several iterations; see
 [Order of work](#order-of-work).
 
@@ -306,7 +310,8 @@ pub enum Target {
     Gas,
 }
 
-pub enum Op {
+/// As written in a feature; `Compiled` holds `Op`, the same with every `Num` resolved.
+pub enum OpSpec {
     Add(Num),        // value += a·w
     Scale(Num),      // value *= 1 + c·w
     Subtract,        // value *= 1 - w
@@ -319,6 +324,11 @@ pub enum Num { Lit(f64), Var(String) }
 
 Terms do not commute — a scale applied before an add leaves the add unscaled — so their order is
 the timeline's order and that is what the timeline means.
+
+As built, `Target` has only `Density`, `Exclusion` and `FeH`; the others arrive with the kinds
+that need them. Variables resolve when the timeline compiles, so `Term` carries `Op` with plain
+numbers. A cluster kind reads `Add` on a density as a total number of stars and converts it to a
+peak density from its profile's integral, because the total is what a designer knows.
 
 ### Kinds
 
@@ -348,7 +358,7 @@ One timeline per frame — the main galaxy, and one per companion — so designe
 different galaxies do not touch the same file:
 
 ```ron
-Timeline(format: 1, next_id: 7)
+Timeline(format: 1, next_id: 7, seed: 1)
 Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0, 0, 0), tilt_deg: 0, azimuth_deg: 0, rotation: Flat(speed_km_s: 220, core_ly: 3000)))
 Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Thin disc", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 0, max_gyr: 10), feh: (zero_age: 0.1, per_gyr: -0.05, per_kly: -0.018, scatter: 0.15), binaries: Standard, dispersion: (zero_age_km_s: 10, exponent: 0.5)))
 Feature(id: 2, kind: "variable", version: 1, enabled: true, params: (name: "h_R", value: 3300))
@@ -442,10 +452,13 @@ a fixed global grid.
 
 1. Space is divided into cubic **cells** of fixed side, 8 ly as a first estimate, on a grid
    anchored at the origin. The grid is part of the format and never moves.
-2. Each cell draws a Poisson number of **candidates** at the cell's bounding intensity, from a
-   generator seeded by `(graph version, cell index)`, and keeps each with probability
-   `λ(x)/λ_max`. The bound comes from sampling the field over the cell with a margin; a
-   candidate whose field exceeds the bound is a bake error, not something to clamp.
+2. Each cell draws a Poisson number of **candidates** at the cell's bounding intensity, each
+   candidate's draws hashed from `(seed, cell index, candidate index)`, and keeps each with
+   probability `λ(x)/λ_max`. The seed is the timeline header's, fixed across edits, so changing
+   a parameter adds or removes the stars it affects instead of reshuffling every star. The
+   bound comes from sampling the field on a 1 ly lattice over the cell with a margin; a
+   candidate whose field still exceeds it doubles the bound and redraws the cell, which stays a
+   pure function of the field, and a cell that exceeds every bound tried is a bake error.
 3. Each candidate gets a **mark**, a uniform draw from the same stream, and an exclusion distance
    `r(x)`.
 4. A candidate **survives** unless another candidate within `max(r_a, r_b)` has a smaller mark.
@@ -609,8 +622,16 @@ changes. The freeze rules matter from the first public shard on.
 
 ## The editor
 
-A native Bevy binary, `lc-galaxy-editor`, over an engine-free library. It is a design tool and
-never ships to players.
+**Galaxy Forge**: a native Bevy binary, `lc-galaxy-editor`, over an engine-free library. It is a
+design tool and never ships to players.
+
+```bash
+cargo run -p lc-galaxy-editor -- [timeline.ron] [--view region|sky] [--select <row>] [--pick <star>] [--shot <png> [--frames <n>]]
+```
+
+With no path it opens `crates/lc-galaxy/galaxies/phase-1.ron`. As built in E2, the region and
+sky views draw through egui's painter, which is cheap below the live-bake budget; the client's
+starfield material and the GPU marcher replace it when the views draw fields.
 
 ### Views
 

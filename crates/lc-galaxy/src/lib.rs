@@ -22,4 +22,5 @@ pub use compiled::{Aabb, Compiled, Op, Shape, Target, Term};
 pub use feature::{Feature, FeatureId, FeatureKind, Output, Params, Problem, Registry};
 pub use num::Num;
 pub use sample::{Bake, BakeError, BakedStar, Cell, StarKey, bake};
+pub use lc_world::sky::StarId;
 pub use timeline::{Row, Timeline, Unread};
