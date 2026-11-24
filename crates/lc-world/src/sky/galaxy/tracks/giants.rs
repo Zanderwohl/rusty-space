@@ -105,7 +105,7 @@ impl Track {
     }
 }
 
-/// What remains, and when.
+/// What remains.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum End {
     WhiteDwarf { mass: f64 },

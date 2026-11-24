@@ -107,8 +107,7 @@ pub(super) const C3: f64 = 4.637345;
 
 /// Hurley et al. (2000) Appendix, the giant-branch and later fits: `(α, β, γ, η, μ)` for each
 /// tabulated b_n, indexed from 1. Primed entries (11, 13, 14, 16, 24, 27, 31, 34, 36–38, 41, 44,
-/// 51, 53, 56, 57) are scaled in [`Coefficients::new`]. Checked against the SSE code's data; where
-/// the paper's HTML differed (b17's exponent, the blue-loop exponent), the code is taken.
+/// 51, 53, 56, 57) are scaled in [`Coefficients::new`].
 #[rustfmt::skip]
 const B: [[f64; 5]; 58] = {
     let mut t = [[0.0; 5]; 58];
@@ -181,7 +180,6 @@ pub(super) fn lg(x: f64) -> f64 {
     libm::log10(x)
 }
 
-/// Every metallicity-dependent number the formulas read, for one Z.
 pub struct Coefficients {
     pub(super) z: f64,
     pub(super) zeta: f64,

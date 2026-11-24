@@ -1,10 +1,10 @@
 //! Placing stars: Matérn type II thinning of an inhomogeneous Poisson process, seeded per cell
 //! of a fixed global grid.
 //!
-//! A candidate survives unless another within `(r_a + r_b) / 2` has a smaller mark: the larger
-//! radius over-thins where density falls (a sparse edge candidate's wide radius removes dense
-//! neighbors) by about 5%, the smaller under-thins by as much, and the mean holds the count to
-//! the field within 0.1% over the Phase I and II galaxies. Exclusion
+//! A candidate survives unless another within `(r_a + r_b) / 2` has a smaller mark. Where density
+//! falls, the larger radius left 4.6% too few stars (a sparse edge candidate's wide radius removes
+//! dense neighbors) and the smaller 4–9% too many; the mean holds the count to the field within
+//! 0.1% over the Phase I and II galaxies. Exclusion
 //! distances are capped at one cell, so a cell's stars depend only on its own candidates and its
 //! 26 neighbors': any region bakes alone, in any order, on any number of threads, and gives
 //! the stars a whole-galaxy bake would. See `34-galaxy-authoring.md`, "Placing stars".

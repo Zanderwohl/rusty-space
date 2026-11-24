@@ -117,7 +117,7 @@ fn the_count_matches_the_field() {
         })
         .sum();
     let mean = total as f64 / 5.0;
-    // Poisson σ of the mean is √(2000/5) = 20; allow the few percent `r(x)` grading costs.
+    // Poisson σ of the mean is √(2000/5) = 20, so 5% is five σ.
     assert!((mean - target).abs() < 0.05 * target, "mean {mean} against {target}");
 }
 

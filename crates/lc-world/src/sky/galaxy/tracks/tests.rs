@@ -1,8 +1,7 @@
 use super::*;
 use super::giants;
 
-/// Tout et al.'s fit, evaluated by hand from its table at Z = 0.02: the ZAMS Sun is fainter
-/// and smaller than today's.
+/// Tout et al.'s fit, evaluated by hand from its table at Z = 0.02.
 #[test]
 fn the_zams_sun_matches_the_tout_table() {
     let c = Coefficients::new(0.02);
@@ -123,7 +122,7 @@ fn massive_stars_end_as_the_core_mass_says() {
     assert_eq!(evolve(20.0, 0.1, 0.0).state, State::NeutronStar);
 }
 
-/// A 5 M☉ star's radius dips during helium burning, the blue loop Cepheids live in.
+/// A 5 M☉ star's radius dips during helium burning: the blue loop.
 #[test]
 fn intermediate_stars_make_a_blue_loop() {
     let c = Coefficients::new(0.02);
