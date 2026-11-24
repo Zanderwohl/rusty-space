@@ -1,18 +1,30 @@
 // Layout primitives. Each says how children are arranged and nothing about what they are.
 
-// The star map behind every page with a reading column. The column, masthead and footer
-// paint the ground over it, so it shows only in the gutters. The SVG's own colors suit the
-// dark ground; on the light ground it is a mask filled with `--map-line` instead.
+// The star map behind every page with a reading column, with light-speed wavefronts
+// spreading from its stars. The column, masthead and footer paint the ground over both, so
+// they show only in the gutters. The SVGs' own colors suit the dark ground; on the light
+// ground each is a mask filled from a token instead.
+//
+// Two pseudo-elements rather than two backgrounds on one, so the browser can cache the
+// static map while the animated waves repaint.
 body:has(> main.page) {
   min-height: 100vh;
   position: relative;
 
-  &::before {
-    background: url("../images/map.svg") top center / auto no-repeat;
+  &::before,
+  &::after {
     content: "";
     inset: 0;
     position: absolute;
     z-index: -1;
+  }
+
+  &::before {
+    background: url("../images/map.svg") top center / auto no-repeat;
+  }
+
+  &::after {
+    background: url("../images/waves.svg") top center / auto no-repeat;
   }
 }
 
@@ -20,6 +32,18 @@ body:has(> main.page) {
   body:has(> main.page)::before {
     background: var(--map-line);
     mask: url("../images/map.svg") top center / auto no-repeat;
+  }
+
+  body:has(> main.page)::after {
+    background: var(--map-wave);
+    mask: url("../images/waves.svg") top center / auto no-repeat;
+  }
+}
+
+// The waves animate with SMIL, which a rule inside the SVG cannot stop.
+@media (prefers-reduced-motion: reduce) {
+  body:has(> main.page)::after {
+    content: none;
   }
 }
 
