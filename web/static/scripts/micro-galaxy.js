@@ -37,7 +37,7 @@ const STAR_COUNT = 280;
 // The largest stars twinkle by walking this loop of brightness factors, each at its own rate
 // and starting point. Cosine-eased between keys, so a fixed curve rather than per-frame noise.
 const TWINKLERS = 20;
-const TWINKLE_CURVE = [1, 0.61, 0.86, 0.3, 0.93, 0.47, 0.78, 0.23, 0.69, 0.97];
+const TWINKLE_CURVE = [1, 0.871, 0.954, 0.769, 0.977, 0.825, 0.927, 0.746, 0.898, 0.99];
 
 // Kept dark in the light theme too: the galaxy is drawn additively and needs a dark field.
 const SPACE = "#0b0d12";
@@ -249,8 +249,8 @@ function scatterStars(rand) {
   const largest = [...stars].sort((a, b) => b.size - a.size).slice(0, TWINKLERS);
   for (const star of largest) {
     star.alpha = 1;
-    // Keys per second, so one pass of the curve takes about 11 to 25 s.
-    star.twinkle = { rate: 0.4 + 0.5 * rand(), offset: rand() * TWINKLE_CURVE.length };
+    // Keys per second, so one pass of the curve takes about 1.1 to 2.5 s.
+    star.twinkle = { rate: 4 + 5 * rand(), offset: rand() * TWINKLE_CURVE.length };
   }
   return stars;
 }
@@ -341,7 +341,7 @@ function twinkle(star, seconds) {
 function drawStar(ctx, res, star, x, y, starPx, visible, seconds) {
   if (visible <= 0) return;
   const glow = twinkle(star, seconds);
-  const s = starPx * star.size * (0.75 + 0.25 * glow);
+  const s = starPx * star.size * (0.92 + 0.08 * glow);
   ctx.globalAlpha = star.alpha * visible * glow;
   ctx.drawImage(res.sprites[star.sprite], x - s, y - s, 2 * s, 2 * s);
 }
