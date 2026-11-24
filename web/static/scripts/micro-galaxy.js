@@ -124,9 +124,9 @@ function canvasOf(size) {
   return c;
 }
 
-// The face-on disc: exponential falloff, two trailing log-spiral arms broken into clouds, a
-// dust lane along each arm's inner edge, and pink knots where the arm is densest. RGB is the
-// color and alpha the brightness, since it is drawn with "lighter".
+// The face-on disc: exponential falloff, two trailing log-spiral arms broken into clouds, faint
+// filaments between them, a dust lane along each arm's inner edge, and pink knots where the arm
+// is densest. RGB is the color and alpha the brightness, since it is drawn with "lighter".
 function bakeDisc(fbm) {
   const canvas = canvasOf(DISC_TEXELS);
   const ctx = canvas.getContext("2d");
@@ -151,7 +151,11 @@ function bakeDisc(fbm) {
       const dust = contrast(fbm(u * 11 + 3, v * 11 + 9, 3), 2);
 
       const falloff = Math.exp(-r / 0.42) * (1 - smoothstep(0.6, 1, r));
-      const structure = mix(0.55, 0.15 + arm * (0.35 + 1.1 * cloud), reach);
+      // Ridged noise: thin filaments of gas that bridge the gaps between arms.
+      // The noise is stretched first: raw fractal noise sits near 0.5, which is a ridge crest.
+      const ridge = 1 - Math.abs(2 * contrast(fbm(u * 3.5 + 21, v * 3.5 + 13, 3), 2.2) - 1);
+      const haze = 0.1 + 0.25 * Math.pow(ridge, 3);
+      const structure = mix(0.55, haze + arm * (0.35 + 1.1 * cloud), reach);
       const shadow = 1 - 0.7 * lane * reach * dust;
       const bright = falloff * structure * shadow;
 
