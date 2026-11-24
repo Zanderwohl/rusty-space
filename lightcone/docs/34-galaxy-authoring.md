@@ -8,7 +8,9 @@ description becomes stars the shard and the client can load.
 and `plummer` kinds, placement on the fixed grid, attributes and a local publish;
 `crates/lc-galaxy-editor` is **Galaxy Forge**, the editor; and `lc_world::sky::galaxy` reads
 published chunks into the shard (`--sky <manifest>.galaxy`) and the client (a `.galaxy` asset).
-Tier A, the CDN, and everything from Phase II on are not started. The shipped sky is still the
+Phase I is under way: since 2026-11-24 the dev shard and the promoted browser build run the
+Phase I galaxy (build `fbb9423f`). Tier A, the CDN path of Phase III, and everything from Phase
+II on are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
