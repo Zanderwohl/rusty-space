@@ -108,7 +108,7 @@ pub fn link(
     let state = match state {
         State::Offline => return None,
         State::Connecting => "CONNECTING",
-        State::Joined(_) => "LINKED",
+        State::Joined(_) | State::Unlaunched => "LINKED",
         State::Refused(_) => "REFUSED",
         State::Lost(_) => "LINK LOST",
     };

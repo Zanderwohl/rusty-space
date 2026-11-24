@@ -563,7 +563,14 @@ fn played_s(game_s: f64, rate: f64) -> f64 {
 pub struct Wrecks {
     fell: Vec<Wreck>,
     last: HashMap<ShipId, Last>,
+    /// This client's own ship as last drawn, for its wreck: the shard sends no sighting of it.
+    own: Option<Last>,
     taken: HashSet<i64>,
+}
+
+/// The event id this client gives its own wreck. Negative, so no shard event has it.
+fn own_wreck_id(ship: ShipId) -> i64 {
+    -1 - ship.0
 }
 
 impl Wrecks {
@@ -639,6 +646,26 @@ pub fn collapses(
     let me = uplink.joined().map(|joined| joined.ship_id);
     let balance = uplink.fitting.as_ref().map_or(Balance::DEFAULT, |f| f.balance.into());
     let wrecks = &mut *wrecks;
+    if let Some(fallen) = &uplink.fallen
+        && let Some(own) = wrecks.own.clone()
+        && wrecks.taken.insert(own_wreck_id(fallen.ship_id))
+    {
+        wrecks.fell.push(Wreck {
+            event_id: own_wreck_id(fallen.ship_id),
+            craft: fallen.ship_id,
+            arrive_s: fallen.at_t as f64 * 1e-6,
+            ahead_s: 0.0,
+            at_ly: fallen.at_ly,
+            rotation: own.rotation,
+            hash: Some(own.hash),
+            kelvin: own.kelvin,
+            radius_m: 0.0,
+            released_j: fallen.released_j,
+            spike_w: balance.collapse_spike_fraction * fallen.released_j / SPIKE_S,
+            shown_at: None,
+            landed: HashMap::new(),
+        });
+    }
     for sighting in uplink.seen.iter().filter(|s| s.kind == lc_proto::kind::COLLAPSE) {
         let from = ShipId(sighting.source_id);
         if !wrecks.taken.insert(sighting.event_id) || Some(from) == me {
@@ -674,7 +701,7 @@ pub fn collapses(
         });
     }
     let seen: HashSet<i64> = uplink.seen.iter().map(|s| s.event_id).collect();
-    wrecks.taken.retain(|id| seen.contains(id));
+    wrecks.taken.retain(|id| *id < 0 || seen.contains(id));
     let excess = wrecks.fell.len().saturating_sub(WRECKS_KEPT);
     wrecks.fell.drain(..excess);
 }
@@ -729,6 +756,8 @@ pub fn draw_fields(
         if let Some(c) = contact {
             let last = Last { name: c.name.clone(), at_ly, rotation: transform.rotation, hash, kelvin: state.kelvin };
             wrecks.last.insert(c.ship_id, last);
+        } else if uplink.fallen.is_none() {
+            wrecks.own = Some(Last { name: uplink.own_name(), at_ly, rotation: transform.rotation, hash, kelvin: state.kelvin });
         }
         if !draws_envelope(&distant, craft) {
             continue;

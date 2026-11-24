@@ -31,6 +31,8 @@ pub enum AppState {
     MainMenu,
     Loading,
     InGame,
+    /// Naming and launching a ship, for an account with none. See [`crate::onboarding`].
+    Onboarding,
     /// The browser build could not reach its shard, or lost it. Terminal: there is no menu to
     /// fall back to, and reloading the page is the way back.
     Unreachable,
@@ -310,6 +312,7 @@ impl Plugin for ClientPlugin {
             .add_plugins(crate::pick::PickPlugin)
             .add_plugins(crate::drones::DronesPlugin)
             .add_plugins(crate::uplink::UplinkPlugin)
+            .add_plugins(crate::onboarding::OnboardingPlugin)
             // Desktop only: a browser build arrives with a session.
             .add_plugins(SigninPlugins)
             .add_systems(

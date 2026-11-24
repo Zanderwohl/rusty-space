@@ -20,7 +20,7 @@ pub(crate) fn ask(out: &mut MessageWriter<Requested>, action: Action) {
 ///
 /// egui 0.36 shows panels inside a `Ui` rather than straight onto the `Context`, so a
 /// top-level panel needs one of these to sit in.
-fn viewport_ui(ctx: &egui::Context) -> egui::Ui {
+pub(crate) fn viewport_ui(ctx: &egui::Context) -> egui::Ui {
     egui::Ui::new(
         ctx.clone(),
         "viewport".into(),

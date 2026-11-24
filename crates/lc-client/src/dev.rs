@@ -275,7 +275,7 @@ pub(crate) fn run_dev_actions(
     // the moment it knows there is none, and one that has been refused is never going to be
     // any readier than it is.
     let settled = match &uplink.state {
-        crate::uplink::State::Joined(_) => true,
+        crate::uplink::State::Joined(_) | crate::uplink::State::Unlaunched => true,
         crate::uplink::State::Offline => address.0.is_none(),
         crate::uplink::State::Connecting => false,
         crate::uplink::State::Refused(_) | crate::uplink::State::Lost(_) => true,
@@ -732,6 +732,7 @@ fn numbered(path: &str, index: u32) -> String {
 /// `--first-person`: after everything that shows the player's own ship, hide it and its drones.
 pub(crate) fn hide_own_ship(
     dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
     mut roots: Query<(&crate::ship_hull::ShipHull, &mut Visibility), Without<crate::hull::Hull>>,
     mut ovoids: Query<(&crate::hull::Hull, &mut Visibility), Without<crate::ship_hull::ShipHull>>,
     mut parts: Query<
@@ -739,7 +740,8 @@ pub(crate) fn hide_own_ship(
         (Or<(With<crate::parts::FormRoot>, With<crate::drones::Swarm>)>, Without<crate::hull::Hull>, Without<crate::ship_hull::ShipHull>),
     >,
 ) {
-    if !dev.first_person {
+    // Collapsed, its wreck is drawn in its place.
+    if !dev.first_person && uplink.fallen.is_none() {
         return;
     }
     for (_, mut visibility) in roots.iter_mut().filter(|(h, _)| h.craft().is_none()) {

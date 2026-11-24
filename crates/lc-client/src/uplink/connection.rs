@@ -16,6 +16,9 @@ pub enum State {
     Offline,
     Connecting,
     Joined(Joined),
+    /// Signed in, with no ship: the account is new or its last one collapsed. See
+    /// [`crate::onboarding`].
+    Unlaunched,
     /// The server would not have us, in words for a person. Terminal: the reasons a server
     /// refuses — a ticket it will not take, a protocol it does not speak — are not things
     /// retrying fixes.
@@ -80,7 +83,7 @@ pub fn out_of_reach(state: &State, address: Option<&str>) -> Option<String> {
     match state {
         State::Refused(why) | State::Lost(why) => Some(why.clone()),
         State::Offline if address.is_none() => Some("no server was named for this page".into()),
-        State::Offline | State::Connecting | State::Joined(_) => None,
+        State::Offline | State::Connecting | State::Joined(_) | State::Unlaunched => None,
     }
 }
 
@@ -193,6 +196,7 @@ pub fn note(state: &State, round_trip_s: Option<f64>) -> Option<(Note, String)> 
             };
             Some((Note::Quiet, format!("LINKED {}{last}", joined.name)))
         }
+        State::Unlaunched => Some((Note::Quiet, "LINKED".into())),
         State::Refused(why) => Some((Note::Wrong, format!("REFUSED — {why}"))),
         State::Lost(why) => Some((Note::Wrong, format!("LINK LOST — {why}"))),
     }

@@ -46,9 +46,9 @@ pub async fn save_ships(client: &impl GenericClient, ships: &[Ship]) -> Result<u
     let saved: Vec<i64> = ships.iter().map(|s| s.saved_t).collect();
     let states: Vec<&[u8]> = ships.iter().map(|s| s.state.as_slice()).collect();
     let formats: Vec<i32> = ships.iter().map(|s| s.format).collect();
-    // An account passing from one row to another in this write, as a destroyed ship's does to its
-    // successor while the wreck is still saved, is released first: the unique check is per row, so
-    // it would fail whenever the successor came first.
+    // An account passing from one row to another in this write, as a collapsed ship's does to the
+    // next one it launches while the wreck is still saved, is released first: the unique check is
+    // per row, so it would fail whenever the new ship came first.
     client
         .execute(
             "UPDATE ships SET account = NULL
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(save_ships(&client, &[]).await.unwrap(), 0);
     }
 
-    /// A wreck is written with no account in the same checkpoint as its successor takes it, in
+    /// A wreck is written with no account in the same checkpoint as the next ship takes it, in
     /// whichever order the two rows come.
     #[tokio::test]
     async fn an_account_passes_between_rows_written_together() {
@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(read.iter().find(|s| s.ship_id == band).unwrap().account, None);
     }
 
-    /// A destroyed ship's account passes to its successor in the same write.
+    /// A destroyed ship's account passes to the next ship in the same write.
     #[tokio::test]
     async fn a_forgotten_ships_account_can_be_taken_again() {
         let Some(mut client) = store().await else { return };
