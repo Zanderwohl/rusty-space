@@ -531,7 +531,7 @@ Each surviving star draws, from its own seed and its population's statistics at 
 | age | the population's age distribution at `x` |
 | `[Fe/H]` | the population's age–metallicity relation, a radial gradient, the graph's offset field, and seeded scatter |
 | multiplicity | the population's binary fraction at that mass; a companion's mass ratio and separation |
-| evolutionary state, luminosity, `T_eff`, radius | initial mass, age and metallicity through analytic tracks — the Hurley, Pols & Tout fits are a candidate — including white dwarfs, neutron stars and black holes as remnants |
+| evolutionary state, luminosity, `T_eff`, radius | initial mass, age and metallicity through analytic tracks: Tout et al. (1996) for the zero-age main sequence and Hurley, Pols & Tout (2000) for the main sequence and Hertzsprung gap, as built in `lc_world::sky::galaxy::tracks`. The giant branches still use an interim fixed temperature and luminosity rise until Hurley's b_n fits are added; white dwarfs, neutron stars and black holes follow simple rules |
 | velocity | the frame's rotation curve at `x`, plus a seeded dispersion that grows with age |
 
 This reverses the direction `lc_world::sky::metallicity` uses for HYG. There, metallicity is
