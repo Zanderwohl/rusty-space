@@ -25,6 +25,11 @@ pub async fn page() -> Markup {
                     "lightcone, how do you ensure your safety? How do you coordinate with your "
                     "allies? How do you build and manage infrastructure?"
                 }
+                p {
+                    "In a galaxy 36,000 lightyears across, you can't see it all. Travel from star to "
+                    "star, build a civilization, defend your periphery, and explore your stellar "
+                    "neighborhood."
+                }
                 div class="actions" {
                     a class="cta primary-button" href="/play" { "Play Now" }
                 }
