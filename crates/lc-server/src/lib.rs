@@ -36,6 +36,7 @@ pub(crate) mod fits;
 pub mod fitting;
 pub(crate) mod instruments;
 pub mod journal;
+pub mod launch;
 pub mod library;
 pub mod park;
 #[cfg(feature = "storage")]
@@ -46,6 +47,7 @@ pub mod radio;
 pub mod rate;
 pub(crate) mod roster;
 pub mod server;
+pub mod standing;
 #[cfg(feature = "storage")]
 pub mod status;
 #[cfg(feature = "storage")]

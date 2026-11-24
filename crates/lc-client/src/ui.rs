@@ -12,6 +12,7 @@ pub enum Screen {
     MainMenu,
     Loading,
     InGame,
+    Onboarding,
     Unreachable,
 }
 

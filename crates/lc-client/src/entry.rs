@@ -291,6 +291,8 @@ pub fn parse(args: &[String]) -> Entry {
         // The password form is the one egui surface in the menu, and it is opened by a button
         // rather than by a page, so it needs its own way in to be photographed.
         open_password_form: flag("--password"),
+        unlaunched: flag("--unlaunched"),
+        collapse: flag("--collapse"),
         say: after("--say"),
         chat: after("--chat"),
         chat_menu: flag("--chat-menu"),

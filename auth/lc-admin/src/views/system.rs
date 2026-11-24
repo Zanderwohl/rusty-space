@@ -96,9 +96,11 @@ fn ships(ships: &[Craft]) -> Markup {
                         @for craft in ships {
                             tr {
                                 th scope="row" {
-                                    @match &craft.name {
-                                        Some(name) => (name),
-                                        None => span class="nothing" { "Unnamed" },
+                                    a href=(crate::routes::ship_url(craft.ship_id)) {
+                                        @match &craft.name {
+                                            Some(name) => (name),
+                                            None => span class="nothing" { "Unnamed" },
+                                        }
                                     }
                                 }
                                 td { (craft.ship_id) }

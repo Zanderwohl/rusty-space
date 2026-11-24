@@ -119,12 +119,16 @@ pub(super) fn fold(
             // Nobody, until the server says otherwise straight after this.
             uplink.chat.auto_acking(Vec::new());
             uplink.chat.sharing(Vec::new());
+            uplink.fallen = None;
+            uplink.launch_refused = None;
             uplink.state = State::Joined(Joined {
                 client_id,
                 ship_id,
                 name,
             });
         }
+        Outbound::Unlaunched => uplink.state = State::Unlaunched,
+        Outbound::LaunchRefused(why) => uplink.launch_refused = Some(why),
         Outbound::WrongProtocol { server } => {
             uplink.state = State::Refused(format!(
                 "the server speaks protocol {server} and this client speaks {PROTOCOL_VERSION}"
@@ -175,6 +179,33 @@ mod tests {
         assert_eq!(joined.ship_id, ShipId(7));
         assert_eq!(joined.client_id, ClientId(3));
         assert_eq!(joined.name, "Ada");
+    }
+
+    /// A collapse grounds the connection where the ship ended, and the welcome to a launched
+    /// ship ends that.
+    #[test]
+    fn a_collapse_grounds_the_client_until_a_new_welcome() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, welcome_at(1_000_000, [1.0e-6, 0.0, 0.0]));
+        let ended_t = 2_000_000;
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Collapsed { ship_id: ShipId(7), at_t: ended_t, released_j: 1.0e20 });
+        assert_eq!(uplink.state, State::Unlaunched);
+        let fallen = uplink.fallen.clone().expect("fallen");
+        assert_eq!((fallen.ship_id, fallen.at_t), (ShipId(7), ended_t));
+        assert!((game.0.ship.motion.position_ly - fallen.at_ly).length() < 1.0e-15, "held at its end");
+
+        fold(&mut uplink, &mut game, &mut ui, Outbound::LaunchRefused(lc_proto::LaunchRefusal::Name));
+        assert_eq!(uplink.launch_refused, Some(lc_proto::LaunchRefusal::Name));
+        fold(&mut uplink, &mut game, &mut ui, welcome(3_000_000));
+        assert!(uplink.joined().is_some() && uplink.fallen.is_none() && uplink.launch_refused.is_none());
+    }
+
+    #[test]
+    fn an_account_with_no_ship_is_told_so() {
+        let (mut uplink, mut game, mut ui) = app();
+        fold(&mut uplink, &mut game, &mut ui, Outbound::Unlaunched);
+        assert_eq!(uplink.state, State::Unlaunched);
+        assert!(uplink.joined().is_none());
     }
 
     /// The reason a `Welcome` carries a clock at all. A client whose own clock started when the

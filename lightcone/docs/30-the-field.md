@@ -324,8 +324,8 @@ The committed burn energy is part of what is stored, so it goes too. The parts' 
   `collapse_spike_k`. The rest leaves over `collapse_afterglow_s`, with the temperature falling from
   the field's limit. The spike is the part that hurts neighbors. The afterglow is what makes the
   event catchable by an instrument integrating a long stare, as a supernova is.
-- **The account's owner gets a new starting ship** at the shard's spawn point, knowing nothing.
-  What that means for players is the harshest rule in this doc, and it is in Open.
+- **The account's owner has no ship** until it launches another, which knows nothing. What that
+  means for players is the harshest rule in this doc, and it is in Open.
 
 How it looks from the next system, taking the spike as one second long:
 
@@ -381,20 +381,26 @@ seeing it replayed as the light passes.
   reach of its first light, the horizon a front is kept to: for a starting ship's collapse, the
   edge of the world. Not until it has passed the craft there happen to be, which left a craft made
   later with a wreck in its sky that the shard had forgotten. A checkpoint keeps it with its end,
-  its afterglow, its collapse event and no account, since the successor carries the account and an
+  its afterglow, its collapse event and no account, since the account's next ship carries it and an
   account holds one row; a restart brings it back as a wreck, nobody's, with nothing to resume, and
   so ends nobody's view of it early. Its row and what it knew are deleted at the checkpoint after
   the sweep. A supernova is the next bright event, and the same shape.
 - **Joining while it glows.** Fronts deliver to whichever craft exist as they pass, so a craft
-  made after a spike went by its place (a newcomer, a successor) hears nothing from them while the
+  made after a spike went by its place (a newcomer, a relaunch) hears nothing from them while the
   afterglow is still reaching it. A connection's first flush adds a sighting for every bright
   event whose light is reaching its craft (`field::wrecks_in_progress`), unless the journal's
   replay in that flush already carried it. It has the collapse's own event id, kept with the wreck
   and checkpointed with it, and lands
   where the light passed the craft's place, so the client starts the debris that far along, past
   the flash. Its strength is the afterglow's now, against the noise floor like any sighting.
-- **The successor** is a new ship, with a new id, at the spawn point. A connected owner is sent
-  `Collapsed` and then welcomed to it as on signing in.
+- **No successor.** A connected owner is sent `Collapsed` and held with no ship
+  (`lc_server::launch`): it hears nothing more of the world, and its orders are refused. The client
+  keeps the third-person camera on its own wreck for `onboarding::WATCH_S`, ten real seconds, then
+  leaves the world for the launch screen. `Inbound::Launch { name }` makes a new ship, with a new id,
+  in high orbit of Luna when the shard holds Sol and at the spawn point otherwise, and welcomes the
+  connection to it as on signing in. A launch from an account whose other connection launched first
+  joins that ship instead. Each launch and collapse is written to `ship_registry`, which
+  outlives the wreck's checkpoint row and is what the console's Ships pages read.
 
 ## Proximity
 
@@ -579,8 +585,8 @@ The star's gain stays `solar_gain` and moves from collection to **the star's ene
 | crate | new | changed |
 |---|---|---|
 | `lc-world` | `field.rs`: the account, its closed forms, time to collapse, temperature, the lethal radius | `solar.rs` becomes intake: starlight onto the shadow, gained at the star. `fitting.rs` folds heat beside stored energy. `refit.rs` reports each step's heat, and whether the plan crosses `Q_max` |
-| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j, successor }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`. `kind::SHADE`, a completed switch, carrying `ShadeChange` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature, shade, envelope and any switch under way |
-| `lc-server` | collapse scheduling and delivery, respawn | the tick settles heat. Refit and order acceptance warn |
+| `lc-proto` | `field.rs`. `Outbound::Collapsed { at_t, released_j }`, to the owner only: observers learn of a collapse from its light. `Order::FieldMode { mode: Clear \| Black \| Auto { clear_above, black_below, refill_below } }`. `kind::SHADE`, a completed switch, carrying `ShadeChange` | `Fitted` gains `field: Field`, with `Q` and its time, the mode, the `Shade` it is in, and any switch under way. `Presence` gains `glow: Glow`, the field's temperature, shade, envelope and any switch under way |
+| `lc-server` | collapse scheduling and delivery, grounding the owner until a launch | the tick settles heat. Refit and order acceptance warn |
 | `lc-client` | | `hud.rs` gains `Field`, `panels.rs` draws the bar. The refit panel, photometry. The field shader is [32-ship-rendering.md](32-ship-rendering.md) |
 
 ## Client
@@ -692,10 +698,11 @@ puts a countdown in the text.
 
 ## Open
 
-- **Death.** A new starting ship, knowing nothing, is the harshest reading. Whether the Mind, the
-  data part's contents or a faction's relays survive the ship is a question for
-  [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing and
-  finds the new ship on signing in; the transcript and knowledge went with the old one.
+- **Death.** A new ship, named again and knowing nothing, is the harshest reading. Whether the
+  Mind, the data part's contents or a faction's relays survive the ship is a question for
+  [22-provenance.md](22-provenance.md). An owner signed out when it happens is told nothing until
+  it signs in, when it is told `Unlaunched` and launches; the transcript and knowledge went with
+  the old ship.
 - **Air under the field.** Parks held by the field would cap its temperature well below 4 600 K.
   Whether that is a real rule or only a look is undecided. The two layers are drawn either way.
 - **Direction of intake.** Reciprocity says an aperture receives best along its own axis. The

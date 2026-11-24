@@ -65,7 +65,7 @@ impl FromRequestParts<AppState> for Admin {
         }
         Ok(Admin {
             id,
-            name: account.display_name,
+            name: account.display_name.unwrap_or_else(|| "Administrator".to_owned()),
             level,
         })
     }

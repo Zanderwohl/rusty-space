@@ -278,7 +278,11 @@ fn already(session: &Session) -> maud::Markup {
         crate::views::Head::new("Signed in", "You are already signed in."),
         maud::html! {
             section class="stack" {
-                h1 { "Signed in as " (session.name) }
+                @if session.name.is_empty() {
+                    h1 { "Signed in" }
+                } @else {
+                    h1 { "Signed in as " (session.name) }
+                }
                 p class="lede" {
                     "There is nothing to sign in to — this browser already holds a session."
                 }

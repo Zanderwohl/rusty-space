@@ -364,9 +364,9 @@ pub const ILLUMINATED: &[u8] = &[
     193, 139, 67, 128, 137, 122,
 ];
 
-/// `Outbound::Collapsed { ship_id: 42, successor: 43 }`
+/// `Outbound::Collapsed { ship_id: 42 }`
 pub const COLLAPSED: &[u8] = &[
-    22, 84, 128, 137, 122, 85, 116, 221, 32, 163, 210, 7, 69, 86,
+    22, 84, 128, 137, 122, 85, 116, 221, 32, 163, 210, 7, 69,
 ];
 
 /// `Inbound::SavePreset { "Plate", the three-part form }`

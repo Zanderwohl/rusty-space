@@ -122,6 +122,22 @@ pub struct Uplink {
     pub beams: crate::emit_panel::Beams,
     /// What each named craft is called here. See [`crate::craft_names`].
     pub labels: std::collections::BTreeMap<ShipId, crate::craft_names::Label>,
+    /// This client's own ship, collapsed, while its end is being watched.
+    pub fallen: Option<Fallen>,
+    /// Why the last [`Inbound::Launch`] was refused.
+    pub launch_refused: Option<lc_proto::LaunchRefusal>,
+}
+
+/// This client's ship, ended.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fallen {
+    pub ship_id: ShipId,
+    /// Coordinate microseconds.
+    pub at_t: i64,
+    pub released_j: f64,
+    pub at_ly: glam::DVec3,
+    /// Real seconds it was first shown, as `Time::elapsed_secs_f64` reads.
+    pub shown_s: Option<f64>,
 }
 
 impl Uplink {
@@ -246,7 +262,7 @@ impl Uplink {
     }
 }
 
-fn fold(
+pub(crate) fn fold(
     uplink: &mut Uplink,
     game: &mut crate::app::Game,
     ui: &mut crate::app::Ui,
@@ -257,6 +273,8 @@ fn fold(
         message @ (Outbound::Welcome { .. }
         | Outbound::WrongProtocol { .. }
         | Outbound::Unauthenticated
+        | Outbound::Unlaunched
+        | Outbound::LaunchRefused(_)
         | Outbound::Clock { .. }) => welcome::fold(uplink, game, ui, message),
         message @ (Outbound::Present(_) | Outbound::Sightings(_)) => sightings::fold(uplink, game, ui, message),
         message @ (Outbound::Accepted { .. } | Outbound::Refused { .. }) => orders::fold(uplink, game, ui, message),
@@ -344,8 +362,17 @@ fn fold(
                 ui.0.notify(format!("{count} messages in the log"), at);
             }
         }
-        // The welcome to the successor follows.
-        Outbound::Collapsed { at_t, .. } => ui.0.notify("The field collapsed", at_t as f64 * 1e-6),
+        Outbound::Collapsed { ship_id, at_t, released_j } => {
+            ui.0.notify("The field collapsed", at_t as f64 * 1e-6);
+            let at_ly = game.0.ship.position_at(at_t as f64) / lc_world::motion::LIGHT_US_PER_LY;
+            // Held where it ended, so the camera stays on the wreck.
+            game.0.ship.motion.position_ly = at_ly;
+            game.0.ship.motion.begin_holding(lc_world::navigation::Waypoint::Fixed(at_ly));
+            uplink.fallen = Some(Fallen { ship_id, at_t, released_j, at_ly, shown_s: None });
+            uplink.chasing = None;
+            uplink.parked = false;
+            uplink.state = State::Unlaunched;
+        }
         Outbound::Illuminated(lit) => {
             let lc_proto::Illumination { ship_id, beam, bearing, spectrum, power_w, arrive_t } = lit.into_inner();
             uplink.incoming.illuminated(ship_id, beam, bearing, spectrum, power_w, arrive_t)
