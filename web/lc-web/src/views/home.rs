@@ -16,16 +16,14 @@ pub async fn page() -> Markup {
                 div #micro-galaxy width="100%" {}
                 script type="module" src=(assets::url("scripts/micro-galaxy.js")) {}
                 p class="lede" {
-                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor. "
-                    "Ut enim ad minim veniam. Quis nostrud exercitation ullamco laboris nisi ut aliquip, "
-                    "ex ea commodo consequat — duis aute irure dolor in reprehenderit in voluptate "
-                    "velit esse cillum dolore eu fugiat nulla pariatur."
+                    "The galaxy is big, and light only travels so fast. Even with allies and probes "
+                    "at the next star, it takes years for relevant data to arrive."
                 }
                 p {
-                    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia "
-                    "deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste "
-                    "natus error sit voluptatem accusantium doloremque laudantium. Totam rem "
-                    "aperiam, eaque ipsa quae ab illo."
+                    em { "Lightcone Frontier" } " is a game about the limitations of the universe. "
+                    "Light travels at C, and you travel slower. If you can't see beyond your "
+                    "lightcone, how do you ensure your safety? How do you coordinate with your "
+                    "allies? How do you build and manage infrastructure?"
                 }
                 div class="actions" {
                     a class="cta primary-button" href="/play" { "Play Now" }
