@@ -1,0 +1,5 @@
+Timeline(format: 1, next_id: 4, seed: 1)
+Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0.0, 0.0, 0.0), tilt_deg: 0.0, azimuth_deg: 0.0, rotation: Static))
+Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Cluster stars", params: (frame: 0, imf: Kroupa, age: Burst(gyr: 0.5, spread_gyr: 0.05), feh: (zero_age: 0.0, per_gyr: 0.0, per_kly: 0.0, scatter: 0.05), dispersion: (zero_age_km_s: 1.0, exponent: 0.0)))
+Feature(id: 2, kind: "variable", version: 1, enabled: true, params: (name: "stars", value: 10.0))
+Feature(id: 3, kind: "plummer", version: 1, enabled: true, name: "Cluster", params: (frame: 0, center_ly: (0.0, 0.0, 0.0), core_ly: 3.0, radius_ly: 3.0, edge_ly: 1.0, contributes: [(Density(1), Add(Var("stars")))]))

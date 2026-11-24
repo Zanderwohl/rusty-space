@@ -107,6 +107,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let stars = match after("--sky") {
+        // An authored galaxy: a manifest and the chunks beside it.
+        Some(source) if source.ends_with(".galaxy") => {
+            let provider = lc_world::sky::galaxy::Manifest::load_from_disk(std::path::Path::new(&source))?;
+            eprintln!("sky: {} stars from {source}, {} dark remnants left out", provider.stars().len(), provider.skipped);
+            provider.into_stars()
+        }
         Some(source) => {
             let provider = lc_world::sky::chunk::ChunkProvider::decode(&read_bytes(&source)?)
                 .map_err(|why| format!("{source}: {why:?}"))?;

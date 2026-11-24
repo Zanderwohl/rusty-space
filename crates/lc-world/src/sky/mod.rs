@@ -17,6 +17,7 @@ use crate::rng;
 use crate::star::Star;
 
 pub mod chunk;
+pub mod galaxy;
 pub mod generate;
 pub mod metallicity;
 pub mod record;
@@ -133,6 +134,11 @@ impl CatalogStar {
 pub trait StarProvider {
     fn name(&self) -> &str;
     fn stars(&self) -> &[CatalogStar];
+
+    /// Stars within `radius_ly` of `center`. A scan here; a large provider indexes it.
+    fn within(&self, center: DVec3, radius_ly: f64) -> Vec<&CatalogStar> {
+        self.stars().iter().filter(|s| s.position_ly.distance(center) <= radius_ly).collect()
+    }
 
     fn get(&self, id: StarId) -> Option<&CatalogStar> {
         self.stars().iter().find(|s| s.id == id)
