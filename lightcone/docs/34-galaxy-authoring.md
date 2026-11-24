@@ -17,7 +17,9 @@ order or thread count. Stars are **published** by region as immutable files; a p
 never moves again, whatever later happens to the graph or the generator code. Every shape in
 the graph also answers a signed distance, which is what lets one ray marcher draw the editor's
 previews and the skybox pictures of galaxies on other shards. The editor is a separate native
-egui binary and ships with neither the client nor the shard.
+egui binary, built before any test galaxy, and ships with neither the client nor the shard.
+Test galaxies reach players in playtest phases I to III, each of several iterations; see
+[Order of work](#order-of-work).
 
 The data model borrows from two feature editors that already exist: Century's timeline
 (`~/rust/century/crates/century-core/src/{feature,timeline}.rs`, `project/codec.rs`) and
@@ -645,9 +647,10 @@ egui, decided. [18-ui-style.md](18-ui-style.md) puts forms and dense readouts in
 editor is mostly both. Transform and falloff handles are drawn in the viewport, through the same
 camera controls as the client's World and Map views.
 
-### Without the editor
+### The CLI
 
-The library and a CLI come first, and are useful alone:
+The editor is the first front end. The CLI follows for work that wants scripting: CI checks, the
+determinism tests, and the runbook's bake and publish.
 
 ```bash
 lc-galaxy check  galaxy/            # parse, resolve references, report the graph version
@@ -658,8 +661,8 @@ lc-galaxy diff   galaxy/ --against <manifest>
 lc-galaxy publish chunks/           # CDN upload and manifest rows; see 15-runbook.md
 ```
 
-A designer can edit RON in a text editor and rerun `render` under a file watcher well before the
-editor exists.
+The RON stays readable by hand, which matters when the editor opens a file and marks a feature
+it cannot read.
 
 ## Crates
 
@@ -697,30 +700,60 @@ cargo tree -p lc-server --prefix none | grep -E '^lc-galaxy'   # must be empty
 
 ## Order of work
 
-The galaxy is built up through three test galaxies before the real one. These are named
-Phase I to III, in Roman numerals, to keep them apart from the numbered phases of
-[12-buildout.md](12-buildout.md). Each is a timeline file the shard can load in place of HYG, and
-each phase ends with the shard and the client running on it.
+The editor is built first, and every test galaxy is made in it. If the bake came first, the
+editor's UI would be judged only after the generator had settled. Built first, the editor is
+used at each scale the galaxy passes through, and its UI changes alongside the generator.
 
-| phase | the galaxy | stars | what it is the first to exercise |
+### Playtest phases
+
+Phase I to III, in Roman numerals to keep them apart from the numbered phases of
+[12-buildout.md](12-buildout.md), are rounds of play and feedback. In each, a test galaxy is
+published to the dev shard in place of HYG, players fly in it, and their reports go back into
+the generator and the editor. A phase holds several iterations. Each iteration is a change to
+the generator, the graph or the editor, followed by a rebake and a republish. Before launch,
+republishing is free ([Publishing and freezing](#publishing-and-freezing)), so an iteration
+costs a bake and a manifest row.
+
+| phase | the galaxy | stars | first exercises |
 |---|---|---|---|
 | **I** | one cluster, one population, 1.5–2 ly spacing | about 10, in a radius of about 2.3 ly | the file format and its tolerant reader, the timeline, `Compiled`, thinning inside one cell (a 0.86 ly floor at 1.75 ly spacing), attributes, the chunk reader, `GalaxyProvider` on the shard |
-| **II** | a cluster of two populations, one old and one young | 500, in a radius of about 8.6 ly | thinning across cell faces (it spans some 27 cells), the determinism tests, populations, IMF and tracks, an HR diagram, `lc-galaxy check`, `render` and `stats` |
-| **III** | a spiral about 100 ly across: disc, bulge, two arms, a void, a boolean | about 10 000 at 2 ly spacing | arms, booleans, masks, signed distances, the ray-marched preview, the tier split, chunks, the editor, publishing and freezing |
+| **II** | a cluster of two populations, one old and one young | 500, in a radius of about 8.6 ly | thinning across cell faces (it spans some 27 cells), the determinism tests, populations, IMF and tracks, an HR diagram |
+| **III** | a spiral about 100 ly across: disc, bulge, two arms, a void, a boolean | about 10 000 at 2 ly spacing | arms, booleans, masks, signed distances, the ray-marched preview, the tier split, chunks on the CDN, publishing and freezing |
 | full | the reference galaxy and its companions | 1.5e11 | tier A for the whole galaxy, publishing tier B by region, the far sky, and the skybox picture of a second shard |
 
 Phase I's count is a Poisson draw, so "about 10" is whatever its seed gives; the tests pin that
-seed. Phase III is the first galaxy big enough to look like one, and the first where the editor
-earns its cost over editing RON by hand, so the editor is built during it rather than before.
+seed.
 
-What each phase needs built, cumulatively:
+The editor runs locally and needs no players, so its UI can change on any day. A phase sets when
+players see a galaxy, not when the editor changes.
 
-| phase | built |
+### Before Phase I
+
+| step | built | tried by |
+|---|---|---|
+| E1 | `lc-galaxy` core: the timeline, the tolerant codec, `Compiled`, the `variable`, `frame`, `population` and `plummer` kinds, the sampler on the fixed grid, attributes from a placeholder track table | unit tests |
+| E2 | `lc-galaxy-editor`: timeline and parameters panels, undo, open and save with `Unknown`, `Unsupported` and `Damaged` features marked, the region and sky views, the inspector, and statistics with a nearest-neighbor histogram against the hard-core distance | the designer, locally |
+| E3 | the chunk writer, `lc-world::sky::galaxy`, `GalaxyProvider`, a region query on `StarProvider`, and a local publish: a chunk file and manifest that the dev shard loads | Phase I begins |
+
+### What each phase adds
+
+Cumulative, on top of E1–E3:
+
+| phase | added |
 |---|---|
-| I | `lc-galaxy` with the timeline, codec, `variable`, `frame`, `population` and `plummer` kinds; the sampler on the fixed grid; attributes with a placeholder track table; the chunk writer; `lc-world::sky::galaxy` and a region query on `StarProvider` |
-| II | the real IMF and tracks; the age–metallicity and age–velocity relations; `check`, `render` and `stats`; determinism tests in separate processes and thread counts |
-| III | the shape kinds, `boolean` and `noise`; signed distances and the CPU ray marcher; coarse volumes; tier A; the manifest, `publish` and `diff`; `lc-galaxy-editor` with timeline, parameters, face-on, edge-on and region views |
+| I | whatever its iterations call for; expected to be the track table, the thinning parameters and the editor's panels |
+| II | the real IMF and tracks; the age–metallicity and age–velocity relations; the HR diagram and the metallicity and shell-radius histograms in Statistics; solo and difference in every view; determinism tests in separate processes and thread counts; `lc-galaxy check` and `stats` |
+| III | the shape kinds, `boolean` and `noise`; signed distances and the CPU ray marcher behind the face-on, edge-on and 3D views; coarse volumes; tier A; the manifest on the CDN, `publish` and `diff`; the Published panel; transform and falloff handles in the viewport |
 | full | the luminosity volume in the client; the GPU marcher in the editor; the universe layout and skybox pictures |
+
+### Live bake and scale
+
+The editor rebakes on every edit while the stars in view stay under a budget, 100 000 to start.
+Above it, the views draw fields — projected density and the ray-marched picture — and baking is
+limited to a selected region. Phases I to III all fit under the budget. Phase III is where the
+ray-marched views arrive, so its iterations show the field views beside a bake of the same graph,
+which checks the marcher against the stars and gives switching between the two modes its UI
+before the full galaxy forces it.
 
 ## Open
 
