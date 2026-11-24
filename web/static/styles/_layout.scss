@@ -1,19 +1,25 @@
 // Layout primitives. Each says how children are arranged and nothing about what they are.
 
 // The star map behind every page with a reading column. The column, masthead and footer
-// paint the ground over it, so it shows only in the gutters. A mask rather than a background
-// image, so the line color is a token and follows the color scheme.
+// paint the ground over it, so it shows only in the gutters. The SVG's own colors suit the
+// dark ground; on the light ground it is a mask filled with `--map-line` instead.
 body:has(> main.page) {
   min-height: 100vh;
   position: relative;
 
   &::before {
-    background: var(--map-line);
+    background: url("../images/map.svg") top center / auto no-repeat;
     content: "";
     inset: 0;
-    mask: url("../images/map.svg") top center / auto no-repeat;
     position: absolute;
     z-index: -1;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  body:has(> main.page)::before {
+    background: var(--map-line);
+    mask: url("../images/map.svg") top center / auto no-repeat;
   }
 }
 
