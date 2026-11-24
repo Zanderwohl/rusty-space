@@ -47,5 +47,9 @@
     --rule: #ddd9d0;
     --accent: #1f6f73;
     --accent-dim: #8cb9bb;
+    // The star map and its wavefronts in the gutters. Light scheme only: on dark the SVGs
+    // draw in their own colors.
+    --map-line: #e6e3db;
+    --map-wave: #c9dcdb;
   }
 }

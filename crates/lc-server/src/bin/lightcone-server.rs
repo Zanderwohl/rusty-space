@@ -134,6 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Kept to notice the administration surface's connection closing; see the loop.
     let mut admin_db: Option<std::sync::Arc<tokio_postgres::Client>> = None;
+    // Changes of standing the console sends, drained on the tick.
+    let (standings, mut stated) = tokio::sync::mpsc::unbounded_channel();
     // Refused rather than silently skipped: a console pointed at a shard that quietly declined
     // to listen is a card reading "unavailable" with nothing to explain it.
     if let Some(addr) = &admin_bind {
@@ -146,6 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             client,
             catalog.clone(),
             std::sync::Arc::new(keys),
+            standings,
         );
         let listener = tokio::net::TcpListener::bind(addr).await?;
         eprintln!("administration surface on {addr}, for audience {audience}");
@@ -310,6 +313,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("connection {} closed", client.0);
             server.disconnected(client);
         }
+        while let Ok(change) = stated.try_recv() {
+            eprintln!("standing of {}: {:?}", change.account, change.standing);
+            server.stand(change, &mut wire);
+        }
         // **Not `?`.** A tick the store would not take is one tick's events lost; ending the
         // process here lost every connected player instead, socket closed with no close frame,
         // and came back on the next order anyone gave.
@@ -396,6 +403,7 @@ struct Taken {
     marks: Vec<(String, lc_proto::Bookmark)>,
     presets: Vec<lc_server::presets::Change>,
     destroyed: Vec<i64>,
+    registered: Vec<lc_store::registry::Entry>,
 }
 
 fn take(server: &mut Server<Store>) -> Taken {
@@ -405,6 +413,7 @@ fn take(server: &mut Server<Store>) -> Taken {
         marks: server.library.take_dirty(),
         presets: server.presets.take_dirty(),
         destroyed: server.take_destroyed(),
+        registered: server.take_registered(),
     }
 }
 
@@ -413,6 +422,7 @@ fn give_back(server: &mut Server<Store>, taken: Taken) {
     server.library.redirty(&taken.marks);
     server.presets.redirty(&taken.presets);
     server.untake_destroyed(taken.destroyed);
+    server.untake_registered(taken.registered);
 }
 
 /// A checkpoint write's outcome, with the connection and what was being written handed back.
@@ -440,6 +450,7 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         let transaction = client.transaction().await?;
         lc_store::ships::forget(&transaction, &taken.destroyed).await?;
         lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
+        lc_store::registry::save(&transaction, &taken.registered).await?;
         lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
         lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
         lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;

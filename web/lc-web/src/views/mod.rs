@@ -11,9 +11,6 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::assets;
 
-/// The design documents are the only thing to read until the devlog has more in it.
-pub const REPO: &str = "https://github.com/Zanderwohl/rusty-space/tree/master/lightcone";
-
 const SITE_NAME: &str = "Lightcone Frontier";
 
 /// Where `icons/` lives. Set once at boot; a page rendered before then has no favicon.
@@ -128,19 +125,18 @@ fn masthead() -> Markup {
             a href="/play" { "Play" }
             a href="/blog" { "Devlog" }
             a href="/about" { "About" }
-            a href=(REPO) { "Source" }
         }
     }
 }
 
 fn colophon() -> Markup {
     html! {
-        p { "A relativistic sandbox in a volume of real stars." }
         p class="fine-print" {
             "Build " code { (assets::BUILD) } " · "
             a href="/feed.xml" { "RSS" } " · "
             a href="/feed.json" { "JSON feed" }
         }
+        p class="fine-print" { "©2025-2026 " a href="https://pikaia.space" { "pikaia.space" } }
     }
 }
 

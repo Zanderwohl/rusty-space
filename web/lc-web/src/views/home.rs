@@ -1,6 +1,7 @@
 use maud::{Markup, html};
 
 use super::{Head, shell};
+use crate::assets;
 
 const DESCRIPTION: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
                            eiusmod tempor incididunt ut labore et dolore magna aliqua.";
@@ -11,28 +12,42 @@ pub async fn page() -> Markup {
         html! {
             section class="stack" {
                 h1 { "Everything you know is out of date." }
+                // Empty, and so no height, until the script draws into it.
+                div #micro-galaxy width="100%" {}
+                script type="module" src=(assets::url("scripts/micro-galaxy.js")) {}
                 p class="lede" {
-                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor. "
-                    "Ut enim ad minim veniam. Quis nostrud exercitation ullamco laboris nisi ut aliquip, "
-                    "ex ea commodo consequat — duis aute irure dolor in reprehenderit in voluptate "
-                    "velit esse cillum dolore eu fugiat nulla pariatur."
+                    "The galaxy is big, and light only travels so fast. Even with allies and probes "
+                    "at the next star, it takes years for relevant data to arrive."
                 }
                 p {
-                    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia "
-                    "deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste "
-                    "natus error sit voluptatem accusantium doloremque laudantium. Totam rem "
-                    "aperiam, eaque ipsa quae ab illo."
+                    em { "Lightcone Frontier" } " is a game about the limitations of the universe. "
+                    "Light travels at C, and you travel slower. If you can't see beyond your "
+                    "lightcone, how do you ensure your safety? How do you coordinate with your "
+                    "allies? How do you build and manage infrastructure?"
+                }
+                p {
+                    "In a galaxy 36,000 lightyears across, you can't see it all. Travel from star to "
+                    "star, build a civilization, defend your periphery, and explore your stellar "
+                    "neighborhood."
+                }
+                div class="actions" {
+                    a class="cta primary-button" href="/play" { "Play Now" }
                 }
             }
 
             section class="stack" {
                 h2 { "One in-game year per real hour" }
                 p {
-                    "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, "
-                    "sed quia consequuntur magni dolores eos qui ratione voluptatem."
+                    "Time ticks away, whether you're online or not. Transmit orders or requests "
+                    "across the lightyears, and you may see what happened next time you log on, if "
+                    "things went to plan. If they didn't, you might not know for some time."
                 }
                 table {
-                    caption { "Travel and signal times at the default rate" }
+                    caption {
+                        "Cause and effect in " cite { "Lightcone Frontier" } " travels at the "
+                        "speed of light. Communication and travel take real-life hours, days, or "
+                        "even longer."
+                    }
                     thead {
                         tr {
                             td {}
@@ -45,13 +60,13 @@ pub async fn page() -> Markup {
                         tr { th scope="row" { "Sun to Earth at C" } td { "8 min 19 s" } td { "57 ms" } }
                         tr { th scope="row" { "Earth to Voyager 1 transmission" } td { "23 h 51 min" } td { "9.8 s" } }
                         tr { th scope="row" { "Sun to Proxima Centauri at C" } td { "4.25 years" } td { "4.25 h" } }
-                        tr { th scope="row" { "Across the game galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
+                        tr { th scope="row" { "Across the galaxy at C" } td { "36,000 years" } td { "4.1 years" } }
                     }
                 }
                 p {
-                    "Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, "
-                    "consectetur, adipisci velit. Sed quia non numquam eius modi tempora "
-                    "incidunt. Ut labore et dolore magnam aliquam quaerat voluptatem."
+                    "Travel at subluminal speed to the next star to set up shop. Communicate with "
+                    "your allies in the stellar neighborhood to coordinate. Relay transmissions, "
+                    "system reports, or news of a battle seen on the galactic horizon."
                 }
             }
 
@@ -88,14 +103,9 @@ pub async fn page() -> Markup {
                     "est. Omnis dolor repellendus — temporibus autem quibusdam et aut officiis "
                     "debitis aut rerum necessitatibus."
                 }
-                p {
-                    "Itaque earum "
-                    a href=(super::REPO) { "rerum hic tenetur" }
-                    " a sapiente delectus, ut aut reiciendis."
-                }
-                p {
-                    a class="cta" href="/play" { "Play in your browser" }
-                    " "
+                p { "Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis." }
+                div class="actions closing-actions" {
+                    a class="cta primary-button" href="/play" { "Play Now" }
                     a class="cta" href="/blog" { "Read the devlog" }
                 }
             }

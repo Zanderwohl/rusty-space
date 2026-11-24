@@ -1,8 +1,8 @@
-//! A read-only HTTP surface for the administration console.
+//! The HTTP surface for the administration console. Read-only but for [`STANDING`].
 //!
-//! **No contact with the tick loop**: it reads the checkpoint and an `Arc` of the catalog,
-//! takes no lock the simulation wants, and cannot make a page load cost the world a frame.
-//! Keep that if this grows a second route.
+//! **No lock shared with the tick loop**: it reads the checkpoint and an `Arc` of the catalog,
+//! and [`STANDING`] only queues a message the loop drains, so a page load cannot cost the world
+//! a frame.
 //!
 //! On **its own port**, which no proxy route reaches — see `lightcone/docs/15-runbook.md`.
 //!
@@ -17,7 +17,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use lc_world::sky::CatalogStar;
 use tokio::sync::Mutex;
 
@@ -34,6 +34,46 @@ pub const SYSTEMS: &str = "/admin/systems";
 /// `{id}` is a system's id as [`SYSTEMS`] lists it.
 pub const SYSTEM: &str = "/admin/systems/{id}";
 
+/// `POST`, with `banned=true` and an optional `until` in Unix seconds, or `banned=false`: the
+/// account's standing after a ban or a lift. See [`crate::standing`].
+pub const STANDING: &str = "/admin/standing/{account}";
+
+/// Every ship ever launched, newest first, from `ship_registry`.
+pub const SHIPS: &str = "/admin/ships";
+
+/// `{id}` is a ship id.
+pub const SHIP: &str = "/admin/ships/{id}";
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipRow {
+    pub ship_id: i64,
+    pub account: Option<String>,
+    pub name: Option<String>,
+    /// Unix seconds.
+    pub launched_at: i64,
+    /// Unix seconds; `None` while it flies.
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipPage {
+    pub ships: Vec<ShipRow>,
+    pub total: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipDetail {
+    pub ship: ShipRow,
+    /// From the checkpoint, which keeps a wreck only until its light has faded.
+    pub status: Option<Status>,
+}
+
+impl From<lc_store::registry::Record> for ShipRow {
+    fn from(r: lc_store::registry::Record) -> Self {
+        ShipRow { ship_id: r.ship_id, account: r.account, name: r.name, launched_at: r.launched_at, ended_at: r.ended_at }
+    }
+}
+
 #[derive(Clone)]
 pub struct Api {
     pub db: Arc<tokio_postgres::Client>,
@@ -41,6 +81,7 @@ pub struct Api {
     pub stars: Arc<Vec<CatalogStar>>,
     pub trusted: Arc<Trusted>,
     spent: Arc<Mutex<Spent>>,
+    standings: tokio::sync::mpsc::UnboundedSender<crate::standing::Stated>,
 }
 
 impl Api {
@@ -48,12 +89,14 @@ impl Api {
         db: Arc<tokio_postgres::Client>,
         stars: Arc<Vec<CatalogStar>>,
         trusted: Arc<Trusted>,
+        standings: tokio::sync::mpsc::UnboundedSender<crate::standing::Stated>,
     ) -> Api {
         Api {
             db,
             stars,
             trusted,
             spent: Arc::new(Mutex::new(Spent::default())),
+            standings,
         }
     }
 }
@@ -63,6 +106,9 @@ pub fn router(api: Api) -> Router {
         .route(STATUS, get(status))
         .route(SYSTEMS, get(systems))
         .route(SYSTEM, get(system))
+        .route(SHIPS, get(ships))
+        .route(SHIP, get(ship))
+        .route(STANDING, post(standing))
         .route("/admin/health", get(|| async { "ok" }))
         .with_state(api)
 }
@@ -101,6 +147,9 @@ struct Asked {
     dir: Option<String>,
     offset: Option<String>,
     limit: Option<String>,
+    account: Option<String>,
+    /// `flying` or `ended`.
+    state: Option<String>,
 }
 
 /// The limit arrives in a URL, and an unbounded one serializes the whole catalog.
@@ -236,6 +285,99 @@ async fn status(
     ron_response(&status, "status")
 }
 
+async fn ships(
+    State(api): State<Api>,
+    headers: HeaderMap,
+    axum::extract::Query(asked): axum::extract::Query<Asked>,
+) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let query = lc_store::registry::Query {
+        search: asked.q.filter(|q| !q.trim().is_empty()).map(|q| q.trim().to_owned()),
+        account: asked.account.filter(|a| !a.is_empty()),
+        flying: match asked.state.as_deref() {
+            Some("flying") => Some(true),
+            Some("ended") => Some(false),
+            _ => None,
+        },
+        offset: asked.offset.and_then(|n| n.parse().ok()).unwrap_or(0).max(0),
+        limit: asked.limit.and_then(|n| n.parse().ok()).unwrap_or(25).clamp(1, MOST_PER_PAGE as i64),
+    };
+    match lc_store::registry::list(&api.db, &query).await {
+        Ok((rows, total)) => ron_response(&ShipPage { ships: rows.into_iter().map(Into::into).collect(), total }, "ships"),
+        Err(why) => {
+            eprintln!("admin ships: the store did not answer: {why}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn ship(State(api): State<Api>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(id) = id.parse::<i64>() else {
+        return (StatusCode::NOT_FOUND, "None").into_response();
+    };
+    let (record, saved) = match (lc_store::registry::get(&api.db, id).await, lc_store::ships::ship_by_id(&api.db, id).await) {
+        (Ok(record), Ok(saved)) => (record, saved),
+        (Err(why), _) | (_, Err(why)) => {
+            eprintln!("admin ship: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Some(record) = record else {
+        return (StatusCode::NOT_FOUND, "None").into_response();
+    };
+    let status = saved.and_then(|ship| {
+        let decoded = crate::persist::decode(&ship).map_err(|why| eprintln!("admin ship: ship {id} did not decode: {why}")).ok()?;
+        Some(Status::of(ship.ship_id, ship.saved_t, &decoded, &api.stars))
+    });
+    ron_response(&ShipDetail { ship: record.into(), status }, "ship")
+}
+
+#[derive(serde::Deserialize, Default)]
+struct Stand {
+    banned: Option<String>,
+    until: Option<String>,
+}
+
+async fn standing(
+    State(api): State<Api>,
+    headers: HeaderMap,
+    Path(account): Path<String>,
+    axum::extract::Query(asked): axum::extract::Query<Stand>,
+) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(standing) = stand(&asked) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match api.standings.send(crate::standing::Stated { account, standing }) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+
+/// `None` for an unknown `banned`, or an `until` that is not a number, which would otherwise
+/// read as a permanent ban.
+fn stand(asked: &Stand) -> Option<crate::standing::Standing> {
+    use crate::standing::Standing;
+    match asked.banned.as_deref()? {
+        "false" => Some(Standing::Clear),
+        "true" => {
+            let until_s = match &asked.until {
+                None => None,
+                Some(until) => Some(until.parse().ok()?),
+            };
+            Some(Standing::Banned { until_s })
+        }
+        _ => None,
+    }
+}
+
 fn ron_response(body: &impl serde::Serialize, route: &str) -> Response {
     match ron::to_string(body) {
         Ok(body) => (
@@ -250,5 +392,42 @@ fn ron_response(body: &impl serde::Serialize, route: &str) -> Response {
             eprintln!("admin {route}: could not serialize: {why}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the console's `shard.rs` pins as captured. A change here is a change there.
+    pub const SHIPS_PAYLOAD: &str = r#"(ships:[(ship_id:12,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Tachi"),launched_at:1795000000,ended_at:None),(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000))],total:2)"#;
+
+    #[test]
+    fn a_standing_is_read_strictly() {
+        use crate::standing::Standing;
+        let asked = |banned: Option<&str>, until: Option<&str>| stand(&Stand { banned: banned.map(Into::into), until: until.map(Into::into) });
+        assert_eq!(asked(Some("true"), None), Some(Standing::Banned { until_s: None }));
+        assert_eq!(asked(Some("true"), Some("1795000000")), Some(Standing::Banned { until_s: Some(1_795_000_000) }));
+        assert_eq!(asked(Some("true"), Some("soon")), None);
+        assert_eq!(asked(Some("false"), None), Some(Standing::Clear));
+        assert_eq!(asked(None, None), None);
+    }
+
+    #[test]
+    fn a_ship_page_serializes_as_the_console_reads_it() {
+        let account = Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70".to_owned());
+        let page = ShipPage {
+            ships: vec![
+                ShipRow { ship_id: 12, account: account.clone(), name: Some("Tachi".into()), launched_at: 1_795_000_000, ended_at: None },
+                ShipRow { ship_id: 9, account, name: Some("Canterbury".into()), launched_at: 1_794_000_000, ended_at: Some(1_794_500_000) },
+            ],
+            total: 2,
+        };
+        assert_eq!(ron::to_string(&page).unwrap(), SHIPS_PAYLOAD);
+        let detail = ShipDetail { ship: page.ships[1].clone(), status: None };
+        assert_eq!(
+            ron::to_string(&detail).unwrap(),
+            r#"(ship:(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000)),status:None)"#,
+        );
     }
 }

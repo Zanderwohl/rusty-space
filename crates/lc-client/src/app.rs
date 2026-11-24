@@ -31,6 +31,8 @@ pub enum AppState {
     MainMenu,
     Loading,
     InGame,
+    /// Naming and launching a ship, for an account with none. See [`crate::onboarding`].
+    Onboarding,
     /// The browser build could not reach its shard, or lost it. Terminal: there is no menu to
     /// fall back to, and reloading the page is the way back.
     Unreachable,
@@ -228,7 +230,7 @@ impl Plugin for ClientPlugin {
                     // mouse or by a crossing aiming itself, on the same frame.
                     crate::dev::frame_the_cast.run_if(in_state(AppState::InGame)),
                     (crate::dev::open_the_radio, crate::dev::open_the_channel, crate::dev::open_the_card).run_if(in_state(AppState::InGame)),
-                    crate::dev::type_at_the_console.run_if(in_state(AppState::InGame)),
+                    (crate::dev::type_at_the_console, crate::dev::stage_the_end).run_if(in_state(AppState::InGame)),
                     (crate::dev::apply_and_cancel, crate::dev::emit_at_selected).run_if(in_state(AppState::InGame)),
                     // After the framing, because a pin overrules everything including that.
                     crate::dev::pin_camera.run_if(in_state(AppState::InGame)),
@@ -310,6 +312,7 @@ impl Plugin for ClientPlugin {
             .add_plugins(crate::pick::PickPlugin)
             .add_plugins(crate::drones::DronesPlugin)
             .add_plugins(crate::uplink::UplinkPlugin)
+            .add_plugins(crate::onboarding::OnboardingPlugin)
             // Desktop only: a browser build arrives with a session.
             .add_plugins(SigninPlugins)
             .add_systems(

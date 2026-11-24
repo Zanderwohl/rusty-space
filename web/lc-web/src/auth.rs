@@ -120,9 +120,25 @@ pub async fn signin(State(state): State<AppState>, headers: HeaderMap) -> Respon
     if let Some(session) = state.who(&headers) {
         return already(&session).into_response();
     }
+    to_broker(&state, &identity, BrokerPage::SignIn)
+}
+
+/// Which of the broker's two forms a player is sent to. Both end at [`RETURN_PATH`], which
+/// lands on `/play`.
+pub enum BrokerPage {
+    SignIn,
+    Register,
+}
+
+/// Redirect to the broker with a fresh nonce.
+pub fn to_broker(state: &AppState, identity: &Identity<'_>, page: BrokerPage) -> Response {
+    let path = match page {
+        BrokerPage::SignIn => "/signin",
+        BrokerPage::Register => "/register",
+    };
     let nonce = session::nonce();
     let url = format!(
-        "{}/signin?return_to={}&state={nonce}",
+        "{}{path}?return_to={}&state={nonce}",
         identity.base,
         urlencode(&format!("{}{RETURN_PATH}", state.base_url)),
     );
@@ -262,7 +278,11 @@ fn already(session: &Session) -> maud::Markup {
         crate::views::Head::new("Signed in", "You are already signed in."),
         maud::html! {
             section class="stack" {
-                h1 { "Signed in as " (session.name) }
+                @if session.name.is_empty() {
+                    h1 { "Signed in" }
+                } @else {
+                    h1 { "Signed in as " (session.name) }
+                }
                 p class="lede" {
                     "There is nothing to sign in to — this browser already holds a session."
                 }

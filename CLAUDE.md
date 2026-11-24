@@ -7,9 +7,11 @@ someone a day. This file is the conventions.
 
 ## Writing style
 
-In all responses, aim to be specific and clear, avoiding metaphor and simile. Straightforward
-grammar without too much recursion is important. The following table gives examples of writing
-tics that make you hard to understand, as well as examples with corrections.
+Do not use Claudisms. Write in a straightforward style without clever grammar or too much
+nesting. Be specific where possible, and avoid metaphor and simile. These rules apply to
+conversation, code comments, documentation, prose, and site copy. The following table gives
+examples of writing tics that make text hard to understand, as well as examples with
+corrections.
 
 | Tic | Example | Better |
 | --- | --- | --- |
@@ -22,6 +24,7 @@ tics that make you hard to understand, as well as examples with corrections.
 | Straw-man knockdown | "It thinks twice as long" is the obvious reading, and it is wrong. | The output is twice as long, but most of the extra tokens restate the prompt. |
 | Fragment cadence | Six legs. One GPU, one server build, one sampler, one question set. | All six legs ran on the same GPU, server build, sampler, and question set. |
 | Dressed metaphor | That is information loss wearing the costume of a style fix. | The change was labeled a style fix, but it removes the units column, so readers lose information. |
+| Topic-Comment structure | A point, defined by its constraints. | A constraint-defined point. |
 
 ## Layout
 
@@ -153,8 +156,10 @@ conventions that are easy to violate by habit:
   what it looks like. A class used once is a review item; most pages should add none, because
   rendered markdown is bare tags and `_base.scss` styles those.
 - **No JavaScript.** Every page is a document a browser renders on arrival. `/play` is the one
-  exception and all it does is hand over to the game client. Anything that wants real
-  interactivity belongs in the client, which already has a WebGPU context.
+  exception and all it does is hand over to the game client. The `#micro-galaxy` decoration
+  (`static/scripts/micro-galaxy.js`) is the other: self-contained, and absent without
+  JavaScript. Anything that wants real interactivity belongs in the client, which already has
+  a WebGPU context.
 
 The browser build of the game is staged by `tools/build-wasm.sh` and delivered from a CDN that
 never overwrites anything — a new build is a new directory, so rollback is a pointer change.

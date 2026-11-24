@@ -143,6 +143,11 @@ pub struct DevEntry {
     pub menu_page: Option<crate::ui::MenuPage>,
     /// Open the password form on arrival, for the same reason.
     pub open_password_form: bool,
+    /// `--unlaunched`: take the account as having no ship, which holds at the launch screen.
+    pub unlaunched: bool,
+    /// `--collapse`: tell this client its own ship collapsed, as the shard would, once its hull
+    /// has been drawn. The shard's half is tested; this photographs the watch and the wreck.
+    pub collapse: bool,
     /// Say this to the first contact that appears, and show the conversation.
     ///
     /// The only way to photograph a transcript. Everything in the radio window arrives from a
@@ -275,7 +280,7 @@ pub(crate) fn run_dev_actions(
     // the moment it knows there is none, and one that has been refused is never going to be
     // any readier than it is.
     let settled = match &uplink.state {
-        crate::uplink::State::Joined(_) => true,
+        crate::uplink::State::Joined(_) | crate::uplink::State::Unlaunched => true,
         crate::uplink::State::Offline => address.0.is_none(),
         crate::uplink::State::Connecting => false,
         crate::uplink::State::Refused(_) | crate::uplink::State::Lost(_) => true,
@@ -526,6 +531,37 @@ pub(crate) fn open_the_card(
     out.write(Requested(Action::OpenPanel(crate::ui::Panel::Subject)));
 }
 
+/// `--unlaunched` and `--collapse`, once the connection has settled.
+pub(crate) fn stage_the_end(
+    dev: Res<DevEntry>,
+    mut game: ResMut<Game>,
+    mut ui: ResMut<Ui>,
+    mut uplink: ResMut<crate::uplink::Uplink>,
+    wrecks: Res<crate::field::Wrecks>,
+    mut done: Local<bool>,
+) {
+    if *done || !(dev.unlaunched || dev.collapse) || matches!(uplink.state, crate::uplink::State::Connecting) {
+        return;
+    }
+    if dev.unlaunched {
+        uplink.state = crate::uplink::State::Unlaunched;
+        *done = true;
+        return;
+    }
+    if !wrecks.has_own() {
+        return;
+    }
+    let session = &game.0;
+    let now_s = session.coordinate_time_s();
+    // Down, or with the clock frozen its light would never arrive.
+    let at_t = (now_s * 1.0e6).floor() as i64;
+    let released_j = session.ship.fitting().map_or(0.0, |f| f.field().released_j(f.stored_j_at(&session.ship.motion, now_s)));
+    let Some(ship_id) = uplink.joined().map(|joined| joined.ship_id) else { return };
+    info!(?ship_id, at_t, released_j, "staged a collapse of this client's ship");
+    crate::uplink::fold(&mut uplink, &mut game, &mut ui, lc_proto::Outbound::Collapsed { ship_id, at_t, released_j });
+    *done = true;
+}
+
 pub(crate) fn type_at_the_console(
     dev: Res<DevEntry>,
     uplink: Res<crate::uplink::Uplink>,
@@ -732,6 +768,7 @@ fn numbered(path: &str, index: u32) -> String {
 /// `--first-person`: after everything that shows the player's own ship, hide it and its drones.
 pub(crate) fn hide_own_ship(
     dev: Res<DevEntry>,
+    uplink: Res<crate::uplink::Uplink>,
     mut roots: Query<(&crate::ship_hull::ShipHull, &mut Visibility), Without<crate::hull::Hull>>,
     mut ovoids: Query<(&crate::hull::Hull, &mut Visibility), Without<crate::ship_hull::ShipHull>>,
     mut parts: Query<
@@ -739,7 +776,8 @@ pub(crate) fn hide_own_ship(
         (Or<(With<crate::parts::FormRoot>, With<crate::drones::Swarm>)>, Without<crate::hull::Hull>, Without<crate::ship_hull::ShipHull>),
     >,
 ) {
-    if !dev.first_person {
+    // Collapsed, its wreck is drawn in its place.
+    if !dev.first_person && uplink.fallen.is_none() {
         return;
     }
     for (_, mut visibility) in roots.iter_mut().filter(|(h, _)| h.craft().is_none()) {

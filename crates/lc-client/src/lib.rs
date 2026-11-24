@@ -68,6 +68,7 @@ pub mod map_spread;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
 pub mod menu;
+pub mod onboarding;
 pub mod panels;
 pub mod parts;
 pub mod pick;

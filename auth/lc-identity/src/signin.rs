@@ -180,7 +180,6 @@ pub async fn register_password(
     store: &Store,
     email: &str,
     password_input: &str,
-    display_name: &str,
 ) -> Result<Uuid, Refused> {
     let phc = password::hash(password_input).map_err(Refused::Unacceptable)?;
     let subject = normalize_email(email);
@@ -190,7 +189,7 @@ pub async fn register_password(
     let account = store
         .add_link(
             None,
-            display_name,
+            None,
             Link {
                 provider: Provider::Password,
                 subject: subject.clone(),
@@ -210,7 +209,7 @@ mod tests {
 
     async fn with_account(email: &str, password_input: &str) -> Store {
         let store = Store::memory();
-        register_password(&store, email, password_input, "Ada")
+        register_password(&store, email, password_input)
             .await
             .expect("registered");
         store
@@ -250,8 +249,7 @@ mod tests {
             register_password(
                 &store,
                 "ADA@example.test",
-                "another password entirely",
-                "Imposter"
+                "another password entirely"
             )
             .await,
             Err(Refused::Taken),
@@ -262,7 +260,7 @@ mod tests {
     async fn a_password_that_is_refused_creates_nothing() {
         let store = Store::memory();
         assert_eq!(
-            register_password(&store, "ada@example.test", "short", "Ada").await,
+            register_password(&store, "ada@example.test", "short").await,
             Err(Refused::Unacceptable(password::Unacceptable::TooShort)),
         );
         assert!(

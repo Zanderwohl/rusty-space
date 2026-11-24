@@ -29,6 +29,15 @@ pub struct Detail {
     pub sanction: Option<Sanction>,
     /// Best effort: a shard that is down makes this section say so and leaves the rest working.
     pub status: Result<Status, Missing>,
+    /// Every ship the account has launched, newest first. Best effort, as `status` is.
+    pub ships: Result<crate::shard::ShipPage, Missing>,
+}
+
+impl Detail {
+    pub fn title(&self) -> String {
+        let email = self.links.iter().find_map(|l| l.email.as_deref());
+        super::account_label(self.account.display_name.as_deref(), email, self.account.id)
+    }
 }
 
 pub struct Notice {
@@ -77,7 +86,7 @@ pub fn region(
             }
 
             header class="person" {
-                h1 { (account.display_name) }
+                h1 { (detail.title()) }
                 p class="person-badges" {
                     (super::level_badge(level))
                     (standing(detail, now))
@@ -165,7 +174,7 @@ fn controls(admin: &Admin, detail: &Detail, now: DateTime<Utc>) -> Markup {
                         hx-post=(crate::routes::user_ban_url(account.id))
                         // `ts/confirm.ts` answers this; with scripting off htmx falls back to
                         // `window.confirm`.
-                        hx-confirm={ "Ban " (account.display_name) "?" }
+                        hx-confirm={ "Ban " (detail.title()) "?" }
                     {
                         div class="field" {
                             label for="reason" { "Reason" }
@@ -391,9 +400,18 @@ fn grants(detail: &Detail, now: DateTime<Utc>) -> Markup {
 ///
 /// The system card is deliberately thin — more about the system goes here later.
 fn status_section(detail: &Detail) -> Markup {
+    // Every ship here is this account's.
+    let pilots = std::collections::HashMap::from([(
+        detail.account.id,
+        crate::users::Pilot {
+            display_name: detail.account.display_name.clone(),
+            email: detail.links.iter().find_map(|l| l.email.clone()),
+            banned: detail.sanction.is_some(),
+        },
+    )]);
     html! {
         section class="panel" {
-            h2 { "Status" }
+            h2 { "Ships" }
             @match &detail.status {
                 Err(missing) => p class="nothing" { (missing.said()) },
                 Ok(status) => div class="cards" {
@@ -401,11 +419,17 @@ fn status_section(detail: &Detail) -> Markup {
                     (fit_card(status))
                 },
             }
+            @match &detail.ships {
+                Err(Missing::NotConfigured) => {},
+                Err(missing) => p class="nothing" { (missing.said()) },
+                Ok(page) if page.ships.is_empty() => {},
+                Ok(page) => (super::ships::table(&page.ships, &pilots)),
+            }
         }
     }
 }
 
-fn where_card(status: &Status) -> Markup {
+pub(crate) fn where_card(status: &Status) -> Markup {
     html! {
         article class="card" {
             h3 { "Whereabouts" }
@@ -430,14 +454,16 @@ fn where_card(status: &Status) -> Markup {
     }
 }
 
-fn fit_card(status: &Status) -> Markup {
+pub(crate) fn fit_card(status: &Status) -> Markup {
     html! {
         article class="card" {
             h3 { "Ship" }
             p class="card-headline" {
-                @match &status.name {
-                    Some(name) => (name),
-                    None => "Unnamed",
+                a href=(crate::routes::ship_url(status.ship_id)) {
+                    @match &status.name {
+                        Some(name) => (name),
+                        None => "Unnamed",
+                    }
                 }
             }
             p class="card-detail" {
@@ -578,7 +604,7 @@ mod tests {
         Detail {
             account: Account {
                 id: Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
-                display_name: "Grace".into(),
+                display_name: Some("Grace".into()),
                 permission: level.as_i32(),
             },
             joined: Some(Utc::now()),
@@ -588,6 +614,7 @@ mod tests {
             log: Vec::new(),
             sanction,
             status: Err(Missing::NotConfigured),
+            ships: Err(Missing::NotConfigured),
         }
     }
 

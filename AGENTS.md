@@ -98,6 +98,8 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--menu` | hold at the main menu, so `--shot` photographs that instead of the sky |
 | `--signin` | hold at the sign-in modal, which draws over the menu and no action can reach |
 | `--password` | hold at the password form, the one egui surface inside the menu |
+| `--unlaunched` | take the account as having no ship, which holds at the launch screen |
+| `--collapse` | tell the client its own ship collapsed, as the shard would, once its hull is drawn: the ten-second watch of the wreck, then the launch screen. Needs a shard (`--local`), which states the form the hull is drawn from |
 | `--turn <deg>` / `--pitch <deg>` | turn the view, the only way to put something off screen |
 | `--zoom <notches>` | move the orbit camera; both its stops are clamps, so ask for far too much |
 | `--map <bearing:elevation:au>` | pin the map's camera. A pin, so two shots of it are the same shot |

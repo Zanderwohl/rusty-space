@@ -61,7 +61,7 @@ version field. Not a path dependency.
 | middleware | tower-http: trace, compression, timeout, set-header | — |
 | templates | **maud** | askama's template files buy nothing when every fragment is also a function; maud makes "return a partial or a whole page" a composition question, and the compiler checks it |
 | styling | SCSS compiled by **grass** at startup, semantic classes | no Node in the build, and no utility-class vocabulary to learn twice |
-| interactivity | none: no JavaScript but `/play` | see [The site is documents](#the-site-is-documents) |
+| interactivity | none: no JavaScript but `/play` and the `#micro-galaxy` decoration | see [The site is documents](#the-site-is-documents) |
 | markdown | pulldown-cmark + syntect | — |
 | database | PostgreSQL via sqlx 0.8, queries checked at run time | compile-time checking needs a committed `.sqlx/` re-prepared against a live database on every query change, and a stale one fails the Docker build; for a handful of queries over two tables, the hermetic build wins. `lc-store` uses tokio-postgres because it hand-writes range scans |
 | feeds | the `rss` crate | hand-rolled XML escaping is a bug farm |
@@ -92,6 +92,11 @@ PostgreSQL stopped.
 renders on arrival; `/play` is the single exception, and what it does is hand over to the game.
 Anything that wants real interactivity belongs in the client, which is a Bevy application with
 a WebGPU context and no reason to be re-implemented badly in a browser DOM.
+
+The one other script is `static/scripts/micro-galaxy.js`, a spinning galaxy drawn into a
+`<div id="micro-galaxy">` on the home page. It is decoration and reads nothing from the page
+but its host's `width` and `height`. With JavaScript off the div is empty and takes no room,
+so the page is the same document either way.
 
 An earlier draft let htmx into four places — pagination, tag filtering, the newsletter form and
 the account pages. None was built: each is a plain page and a plain form, and works as one.

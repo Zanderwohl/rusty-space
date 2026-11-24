@@ -178,7 +178,8 @@ mod tests {
     }
 
     async fn signs_in(server: &mut Server<Memory>, wire: &mut Loopback, from: ClientId, ticket: String) -> Vec<Outbound> {
-        says(server, wire, from, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket }).await
+        wire.client_says(from, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket });
+        says(server, wire, from, crate::testing::launch()).await
     }
 
     fn presets(said: &[Outbound]) -> Option<Vec<Preset>> {

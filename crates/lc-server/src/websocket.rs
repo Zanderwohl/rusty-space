@@ -210,6 +210,7 @@ mod tests {
             })))
             .await
             .unwrap();
+        client.send(Message::Binary(lc_proto::encode(&crate::testing::launch()).into())).await.unwrap();
 
         // Tick until the hello has come through and been answered.
         for _ in 0..200 {
@@ -222,6 +223,9 @@ mod tests {
             {
                 let Message::Binary(bytes) = frame else { continue };
                 let message: Outbound = lc_proto::decode(&bytes).expect("it decodes");
+                if message == Outbound::Unlaunched {
+                    continue;
+                }
                 assert!(
                     matches!(message, Outbound::Welcome { client_id, ship_id, .. }
                         if client_id == id && ship_id == ShipId(1)),

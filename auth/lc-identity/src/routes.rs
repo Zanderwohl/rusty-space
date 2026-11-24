@@ -118,7 +118,6 @@ struct Credentials {
     to: Destination,
     email: String,
     password: String,
-    display_name: Option<String>,
 }
 
 async fn sign_in(
@@ -172,13 +171,7 @@ async fn complete(
     }
 
     let outcome = if new_account {
-        signin::register_password(
-            &broker.store,
-            &form.email,
-            &form.password,
-            form.display_name.as_deref().unwrap_or("Traveler"),
-        )
-        .await
+        signin::register_password(&broker.store, &form.email, &form.password).await
     } else {
         signin::with_password(&broker.store, &form.email, &form.password).await
     };
@@ -233,8 +226,6 @@ struct NativeCredentials {
     password: String,
     /// What a revocation list shows a person. The machine, not an identifier.
     label: String,
-    /// Only read when registering.
-    display_name: Option<String>,
 }
 
 async fn native_signin(
@@ -282,13 +273,7 @@ async fn native(
     }
 
     let outcome = if new_account {
-        signin::register_password(
-            &broker.store,
-            &form.email,
-            &form.password,
-            form.display_name.as_deref().unwrap_or("Traveler"),
-        )
-        .await
+        signin::register_password(&broker.store, &form.email, &form.password).await
     } else {
         signin::with_password(&broker.store, &form.email, &form.password).await
     };
@@ -333,7 +318,7 @@ async fn native(
     axum::Json(Granted {
         grant,
         account_id: account.id.to_string(),
-        display_name: account.display_name,
+        display_name: account.display_name.unwrap_or_default(),
     })
     .into_response()
 }
@@ -382,7 +367,7 @@ async fn exchange(
             }
             axum::Json(Identity {
                 account_id: account.id.to_string(),
-                display_name: account.display_name,
+                display_name: account.display_name.unwrap_or_default(),
             })
             .into_response()
         }
@@ -462,7 +447,7 @@ async fn ticket(
     }
     match broker.keys.mint(
         &account.id.to_string(),
-        &account.display_name,
+        account.display_name.as_deref().unwrap_or_default(),
         account.permission,
         &audience,
         chrono::Utc::now().timestamp(),
@@ -537,7 +522,7 @@ async fn grant(
     axum::Json(Granted {
         grant,
         account_id: account.id.to_string(),
-        display_name: account.display_name,
+        display_name: account.display_name.unwrap_or_default(),
     })
     .into_response()
 }
@@ -629,8 +614,7 @@ mod endpoint_tests {
         crate::signin::register_password(
             &broker.store,
             "ada@example.test",
-            "a good password",
-            "Ada",
+            "a good password"
         )
         .await
         .unwrap()
@@ -840,7 +824,8 @@ mod endpoint_tests {
         });
         let (status, granted) = call(&broker, post("/signin/register/native", make, None)).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(granted["display_name"], "Ada");
+        // A name sent by an older client is ignored.
+        assert_eq!(granted["display_name"], "");
 
         // The grant it handed back is a real one.
         let (status, minted) = call(

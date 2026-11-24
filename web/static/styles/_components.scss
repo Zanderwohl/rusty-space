@@ -58,6 +58,33 @@
   }
 }
 
+// The link a page most wants followed.
+.primary-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ground);
+  font-weight: 600;
+
+  &:hover {
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+}
+
+// Calls to action, centered and stacked, first one on top.
+.actions {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+// The page's last word: its primary button is larger than one met in passing.
+.closing-actions .primary-button {
+  font-size: var(--step-1);
+  padding: var(--space-3) var(--space-5);
+}
+
 // Build ids, licenses, and anything else nobody reads until they need it.
 .fine-print {
   font-size: var(--step--1);

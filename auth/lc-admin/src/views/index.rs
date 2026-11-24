@@ -179,8 +179,8 @@ fn line(row: &Row, now: DateTime<Utc>) -> Markup {
     html! {
         tr class={ "row-link" @if row.is_banned() { " is-banned" } } {
             th scope="row" class="cell-name" {
-                a href=(crate::routes::user_url(row.id)) { (row.display_name) }
-                @if let Some(email) = &row.email {
+                a href=(crate::routes::user_url(row.id)) { (super::account_label(row.display_name.as_deref(), row.email.as_deref(), row.id)) }
+                @if row.display_name.is_some() && let Some(email) = &row.email {
                     span class="cell-email" { (email) }
                 }
             }
@@ -286,7 +286,7 @@ mod tests {
         (0..n)
             .map(|i| Row {
                 id: Uuid::new_v4(),
-                display_name: format!("Account {i}"),
+                display_name: Some(format!("Account {i}")),
                 level: Level::PLAYER,
                 email: Some(format!("a{i}@example.test")),
                 in_force: 0,

@@ -219,13 +219,6 @@ pub(crate) fn credentials_page(
                 form method="post" action=(which.action()) class="signin-form" {
                     input type="hidden" name="return_to" value=(to.return_to);
                     input type="hidden" name="state" value=(to.state);
-                    @if which == Which::Register {
-                        label for="display_name" { "Name" }
-                        // What other players see. Optional, because a person who has not
-                        // decided should still be able to finish.
-                        input id="display_name" name="display_name" type="text"
-                            autocomplete="nickname" maxlength="60";
-                    }
                     label for="email" { "Email" }
                     input id="email" name="email" type="email" autocomplete="username" required;
                     label for="password" { "Password" }
@@ -236,8 +229,7 @@ pub(crate) fn credentials_page(
                         // Said before it is refused, because a rule a person meets on the first
                         // try is not a rule they had to be told off about.
                         p class="fine-print" {
-                            "At least " (crate::password::MIN_LENGTH) " characters. "
-                            "There is no password reset yet, so keep it somewhere."
+                            "At least " (crate::password::MIN_LENGTH) " characters."
                         }
                     }
                     button type="submit" { (which.title()) }
@@ -287,9 +279,6 @@ pub(crate) fn shell(title: &str, body: Markup) -> Markup {
                 // allowlist, and a masthead is one more place to be sent that is not.
                 p class="wordmark" { "Lightcone Frontier" }
                 main { (body) }
-                footer class="fine-print" {
-                    "A relativistic sandbox in a volume of real stars."
-                }
             }
         }
     }
@@ -426,8 +415,8 @@ mod tests {
         assert!(page.contains("action=\"/signin/register\""), "{page}");
         assert!(page.contains("https://lightcone.example/auth/return"));
         assert!(page.contains("nonce1"));
-        // A new account needs a name and a new-password field, not a current-password one.
-        assert!(page.contains("display_name"), "{page}");
+        // A new-password field, not a current-password one, and no name field.
+        assert!(!page.contains("display_name"), "{page}");
         assert!(page.contains("new-password"), "{page}");
         assert!(!page.contains("current-password"), "{page}");
         // And the way back, with the destination intact.

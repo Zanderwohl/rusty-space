@@ -11,7 +11,7 @@ use axum::extract::{Form, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use lc_identity::ability;
 use lc_identity::actions::Action;
 use lc_identity::bans::{Issue, Reason, Term};
@@ -33,6 +33,9 @@ pub const RETURN: &str = "/auth/return";
 pub const SIGNOUT: &str = "/signout";
 pub const USERS: &str = "/users";
 pub const USER_ROWS: &str = "/users/rows";
+pub const SHIPS: &str = "/ships";
+pub const SHIP_ROWS: &str = "/ships/rows";
+const SHIP: &str = "/ships/{id}";
 pub const SYSTEMS: &str = "/systems";
 pub const SYSTEM_ROWS: &str = "/systems/rows";
 const SYSTEM: &str = "/systems/{id}";
@@ -45,6 +48,10 @@ const USER_LIFT: &str = "/users/{id}/lift";
 
 pub fn user_url(id: Uuid) -> String {
     format!("/users/{id}")
+}
+
+pub fn ship_url(id: i64) -> String {
+    format!("/ships/{id}")
 }
 
 pub fn system_url(id: u64) -> String {
@@ -93,7 +100,9 @@ pub fn router(state: AppState) -> Router {
         // A static path beats `{id}`, which is what lets `/users/rows` and `/users/{id}` coexist.
         .route(USER_ROWS, get(rows))
         .route(USER, get(person))
-        // No detail route: there is not enough about one system to be worth a page.
+        .route(SHIPS, get(ship_index))
+        .route(SHIP_ROWS, get(ship_rows))
+        .route(SHIP, get(ship_page))
         .route(SYSTEMS, get(system_index))
         .route(SYSTEM_ROWS, get(system_rows))
         .route(SYSTEM, get(system_page))
@@ -197,6 +206,73 @@ async fn load_page(state: &AppState, listing: &Listing) -> Result<users::Page, R
                 "The account store did not answer.",
             )
         })
+}
+
+async fn ship_index(
+    State(state): State<AppState>,
+    admin: Admin,
+    Query(params): Query<crate::fleet::Params>,
+) -> Response {
+    let listing = crate::fleet::Listing::from_params(params);
+    let (found, pilots) = load_ships(&state, &admin, &listing).await;
+    views::shell(&state.assets, Head { title: "Ships" }, Some(&admin), views::ships::page(&listing, &found, &pilots)).into_response()
+}
+
+async fn ship_rows(
+    State(state): State<AppState>,
+    admin: Admin,
+    Query(params): Query<crate::fleet::Params>,
+) -> Response {
+    let listing = crate::fleet::Listing::from_params(params);
+    let (found, pilots) = load_ships(&state, &admin, &listing).await;
+    views::ships::region(&listing, &found, &pilots).into_response()
+}
+
+type Pilots = std::collections::HashMap<Uuid, crate::users::Pilot>;
+
+/// Who flew each ship comes from this service's own database; a lookup that fails leaves the
+/// pilots unlabeled rather than the page unrendered.
+async fn pilots_of<'a>(state: &AppState, ships: impl IntoIterator<Item = &'a crate::shard::ShipRow>) -> Pilots {
+    let ids = views::ship::accounts_of(ships);
+    crate::users::pilots(&state.pool, &ids, Utc::now()).await.unwrap_or_else(|why| {
+        tracing::error!(%why, "could not look up the pilots of a page of ships");
+        Pilots::new()
+    })
+}
+
+async fn load_ships(
+    state: &AppState,
+    admin: &Admin,
+    listing: &crate::fleet::Listing,
+) -> (Result<crate::shard::ShipPage, crate::shard::Missing>, Pilots) {
+    let found = match state.shard() {
+        None => Err(crate::shard::Missing::NotConfigured),
+        Some(shard) => shard.ships(&admin.id.to_string(), &listing.shard_query()).await,
+    };
+    let pilots = match &found {
+        Ok(page) => pilots_of(state, &page.ships).await,
+        Err(_) => Pilots::new(),
+    };
+    (found, pilots)
+}
+
+async fn ship_page(State(state): State<AppState>, admin: Admin, Path(id): Path<String>) -> Response {
+    let found = match (state.shard(), id.parse::<i64>()) {
+        (None, _) => Err(crate::shard::Missing::NotConfigured),
+        (_, Err(_)) => Err(crate::shard::Missing::NoSuchShip),
+        (Some(shard), Ok(id)) => shard.ship(&admin.id.to_string(), id).await,
+    };
+    let pilots = match &found {
+        Ok(detail) => pilots_of(&state, [&detail.ship]).await,
+        Err(_) => Pilots::new(),
+    };
+    let status = match &found {
+        Err(crate::shard::Missing::NoSuchShip) => StatusCode::NOT_FOUND,
+        _ => StatusCode::OK,
+    };
+    let title = views::ship::title(&found);
+    let page = views::shell(&state.assets, Head { title: &title }, Some(&admin), views::ship::page(&found, &pilots));
+    (status, page).into_response()
 }
 
 async fn system_index(
@@ -348,14 +424,18 @@ async fn load_detail(state: &AppState, id: Uuid, acting: &Admin) -> Result<Detai
     // **Best effort, and last.** A shard that is down, slow or not configured makes the
     // Status section say so; every other section on this page is answered by a database this
     // service owns and is not held up by a network call to another one.
-    let status = match state.shard() {
-        None => Err(crate::shard::Missing::NotConfigured),
-        Some(shard) => shard.status(&acting.id.to_string(), &id.to_string()).await,
+    let (status, ships) = match state.shard() {
+        None => (Err(crate::shard::Missing::NotConfigured), Err(crate::shard::Missing::NotConfigured)),
+        Some(shard) => {
+            let acting = acting.id.to_string();
+            (shard.status(&acting, &id.to_string()).await, shard.ships(&acting, &crate::fleet::of_account(id)).await)
+        }
     };
 
     let now = Utc::now();
     Ok(Detail {
         status,
+        ships,
         sanction: store
             .sanction(id, now)
             .await
@@ -388,7 +468,7 @@ fn page_for(state: &AppState, admin: &Admin, detail: &Detail, notice: Option<&No
     views::shell(
         &state.assets,
         Head {
-            title: &detail.account.display_name,
+            title: &detail.title(),
         },
         Some(admin),
         views::user::page(admin, detail, notice, Utc::now()),
@@ -590,6 +670,7 @@ async fn issue_ban(
                         actor = %admin.id, subject = %id, %ban,
                         reason = reason.slug(), term = term.slug(), "ban issued",
                     );
+                    tell_the_shard(&state, &admin, id, now).await;
                     Ok(Done::Banned)
                 }
             }
@@ -645,11 +726,28 @@ async fn lift_ban(
                     tracing::error!(%why, subject = %id, "a lift went unlogged");
                 }
                 tracing::info!(actor = %admin.id, subject = %id, ban = %form.ban, "ban lifted");
+                tell_the_shard(&state, &admin, id, now).await;
                 Ok(Done::Lifted)
             }
         },
     };
     answered(&state, &admin, &headers, id, outcome).await
+}
+
+/// Sends the standing as it now is: lifting one ban of several leaves the account banned. Best
+/// effort, because the broker enforces the ban at the account's next sign-in regardless.
+async fn tell_the_shard(state: &AppState, admin: &Admin, id: Uuid, now: DateTime<Utc>) {
+    let Some(shard) = state.shard() else { return };
+    let sanction = match state.store().sanction(id, now).await {
+        Ok(sanction) => sanction,
+        Err(why) => {
+            tracing::error!(%why, subject = %id, "could not read a standing to send the shard");
+            return;
+        }
+    };
+    if let Err(why) = shard.stand(&admin.id.to_string(), id, sanction.as_ref()).await {
+        tracing::error!(?why, subject = %id, "the shard was not told of a change of standing");
+    }
 }
 
 /// No degraded mode: without the database there is nothing to administer.
@@ -711,6 +809,8 @@ mod tests {
         assert_eq!(USER.replace("{id}", "rows"), USER_ROWS);
         assert_eq!(system_url(42), SYSTEM.replace("{id}", "42"));
         assert_eq!(SYSTEM.replace("{id}", "rows"), SYSTEM_ROWS);
+        assert_eq!(ship_url(42), SHIP.replace("{id}", "42"));
+        assert_eq!(SHIP.replace("{id}", "rows"), SHIP_ROWS);
         assert_eq!(
             cdn_build_url("2026.09.1+a10eac4"),
             CDN_BUILD.replace("{id}", "2026.09.1+a10eac4")
