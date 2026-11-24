@@ -452,8 +452,7 @@ async fn a_squatted_address_does_not_become_the_google_account() {
     let squatter = lc_identity::signin::register_password(
         &store,
         "ada@example.test",
-        "a good enough password",
-        "Imposter",
+        "a good enough password"
     )
     .await
     .unwrap();

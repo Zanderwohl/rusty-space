@@ -15,7 +15,7 @@ use crate::listing::{Listing, Rank, Standing};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub id: Uuid,
-    pub display_name: String,
+    pub display_name: Option<String>,
     pub level: Level,
     /// One, to recognize the account by. The user page enumerates them.
     pub email: Option<String>,
@@ -63,7 +63,7 @@ impl Page {
 
 type IndexRow = (
     Uuid,
-    String,
+    Option<String>,
     i32,
     Option<String>,
     i64,
@@ -164,6 +164,35 @@ pub async fn page(pool: &PgPool, listing: &Listing, now: DateTime<Utc>) -> sqlx:
     })
 }
 
+/// Who flew a ship, as a ship's page names them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pilot {
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    /// A ban in force stops every ship the account has, and any it would launch.
+    pub banned: bool,
+}
+
+/// The pilots among `ids`, by account. One with no row is an account deleted since, or a
+/// shard's anonymous connection.
+pub async fn pilots(pool: &PgPool, ids: &[Uuid], now: DateTime<Utc>) -> sqlx::Result<std::collections::HashMap<Uuid, Pilot>> {
+    if ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let rows: Vec<(Uuid, Option<String>, Option<String>, bool)> = sqlx::query_as(
+        "select a.id, a.display_name, \
+                (select min(l.email) from links l where l.account_id = a.id and l.email is not null), \
+                exists (select 1 from bans b where b.account_id = a.id and b.lifted_at is null \
+                          and (b.expires_at is null or b.expires_at > $2)) \
+         from accounts a where a.id = any($1)",
+    )
+    .bind(ids)
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id, display_name, email, banned)| (id, Pilot { display_name, email, banned })).collect())
+}
+
 /// For the one case where "nothing matches" and "you paged past the end" differ.
 pub async fn total_matching(
     pool: &PgPool,
@@ -216,7 +245,7 @@ mod tests {
             rows: (0..rows)
                 .map(|n| Row {
                     id: Uuid::new_v4(),
-                    display_name: format!("account {n}"),
+                    display_name: Some(format!("account {n}")),
                     level: Level::PLAYER,
                     email: None,
                     in_force: 0,

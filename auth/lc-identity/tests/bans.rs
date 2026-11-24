@@ -140,7 +140,7 @@ async fn sign_in(app: &axum::Router) -> String {
 }
 
 async fn account(store: &Store) -> Uuid {
-    lc_identity::signin::register_password(store, EMAIL, PASSWORD, "Ada")
+    lc_identity::signin::register_password(store, EMAIL, PASSWORD)
         .await
         .expect("registered")
 }

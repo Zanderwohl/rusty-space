@@ -12,11 +12,12 @@ use uuid::Uuid;
 use crate::level::Level;
 use crate::providers::Provider;
 
-/// An account as anything outside the broker sees it: an opaque id, a name, and what it may do.
+/// An account as anything outside the broker sees it: an opaque id, a name if it has one, and
+/// what it may do. A password account has none; a ship's name belongs to the shard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub id: Uuid,
-    pub display_name: String,
+    pub display_name: Option<String>,
     /// The raw column. Read it as a [`Level`], which carries the ordering — the integers run
     /// the opposite way to seniority and comparing two of them directly is the mistake that
     /// type exists to prevent.
@@ -171,7 +172,7 @@ impl Store {
         match self {
             Store::Memory(m) => Ok(m.0.lock().unwrap().accounts.get(&id).cloned()),
             Store::Postgres(pool) => {
-                let row: Option<(Uuid, String, i32)> = sqlx::query_as(
+                let row: Option<(Uuid, Option<String>, i32)> = sqlx::query_as(
                     "select id, display_name, permission from accounts where id = $1",
                 )
                 .bind(id)
@@ -216,7 +217,7 @@ impl Store {
     pub async fn add_link(
         &self,
         account_id: Option<Uuid>,
-        display_name: &str,
+        display_name: Option<&str>,
         link: Link,
     ) -> Result<Account, StoreError> {
         let email = link.email.as_deref().map(normalize_email);
@@ -230,7 +231,7 @@ impl Store {
         let id = account_id.unwrap_or_else(Uuid::new_v4);
         let account = Account {
             id,
-            display_name: display_name.to_owned(),
+            display_name: display_name.map(str::to_owned),
             permission: PLAYER,
         };
         let link = Link {
@@ -597,7 +598,7 @@ mod tests {
         let made = store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 link(
                     Provider::Password,
                     "ada@example.test",
@@ -637,7 +638,7 @@ mod tests {
         let google = store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 link(Provider::Google, "g-1", "ada@example.test", true),
             )
             .await
@@ -647,7 +648,7 @@ mod tests {
         let password = store
             .add_link(
                 None,
-                "Not Ada",
+                Some("Not Ada"),
                 link(
                     Provider::Password,
                     "ada@example.test",
@@ -680,7 +681,7 @@ mod tests {
         let first = store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 link(Provider::Google, "g-1", "ada@example.test", true),
             )
             .await
@@ -690,7 +691,7 @@ mod tests {
         let rival = store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 link(Provider::Discord, "d-1", "ada@example.test", true),
             )
             .await;
@@ -703,7 +704,7 @@ mod tests {
         store
             .add_link(
                 Some(first.id),
-                "Ada",
+                Some("Ada"),
                 link(Provider::Discord, "d-1", "ada@example.test", true),
             )
             .await
@@ -725,7 +726,7 @@ mod tests {
         store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 link(
                     Provider::Password,
                     "ada@example.test",
@@ -771,7 +772,7 @@ mod code_tests {
         store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 Link {
                     provider: Provider::Password,
                     subject: "ada@example.test".into(),
@@ -897,7 +898,7 @@ mod grant_tests {
         store
             .add_link(
                 None,
-                "Ada",
+                Some("Ada"),
                 Link {
                     provider: Provider::Password,
                     subject: "ada@example.test".into(),

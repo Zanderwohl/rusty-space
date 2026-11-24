@@ -346,3 +346,29 @@ fn ron_response(body: &impl serde::Serialize, route: &str) -> Response {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the console's `shard.rs` pins as captured. A change here is a change there.
+    pub const SHIPS_PAYLOAD: &str = r#"(ships:[(ship_id:12,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Tachi"),launched_at:1795000000,ended_at:None),(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000))],total:2)"#;
+
+    #[test]
+    fn a_ship_page_serializes_as_the_console_reads_it() {
+        let account = Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70".to_owned());
+        let page = ShipPage {
+            ships: vec![
+                ShipRow { ship_id: 12, account: account.clone(), name: Some("Tachi".into()), launched_at: 1_795_000_000, ended_at: None },
+                ShipRow { ship_id: 9, account, name: Some("Canterbury".into()), launched_at: 1_794_000_000, ended_at: Some(1_794_500_000) },
+            ],
+            total: 2,
+        };
+        assert_eq!(ron::to_string(&page).unwrap(), SHIPS_PAYLOAD);
+        let detail = ShipDetail { ship: page.ships[1].clone(), status: None };
+        assert_eq!(
+            ron::to_string(&detail).unwrap(),
+            r#"(ship:(ship_id:9,account:Some("6f1c2a4e-0d5b-4c43-9a57-3b1e2f9d8c70"),name:Some("Canterbury"),launched_at:1794000000,ended_at:Some(1794500000)),status:None)"#,
+        );
+    }
+}
