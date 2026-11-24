@@ -37,10 +37,14 @@ const CANVAS: &str = "#lightcone";
 #[cfg(target_arch = "wasm32")]
 const DEFAULT_ASSET_BASE: &str = "assets";
 
-/// The packed catalog, under the asset base. `tools/build-wasm.sh` writes it here, and a
-/// shard's `--sky` names the same object.
+/// The packed sky, under the asset base: an `.lcsky` catalog or an authored galaxy's
+/// `.galaxy` manifest. `tools/build-wasm.sh` writes it and sets `LC_SKY`, and a shard's `--sky`
+/// names the same object.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-const SKY: &str = "sky/catalog.lcsky";
+const SKY: &str = match option_env!("LC_SKY") {
+    Some(path) => path,
+    None => "sky/catalog.lcsky",
+};
 
 #[cfg(target_arch = "wasm32")]
 fn main() {

@@ -30,6 +30,10 @@ done
 BUILD_ID="$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)"
 OUT="target/web/$BUILD_ID"
 CATALOG=assets/catalogs/hygdata_v42.csv
+# An authored galaxy's timeline, published into the build in place of CATALOG when set. The
+# playtest phases of lightcone/docs/34-galaxy-authoring.md set it; committed, so the build id
+# names the galaxy as well as the code.
+GALAXY=crates/lc-galaxy/galaxies/phase-1.ron
 
 for tool in wasm-bindgen wasm-opt; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
@@ -40,10 +44,17 @@ rm -rf "$OUT"; mkdir -p "$OUT/assets"
 
 # The sky, packed. The browser never sees a CSV: there is no filesystem to read one from and
 # no reason to send 34 MB when 0.3 will do.
-echo "==> sky chunk"
 mkdir -p "$OUT/assets/sky"
-cargo run -q -p lc-world --bin skypack -- "$CATALOG" "$OUT/assets/sky/catalog.lcsky" \
-  --limit "$SKY_LIMIT"
+if [ -n "$GALAXY" ]; then
+  echo "==> galaxy $GALAXY"
+  cargo run -q -p lc-galaxy --bin lc-galaxy -- publish "$GALAXY" --out "$OUT/assets/sky/galaxy"
+  export LC_SKY=sky/galaxy/manifest.galaxy
+else
+  echo "==> sky chunk"
+  cargo run -q -p lc-world --bin skypack -- "$CATALOG" "$OUT/assets/sky/catalog.lcsky" \
+    --limit "$SKY_LIMIT"
+  export LC_SKY=sky/catalog.lcsky
+fi
 
 # `--no-default-features` turns off `hyg`, which is what keeps the CSV reader -- and the only
 # `std::fs` call in the client's tree -- out of the browser binary entirely.
@@ -77,7 +88,7 @@ cp -R crates/lc-client/assets/textures "$OUT/assets/textures"
 
 WASM_BYTES=$(wc -c < "$OUT/${BIN}_bg.wasm" | tr -d ' ')
 JS_BYTES=$(wc -c < "$OUT/$BIN.js" | tr -d ' ')
-SKY_BYTES=$(wc -c < "$OUT/assets/sky/catalog.lcsky" | tr -d ' ')
+SKY_BYTES=$(find "$OUT/assets/sky" -type f -exec cat {} + | wc -c | tr -d ' ')
 
 cat > "$OUT/manifest.json" <<JSON
 {
@@ -87,6 +98,7 @@ cat > "$OUT/manifest.json" <<JSON
   "entry": "$BIN.js",
   "wasm": "${BIN}_bg.wasm",
   "asset_base": "assets",
+  "sky": "$LC_SKY",
   "bytes": { "wasm": $WASM_BYTES, "js": $JS_BYTES, "sky": $SKY_BYTES }
 }
 JSON
@@ -104,7 +116,7 @@ cp tools/wasm-index.html "$OUT/index.html"
 echo "==> pre-compress"
 compressible() {
   find "$OUT" -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.wgsl' \
-    -o -name '*.lcsky' -o -name '*.json' -o -name '*.html' -o -name '*.ttf' \) -print0
+    -o -name '*.lcsky' -o -name '*.galaxy' -o -name '*.lcg' -o -name '*.json' -o -name '*.html' -o -name '*.ttf' \) -print0
 }
 if command -v brotli >/dev/null; then
   compressible | while IFS= read -r -d '' f; do brotli -q 11 -f -k "$f" -o "$f.br"; done
@@ -115,7 +127,7 @@ compressible | while IFS= read -r -d '' f; do gzip -9 -f -k -c "$f" > "$f.gz"; d
 
 echo
 echo "==> $OUT"
-for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/sky/catalog.lcsky"; do
+for f in "$OUT/${BIN}_bg.wasm" "$OUT/$BIN.js" "$OUT/assets/$LC_SKY"; do
   raw=$(wc -c < "$f" | tr -d ' ')
   if [ -f "$f.br" ]; then br=$(wc -c < "$f.br" | tr -d ' '); else br=0; fi
   printf '    %-28s %8.2f MB raw  %8.2f MB brotli\n' \
