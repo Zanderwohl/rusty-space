@@ -13,7 +13,7 @@ use crate::sample::default_threads;
 use crate::{Bake, Compiled, Row, Timeline, bake, codec};
 
 /// Bumped whenever the generator would bake a different galaxy from the same timeline.
-pub const GENERATOR_VERSION: u64 = 1;
+pub const GENERATOR_VERSION: u64 = 2;
 
 /// The content hash of the timeline as written, together with the generator's version.
 pub fn graph_version(timeline: &Timeline) -> u64 {
