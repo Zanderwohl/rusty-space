@@ -321,6 +321,10 @@ pub fn find(name: &str, level: Level) -> Option<&'static Spec> {
     COMMANDS.iter().find(|spec| spec.name == name && level.at_least(spec.level))
 }
 
+/// Commands given on the shard's own command line (`--operator`), run at superadmin level. No
+/// connection is ever given this id: the transport counts up from zero.
+pub const OPERATOR: ClientId = ClientId(u64::MAX);
+
 #[derive(Clone, Debug)]
 pub struct Queued {
     from: ClientId,
@@ -339,6 +343,10 @@ impl<J: Journal> Server<J> {
         self.commands.push_back(Queued { from, seq, line });
     }
 
+    pub fn enqueue_operator(&mut self, line: String) {
+        self.commands.push_back(Queued { from: OPERATOR, seq: 0, line });
+    }
+
     pub(crate) fn run_commands(
         &mut self,
         wire: &mut impl Transport,
@@ -350,6 +358,10 @@ impl<J: Journal> Server<J> {
                 Ok(text) => (true, text),
                 Err(text) => (false, text),
             };
+            if command.from == OPERATOR {
+                eprintln!("operator {}: {} {text}", command.line, if ok { "ok:" } else { "REFUSED:" });
+                continue;
+            }
             wire.send(command.from, Outbound::Answered { seq: command.seq, ok, text });
         }
     }
@@ -424,6 +436,9 @@ impl<J: Journal> Server<J> {
     }
 
     fn commanding(&self, from: ClientId) -> Level {
+        if from == OPERATOR {
+            return Level::SUPERADMIN;
+        }
         let level = self.clients.get(&from).map_or(Level::PLAYER, |c| c.permission);
         crate::ability::commanding(level, crate::ability::Directing(self.directs))
     }
