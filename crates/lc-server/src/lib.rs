@@ -36,6 +36,7 @@ pub(crate) mod fits;
 pub mod fitting;
 pub(crate) mod instruments;
 pub mod journal;
+pub mod launch;
 pub mod library;
 pub mod park;
 #[cfg(feature = "storage")]

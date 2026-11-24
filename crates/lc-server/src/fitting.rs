@@ -705,6 +705,9 @@ mod tests {
             debug,
             hello(broker.mint_with("acct-debug", "shard-1", "j4", Level::DEBUG.as_i32())),
         );
+        for who in [player, admin, old, debug] {
+            wire.client_says(who, crate::testing::launch());
+        }
         server.tick(&mut wire).await.unwrap();
         for who in [player, admin, old, debug] {
             let _ = wire.take(who);

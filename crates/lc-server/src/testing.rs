@@ -61,3 +61,9 @@ impl Broker {
     }
 }
 
+
+/// What a client signing in with a ticket says after its hello, so the account flies a ship. An
+/// account that already has one is refused it, harmlessly.
+pub fn launch() -> lc_proto::Inbound {
+    lc_proto::Inbound::Launch { name: "Test Ship".into() }
+}

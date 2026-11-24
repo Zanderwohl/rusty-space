@@ -22,7 +22,7 @@ use crate::rate::Budget;
 use crate::transport::Transport;
 use crate::ticket::{Spent, Trusted};
 use crate::world::{Event, World};
-use lc_world::craft::{Craft, CraftId, Fleet, Kind};
+use lc_world::craft::{Craft, CraftId, Fleet};
 use lc_world::motion::{Change, Event as Change_, Rejected};
 use lc_world::navigation::Course;
 use lc_world::signal::Beam;
@@ -48,6 +48,12 @@ struct Applied {
     event_id: i64,
     at_t: i64,
     order: Order,
+}
+
+/// What a verified ticket found.
+enum SignedIn {
+    Flying { ship: ShipId, name: String, account: String },
+    Unlaunched,
 }
 
 /// What the server remembers about one connection.
@@ -155,6 +161,8 @@ pub struct Server<J: Journal> {
     /// client, and a client is a connection rather than a thing in space.
     pub(crate) owners: HashMap<CraftId, ClientId>,
     pub(crate) clients: HashMap<ClientId, Connected>,
+    /// Signed in with no ship. See [`crate::launch`].
+    pub(crate) unlaunched: HashMap<ClientId, crate::launch::Unlaunched>,
     pub(crate) journal: J,
     /// See [`crate::front`].
     pub(crate) fronts: crate::front::Fronts,
@@ -261,6 +269,7 @@ impl<J: Journal> Server<J> {
             next_ship: 1,
             owners: HashMap::new(),
             clients: HashMap::new(),
+            unlaunched: HashMap::new(),
             journal,
             fronts: Default::default(),
             // Startup, which may panic: a shard number outside the field is a misconfiguration.
@@ -415,6 +424,7 @@ impl<J: Journal> Server<J> {
     /// accumulate one entry per connection for the life of the process.
     pub fn disconnected(&mut self, client: ClientId) {
         self.clients.remove(&client);
+        self.unlaunched.remove(&client);
         self.budgets.remove(&client);
     }
 
@@ -611,7 +621,8 @@ impl<J: Journal> Server<J> {
                     return;
                 }
                 match self.sign_in(from, &ticket) {
-                    Some((ship_id, name, account)) => self.welcome(from, ship_id, name, &account, wire),
+                    Some(SignedIn::Flying { ship, name, account }) => self.welcome(from, ship, name, &account, wire),
+                    Some(SignedIn::Unlaunched) => wire.send(from, Outbound::Unlaunched),
                     None => wire.send(from, Outbound::Unauthenticated),
                 }
             }
@@ -664,6 +675,7 @@ impl<J: Journal> Server<J> {
             Inbound::Command { seq, line } => self.enqueue(from, seq, line, wire),
             Inbound::SavePreset { name, form } => self.keep_preset(from, name, Some(form), wire),
             Inbound::DeletePreset { name } => self.keep_preset(from, name, None, wire),
+            Inbound::Launch { name } => self.launch_ship(from, &name, wire),
             Inbound::Stage { scenario } => self.staged(from, &scenario, wire),
             Inbound::Grant { joules } => self.granted(from, joules, wire),
             Inbound::ResumeFrom { arrive_t } => {
@@ -1090,27 +1102,30 @@ impl<J: Journal> Server<J> {
         crate::world::CANCEL_MARGIN * stopped_w.max(hull_w)
     }
 
-    /// Verify a ticket and bind the connection to the account's craft.
+    /// Verify a ticket and bind the connection to the account's craft, if it has one.
     ///
     /// The client never names its own ship: the identifier comes back in `Welcome` and is
     /// looked up from the ticket's subject. A client that could ask for a `ShipId` could ask
     /// for someone else's.
-    fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<(ShipId, String, String)> {
-        let claims = match self.trusted.check(ticket) {
+    fn sign_in(&mut self, from: ClientId, ticket: &str) -> Option<SignedIn> {
+        let (claims, anonymous) = match self.trusted.check(ticket) {
             Ok(claims) => {
                 // Spent only after it verifies, or an invalid ticket could burn a valid one's
                 // identifier.
                 self.spent.claim(&claims, self.now_t / crate::world::MICROS_PER_SECOND).ok()?;
-                claims
+                (claims, false)
             }
             // No account to key an anonymous player by, so the connection is the account.
-            Err(_) if self.open => crate::ticket::Claims {
-                sub: format!("anonymous:{}", from.0),
-                name: format!("Traveler {}", from.0),
-                exp: i64::MAX,
-                jti: format!("anonymous:{}", from.0),
-                perm: 0,
-            },
+            Err(_) if self.open => (
+                crate::ticket::Claims {
+                    sub: format!("anonymous:{}", from.0),
+                    name: format!("Traveler {}", from.0),
+                    exp: i64::MAX,
+                    jti: format!("anonymous:{}", from.0),
+                    perm: 0,
+                },
+                true,
+            ),
             Err(_) => return None,
         };
 
@@ -1123,40 +1138,20 @@ impl<J: Journal> Server<J> {
             return None;
         }
 
+        let permission = crate::ability::Level::from_claim(claims.perm);
         let ship = match self.by_account.get(&claims.sub) {
             Some(ship) => *ship,
+            // An anonymous connection is a development shard's, where a launch screen in front
+            // of every staged scene would be in the way.
+            None if anonymous => self.spawn(Some(claims.name.clone())),
             None => {
-                let ship = self.spawn(Some(claims.name.clone()));
-                self.by_account.insert(claims.sub.clone(), ship);
-                ship
+                self.ground(from, claims.sub, permission);
+                return Some(SignedIn::Unlaunched);
             }
         };
-        // A reconnection replaces the old connection's claim on the craft rather than sharing
-        // it: two sockets acting for one ship is two clients predicting different futures.
-        self.clients.retain(|_, state| state.ship != ship);
-        self.clients.insert(from, Connected::new(ship, claims.sub.clone(), crate::ability::Level::from_claim(claims.perm)));
-        self.claim_if_unnamed(CraftId(ship.0));
-        // Being welcomed is not the same fact as owning the craft, and `act` checks the
-        // second. Without this a signed-in client is welcomed, given a ship, and then refused
-        // `NotYours` on every order it sends — which no in-process test caught, because the
-        // ones about orders call `admit` and the ones about tickets never send an order.
-        self.owners.insert(CraftId(ship.0), from);
-        Some((ship, claims.name, claims.sub))
-    }
-
-    /// A new starting ship at the shard's spawn point. Where a new player starts is a game
-    /// question and this is the crudest possible answer to it.
-    pub(crate) fn spawn(&mut self, name: Option<String>) -> ShipId {
-        let ship = ShipId(self.next_ship);
-        self.next_ship += 1;
-        // Inside a system if this server has one, because the origin is empty space and a player
-        // put there has nothing to look at or fly to.
-        let at = self.world.start().unwrap_or(DVec3::ZERO);
-        let mut craft = Craft::at(CraftId(ship.0), Kind::Ship, at);
-        craft.name = name;
-        self.fit_new(&mut craft);
-        self.fleet.insert(craft);
-        ship
+        self.embark(from, ship, claims.sub.clone(), permission);
+        let name = self.ship(ship).map(Craft::designation).unwrap_or_default();
+        Some(SignedIn::Flying { ship, name, account: claims.sub })
     }
 
     /// Put every craft in the system it is actually inside.
@@ -1507,6 +1502,7 @@ pub const BURN_POWER_W: f64 = 1.0e12;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lc_world::craft::Kind;
     use crate::journal::Memory;
 use crate::transport::Loopback;
 
@@ -1961,6 +1957,9 @@ use crate::transport::Loopback;
             protocol: PROTOCOL_VERSION,
             ticket: broker.mint("acct-1", "shard-1", 60, "j2"),
         });
+        server.tick(&mut wire).await.unwrap();
+        assert_eq!(wire.take(client), vec![Outbound::Unlaunched]);
+        wire.client_says(client, crate::testing::launch());
         server.tick(&mut wire).await.unwrap();
         assert!(matches!(wire.take(client).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
     }
@@ -3105,6 +3104,7 @@ mod hello_tests {
 
     async fn says(server: &mut Server<Memory>, wire: &mut Loopback, from: ClientId, ticket: String) {
         wire.client_says(from, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket });
+        wire.client_says(from, crate::testing::launch());
         server.tick(wire).await.unwrap();
     }
 
@@ -3134,7 +3134,7 @@ mod hello_tests {
         assert!(matches!(wire.take(client).as_slice(), [Outbound::Unauthenticated]));
     }
 
-    /// A valid ticket gets a craft, and the client is never asked which one it wants.
+    /// A valid ticket and a launch get a craft, and the client is never asked which one it wants.
     #[tokio::test]
     async fn a_ticket_names_the_account_and_the_server_names_the_ship() {
         let broker = Broker::new([1u8; 32]);
@@ -3144,13 +3144,13 @@ mod hello_tests {
 
         says(&mut server, &mut wire, client, broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(client);
-        let [Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..] =
+        let [Outbound::Unlaunched, Outbound::Welcome { ship_id, name, client_id, .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..] =
             said.as_slice()
         else {
             panic!("no welcome: {said:?}")
         };
         assert_eq!(*client_id, client);
-        assert_eq!(name, "Ada");
+        assert_eq!(name, "Test Ship", "named at its launch, not by the ticket");
         assert!(server.ship(*ship_id).is_some(), "the ship it was given does not exist");
     }
 
@@ -3210,7 +3210,7 @@ mod hello_tests {
         let ticket = broker.mint("acct-1", SHARD, 60, "only-once");
 
         says(&mut server, &mut wire, ClientId(1), ticket.clone()).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unlaunched, Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
 
         says(&mut server, &mut wire, ClientId(2), ticket).await;
         assert!(matches!(wire.take(ClientId(2)).as_slice(), [Outbound::Unauthenticated]));
@@ -3230,7 +3230,7 @@ mod hello_tests {
 
         // The real one, with the same identifier, still works.
         says(&mut server, &mut wire, ClientId(1), ours.mint("acct-1", SHARD, 60, "j1")).await;
-        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
+        assert!(matches!(wire.take(ClientId(1)).as_slice(), [Outbound::Unlaunched, Outbound::Welcome { .. }, Outbound::Fitted { .. }, Outbound::Observing { .. }, Outbound::Presets(_), ..]));
     }
 
     /// A ticket minted for another shard is not a ticket here, however valid it is there.
@@ -3981,9 +3981,10 @@ mod hello_tests {
         );
     }
 
+    /// The ship a sign-in flies, from its welcome; a new account is told `Unlaunched` first.
     fn welcomed(wire: &mut Loopback, client: ClientId) -> ShipId {
         let said = wire.take(client);
-        match said.first() {
+        match said.iter().find(|m| **m != Outbound::Unlaunched) {
             Some(Outbound::Welcome { ship_id, .. }) => *ship_id,
             _ => panic!("{said:?}"),
         }

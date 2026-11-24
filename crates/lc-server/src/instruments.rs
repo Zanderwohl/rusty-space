@@ -666,6 +666,7 @@ mod tests {
         ticket: String,
     ) -> (ShipId, Vec<Outbound>) {
         wire.client_says(client, Inbound::Hello { protocol: PROTOCOL_VERSION, ticket });
+        wire.client_says(client, crate::testing::launch());
         server.tick(wire).await.unwrap();
         let said = wire.take(client);
         let ship = said

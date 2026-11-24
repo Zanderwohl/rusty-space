@@ -192,7 +192,6 @@ impl<J: Journal> Server<J> {
         let released_j = fitting.field().released_j(fitting.stored_j_at(&craft.motion, at_s));
         let balance = *fitting.balance();
         let spike_j = balance.collapse_spike_fraction * released_j;
-        let name = craft.name.clone();
         let from = craft.position_at(at_t as f64);
         craft.end(at_s);
         let afterglow = Afterglow::of(from, at_s, released_j, &balance);
@@ -216,24 +215,15 @@ impl<J: Journal> Server<J> {
         self.owed.remove(&id);
         self.answered.remove(&id);
 
-        let account = self.by_account.iter().find(|(_, ship)| ship.0 == id.0).map(|(account, _)| account.clone());
+        // The account keeps nothing of the ship: it launches another, knowing nothing.
+        self.by_account.retain(|_, ship| ship.0 != id.0);
         // Connected, or nobody could ever reach a ship given to it.
         let owner = self.owners.remove(&id).filter(|from| self.clients.get(from).is_some_and(|state| state.ship.0 == id.0));
-        if account.is_none() && owner.is_none() {
-            return;
-        }
-        let successor = self.spawn(name.clone());
-        if let Some(account) = account {
-            self.by_account.insert(account, successor);
-        }
         let Some(from) = owner else { return };
-        let Some(state) = self.clients.get_mut(&from) else { return };
-        let account = state.account.clone();
-        *state = crate::server::Connected::new(successor, account.clone(), state.permission);
-        self.owners.insert(CraftId(successor.0), from);
-        wire.send(from, Outbound::Collapsed { ship_id: ShipId(id.0), at_t, released_j, successor });
-        let name = name.unwrap_or_else(|| self.ship(successor).map(Craft::designation).unwrap_or_default());
-        self.welcome(from, successor, name, &account, wire);
+        let Some(state) = self.clients.get(&from) else { return };
+        let (account, permission) = (state.account.clone(), state.permission);
+        self.ground(from, account, permission);
+        wire.send(from, Outbound::Collapsed { ship_id: ShipId(id.0), at_t, released_j });
     }
 
     /// Drop each wreck once its light has faded everywhere. See [`crate::bright`].
@@ -359,7 +349,6 @@ mod tests {
         before: Craft,
         pub(super) at_t: i64,
         released_j: f64,
-        successor: ShipId,
         said: Vec<Outbound>,
     }
 
@@ -369,13 +358,11 @@ mod tests {
             server.tick(wire).await.unwrap();
             let said = wire.take(OWNER);
             let told = said.iter().find_map(|m| match m {
-                Outbound::Collapsed { ship_id, at_t, released_j, successor } if *ship_id == DYING => {
-                    Some((*at_t, *released_j, *successor))
-                }
+                Outbound::Collapsed { ship_id, at_t, released_j } if *ship_id == DYING => Some((*at_t, *released_j)),
                 _ => None,
             });
-            if let Some((at_t, released_j, successor)) = told {
-                return Collapsed { before, at_t, released_j, successor, said };
+            if let Some((at_t, released_j)) = told {
+                return Collapsed { before, at_t, released_j, said };
             }
         }
         panic!("no collapse");
@@ -572,41 +559,53 @@ mod tests {
     /// no longer theirs to order about or saved.
     #[cfg(feature = "storage")]
     #[tokio::test]
-    async fn the_owner_is_given_a_new_starting_ship() {
+    async fn the_owner_flies_nothing_until_it_launches_a_new_ship() {
         let Some((mut server, mut wire)) = scene() else { return };
         let collapsed = until_collapse(&mut server, &mut wire).await;
-        let successor = collapsed.successor;
-        assert_eq!(successor, ShipId(3));
-        let welcome = collapsed.said.iter().position(|m| matches!(m, Outbound::Welcome { ship_id, .. } if *ship_id == successor));
-        let told = collapsed.said.iter().position(|m| matches!(m, Outbound::Collapsed { .. }));
-        assert!(told < welcome && welcome.is_some(), "{:?}", collapsed.said);
+        assert!(!collapsed.said.iter().any(|m| matches!(m, Outbound::Welcome { .. })), "{:?}", collapsed.said);
+        assert!(server.unlaunched.contains_key(&OWNER) && !server.clients.contains_key(&OWNER));
+        assert_eq!(server.wreck(DYING).unwrap().craft.ended_s(), Some(collapsed.at_t as f64 * 1.0e-6));
 
+        wire.client_says(OWNER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
+        wire.client_says(OWNER, Inbound::Launch { name: "  ".into() });
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(OWNER);
+        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: lc_proto::Refusal::NotYours } if *ship_id == DYING)), "{said:?}");
+        assert!(said.contains(&Outbound::LaunchRefused(lc_proto::LaunchRefusal::Name)), "{said:?}");
+        assert!(server.ship(ShipId(3)).is_none(), "no ship before a launch");
+
+        wire.client_says(OWNER, Inbound::Launch { name: "Second Wind".into() });
+        server.tick(&mut wire).await.unwrap();
+        let said = wire.take(OWNER);
+        let Some(successor) = said.iter().find_map(|m| match m {
+            Outbound::Welcome { ship_id, name, .. } if name == "Second Wind" => Some(*ship_id),
+            _ => None,
+        }) else { panic!("{said:?}") };
+        assert_eq!(successor, ShipId(3));
         let craft = server.ship(successor).unwrap();
-        assert!(craft.motion.position_ly.distance(server.world.start().unwrap()) < 1.0e-9);
+        assert!(craft.motion.position_ly.distance(server.world.start().unwrap()) < 1.0e-9, "a star that is not Sol starts it at the start");
         let fitting = craft.fitting().unwrap();
         assert_eq!(fitting.form(), &Form::starting());
-        assert_eq!(fitting.stored_j_at(&craft.motion, server.now_t() as f64 * 1.0e-6), fitting.hull().capacities.storage_j);
         // Nothing inherited: what it holds is only what it has seen around it since.
         let knows = server.instruments.aboard.get(&CraftId(successor.0)).map(|a| a.knowledge.files().map(|(s, _)| s).collect::<Vec<_>>());
         let seen = |s: &lc_world::knowledge::Subject| matches!(s, lc_world::knowledge::Subject::Craft(_) | lc_world::knowledge::Subject::Collapse(_));
         assert!(knows.unwrap_or_default().iter().all(seen));
-        assert_eq!(server.wreck(DYING).unwrap().craft.ended_s(), Some(collapsed.at_t as f64 * 1.0e-6));
 
-        wire.client_says(OWNER, act(DYING, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         wire.client_says(OWNER, act(successor, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
+        wire.client_says(OWNER, Inbound::Launch { name: "Third".into() });
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(OWNER);
-        assert!(said.iter().any(|m| matches!(m, Outbound::Refused { ship_id, reason: lc_proto::Refusal::NotYours } if *ship_id == DYING)), "{said:?}");
         assert!(said.iter().any(|m| matches!(m, Outbound::Accepted { ship_id, .. } if *ship_id == successor)), "{said:?}");
+        assert!(said.contains(&Outbound::LaunchRefused(lc_proto::LaunchRefusal::Flying)), "{said:?}");
 
         let saved: Vec<i64> = server.checkpoint().ships.iter().map(|s| s.ship_id).collect();
         assert!(saved.contains(&DYING.0) && saved.contains(&successor.0), "{saved:?}");
         assert!(server.take_destroyed().is_empty(), "its row went at the collapse, not the sweep");
     }
 
-    /// An owner signed out when it happens finds the new ship on signing in again.
+    /// An owner signed out when it happens has no ship on signing in again, and launches one.
     #[tokio::test]
-    async fn a_signed_out_owner_signs_in_to_the_successor() {
+    async fn a_signed_out_owner_signs_in_to_no_ship() {
         use crate::testing::Broker;
         let Some(near) = near_the_star() else { return };
         let broker = Broker::new([1u8; 32]);
@@ -627,6 +626,9 @@ mod tests {
 
         wire.client_says(OWNER, hello("j1"));
         server.tick(&mut wire).await.unwrap();
+        assert_eq!(wire.take(OWNER), vec![Outbound::Unlaunched], "a new account has no ship");
+        wire.client_says(OWNER, Inbound::Launch { name: "First".into() });
+        server.tick(&mut wire).await.unwrap();
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
         server.fit_new(&mut dying);
@@ -641,13 +643,18 @@ mod tests {
             }
         }
         assert_eq!(collapse_events(&server).len(), 1, "premise: it collapsed");
+        assert!(server.by_account.is_empty());
 
         let again = ClientId(3);
         wire.client_says(again, hello("j2"));
         server.tick(&mut wire).await.unwrap();
+        assert_eq!(wire.take(again), vec![Outbound::Unlaunched]);
+        wire.client_says(again, Inbound::Launch { name: "Second".into() });
+        server.tick(&mut wire).await.unwrap();
         let second = welcomed(wire.take(again)).expect("welcomed again");
         assert_ne!(second, first);
         assert!(server.ship(second).is_some_and(|craft| craft.ended_s().is_none() && craft.fitting().is_some()));
+        assert_eq!(server.by_account["acct-1"], second);
     }
 
     /// A ship keeps heating while its owner is signed out, and signing in again states the heat it
@@ -667,9 +674,10 @@ mod tests {
         let hello = |jti: &str| Inbound::Hello { protocol: lc_proto::PROTOCOL_VERSION, ticket: broker.mint("acct-1", "shard-1", 60, jti) };
 
         wire.client_says(OWNER, hello("j1"));
+        wire.client_says(OWNER, Inbound::Launch { name: "Warm".into() });
         server.tick(&mut wire).await.unwrap();
         let said = wire.take(OWNER);
-        let Some(Outbound::Welcome { ship_id, .. }) = said.first() else { panic!("{said:?}") };
+        let Some(Outbound::Welcome { ship_id, .. }) = said.get(1) else { panic!("{said:?}") };
         let mut heating = still(*ship_id, near);
         server.fit_new(&mut heating);
         hold_black(&mut heating);
@@ -1000,11 +1008,11 @@ mod tests {
         assert!(collapse_events(&restarted).is_empty(), "it collapsed again");
     }
 
-    /// Signed out through the collapse and a restart, the owner signs in to the successor; the
-    /// wreck's row claims no account, and ordering it is refused.
+    /// Signed out through the collapse and a restart, the owner signs in to no ship; the wreck's
+    /// row claims no account, and ordering it is refused.
     #[cfg(feature = "storage")]
     #[tokio::test]
-    async fn after_a_restart_the_owner_still_flies_the_successor() {
+    async fn after_a_restart_the_owner_still_has_no_ship() {
         use crate::testing::Broker;
         let Some(near) = near_the_star() else { return };
         let broker = Broker::new([1u8; 32]);
@@ -1027,6 +1035,7 @@ mod tests {
         let mut server = shard();
         let mut wire = Loopback::new();
         wire.client_says(OWNER, hello("j1"));
+        wire.client_says(OWNER, Inbound::Launch { name: "First".into() });
         server.tick(&mut wire).await.unwrap();
         let first = welcomed(wire.take(OWNER)).expect("welcomed");
         let mut dying = still(first, near);
@@ -1043,23 +1052,23 @@ mod tests {
                 break;
             }
         }
-        let successor = server.by_account["acct-1"];
-        assert_ne!(successor, first, "premise: it collapsed");
+        assert_eq!(collapse_events(&server).len(), 1, "premise: it collapsed");
+        assert!(!server.by_account.contains_key("acct-1"));
 
         let rows = server.checkpoint().ships;
         let wreck = rows.iter().find(|s| s.ship_id == first.0).expect("the wreck is saved");
         assert_eq!(wreck.account, None);
-        assert_eq!(rows.iter().find(|s| s.ship_id == successor.0).unwrap().account.as_deref(), Some("acct-1"));
+        assert!(rows.iter().all(|s| s.account.is_none()), "{rows:?}");
 
         let mut restarted = shard();
         assert!(restarted.adopt(server.checkpoint()).is_empty());
         drop(server);
-        assert_eq!(restarted.by_account["acct-1"], successor);
+        assert!(restarted.by_account.is_empty());
         assert_inert(&restarted, CraftId(first.0));
         let again = ClientId(3);
         wire.client_says(again, hello("j2"));
         restarted.tick(&mut wire).await.unwrap();
-        assert_eq!(welcomed(wire.take(again)), Some(successor));
+        assert_eq!(wire.take(again), vec![Outbound::Unlaunched]);
         wire.client_says(again, act(first, Order::Burn { beta: [1.0e-6, 0.0, 0.0] }));
         restarted.tick(&mut wire).await.unwrap();
         let said = wire.take(again);
