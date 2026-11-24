@@ -216,7 +216,11 @@ impl<J: Journal> Server<J> {
         self.answered.remove(&id);
 
         // The account keeps nothing of the ship: it launches another, knowing nothing.
-        self.by_account.retain(|_, ship| ship.0 != id.0);
+        let pilot = self.by_account.iter().find(|(_, ship)| ship.0 == id.0).map(|(account, _)| account.clone());
+        if let Some(pilot) = pilot {
+            self.by_account.remove(&pilot);
+            self.register(ShipId(id.0), &pilot, Some(at_t));
+        }
         // Connected, or nobody could ever reach a ship given to it.
         let owner = self.owners.remove(&id).filter(|from| self.clients.get(from).is_some_and(|state| state.ship.0 == id.0));
         let Some(from) = owner else { return };

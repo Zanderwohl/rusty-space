@@ -372,6 +372,9 @@ impl<J: Journal> Server<J> {
                     }
                     if let Some(account) = &row.account {
                         self.by_account.insert(account.clone(), ShipId(craft.id.0));
+                        // Fills the names of rows the registry's migration could not read.
+                        let name = craft.name.clone();
+                        self.registered.push(lc_store::registry::Entry { ship_id: craft.id.0, account: Some(account.clone()), name, ended_t: None });
                     }
                     let saved = decode(row).ok();
                     if let Some(light) = saved.as_ref().map(|saved| saved.light.clone()) {

@@ -52,8 +52,26 @@ impl<J: Journal> Server<J> {
             return;
         }
         let ship = self.spawn(Some(name.clone()));
+        self.register(ship, &account, None);
         self.embark(from, ship, account.clone(), permission);
         self.welcome(from, ship, name, &account, wire);
+    }
+
+    /// Record `ship` in `ship_registry` at the next checkpoint.
+    pub(crate) fn register(&mut self, ship: ShipId, account: &str, ended_t: Option<i64>) {
+        let name = self.ship(ship).or_else(|| self.wreck(ship).map(|w| &w.craft)).and_then(|craft| craft.name.clone());
+        let account = (!account.is_empty()).then(|| account.to_owned());
+        self.registered.push(lc_store::registry::Entry { ship_id: ship.0, account, name, ended_t });
+    }
+
+    /// Registry entries since this was last called.
+    pub fn take_registered(&mut self) -> Vec<lc_store::registry::Entry> {
+        std::mem::take(&mut self.registered)
+    }
+
+    /// Hand back what [`Server::take_registered`] took, because writing them failed.
+    pub fn untake_registered(&mut self, entries: Vec<lc_store::registry::Entry>) {
+        self.registered.extend(entries);
     }
 
     /// Bind `from` to `ship` as its pilot.

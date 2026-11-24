@@ -34,6 +34,43 @@ pub const SYSTEMS: &str = "/admin/systems";
 /// `{id}` is a system's id as [`SYSTEMS`] lists it.
 pub const SYSTEM: &str = "/admin/systems/{id}";
 
+/// Every ship ever launched, newest first, from `ship_registry`.
+pub const SHIPS: &str = "/admin/ships";
+
+/// `{id}` is a ship id.
+pub const SHIP: &str = "/admin/ships/{id}";
+
+/// One ship as [`SHIPS`] lists it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipRow {
+    pub ship_id: i64,
+    pub account: Option<String>,
+    pub name: Option<String>,
+    /// Unix seconds.
+    pub launched_at: i64,
+    /// Unix seconds; `None` while it flies.
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipPage {
+    pub ships: Vec<ShipRow>,
+    pub total: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShipDetail {
+    pub ship: ShipRow,
+    /// From the checkpoint, which keeps a wreck only until its light has faded.
+    pub status: Option<Status>,
+}
+
+impl From<lc_store::registry::Record> for ShipRow {
+    fn from(r: lc_store::registry::Record) -> Self {
+        ShipRow { ship_id: r.ship_id, account: r.account, name: r.name, launched_at: r.launched_at, ended_at: r.ended_at }
+    }
+}
+
 #[derive(Clone)]
 pub struct Api {
     pub db: Arc<tokio_postgres::Client>,
@@ -63,6 +100,8 @@ pub fn router(api: Api) -> Router {
         .route(STATUS, get(status))
         .route(SYSTEMS, get(systems))
         .route(SYSTEM, get(system))
+        .route(SHIPS, get(ships))
+        .route(SHIP, get(ship))
         .route("/admin/health", get(|| async { "ok" }))
         .with_state(api)
 }
@@ -101,6 +140,9 @@ struct Asked {
     dir: Option<String>,
     offset: Option<String>,
     limit: Option<String>,
+    account: Option<String>,
+    /// `flying` or `ended`.
+    state: Option<String>,
 }
 
 /// The limit arrives in a URL, and an unbounded one serializes the whole catalog.
@@ -234,6 +276,58 @@ async fn status(
     eprintln!("admin status: {} asked about {account}", claims.sub);
 
     ron_response(&status, "status")
+}
+
+async fn ships(
+    State(api): State<Api>,
+    headers: HeaderMap,
+    axum::extract::Query(asked): axum::extract::Query<Asked>,
+) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let query = lc_store::registry::Query {
+        search: asked.q.filter(|q| !q.trim().is_empty()).map(|q| q.trim().to_owned()),
+        account: asked.account.filter(|a| !a.is_empty()),
+        flying: match asked.state.as_deref() {
+            Some("flying") => Some(true),
+            Some("ended") => Some(false),
+            _ => None,
+        },
+        offset: asked.offset.and_then(|n| n.parse().ok()).unwrap_or(0).max(0),
+        limit: asked.limit.and_then(|n| n.parse().ok()).unwrap_or(25).clamp(1, MOST_PER_PAGE as i64),
+    };
+    match lc_store::registry::list(&api.db, &query).await {
+        Ok((rows, total)) => ron_response(&ShipPage { ships: rows.into_iter().map(Into::into).collect(), total }, "ships"),
+        Err(why) => {
+            eprintln!("admin ships: the store did not answer: {why}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn ship(State(api): State<Api>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(id) = id.parse::<i64>() else {
+        return (StatusCode::NOT_FOUND, "None").into_response();
+    };
+    let (record, saved) = match (lc_store::registry::get(&api.db, id).await, lc_store::ships::ship_by_id(&api.db, id).await) {
+        (Ok(record), Ok(saved)) => (record, saved),
+        (Err(why), _) | (_, Err(why)) => {
+            eprintln!("admin ship: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let Some(record) = record else {
+        return (StatusCode::NOT_FOUND, "None").into_response();
+    };
+    let status = saved.and_then(|ship| {
+        let decoded = crate::persist::decode(&ship).map_err(|why| eprintln!("admin ship: ship {id} did not decode: {why}")).ok()?;
+        Some(Status::of(ship.ship_id, ship.saved_t, &decoded, &api.stars))
+    });
+    ron_response(&ShipDetail { ship: record.into(), status }, "ship")
 }
 
 fn ron_response(body: &impl serde::Serialize, route: &str) -> Response {

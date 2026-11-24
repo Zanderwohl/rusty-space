@@ -163,6 +163,8 @@ pub struct Server<J: Journal> {
     pub(crate) clients: HashMap<ClientId, Connected>,
     /// Signed in with no ship. See [`crate::launch`].
     pub(crate) unlaunched: HashMap<ClientId, crate::launch::Unlaunched>,
+    /// Launches and collapses not yet written to `ship_registry`.
+    pub(crate) registered: Vec<lc_store::registry::Entry>,
     pub(crate) journal: J,
     /// See [`crate::front`].
     pub(crate) fronts: crate::front::Fronts,
@@ -270,6 +272,7 @@ impl<J: Journal> Server<J> {
             owners: HashMap::new(),
             clients: HashMap::new(),
             unlaunched: HashMap::new(),
+            registered: Vec::new(),
             journal,
             fronts: Default::default(),
             // Startup, which may panic: a shard number outside the field is a misconfiguration.

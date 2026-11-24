@@ -30,6 +30,7 @@ pub const STEPS: &[(&str, &str)] =
         ("0020_fronts", include_str!("../sql/0020_fronts.sql")),
         ("0021_transcript", include_str!("../sql/0021_transcript.sql")),
         ("0022_delivery_archive", include_str!("../sql/0022_delivery_archive.sql")),
+        ("0023_ship_registry", include_str!("../sql/0023_ship_registry.sql")),
     ];
 
 /// The advisory lock every migrator takes before touching the schema.

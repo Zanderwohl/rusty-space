@@ -28,6 +28,7 @@ pub mod presets;
 pub mod reading;
 #[cfg(feature = "postgres")]
 pub mod retention;
+pub mod registry;
 #[cfg(feature = "postgres")]
 pub mod ships;
 pub mod store;

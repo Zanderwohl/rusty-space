@@ -390,6 +390,7 @@ struct Taken {
     marks: Vec<(String, lc_proto::Bookmark)>,
     presets: Vec<lc_server::presets::Change>,
     destroyed: Vec<i64>,
+    registered: Vec<lc_store::registry::Entry>,
 }
 
 fn take(server: &mut Server<Store>) -> Taken {
@@ -399,6 +400,7 @@ fn take(server: &mut Server<Store>) -> Taken {
         marks: server.library.take_dirty(),
         presets: server.presets.take_dirty(),
         destroyed: server.take_destroyed(),
+        registered: server.take_registered(),
     }
 }
 
@@ -407,6 +409,7 @@ fn give_back(server: &mut Server<Store>, taken: Taken) {
     server.library.redirty(&taken.marks);
     server.presets.redirty(&taken.presets);
     server.untake_destroyed(taken.destroyed);
+    server.untake_registered(taken.registered);
 }
 
 /// A checkpoint write's outcome, with the connection and what was being written handed back.
@@ -434,6 +437,7 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
         let transaction = client.transaction().await?;
         lc_store::ships::forget(&transaction, &taken.destroyed).await?;
         lc_store::ships::save_ships(&transaction, &taken.checkpoint.ships).await?;
+        lc_store::registry::save(&transaction, &taken.registered).await?;
         lc_store::knowledge::save_files(&transaction, &taken.remembered.files).await?;
         lc_store::knowledge::save_samples(&transaction, &taken.remembered.samples).await?;
         lc_store::knowledge::delete_samples(&transaction, &taken.remembered.discarded).await?;

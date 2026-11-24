@@ -108,6 +108,19 @@ pub async fn ship_for_account(client: &Client, account: &str) -> Result<Option<S
     }))
 }
 
+pub async fn ship_by_id(client: &Client, ship_id: i64) -> Result<Option<Ship>, Error> {
+    let row = client
+        .query_opt("SELECT ship_id, account, saved_t, state, format FROM ships WHERE ship_id = $1", &[&ship_id])
+        .await?;
+    Ok(row.map(|row| Ship {
+        ship_id: row.get(0),
+        account: row.get(1),
+        saved_t: row.get(2),
+        state: row.get(3),
+        format: row.get(4),
+    }))
+}
+
 /// Forget swept wrecks, and everything they knew.
 pub async fn forget(client: &impl GenericClient, ship_ids: &[i64]) -> Result<u64, Error> {
     if ship_ids.is_empty() {
