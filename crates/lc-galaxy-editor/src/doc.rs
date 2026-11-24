@@ -46,6 +46,8 @@ pub struct Doc {
     pub picked: Option<StarId>,
     pub notice: Option<String>,
     pub result: Option<Result>,
+    /// Bumped by every rebuild, so a chart knows when to redraw.
+    pub generation: u64,
     built_from: Option<(Timeline, usize)>,
     built_at: Option<Instant>,
 }
@@ -65,6 +67,7 @@ impl Doc {
             picked: None,
             notice: None,
             result: None,
+            generation: 0,
             built_from: None,
             built_at: None,
         }
@@ -168,6 +171,7 @@ impl Doc {
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
         self.result = Some(Result { compiled, bake, expected, nearest, took: start.elapsed() });
         self.built_from = Some(key);
+        self.generation += 1;
         self.built_at = Some(Instant::now());
     }
 

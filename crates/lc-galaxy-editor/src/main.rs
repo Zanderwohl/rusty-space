@@ -1,10 +1,11 @@
 //! Galaxy Forge: the editor for the Lightcone galaxy. See `lightcone/docs/34-galaxy-authoring.md`.
 //!
 //! ```text
-//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--select <row>] [--pick <star>]
+//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh]
 //!                  [--shot <png> [--frames <n>]]
 //! ```
 
+mod charts;
 mod doc;
 mod palette;
 mod params_panel;
@@ -30,6 +31,7 @@ struct Args {
     view: Option<View>,
     select: Option<usize>,
     pick: Option<usize>,
+    chart: Option<charts::Plot>,
     shot: Option<PathBuf>,
     frames: u32,
 }
@@ -48,6 +50,7 @@ fn args() -> Args {
             }
             "--select" => a.select = value().parse().ok(),
             "--pick" => a.pick = value().parse().ok(),
+            "--chart" => a.chart = charts::Plot::named(&value()),
             "--shot" => a.shot = Some(value().into()),
             "--frames" => a.frames = value().parse().unwrap_or(30),
             _ => a.path = Some(arg.into()),
@@ -64,6 +67,7 @@ fn default_galaxy() -> PathBuf {
 #[derive(Resource)]
 struct Ui {
     view: ViewState,
+    charts: charts::Charts,
     dialog: Option<Dialog>,
 }
 
@@ -100,7 +104,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
-        .insert_resource(Ui { view, dialog: None })
+        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
@@ -143,11 +147,12 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
     egui::Panel::top("menu").show(&mut root, |ui| menu(ui, doc, state));
     egui::Panel::bottom("status").show(&mut root, |ui| status(ui, doc));
     egui::Panel::left("timeline").resizable(true).default_size(320.0).show(&mut root, |ui| timeline_panel::show(ui, doc));
-    egui::Panel::right("details").resizable(true).default_size(380.0).show(&mut root, |ui| {
+    egui::Panel::right("details").resizable(true).default_size(440.0).show(&mut root, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             params_panel::show(ui, doc);
             ui.add_space(8.0);
             egui::CollapsingHeader::new("Statistics").default_open(true).show(ui, |ui| stats_panel::statistics(ui, doc));
+            egui::CollapsingHeader::new("Charts").default_open(true).show(ui, |ui| charts::show(ui, &mut state.charts, doc));
             egui::CollapsingHeader::new("Inspector").default_open(true).show(ui, |ui| stats_panel::inspector(ui, doc));
         });
     });

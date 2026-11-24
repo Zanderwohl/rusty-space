@@ -206,3 +206,19 @@ fn in_phase_one_a_ship_beside_a_star_is_in_its_system() {
         assert_eq!(lc_world::system::holding(beside, stars).map(|h| h.id), Some(s.id));
     }
 }
+
+#[test]
+fn the_imf_and_age_fractions_sum_to_one_and_match_the_draws() {
+    use lc_galaxy::attributes::{age_fraction, imf_fraction, mass};
+    use lc_galaxy::compiled::{Age, Imf};
+    for imf in [Imf::Kroupa, Imf::Salpeter] {
+        assert!((imf_fraction(&imf, 0.08, 100.0) - 1.0).abs() < 1e-12);
+        // The share below 1 M☉ by fraction agrees with the share the sampler draws there.
+        let below = (0..20_000).filter(|i| mass(&imf, (*i as f64 + 0.5) / 20_000.0) < 1.0).count() as f64 / 20_000.0;
+        assert!((below - imf_fraction(&imf, 0.08, 1.0)).abs() < 1e-3, "{imf:?}: {below}");
+    }
+    for age in [Age::Uniform { min_gyr: 1.0, max_gyr: 5.0 }, Age::Burst { gyr: 0.5, spread_gyr: 0.05 }] {
+        assert!((age_fraction(&age, 0.0, 13.8) - 1.0).abs() < 1e-9, "{age:?}");
+    }
+    assert!((age_fraction(&Age::Uniform { min_gyr: 1.0, max_gyr: 5.0 }, 2.0, 3.0) - 0.25).abs() < 1e-12);
+}
