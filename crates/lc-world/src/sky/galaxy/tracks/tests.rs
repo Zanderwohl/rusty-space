@@ -137,3 +137,23 @@ fn intermediate_stars_make_a_blue_loop() {
     let loop_min = r.iter().filter(|(s, _)| *s == State::CoreHeliumBurning).map(|x| x.1).fold(f64::INFINITY, f64::min);
     assert!(loop_min < 0.6 * giant_max, "loop {loop_min} R☉ against giant {giant_max} R☉");
 }
+
+/// The cached coefficients for a record's `[Fe/H]` step give the same star as building them.
+#[test]
+fn a_cached_step_evolves_as_built() {
+    for step in [-128i8, -50, 0, 7, 127] {
+        let feh = step as f64 * crate::sky::galaxy::FEH_STEP;
+        for (m, age) in [(0.09, 1.0), (1.0, 4.57), (1.0, 12.3), (5.0, 0.11), (20.0, 0.1)] {
+            assert_eq!(evolve_step(m, age, step), evolve(m, age, feh), "step {step}, M = {m}, age = {age}");
+        }
+    }
+}
+
+/// Below 0.1 M☉ the main sequence extrapolates with eq. 24's floor instead of copying 0.1 M☉.
+#[test]
+fn the_lightest_stars_are_not_all_one_star() {
+    let a = evolve(0.08, 1.0, 0.0);
+    let b = evolve(0.1, 1.0, 0.0);
+    assert!(a.luminosity_solar < b.luminosity_solar, "{a:?} {b:?}");
+    assert!(a.radius_solar > 0.0 && a.teff_k > 1000.0, "{a:?}");
+}

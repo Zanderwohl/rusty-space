@@ -86,7 +86,7 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Op
     let feh = pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly + pop.feh.scatter * d.gaussian(3) + offset;
     let record = GalaxyRecord::quantize(key.cell.0.to_array(), key.index, position, initial, age, feh, slot as u8, false);
     let (initial, age) = (record.initial_mass_solar(), record.age_gyr());
-    let e = tracks::evolve(initial, age, record.feh());
+    let e = tracks::evolve_step(initial, age, record.feh);
     let kin = kinematics(compiled, population).unwrap_or_else(|| Kinematics {
         origin: DVec3::ZERO,
         axes: glam::DMat3::IDENTITY,

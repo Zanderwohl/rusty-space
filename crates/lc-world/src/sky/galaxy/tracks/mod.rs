@@ -4,9 +4,10 @@
 //! Pols & Tout (2000, MNRAS 315, 543, astro-ph/0001295), equations and Appendix coefficients as
 //! published. Every coefficient was checked against the SSE code's data; where the paper's HTML
 //! and the code disagreed (eq. 21's divisor, b17's exponent, the blue-loop exponent), the code is
-//! taken. Valid for 0.1–100 M☉ and Z = 1e-4 to 0.03; outside that, values are clamped to the edge.
+//! taken. Fitted for 0.1–100 M☉ and Z = 1e-4 to 0.03; masses down to the IMF's 0.08 M☉ extrapolate
+//! the main sequence with eq. 24's radius floor, and anything else outside is clamped to the edge.
 //!
-//! No winds: the AGB ends at an initial–final mass relation instead, see [`giants`].
+//! No winds: the AGB ends at an initial–final mass relation instead (`giants`).
 //!
 //! Shared by the bake and the loader, so a published star is as bright in the game as in the
 //! editor.
@@ -18,11 +19,13 @@ mod main_sequence;
 pub use coefficients::Coefficients;
 pub use giants::End;
 
+use std::sync::OnceLock;
+
 use coefficients::{Z_REF, pow};
 
 /// Solar effective temperature, K.
 const T_SUN: f64 = 5772.0;
-const M_RANGE: (f64, f64) = (0.1, 100.0);
+const M_RANGE: (f64, f64) = (0.08, 100.0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -57,14 +60,26 @@ pub fn metallicity_z(feh: f64) -> f64 {
 }
 
 pub fn evolve(initial_mass: f64, age_gyr: f64, feh: f64) -> Evolved {
+    evolve_with(&Coefficients::new(metallicity_z(feh)), initial_mass, age_gyr)
+}
+
+/// As [`evolve`], with the coefficients for a published record's `[Fe/H]` step built once and
+/// kept: a step is an `i8`, so 256 sets cover every record the bake or the loader sees.
+pub fn evolve_step(initial_mass: f64, age_gyr: f64, feh_step: i8) -> Evolved {
+    static SETS: [OnceLock<Coefficients>; 256] = [const { OnceLock::new() }; 256];
+    let c = SETS[(feh_step as i16 + 128) as usize]
+        .get_or_init(|| Coefficients::new(metallicity_z(feh_step as f64 * super::FEH_STEP)));
+    evolve_with(c, initial_mass, age_gyr)
+}
+
+fn evolve_with(c: &Coefficients, initial_mass: f64, age_gyr: f64) -> Evolved {
     let m = initial_mass.clamp(M_RANGE.0, M_RANGE.1);
-    let c = Coefficients::new(metallicity_z(feh));
     let t = age_gyr.max(0.0) * 1000.0;
     if t < c.t_ms(m) {
         let (l, r) = c.main_sequence(m, t);
         return Evolved { state: State::MainSequence, mass_solar: initial_mass, luminosity_solar: l, teff_k: teff(l, r), radius_solar: r };
     }
-    let life = giants::Life::new(&c, m);
+    let life = giants::Life::new(c, m);
     if t < life.t_end {
         return Evolved { mass_solar: initial_mass, ..life.at(t) };
     }

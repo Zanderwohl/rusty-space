@@ -114,15 +114,11 @@ pub enum End {
 }
 
 /// The core mass of a white dwarf from its progenitor's initial mass, M☉: the piecewise relation
-/// SSE's `ifflag` option uses, standing in for the envelope loss these tracks do not model.
-fn white_dwarf_mass(m: f64, z: f64) -> f64 {
-    let mc = if pow(z, 0.4) >= 1e-8 {
-        f64::max(0.54 + 0.042 * m, f64::min(0.36 + 0.104 * m, 0.58 + 0.061 * m))
-    } else {
-        f64::max(0.54 + 0.073 * m, f64::min(0.29 + 0.178 * m, 0.65 + 0.062 * m))
-    };
-    let mc = if m < 1.0 { 0.46 } else { mc };
-    mc.min(M_CH)
+/// SSE's `ifflag` option uses for any Z these tracks accept, standing in for the envelope loss
+/// they do not model.
+fn white_dwarf_mass(m: f64) -> f64 {
+    let mc = f64::max(0.54 + 0.042 * m, f64::min(0.36 + 0.104 * m, 0.58 + 0.061 * m));
+    if m < 1.0 { 0.46 } else { mc.min(M_CH) }
 }
 
 /// A neutron star of `1.17 + 0.09 Mc` (eq. 92) below the black-hole core, and above it the
@@ -191,7 +187,7 @@ impl<'a> Life<'a> {
             let t_du = early_agb.time_at_luminosity(l_du).max(t_bagb);
             let pulsing = Track::new(rel, A_H * A_HE / (A_H + A_HE), t_du, l_du);
             let lambda = f64::min(0.9, 0.3 + 0.001 * pow(m, 5.0));
-            let mass = white_dwarf_mass(m, c.z).max(early_agb.core(t_bagb));
+            let mass = white_dwarf_mass(m).max(early_agb.core(t_bagb)).min(M_CH);
             let t_end = if mass <= mc_du {
                 early_agb.time_at_core(mass)
             } else {
