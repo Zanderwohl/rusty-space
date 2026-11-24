@@ -17,7 +17,7 @@
 const ELEVATION = (30 * Math.PI) / 180;
 const SQUASH = Math.sin(ELEVATION);
 const LIFT = Math.cos(ELEVATION);
-const PERIOD_MS = 60_000;
+const PERIOD_MS = 240_000; // 0.25 rpm
 
 // Disc radius is 1. Everything below is in that unit.
 const ARMS = 2;
@@ -37,7 +37,7 @@ const STAR_COUNT = 280;
 // The largest stars twinkle by walking this loop of brightness factors, each at its own rate
 // and starting point. Cosine-eased between keys, so a fixed curve rather than per-frame noise.
 const TWINKLERS = 20;
-const TWINKLE_CURVE = [1, 0.72, 0.9, 0.5, 0.95, 0.62, 0.84, 0.45, 0.78, 0.98];
+const TWINKLE_CURVE = [1, 0.61, 0.86, 0.3, 0.93, 0.47, 0.78, 0.23, 0.69, 0.97];
 
 // Kept dark in the light theme too: the galaxy is drawn additively and needs a dark field.
 const SPACE = "#0b0d12";
@@ -341,7 +341,7 @@ function twinkle(star, seconds) {
 function drawStar(ctx, res, star, x, y, starPx, visible, seconds) {
   if (visible <= 0) return;
   const glow = twinkle(star, seconds);
-  const s = starPx * star.size * (0.85 + 0.15 * glow);
+  const s = starPx * star.size * (0.75 + 0.25 * glow);
   ctx.globalAlpha = star.alpha * visible * glow;
   ctx.drawImage(res.sprites[star.sprite], x - s, y - s, 2 * s, 2 * s);
 }
