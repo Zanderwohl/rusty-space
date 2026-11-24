@@ -805,7 +805,7 @@ before the full galaxy forces it.
 | `L_A` and tier A's cell size | Set by how far the telescopes in [05-observation.md](05-observation.md) resolve a star of a given luminosity. 100 L☉ is a placeholder. |
 | Cell side | 8 ly keeps a dense cell near a thousand candidates and a sparse one near four. Globular cores may want a finer grid, which would be a second grid level rather than a change to this one. |
 | Chunk delivery | Range requests on immutable CDN files are assumed to work through the CDN in [14-hosting.md](14-hosting.md); unverified. |
-| Shell overlap at 1 ly spacing | The hard-core floor bounds the clamp from below. At the 0.8 ly central spacing the floor is a 0.2 ly shell; whether that is still a usable partition boundary for [03-world-model.md](03-world-model.md) is measurable from Phase II. |
+| Shell overlap at 1 ly spacing | Shells overlap wherever stars are closer than 3.2 ly, which Phase I's 1.3–1.9 ly spacing already does. A position belongs to the *nearest* star within the shell (`lc_world::system::holding`), which the shard and the client share; the first-in-catalog-order rule it replaced put a ship beside one star into its neighbor's system. Whether a shell this much larger than the spacing still suits [03-world-model.md](03-world-model.md)'s other uses of it is open. |
 | Published tier-B volume | How far ahead of play to publish. Sets CDN storage, which grows with exploration rather than with the galaxy. |
 | Nebulae | Authored as dust and gas fields with a young population inside. How they render and occlude is a separate design. |
 | The universe layout | Who owns the file that places shards relative to one another, and whether a shard's galaxies can be seen from another in more than a skybox picture. |
