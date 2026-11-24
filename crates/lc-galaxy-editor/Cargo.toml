@@ -1,0 +1,17 @@
+[package]
+name = "lc-galaxy-editor"
+version = "0.1.0"
+edition = "2024"
+description = "Galaxy Forge: the native editor for the Lightcone galaxy. Never shipped."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+lc-galaxy = { path = "../lc-galaxy" }
+bevy = "0.19.1"
+bevy_egui = "0.42.0"
+glam = "0.32"
+
+[[bin]]
+name = "lc-galaxy-editor"
+path = "src/main.rs"

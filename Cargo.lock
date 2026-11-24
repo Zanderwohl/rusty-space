@@ -5066,6 +5066,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "lc-galaxy"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "lc-world",
+ "libm",
+ "ron 0.12.2",
+ "serde",
+]
+
+[[package]]
+name = "lc-galaxy-editor"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_egui",
+ "glam",
+ "lc-galaxy",
+]
+
+[[package]]
 name = "lc-proto"
 version = "0.1.0"
 dependencies = [
