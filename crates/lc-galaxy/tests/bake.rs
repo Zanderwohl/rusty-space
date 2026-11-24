@@ -131,3 +131,29 @@ fn features_outside_the_box_are_problems() {
     let c = t.compile(t.len(), None);
     assert!(c.problems.contains_key(&frame));
 }
+
+/// A published chunk loads back into the stars the bake made: same ids, positions within a
+/// quantization step, and the same luminosity, since both ends derive it from the same record.
+#[test]
+fn a_published_galaxy_loads_as_baked() {
+    use lc_world::sky::StarProvider;
+    use lc_world::sky::galaxy::GalaxyChunk;
+    let (t, c) = uniform_ball(300.0, 8.0, 13);
+    let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
+    let chunks = lc_galaxy::publish::chunks(&c, &b, 7);
+    assert!(chunks.len() > 1, "the ball straddles the origin, so several chunks");
+    let decoded: Vec<_> = chunks.iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let provider = lc_world::sky::galaxy::GalaxyProvider::new("t".into(), &decoded);
+    let lit: Vec<_> = b.stars.iter().filter(|s| s.attributes.luminosity_solar > 0.0).collect();
+    assert_eq!(provider.len(), lit.len());
+    for s in lit {
+        let loaded = provider.get(s.id).expect("every lit star loads");
+        assert!(loaded.position_ly.distance(s.position_ly) < 1e-3);
+        assert_eq!(loaded.luminosity_solar, s.attributes.luminosity_solar);
+        assert!((loaded.velocity / 1000.0 - s.attributes.velocity_km_s).length() < 1e-6);
+    }
+    for ch in &decoded {
+        let (stars, _) = ch.stars();
+        assert!(stars.windows(2).all(|w| w[0].luminosity_solar >= w[1].luminosity_solar));
+    }
+}

@@ -3,12 +3,13 @@
 How designers describe a galaxy of some 10^11 stars without placing any of them, and how that
 description becomes stars the shard and the client can load.
 
-**Status: partly built.** Steps E1 and E2 of [Before Phase I](#before-phase-i) are built:
+**Status: partly built.** Steps E1 to E3 of [Before Phase I](#before-phase-i) are built:
 `crates/lc-galaxy` holds the timeline, its tolerant codec, the `variable`, `frame`, `population`
-and `plummer` kinds, placement on the fixed grid and placeholder attributes, and
-`crates/lc-galaxy-editor` is **Galaxy Forge**, the editor. E3 (chunks and the shard) and
-everything after it are not started. Today's sky is still the HYG catalog through
-`lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
+and `plummer` kinds, placement on the fixed grid, attributes and a local publish;
+`crates/lc-galaxy-editor` is **Galaxy Forge**, the editor; and `lc_world::sky::galaxy` reads
+published chunks into the shard (`--sky <manifest>.galaxy`) and the client (a `.galaxy` asset).
+Tier A, the CDN, and everything from Phase II on are not started. The shipped sky is still the
+HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
 
@@ -547,15 +548,24 @@ and frozen. Physics derived from the stored draws may be retuned like any other 
 
 | field | bytes | notes |
 |---|---|---|
+| cell within chunk | 2 | a chunk is 32³ cells, 256 ly on a side |
 | index within cell | 2 | with the cell, the id |
 | position within cell | 6 | `u16` per axis over 8 ly: 7.7 AU resolution |
-| initial mass | 2 | logarithmic |
-| age | 2 | |
+| initial mass | 2 | logarithmic over 0.08–150 M☉ |
+| age | 2 | linear over 0–13.8 Gyr |
 | `[Fe/H]` | 1 | 0.02 dex steps |
-| population, multiplicity, tier | 1 | |
-| **total** | **14** | a companion adds a record of its own |
+| population, tier | 1 | four bits of population index into the chunk's header, one of tier |
+| **total** | **16** | a companion adds a record of its own; multiplicity is not stored yet |
 
-Velocity, luminosity, temperature, radius and `mu` are computed on load. A retune of the tracks
+As built (`lc_world::sky::galaxy`), a chunk file is a header — the graph version, the chunk's
+coordinates, and each population's frame, rotation curve and dispersion — then its records,
+brightest first. Files are named by their content hash, and a `manifest.galaxy` in RON lists
+them with their hashes; the loader refuses a chunk whose bytes do not match. Remnants that emit
+nothing are left out of the sky on load.
+
+Velocity, luminosity, temperature, radius and `mu` are computed on load, by the same code the
+bake uses (`sky::galaxy::tracks` and `Kinematics`), and the bake derives its stars from the
+quantized record, so Galaxy Forge shows a star exactly as the game will load it. A retune of the tracks
 therefore changes how bright a published star is, which is the same bargain system generation
 already makes; it never changes where a star is or whether it exists.
 
@@ -682,6 +692,16 @@ lc-galaxy diff   galaxy/ --against <manifest>
 lc-galaxy publish chunks/           # CDN upload and manifest rows; see 15-runbook.md
 ```
 
+As built in E3, only `check` and a local `publish` exist:
+
+```bash
+cargo run -p lc-galaxy --bin lc-galaxy -- publish crates/lc-galaxy/galaxies/phase-1.ron --out crates/lc-client/assets/galaxies/phase-1
+cargo run -p lc-server --bin lightcone-server -- --open --sky crates/lc-client/assets/galaxies/phase-1/manifest.galaxy
+cargo run -p lc-client --bin lightcone -- galaxies/phase-1/manifest.galaxy --local
+```
+
+The published directory is generated and not committed.
+
 The RON stays readable by hand, which matters when the editor opens a file and marks a feature
 it cannot read.
 
@@ -754,7 +774,7 @@ players see a galaxy, not when the editor changes.
 |---|---|---|
 | E1 | `lc-galaxy` core: the timeline, the tolerant codec, `Compiled`, the `variable`, `frame`, `population` and `plummer` kinds, the sampler on the fixed grid, attributes from a placeholder track table | unit tests |
 | E2 | `lc-galaxy-editor`: timeline and parameters panels, undo, open and save with `Unknown`, `Unsupported` and `Damaged` features marked, the region and sky views, the inspector, and statistics with a nearest-neighbor histogram against the hard-core distance | the designer, locally |
-| E3 | the chunk writer, `lc-world::sky::galaxy`, `GalaxyProvider`, a region query on `StarProvider`, and a local publish: a chunk file and manifest that the dev shard loads | Phase I begins |
+| E3 | the chunk writer, `lc-world::sky::galaxy`, `GalaxyProvider`, a region query on `StarProvider`, and a local publish: chunk files and a manifest that the dev shard loads (built) | Phase I begins |
 
 ### What each phase adds
 

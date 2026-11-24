@@ -13,8 +13,7 @@ pub struct PopulationKind {
     pub dispersion: Dispersion,
 }
 
-/// The universe is about 13.8 Gyr old; no star is older.
-pub const MAX_AGE_GYR: f64 = 13.8;
+pub use lc_world::sky::galaxy::MAX_AGE_GYR;
 
 impl FeatureKind for PopulationKind {
     const KIND: &'static str = "population";

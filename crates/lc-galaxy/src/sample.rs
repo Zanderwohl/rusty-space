@@ -11,16 +11,12 @@ use std::f64::consts::PI;
 use glam::{DVec3, IVec3};
 use lc_world::rng;
 use lc_world::sky::StarId;
+use lc_world::sky::galaxy::{cell_in_grid, pack_cell, star_id};
 
 use crate::attributes::{self, Attributes};
 use crate::compiled::{Aabb, Compiled};
 
-/// Side of a grid cell in ly. Part of the format: the grid is anchored at the origin and never
-/// moves.
-pub const CELL_LY: f64 = 8.0;
-
-/// Cells per axis either side of the origin: `2^13 · 8 ly` covers the ±36 500 ly box.
-const CELL_HALF_RANGE: i32 = 1 << 13;
+pub use lc_world::sky::galaxy::CELL_LY;
 
 /// The sampled intensity bound is raised by this before drawing, and doubled again if a
 /// candidate still exceeds it. Deterministic either way: the bound is a function of the field.
@@ -63,14 +59,13 @@ impl Cell {
     }
 
     pub fn in_grid(self) -> bool {
-        self.0.to_array().iter().all(|v| (-CELL_HALF_RANGE..CELL_HALF_RANGE).contains(v))
+        cell_in_grid(self.0.to_array())
     }
 
-    /// 14 bits per axis. Only for a cell [`Cell::in_grid`]; one outside would share bits with
-    /// another, which is why the bake refuses such a region.
+    /// Panics outside the grid, where two cells would share bits; the bake refuses such a
+    /// region before it gets here.
     pub fn packed(self) -> u64 {
-        let axis = |v: i32| ((v + CELL_HALF_RANGE) as u64) & 0x3fff;
-        axis(self.0.x) << 28 | axis(self.0.y) << 14 | axis(self.0.z)
+        pack_cell(self.0.to_array()).unwrap_or_else(|| panic!("cell {} is outside the grid", self.0))
     }
 }
 
@@ -81,10 +76,6 @@ pub enum Tier {
     B,
 }
 
-/// Which provider built an id, in its low bits: distinct from every hashed catalog id only
-/// statistically, but distinct from every other built one by construction.
-const GALAXY_PROVIDER_TAG: u64 = 1;
-
 /// A star's address: its cell and its candidate's index there, which is what its id is built
 /// from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -94,13 +85,9 @@ pub struct StarKey {
 }
 
 impl StarKey {
-    /// `cell (42) | index (16) | tier (1) | provider (5)`.
     pub fn star_id(self, tier: Tier) -> StarId {
-        let tier = match tier {
-            Tier::A => 1,
-            Tier::B => 0,
-        };
-        StarId::from_raw(self.cell.packed() << 22 | (self.index as u64) << 6 | tier << 5 | GALAXY_PROVIDER_TAG)
+        star_id(self.cell.0.to_array(), self.index, tier == Tier::A)
+            .unwrap_or_else(|| panic!("cell {} is outside the grid", self.cell.0))
     }
 
     fn hash(self, seed: u64, salt: u64) -> u64 {
@@ -308,12 +295,14 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
                         && a.position.distance_squared(b.position) < a.exclusion_ly.max(b.exclusion_ly).powi(2)
                 })
             })
-            .map(|c| BakedStar {
-                key: c.key,
-                id: c.key.star_id(Tier::B),
-                position_ly: c.position,
-                exclusion_ly: c.exclusion_ly,
-                attributes: attributes::draw(compiled, seed, c.key, c.position),
+            .filter_map(|c| {
+                Some(BakedStar {
+                    key: c.key,
+                    id: c.key.star_id(Tier::B),
+                    position_ly: c.position,
+                    exclusion_ly: c.exclusion_ly,
+                    attributes: attributes::draw(compiled, seed, c.key, c.position)?,
+                })
             })
             .collect::<Vec<_>>()
     });

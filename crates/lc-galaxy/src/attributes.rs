@@ -1,35 +1,26 @@
 //! What a placed star is: drawn from its own seed and its population's statistics where it
 //! fell.
 //!
-//! **The tracks are a placeholder**: textbook power laws for the main sequence, one giant
-//! branch and fixed remnants, enough to make a star list whose HR diagram has the right shape.
-//! The analytic tracks of `34-galaxy-authoring.md` (Hurley, Pols & Tout) replace them.
+//! The draws go through [`GalaxyRecord`]'s quantization before anything is derived from them,
+//! and the derivation is `lc_world::sky::galaxy`'s, so a baked star is exactly what the game
+//! loads from a published chunk.
 
 use glam::DVec3;
 use lc_world::rng;
+use lc_world::sky::galaxy::{GalaxyRecord, Kinematics, tracks};
 
-use crate::compiled::{Age, Compiled, Imf, Population};
+pub use lc_world::sky::galaxy::tracks::State;
+
+use crate::compiled::{Age, Compiled, Imf};
 use crate::feature::FeatureId;
 use crate::kinds::MAX_AGE_GYR;
-use crate::sample::StarKey;
+use crate::sample::{StarKey, Tier};
 
 const SALT_ATTRIBUTES: u64 = 0x6174_7472;
 
 /// The IMF's mass range, M☉.
 pub const MIN_MASS: f64 = 0.08;
 pub const MAX_MASS: f64 = 100.0;
-
-/// Solar effective temperature, K.
-const T_SUN: f64 = 5772.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum State {
-    MainSequence,
-    Giant,
-    WhiteDwarf,
-    NeutronStar,
-    BlackHole,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attributes {
@@ -43,6 +34,8 @@ pub struct Attributes {
     pub teff_k: f64,
     pub radius_solar: f64,
     pub velocity_km_s: DVec3,
+    /// What a publish writes; the fields above are derived from it.
+    pub record: GalaxyRecord,
 }
 
 struct Draws(u64);
@@ -59,78 +52,66 @@ impl Draws {
     }
 }
 
-pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Attributes {
+/// `None` where no population has density, which a surviving candidate never is.
+pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Option<Attributes> {
     let d = Draws(rng::hash(&[seed, key.cell.packed(), key.index as u64, SALT_ATTRIBUTES]));
     let sample = compiled.sample(position);
-    let total = sample.total();
-    let pick = d.u(0) * total;
+    let pick = d.u(0) * sample.total();
     let mut acc = 0.0;
     let mut found = None;
-    for (((id, p), n), off) in compiled.populations.iter().zip(&sample.density).zip(&sample.feh_offset) {
+    for (slot, (((id, p), n), off)) in
+        compiled.populations.iter().zip(&sample.density).zip(&sample.feh_offset).enumerate()
+    {
         if *n <= 0.0 {
             continue;
         }
         acc += n;
         // Rounding can leave `pick` a hair past the last sum; the last nonzero one takes it.
-        found = Some((*id, p, *off));
+        found = Some((slot, *id, p, *off));
         if pick < acc {
             break;
         }
     }
-    let Some((population, pop, offset)) = found else {
-        return Attributes::bare(mass(&Imf::Kroupa, d.u(1)));
-    };
+    let (slot, population, pop, offset) = found?;
+    let frame = compiled.frames.get(&pop.frame)?;
     let initial = mass(&pop.imf, d.u(1));
     let age = match pop.age {
         Age::Uniform { min_gyr, max_gyr } => min_gyr + d.u(2) * (max_gyr - min_gyr),
         Age::Burst { gyr, spread_gyr } => (gyr + spread_gyr * d.gaussian(2)).clamp(0.0, MAX_AGE_GYR),
     };
-    let frame = compiled.frames.get(&pop.frame);
-    let radius_kly = frame.map_or(0.0, |f| {
-        let l = f.to_local(position);
-        libm::hypot(l.x, l.y) / 1000.0
-    });
-    let feh = (pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly
-        + pop.feh.scatter * d.gaussian(3)
-        + offset)
-        .clamp(-4.0, 1.0);
-    let velocity = frame.map_or(DVec3::ZERO, |f| f.circular_velocity(position)) + dispersion(pop, age, &d);
-    let (state, mass_now, luminosity, teff) = track(initial, age);
-    Attributes {
+    let local = frame.to_local(position);
+    let radius_kly = libm::hypot(local.x, local.y) / 1000.0;
+    let feh = pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly + pop.feh.scatter * d.gaussian(3) + offset;
+    let record = GalaxyRecord::quantize(key.cell.0.to_array(), key.index, position, initial, age, feh, slot as u8, false);
+    let (initial, age) = (record.initial_mass_solar(), record.age_gyr());
+    let e = tracks::evolve(initial, age);
+    let velocity = kinematics(compiled, population)?.velocity_km_s(position, age, key.star_id(Tier::B));
+    Some(Attributes {
         population: Some(population),
         initial_mass_solar: initial,
         age_gyr: age,
-        feh,
-        state,
-        mass_solar: mass_now,
-        luminosity_solar: luminosity,
-        teff_k: teff,
-        radius_solar: radius(luminosity, teff, state),
+        feh: record.feh(),
+        state: e.state,
+        mass_solar: e.mass_solar,
+        luminosity_solar: e.luminosity_solar,
+        teff_k: e.teff_k,
+        radius_solar: e.radius_solar,
         velocity_km_s: velocity,
-    }
+        record,
+    })
 }
 
-impl Attributes {
-    fn bare(initial: f64) -> Self {
-        let (state, mass_solar, luminosity_solar, teff_k) = track(initial, 0.0);
-        Self {
-            population: None,
-            initial_mass_solar: initial,
-            age_gyr: 0.0,
-            feh: 0.0,
-            state,
-            mass_solar,
-            luminosity_solar,
-            teff_k,
-            radius_solar: radius(luminosity_solar, teff_k, state),
-            velocity_km_s: DVec3::ZERO,
-        }
-    }
-}
-
-fn dispersion(pop: &Population, age: f64, d: &Draws) -> DVec3 {
-    let sigma = pop.dispersion.zero_age_km_s * libm::pow(1.0 + age, pop.dispersion.exponent);
-    DVec3::new(d.gaussian(4), d.gaussian(5), d.gaussian(6)) * sigma
+/// What a population's stars need to move, as a chunk carries it.
+pub fn kinematics(compiled: &Compiled, population: FeatureId) -> Option<Kinematics> {
+    let pop = compiled.populations.get(&population)?;
+    let frame = compiled.frames.get(&pop.frame)?;
+    Some(Kinematics {
+        origin: frame.origin,
+        axes: frame.axes,
+        rotation: frame.rotation.clone(),
+        dispersion_km_s: pop.dispersion.zero_age_km_s,
+        dispersion_exponent: pop.dispersion.exponent,
+    })
 }
 
 /// Inverts the cumulative of a broken power law `ξ(m) ∝ m^-α`.
@@ -167,56 +148,3 @@ fn power_integral(lo: f64, hi: f64, alpha: f64) -> f64 {
     (libm::pow(hi, k) - libm::pow(lo, k)) / k
 }
 
-/// Main-sequence lifetime, Gyr.
-pub fn lifetime_gyr(mass: f64) -> f64 {
-    10.0 * libm::pow(mass, -2.5)
-}
-
-fn main_sequence_luminosity(m: f64) -> f64 {
-    if m < 0.43 {
-        0.23 * libm::pow(m, 2.3)
-    } else if m < 2.0 {
-        libm::pow(m, 4.0)
-    } else if m < 55.0 {
-        1.4 * libm::pow(m, 3.5)
-    } else {
-        32000.0 * m
-    }
-}
-
-fn main_sequence_radius(m: f64) -> f64 {
-    if m < 1.0 { libm::pow(m, 0.8) } else { libm::pow(m, 0.57) }
-}
-
-/// `(state, current mass M☉, luminosity L☉, T_eff K)`.
-fn track(m: f64, age: f64) -> (State, f64, f64, f64) {
-    let t_ms = lifetime_gyr(m);
-    if age < t_ms {
-        let l = main_sequence_luminosity(m);
-        let r = main_sequence_radius(m);
-        return (State::MainSequence, m, l, T_SUN * libm::pow(l / (r * r), 0.25));
-    }
-    if age < 1.1 * t_ms {
-        return if m < 8.0 { (State::Giant, m, 100.0 * m * m, 4500.0) } else { (State::Giant, m, main_sequence_luminosity(m), 4000.0) };
-    }
-    if m < 8.0 {
-        let cooling = (age - 1.1 * t_ms).max(1e-3);
-        let l = (0.01 * libm::pow(cooling / 0.1, -1.4)).min(0.1);
-        let r = 0.0126;
-        (State::WhiteDwarf, 0.109 * m + 0.394, l, T_SUN * libm::pow(l / (r * r), 0.25))
-    } else if m < 25.0 {
-        (State::NeutronStar, 1.4, 0.0, 0.0)
-    } else {
-        (State::BlackHole, 0.3 * m, 0.0, 0.0)
-    }
-}
-
-/// R☉, from `L = R² (T/T☉)⁴`.
-fn radius(luminosity: f64, teff: f64, state: State) -> f64 {
-    match state {
-        State::NeutronStar => 1.4e-5,
-        State::BlackHole => 0.0,
-        _ if teff > 0.0 => libm::sqrt(luminosity) * (T_SUN / teff).powi(2),
-        _ => 0.0,
-    }
-}

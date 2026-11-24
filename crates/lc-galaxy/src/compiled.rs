@@ -74,12 +74,7 @@ pub trait Shape: Debug + Send + Sync {
     fn bounds(&self) -> Aabb;
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Rotation {
-    Static,
-    /// `v(R) = speed · R / √(R² + core²)`, prograde about the frame's +Z.
-    Flat { speed_km_s: f64, core_ly: f64 },
-}
+pub use lc_world::sky::galaxy::Rotation;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
@@ -96,18 +91,6 @@ impl Frame {
 
     pub fn to_galaxy(&self, local: DVec3) -> DVec3 {
         self.origin + self.axes * local
-    }
-
-    /// Circular velocity at `p`, km/s, in galaxy axes.
-    pub fn circular_velocity(&self, p: DVec3) -> DVec3 {
-        let Rotation::Flat { speed_km_s, core_ly } = self.rotation else { return DVec3::ZERO };
-        let local = self.to_local(p);
-        let r = libm::hypot(local.x, local.y);
-        if r == 0.0 {
-            return DVec3::ZERO;
-        }
-        let v = speed_km_s * r / libm::sqrt(r * r + core_ly * core_ly);
-        self.axes * (DVec3::new(-local.y, local.x, 0.0) * (v / r))
     }
 }
 

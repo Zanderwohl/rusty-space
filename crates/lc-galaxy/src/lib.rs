@@ -14,6 +14,7 @@ pub mod compiled;
 pub mod feature;
 pub mod kinds;
 pub mod num;
+pub mod publish;
 pub mod sample;
 pub mod stats;
 pub mod timeline;

@@ -9,6 +9,7 @@ use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext};
 use bevy::prelude::*;
 use lc_world::sky::chunk::{ChunkError, ChunkProvider};
+use lc_world::sky::galaxy::{GalaxyError, Manifest};
 use lc_world::sky::{CatalogStar, StarProvider};
 
 /// A decoded sky chunk.
@@ -33,6 +34,7 @@ impl StarProvider for Sky {
 pub enum SkyLoadError {
     Io(std::io::Error),
     Chunk(ChunkError),
+    Galaxy(GalaxyError),
 }
 
 impl std::fmt::Display for SkyLoadError {
@@ -40,6 +42,7 @@ impl std::fmt::Display for SkyLoadError {
         match self {
             Self::Io(e) => write!(f, "{e}"),
             Self::Chunk(e) => write!(f, "{e}"),
+            Self::Galaxy(e) => write!(f, "{e}"),
         }
     }
 }
@@ -80,10 +83,39 @@ impl AssetLoader for SkyLoader {
     }
 }
 
+/// An authored galaxy: a manifest, and the chunks it names, fetched beside it.
+#[derive(Default, TypePath)]
+pub struct GalaxyLoader;
+
+impl AssetLoader for GalaxyLoader {
+    type Asset = Sky;
+    type Settings = ();
+    type Error = SkyLoadError;
+
+    async fn load(&self, reader: &mut dyn Reader, _settings: &(), load: &mut LoadContext<'_>) -> Result<Sky, Self::Error> {
+        let mut raw = Vec::new();
+        reader.read_to_end(&mut raw).await?;
+        let text = String::from_utf8(raw).map_err(|e| SkyLoadError::Io(std::io::Error::other(e)))?;
+        let manifest = Manifest::parse(&text).map_err(SkyLoadError::Galaxy)?;
+        let dir = load.path().path().parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let mut bytes = Vec::with_capacity(manifest.chunks.len());
+        for c in &manifest.chunks {
+            let path = bevy::asset::AssetPath::from_path_buf(dir.join(&c.file));
+            bytes.push(load.read_asset_bytes(path).await.map_err(|e| SkyLoadError::Io(std::io::Error::other(e.to_string())))?);
+        }
+        let provider = manifest.load(&bytes).map_err(SkyLoadError::Galaxy)?;
+        Ok(Sky { source: provider.name().to_owned(), skipped: provider.skipped, stars: provider.into_stars() })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["galaxy"]
+    }
+}
+
 pub struct SkyAssetPlugin;
 
 impl Plugin for SkyAssetPlugin {
     fn build(&self, app: &mut App) {
-        app.init_asset::<Sky>().init_asset_loader::<SkyLoader>();
+        app.init_asset::<Sky>().init_asset_loader::<SkyLoader>().init_asset_loader::<GalaxyLoader>();
     }
 }
