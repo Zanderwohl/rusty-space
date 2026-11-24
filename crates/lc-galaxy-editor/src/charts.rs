@@ -167,7 +167,7 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
             let c = chart(x, y, size, &metrics);
             let zams: Vec<Point> = edges(MIN_MASS, MAX_MASS, 120, true)
                 .iter()
-                .map(|(m, _)| tracks::evolve(*m, 0.0))
+                .map(|(m, _)| tracks::evolve(*m, 0.0, 0.0))
                 .map(|e| at(&c, e.teff_k, e.luminosity_solar))
                 .collect();
             let lit: Vec<&BakedStar> = stars.iter().filter(|s| s.attributes.luminosity_solar > 0.0).collect();

@@ -466,7 +466,7 @@ a fixed global grid.
    pure function of the field, and a cell that exceeds every bound tried is a bake error.
 3. Each candidate gets a **mark**, a uniform draw from the same stream, and an exclusion distance
    `r(x)`.
-4. A candidate **survives** unless another candidate within `max(r_a, r_b)` has a smaller mark.
+4. A candidate **survives** unless another candidate within `(r_a + r_b) / 2` has a smaller mark.
 
 Step 4 is the whole of the interaction between points, and it is symmetric and local: whether a
 candidate survives depends only on candidates within `r_max` of it, which live in its own cell
@@ -494,9 +494,12 @@ real ones do. Clustering beyond that — open clusters, associations — is auth
 or as a cluster-population feature that places a parent process and spawns members around each
 parent (a Neyman–Scott process), whose members the hard-core rule then thins like any others.
 
-When `r(x)` varies, the surviving density departs from the formula by a few percent. The bake
-corrects for it by measurement rather than by derivation: a test bakes uniform and graded boxes
-and holds the surviving count to the target within a stated tolerance.
+When `r(x)` varies, the surviving density departs from the formula, and which pair radius the
+rule uses decides by how much. Measured over 1000 seeds of Phase I and 150 of Phase II, the larger
+of the two radii left 4.6% fewer stars than the field promises (a sparse edge candidate's wide
+radius removes dense neighbors), the smaller left 4–9% too many, and their mean came within 0.1%.
+So the rule uses the mean, and a test bakes a uniform ball and the graded Phase II cluster and
+holds the surviving count to the field within a stated tolerance.
 
 ### Two tiers
 
@@ -531,7 +534,7 @@ Each surviving star draws, from its own seed and its population's statistics at 
 | age | the population's age distribution at `x` |
 | `[Fe/H]` | the population's age–metallicity relation, a radial gradient, the graph's offset field, and seeded scatter |
 | multiplicity | the population's binary fraction at that mass; a companion's mass ratio and separation |
-| evolutionary state, luminosity, `T_eff`, radius | initial mass, age and metallicity through analytic tracks — the Hurley, Pols & Tout fits are a candidate — including white dwarfs, neutron stars and black holes as remnants |
+| evolutionary state, luminosity, `T_eff`, radius | initial mass, age and metallicity through analytic tracks: Tout et al. (1996) for the zero-age main sequence and Hurley, Pols & Tout (2000) for the main sequence and Hertzsprung gap, as built in `lc_world::sky::galaxy::tracks`, through the Hertzsprung gap, giant branch, core helium burning with its blue loop, and AGB, to Mestel-cooling white dwarfs, neutron stars (eq. 92) and black holes (Belczynski et al. 2002 fallback). The tracks model no winds, so the AGB ends at an initial–final mass relation rather than at envelope loss |
 | velocity | the frame's rotation curve at `x`, plus a seeded dispersion that grows with age |
 
 This reverses the direction `lc_world::sky::metallicity` uses for HYG. There, metallicity is

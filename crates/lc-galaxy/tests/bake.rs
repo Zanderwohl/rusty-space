@@ -6,6 +6,28 @@ use lc_galaxy::kinds::{Contribution, FrameKind, Plummer, PopulationKind};
 use lc_galaxy::stats;
 use lc_galaxy::{Aabb, Compiled, FeatureKind, Num, Registry, Target, Timeline, bake, codec};
 
+fn phase_two() -> (Timeline, Compiled) {
+    let t = codec::read(include_str!("../galaxies/phase-2.ron"), &Registry::standard()).unwrap();
+    let c = t.compile(t.len(), None);
+    (t, c)
+}
+
+/// A cluster whose density falls to nothing at its edge, where exclusion radii vary most: the
+/// rule's choice of pair radius shows here and not in a uniform box. Twelve seeds put the Poisson
+/// scatter of the mean near 1.3%.
+#[test]
+fn the_count_matches_the_field_where_density_falls() {
+    let (mut t, _) = phase_two();
+    let (mut got, mut want) = (0.0, 0.0);
+    for seed in 0..12 {
+        t.seed = seed;
+        let c = t.compile(t.len(), None);
+        want += stats::expected(&c, c.bounds(), 48).iter().map(|(_, n)| n).sum::<f64>();
+        got += bake(&c, t.seed, c.bounds(), 8).unwrap().stars.len() as f64;
+    }
+    assert!((got / want - 1.0).abs() < 0.04, "baked {got} against {want}");
+}
+
 fn phase_one() -> (Timeline, Compiled) {
     let t = codec::read(include_str!("../galaxies/phase-1.ron"), &Registry::standard()).unwrap();
     let c = t.compile(t.len(), None);
@@ -66,15 +88,18 @@ fn a_region_bakes_the_stars_a_whole_bake_puts_there() {
 }
 
 #[test]
-fn no_two_stars_are_closer_than_their_exclusion() {
-    let (t, c) = uniform_ball(500.0, 8.6, 7);
+fn no_two_stars_are_closer_than_their_pair_radius() {
+    let (t, c) = phase_two();
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
-    let nn = stats::nearest_neighbors(&b.stars);
     // Thinning saw exact positions; a baked star shows its stored one, up to half a step's
     // diagonal away, so two stars may close by twice that.
     let slack = 2.0 * 3f64.sqrt() * lc_galaxy::sample::CELL_LY / 65536.0;
-    for (s, d) in b.stars.iter().zip(&nn) {
-        assert!(*d >= s.exclusion_ly - slack, "{d} < {}", s.exclusion_ly);
+    for (i, a) in b.stars.iter().enumerate() {
+        for s in &b.stars[i + 1..] {
+            let d = a.position_ly.distance(s.position_ly);
+            let r = 0.5 * (a.exclusion_ly + s.exclusion_ly);
+            assert!(d >= r - slack, "{d} < {r}");
+        }
     }
     let ids: BTreeSet<_> = b.stars.iter().map(|s| s.id).collect();
     assert_eq!(ids.len(), b.stars.len());
@@ -92,7 +117,7 @@ fn the_count_matches_the_field() {
         })
         .sum();
     let mean = total as f64 / 5.0;
-    // Poisson σ of the mean is √(2000/5) = 20; allow the few percent `r(x)` grading costs.
+    // Poisson σ of the mean is √(2000/5) = 20, so 5% is five σ.
     assert!((mean - target).abs() < 0.05 * target, "mean {mean} against {target}");
 }
 
@@ -147,7 +172,13 @@ fn a_published_galaxy_loads_as_baked() {
     assert!(chunks.len() > 1, "the ball straddles the origin, so several chunks");
     let decoded: Vec<_> = chunks.iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = lc_world::sky::galaxy::GalaxyProvider::new("t".into(), &decoded);
-    let lit: Vec<_> = b.stars.iter().filter(|s| s.attributes.luminosity_solar > 0.0).collect();
+    use lc_galaxy::attributes::State;
+    // The loader leaves out neutron stars and black holes, which give the sky nothing.
+    let lit: Vec<_> = b
+        .stars
+        .iter()
+        .filter(|s| s.attributes.luminosity_solar > 0.0 && !matches!(s.attributes.state, State::NeutronStar | State::BlackHole))
+        .collect();
     assert_eq!(provider.len(), lit.len());
     for s in lit {
         let loaded = provider.get(s.id).expect("every lit star loads");
