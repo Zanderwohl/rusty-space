@@ -53,6 +53,7 @@ pub fn systems(ui: &mut egui::Ui, census: &CensusJob, doc: &Doc) {
     let (Some(r), Some((_, outcome))) = (&doc.result, census.latest()) else {
         if census.running() {
             ui.spinner();
+            ui.ctx().request_repaint();
         }
         return;
     };
@@ -61,6 +62,7 @@ pub fn systems(ui: &mut egui::Ui, census: &CensusJob, doc: &Doc) {
         ui.label(RichText::new("systems").strong());
         if census.running() {
             ui.spinner();
+            ui.ctx().request_repaint();
         }
     });
     let counted = match outcome {

@@ -95,8 +95,15 @@ pub fn show(ui: &mut egui::Ui, charts: &mut Charts, doc: &Doc, census: &CensusJo
     let size = (width as u32, (width * 0.62) as u32);
     let counted = match census.latest() {
         Some((generation, Ok(c))) if charts.plot.needs_census() => Some((generation, c.as_slice())),
+        Some((_, Err(why))) if charts.plot.needs_census() => {
+            ui.label(format!("no census: {why}"));
+            return;
+        }
         _ => None,
     };
+    if charts.plot.needs_census() && census.running() {
+        ui.ctx().request_repaint();
+    }
     if charts.plot.needs_census() && counted.is_none() {
         ui.spinner();
         return;
@@ -262,14 +269,17 @@ fn ocean(
     size: (u32, u32),
     metrics: &raster::BitmapMetrics,
 ) -> Vec<Primitives> {
-    // Per bin: stars with a system, eligible stars, ocean worlds.
+    // Per bin: stars with a system, eligible stars, ocean worlds at eligible stars.
     let mut per = vec![(0u32, 0u32, 0u32); edges.len()];
     for s in counted {
         let (Some(c), v) = (&s.census, value(s)) else { continue };
-        let Some(i) = edges.iter().position(|(lo, hi)| v >= *lo && v < *hi) else { continue };
+        // Values past either end go in the end bins rather than off the chart.
+        let i = edges.iter().position(|(_, hi)| v < *hi).unwrap_or(edges.len() - 1);
         per[i].0 += 1;
-        per[i].1 += c.eligible as u32;
-        per[i].2 += c.ocean_worlds;
+        if c.eligible {
+            per[i].1 += 1;
+            per[i].2 += c.ocean_worlds;
+        }
     }
     let ratio = |n: u32, d: u32| if d > 0 { n as f64 / d as f64 } else { 0.0 };
     let worlds: Vec<Bin> = edges.iter().zip(&per).map(|(&(lo, hi), &(_, e, w))| (lo, hi, ratio(w, e))).collect();

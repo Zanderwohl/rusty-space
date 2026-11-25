@@ -31,25 +31,24 @@ pub enum CensusJob {
 }
 
 impl CensusJob {
-    /// Starts a census of the current bake if this one is of an older one, and picks up a finished one.
+    /// Picks up a finished census, and starts one of the current bake if none is running. One runs
+    /// at a time: a drag rebuilds every few frames, and only the newest bake is counted after it.
     pub fn update(&mut self, doc: &Doc) {
-        let generation = doc.generation;
-        let current = match self {
-            CensusJob::NotDispatched => None,
-            CensusJob::Waiting { generation, .. } | CensusJob::Ready { generation, .. } => Some(*generation),
-        };
-        if current != Some(generation) {
-            let previous = match std::mem::take(self) {
-                CensusJob::Ready { generation, results } => Some((generation, results)),
-                CensusJob::Waiting { previous, .. } => previous,
-                CensusJob::NotDispatched => None,
-            };
-            *self = dispatch(doc, generation, previous);
-        }
         if let CensusJob::Waiting { generation, slot, .. } = self
             && let Some(outcome) = slot.get()
         {
             *self = CensusJob::Ready { generation: *generation, results: outcome.clone() };
+        }
+        match self {
+            CensusJob::Waiting { .. } => {}
+            CensusJob::Ready { generation, .. } if *generation == doc.generation => {}
+            _ => {
+                let previous = match std::mem::take(self) {
+                    CensusJob::Ready { generation, results } => Some((generation, results)),
+                    _ => None,
+                };
+                *self = dispatch(doc, doc.generation, previous);
+            }
         }
     }
 
