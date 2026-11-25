@@ -14,6 +14,7 @@ pub mod architecture;
 pub mod belt;
 pub mod disc;
 pub mod moon;
+pub mod ocean;
 pub mod planet;
 pub mod profile;
 pub mod tuning;

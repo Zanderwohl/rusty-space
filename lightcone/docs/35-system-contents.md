@@ -6,8 +6,9 @@ star (see [34-galaxy-authoring.md](34-galaxy-authoring.md)), and the system gene
 into its system (see [26-system-generation.md](26-system-generation.md)). This document is the part
 between them.
 
-**Status: design only.** Systems are generated today from a star's seed, mass and metallicity
-under one global `Tuning`; nothing in this document is built.
+**Status: S1–S3 built.** The system fields, the per-chunk profile table (chunk format version 2),
+the profile on `CatalogStar` and the ocean-first construction are in. S4, Galaxy Forge's reporting,
+is not.
 
 The design in one paragraph: the galaxy's feature graph gains a small set of **system fields**,
 which are soft-edged, region-level values like the `[Fe/H]` offset it already has. The bake samples
@@ -99,8 +100,9 @@ A star is **eligible** when it could generate one at all:
    formed, and a remnant has none.
 2. Its disc can build one. The solid mass of the habitable-zone annulus, from the generator's own
    disc and drift rules at the star's mass and metallicity, is at least the smallest mass that holds
-   air and water at habitable-zone temperatures under the retention rule. That is estimated at about
-   0.3 Earth masses at default tuning; S3 computes it from the rule. This is the "enough metallicity" condition, stated in the generator's terms:
+   air and water at habitable-zone temperatures under the retention rule, with a margin of 1.3 so
+   the planet stage's radius spread cannot push it under. `ocean::sites` computes that floor per
+   orbit by bisection. This is the "enough metallicity" condition, stated in the generator's terms:
    a metal-poor star fails it because its disc is too thin, and a red dwarf fails it at a higher
    metallicity than a Sun-like star because its disc is smaller.
 
@@ -116,23 +118,33 @@ exactly as it would be at 0, using the same draws as today.
 The separate salt is what makes 0 mean "no effect" and keeps every other system unchanged when a
 designer raises the value: a star that loses the draw builds the system it always built, and a star
 that wins it builds a different one. At 1, every eligible star is ocean-first. At 0, ocean worlds
-still occur at the generator's natural rate. About three stars in five get a habitable world at
-default tuning ([26](26-system-generation.md)); how many of those clear the seas threshold is
-measured in S3.
+still occur at the generator's natural rate. Measured over 300 stars per row at default tuning:
+
+| star | [Fe/H] | eligible | ocean world at 0 | at 1 |
+|---|---|---|---|---|
+| red dwarf | −1.0 | 2% | 1% | 3% |
+| red dwarf | −0.5 | 41% | 5% | 42% |
+| red dwarf | 0.0 | 96% | 23% | 96% |
+| Sun-like | −1.0 | 80% | 15% | 80% |
+| Sun-like | 0.0 | 100% | 53% | 100% |
+| A star | 0.0 | 100% | 40% | 100% |
+
+The rate at 1 equals the eligible share, which is what the setting promises.
 
 ### Ocean-first construction
 
 The ocean world is placed before anything else, and the rest of the system is built around it:
 
-1. **Orbit.** Uniform in log radius across the habitable zone, from the star's seed.
-2. **Mass.** Drawn between the 0.3 Earth-mass floor and the smaller of the annulus's solid mass and
-   the mass at which a rocky core binds a hydrogen envelope and becomes a sub-Neptune. That ceiling
+1. **Orbit.** One of 32 log-spaced habitable-zone orbits, drawn from those where the floor is under the ceiling.
+2. **Mass.** Log-uniform between the orbit's floor and the smaller of what the narrowest feeding
+   zone can assemble and 0.95 of the core mass at which a rocky core binds a hydrogen envelope and
+   becomes a sub-Neptune. That ceiling
    is why a habitable world has to be a small one, as [26](26-system-generation.md) notes.
 3. **Feeding zone.** The planet's rung sweeps its own annulus, and its mass is taken from it, so mass
    is still conserved across the disc.
-4. **Water and field.** The draws that decide them are conditioned rather than overridden: the
-   rotation is drawn from below the dynamo's spin limit, so the planet has a field and keeps its
-   water, and the delivered water is drawn from the seas-or-more part of the generator's range. A
+4. **Water and field.** The rotation is clamped to 0.9 of the dynamo's spin limit and the field is
+   switched on, so the planet keeps its water, and the delivered water is drawn log-uniform from the
+   seas-or-more part of the generator's range. A
    giantless system would otherwise deliver no water at all; here the ocean world gets its seas
    anyway, which is the cheat.
 5. **Life.** Drawn as for any habitable world, at the star's `life` value.

@@ -66,6 +66,8 @@ pub struct Rung {
     pub stirred: bool,
     /// A giant that ended up far inside where it formed.
     pub migrated: bool,
+    /// The ocean world an ocean-first system was built around.
+    pub ocean: bool,
     /// Equilibrium temperature where it ended up, kelvin, zero albedo.
     pub equilibrium_k: f64,
 }
@@ -110,7 +112,10 @@ impl Architecture {
 pub fn architecture(star: &CatalogStar, tuning: &Tuning) -> Architecture {
     let disc = Disc::of(star, tuning);
     let seed = star.seed();
-    let mut rungs = rungs_of(&disc, star, tuning, seed);
+    let mut rungs = match super::ocean::first(&disc, star, tuning, seed) {
+        Some(site) => ocean_rungs(&disc, star, tuning, seed, &site),
+        None => rungs_of(&disc, star, tuning, seed),
+    };
     // Before anything else reads a mass: what merges changes how far the survivor's
     // resonances reach and which giant is there to migrate.
     settle_giants(&mut rungs, &disc, star, tuning);
@@ -129,7 +134,52 @@ fn rungs_of(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) -> Vec<
         axes.push(a);
         a *= rng::uniform_in(rng::hash(&[seed, 0x1add, axes.len() as u64]), t.spacing.0, t.spacing.1);
     }
+    assemble(disc, star, tuning, seed, &axes)
+}
 
+/// An ocean-first ladder: the ocean world's rung first, then rungs laid inward and outward from it
+/// with the usual spacing. Its rung takes its mass from its own annulus, so the disc is still
+/// conserved.
+fn ocean_rungs(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64, site: &super::ocean::Site) -> Vec<Rung> {
+    let t = &tuning.ladder;
+    let spacing = |k: u64| rng::uniform_in(rng::hash(&[seed, super::ocean::SALT_LADDER, k]), t.spacing.0, t.spacing.1);
+    let mut inner = Vec::new();
+    let mut a = site.semi_major_m;
+    loop {
+        a /= spacing(inner.len() as u64 + 1);
+        if a < disc.inner_m * t.first_rung.0 {
+            break;
+        }
+        inner.push(a);
+    }
+    inner.reverse();
+    let ocean_index = inner.len();
+    let mut axes = inner;
+    axes.push(site.semi_major_m);
+    let mut a = site.semi_major_m;
+    while axes.len() < t.max_rungs {
+        a *= spacing(1000 + axes.len() as u64);
+        if a >= disc.outer_m {
+            break;
+        }
+        axes.push(a);
+    }
+    let mut rungs = assemble(disc, star, tuning, seed, &axes);
+    let rung = &mut rungs[ocean_index];
+    let available = rung.core_earths + rung.debris_earths;
+    let core = super::ocean::mass_earths(site, seed).min(available);
+    rung.class = Class::Rocky;
+    rung.core_earths = core;
+    rung.mass_earths = core;
+    rung.radius_earths = disc::radius_earths(core, false);
+    rung.debris_earths = available - core;
+    rung.ocean = true;
+    rungs
+}
+
+/// What each rung at `axes` assembles from the annulus it sweeps.
+fn assemble(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64, axes: &[f64]) -> Vec<Rung> {
+    let t = &tuning.ladder;
     // In snow lines, so a dim star's whole system is pulled inward together.
     let growth_m = t.growth_over_snow * disc.snow_m;
 
@@ -165,6 +215,7 @@ fn rungs_of(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) -> Vec<
                 sterile: false,
                 stirred: false,
                 migrated: false,
+                ocean: false,
                 equilibrium_k: disc::temperature_at(&star.star, a),
             }
         })
@@ -238,14 +289,33 @@ fn migrate(rungs: &mut Vec<Rung>, disc: &Disc, star: &CatalogStar, tuning: &Tuni
         return;
     };
     let h = rng::hash(&[seed, 0x_7a7e_6f75, k as u64]);
-    let target = rng::uniform_in(h, (disc.inner_m * 1.5).ln(), disc.snow_m.ln()).exp();
-    rungs.drain(..k);
-    let giant = &mut rungs[0];
+    let mut target = rng::uniform_in(h, (disc.inner_m * 1.5).ln(), disc.snow_m.ln()).exp();
+    // An ocean world inside the giant's path stops it at the first orbit where the pair is stable
+    // and the giant's resonances leave the ocean world's rung alone.
+    let keep = match rungs[..k].iter().position(|r| r.ocean) {
+        Some(o) => {
+            let (ocean, giant) = (&rungs[o], &rungs[k]);
+            let star_kg = star.mass_solar.max(0.05) * disc::SOLAR_MASS_KG;
+            let hill = ((ocean.mass_earths + giant.mass_earths) * disc::EARTH_MASS / (3.0 * star_kg)).cbrt();
+            let mu = giant.mass_earths * disc::EARTH_MASS / star_kg;
+            let reach = (t.resonance_reach * mu.powf(0.2)).min(0.85);
+            let nearest = f64::max(ocean.semi_major_m * (1.0 + t.hill_separation * hill), ocean.semi_major_m / (1.0 - reach));
+            if nearest >= giant.semi_major_m {
+                return;
+            }
+            target = target.max(nearest);
+            o + 1
+        }
+        None => 0,
+    };
+    rungs.drain(keep..k);
+    let giant = &mut rungs[keep];
     giant.semi_major_m = target;
     giant.migrated = true;
     giant.equilibrium_k = disc::temperature_at(&star.star, target);
     // The swept disc goes with it: a migrating giant's debris is thrown out, not left in place.
-    giant.zone_m = (disc.inner_m, giant.zone_m.1);
+    let inner = if keep == 0 { disc.inner_m } else { rungs[keep - 1].zone_m.1 };
+    rungs[keep].zone_m = (inner, rungs[keep].zone_m.1);
 }
 
 /// Mark every rung that never became a planet: stirred by a giant's resonances, or simply
@@ -263,7 +333,7 @@ fn sterilize(rungs: &mut [Rung], star: &CatalogStar, tuning: &Tuning) {
         .collect();
 
     for rung in rungs.iter_mut() {
-        if rung.class.is_giant() {
+        if rung.class.is_giant() || rung.ocean {
             continue;
         }
         let stirred = reaches.iter().any(|(a_g, width)| {

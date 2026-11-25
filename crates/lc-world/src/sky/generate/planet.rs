@@ -19,7 +19,7 @@ pub const REFERENCE_K: f64 = 278.3;
 /// has to hold to have air at all; water is what it has to hold to be worth landing on.
 const HYDROGEN: f64 = 2.0;
 const NITROGEN: f64 = 28.0;
-const WATER: f64 = 18.0;
+pub(crate) const WATER: f64 = 18.0;
 
 /// Above this equilibrium temperature a body's water is vapor and can be stripped; below it,
 /// the water is ice and stays whatever the star does. Kelvin.
@@ -206,9 +206,13 @@ fn of(
     let h = |tag: u64| rng::hash(&[seed, 0x91a4, k as u64, tag]);
     let t = &tuning.world;
 
-    let spin_s = spin_of(h(7), rung.class.is_giant(), t);
+    // An ocean world turns inside the dynamo's limit and has the field that keeps its seas.
+    let spin_s = match rung.ocean {
+        true => spin_of(h(7), false, t).min(0.9 * t.dynamo_spin_s),
+        false => spin_of(h(7), rung.class.is_giant(), t),
+    };
     let mass_earths = rung.mass_earths;
-    let magnetic = rung.class.is_giant() || dynamo(mass_earths, spin_s, h(13), tuning);
+    let magnetic = rung.class.is_giant() || rung.ocean || dynamo(mass_earths, spin_s, h(13), tuning);
     let exosphere = exosphere_k(rung.equilibrium_k, tuning);
     let margin = |molar: f64, radius: f64| retention_margin(molar, mass_earths, radius, exosphere, tuning);
 
@@ -278,7 +282,11 @@ fn water(
     tuning: &Tuning,
 ) -> f64 {
     let t = &tuning.world;
-    let born_with = if rung.class.is_giant() {
+    let born_with = if rung.ocean {
+        // Seas whatever the giants did: the authored skew, drawn from the wet end of the range.
+        let lo = super::ocean::SEAS_WATER_FRACTION.max(t.delivered_water.0);
+        rng::uniform_in(h, lo.ln(), t.delivered_water.1.max(lo).ln()).exp()
+    } else if rung.class.is_giant() {
         // A giant's ices are in its core, under an envelope that is neither ice nor rock, so
         // what it holds as water is a share of the core rather than of the planet.
         0.5 * rung.core_earths / rung.mass_earths.max(1.0e-9)
