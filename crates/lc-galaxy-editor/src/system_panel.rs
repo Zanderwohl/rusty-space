@@ -275,20 +275,33 @@ fn strip(ui: &mut egui::Ui, l: &Listing, selected: &mut Option<usize>) -> bool {
     }
     painter.text(pos2(rect.right() - 4.0, rect.top() + 2.0), egui::Align2::RIGHT_TOP, "AU", font, label);
 
-    let hovered = response.hover_pos().and_then(|p| under(&marks, p).map(|i| (p, i)));
-    if let Some((p, i)) = hovered {
-        pointer_label(ui.ctx(), p, &display_name(&l.entries[i]));
+    let pointer = response.hover_pos();
+    let item = pointer.and_then(|p| under(&marks, p));
+    if let Some(p) = pointer {
+        // The zones name themselves on hover but are not entries, so a click on one clears the pick.
+        let near_snow = (p.x - x(z.snow_au)).abs() <= REACH_PX && plot.y_range().contains(p.y);
+        let text = match item {
+            Some(i) => Some(display_name(&l.entries[i])),
+            None if near_snow => Some(format!("Snow line, {:.3} AU", z.snow_au)),
+            None if hz.contains(p) => Some(format!("Habitable zone, {:.3} to {:.3} AU", z.habitable_au.0, z.habitable_au.1)),
+            None => None,
+        };
+        if let Some(text) = text {
+            pointer_label(ui.ctx(), p, &text);
+        }
     }
     if response.clicked() {
-        *selected = hovered.map(|(_, i)| i);
+        *selected = item;
         return true;
     }
     false
 }
 
+/// How far outside a dot, band or line the pointer still counts as over it.
+const REACH_PX: f32 = 4.0;
+
 /// The entry under `p`: the nearest dot within reach, else the narrowest band.
 fn under(marks: &[(usize, Mark)], p: Pos2) -> Option<usize> {
-    const REACH_PX: f32 = 4.0;
     let dot = marks
         .iter()
         .filter_map(|(i, m)| match m {
