@@ -3,6 +3,8 @@
 use bevy_egui::egui::{self, Color32, RichText, Sense, Stroke, pos2, vec2};
 use lc_galaxy::Target;
 
+use em_ui::egui_text::{Unit, quantity};
+
 use crate::doc::Doc;
 use crate::palette;
 
@@ -77,29 +79,34 @@ pub fn inspector(ui: &mut egui::Ui, doc: &Doc) {
     let Some(r) = &doc.result else { return };
     let a = &s.attributes;
     egui::Grid::new("inspector").num_columns(2).striped(true).show(ui, |ui| {
-        let mut row = |k: &str, v: String| {
+        let row = |ui: &mut egui::Ui, k: &str, v: String| {
             ui.label(k);
             ui.label(v);
             ui.end_row();
         };
-        row("id", format!("{:016x}", s.id.get()));
-        row("cell", format!("{} #{}", s.key.cell.0, s.key.index));
+        let solar = |ui: &mut egui::Ui, k: &str, v: String, unit: Unit| {
+            ui.label(k);
+            quantity(ui, &v, unit);
+            ui.end_row();
+        };
+        row(ui, "id", format!("{:016x}", s.id.get()));
+        row(ui, "cell", format!("{} #{}", s.key.cell.0, s.key.index));
         let p = s.position_ly;
-        row("position", format!("({:.3}, {:.3}, {:.3}) ly", p.x, p.y, p.z));
-        row("population", a.population.map_or("none".into(), |p| doc.feature_name(p)));
-        row("state", format!("{:?}", a.state));
-        row("initial mass", format!("{:.3} M☉", a.initial_mass_solar));
-        row("mass", format!("{:.3} M☉", a.mass_solar));
-        row("age", format!("{:.3} Gyr", a.age_gyr));
-        row("[Fe/H]", format!("{:+.2}", a.feh));
-        row("luminosity", format!("{:.4} L☉", a.luminosity_solar));
-        row("T_eff", format!("{:.0} K", a.teff_k));
-        row("radius", format!("{:.4} R☉", a.radius_solar));
+        row(ui, "position", format!("({:.3}, {:.3}, {:.3}) ly", p.x, p.y, p.z));
+        row(ui, "population", a.population.map_or("none".into(), |p| doc.feature_name(p)));
+        row(ui, "state", format!("{:?}", a.state));
+        solar(ui, "initial mass", format!("{:.3}", a.initial_mass_solar), Unit::SolarMass);
+        solar(ui, "mass", format!("{:.3}", a.mass_solar), Unit::SolarMass);
+        row(ui, "age", format!("{:.3} Gyr", a.age_gyr));
+        row(ui, "[Fe/H]", format!("{:+.2}", a.feh));
+        solar(ui, "luminosity", format!("{:.4}", a.luminosity_solar), Unit::SolarLuminosity);
+        row(ui, "T_eff", format!("{:.0} K", a.teff_k));
+        solar(ui, "radius", format!("{:.4}", a.radius_solar), Unit::SolarRadius);
         let v = a.velocity_km_s;
-        row("velocity", format!("({:.1}, {:.1}, {:.1}) km/s", v.x, v.y, v.z));
-        row("exclusion", format!("{:.3} ly", s.exclusion_ly));
+        row(ui, "velocity", format!("({:.1}, {:.1}, {:.1}) km/s", v.x, v.y, v.z));
+        row(ui, "exclusion", format!("{:.3} ly", s.exclusion_ly));
         if let Some(d) = r.nearest.get(index).filter(|d| d.is_finite()) {
-            row("nearest", format!("{d:.3} ly"));
+            row(ui, "nearest", format!("{d:.3} ly"));
         }
     });
     ui.add_space(6.0);
