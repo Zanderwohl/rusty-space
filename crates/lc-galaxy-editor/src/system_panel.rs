@@ -94,7 +94,7 @@ pub fn show(ui: &mut egui::Ui, job: &mut Job, doc: &Doc) {
             Some(l) => {
                 strip(ui, l);
                 ui.add_space(4.0);
-                egui::ScrollArea::vertical().id_salt("system list").max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("system list").min_scrolled_height(600.0).max_height(600.0).auto_shrink([false, true]).show(ui, |ui| {
                     if l.entries.is_empty() {
                         ui.label("nothing orbits it");
                     }
