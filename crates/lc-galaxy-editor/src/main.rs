@@ -70,7 +70,7 @@ struct Ui {
     view: ViewState,
     charts: charts::Charts,
     dialog: Option<Dialog>,
-    system: system_panel::Job,
+    system: system_panel::SystemView,
 }
 
 enum Dialog {
