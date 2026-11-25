@@ -9,6 +9,9 @@ use lc_world::population::Kind as PopulationKind;
 use lc_world::sky::generate::listing::{Entry, Kind, Listing, listing};
 use lc_world::sky::generate::{Class, SystemProfile, system_with};
 
+use em_ui::egui_text::raised;
+use em_ui::number::scientific;
+
 use crate::doc::Doc;
 use crate::palette;
 
@@ -146,11 +149,11 @@ fn entry(ui: &mut egui::Ui, e: &Entry) {
             ui.label("orbit");
             ui.label(orbit);
             ui.label("mass");
-            ui.label(e.mass_earths.map_or("unknown".into(), |m| format!("{m:.3e} Earths")));
+            ui.label(raised(ui.style(), &e.mass_earths.map_or("unknown".into(), |m| format!("{} Earths", scientific(m, 3))), None));
             ui.end_row();
             if let Some(w) = &e.world {
                 ui.label("water");
-                ui.label(if w.water_fraction > 0.0 { format!("{:.2e}", w.water_fraction) } else { "none".into() });
+                ui.label(raised(ui.style(), &if w.water_fraction > 0.0 { scientific(w.water_fraction, 2) } else { "none".into() }, None));
                 ui.label("habitable");
                 ui.label(if w.habitable { "yes" } else { "no" });
                 ui.end_row();

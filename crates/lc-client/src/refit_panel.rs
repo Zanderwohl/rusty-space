@@ -6,6 +6,8 @@
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use em_ui::egui_text::raised;
+use em_ui::number::scientific;
 
 use lc_world::fitting::Balance;
 use lc_world::refit::rounds::Plan;
@@ -82,7 +84,7 @@ pub fn me_per_year(watts: f64, module_j: f64) -> String {
 
 /// An energy small enough to need an exponent, in module-energies.
 fn me_small(joules: f64, module_j: f64) -> String {
-    format!("{:.3e} ME", joules / module_j)
+    format!("{} ME", scientific(joules / module_j, 3))
 }
 
 /// A hull length: meters, or kilometers once there are thousands of them.
@@ -108,10 +110,10 @@ pub fn refit(ui: &mut egui::Ui, state: &UiState, game: &Session, out: &mut Messa
     egui::Grid::new("refit-stats").num_columns(2).show(ui, |ui| {
         let mut row = |key: &str, value: String| {
             ui.label(key);
-            ui.label(value);
+            ui.label(raised(ui.style(), &value, None));
             ui.end_row();
         };
-        row("mass", format!("{:.3e} kg", ship.mass_kg_at(now)));
+        row("mass", format!("{} kg", scientific(ship.mass_kg_at(now), 3)));
         row("accel", format!("{:.1} g", fitting.rated_g_at(&ship.motion, now)));
         row("length", length(ship.length_m));
         row("turn", format!("{:.0} s a flip", lc_world::attitude::flip_time_s(ship.slew_rate_rad_s())));
@@ -174,7 +176,7 @@ fn round(
     egui::Grid::new("refit-budget").num_columns(2).show(ui, |ui| {
         let mut row = |key: &str, value: String| {
             ui.label(key);
-            ui.label(value);
+            ui.label(raised(ui.style(), &value, None));
             ui.end_row();
         };
         row("available", me(budget.available_j, module_j));
@@ -213,7 +215,7 @@ fn round(
                     StepState::Waiting => ui.label(span(row.duration_s)),
                 };
                 if row.vented_j > 0.0 {
-                    ui.colored_label(hazard(), format!("vents {:.3e} J", row.vented_j));
+                    ui.label(raised(ui.style(), &format!("vents {} J", scientific(row.vented_j, 3)), Some(hazard())));
                 } else if row.stored_j != 0.0 {
                     ui.label(format!("{:+.2} ME", row.stored_j / module_j));
                 } else {

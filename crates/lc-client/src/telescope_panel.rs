@@ -7,6 +7,8 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use em_spectra::presets;
+use em_ui::egui_text::raised;
+use em_ui::number::scientific;
 use lc_world::knowledge::Distance;
 use lc_world::knowledge::conclusion::Kind;
 use lc_world::knowledge::survey::{Duty, Gaze};
@@ -95,23 +97,23 @@ fn describe(kind: &Kind) -> String {
         Kind::Quiet => "nothing transiting".into(),
         Kind::Unsearched => "a planet this log could not have found yet".into(),
         Kind::Planet { class, transit } => format!(
-            "{}, P = {:.4} ± {:.4} d, depth {:.1e}",
+            "{}, P = {:.4} ± {:.4} d, depth {}",
             class.name(),
             transit.period_s / day,
             transit.period_sigma_s / day,
-            transit.depth,
+            scientific(transit.depth, 1),
         ),
         Kind::Swarm(swarm) => {
-            let mut text = format!("a swarm covering {:.2e} ± {:.1e}", swarm.coverage.0, swarm.coverage.1);
+            let mut text = format!("a swarm covering {} ± {}", scientific(swarm.coverage.0, 2), scientific(swarm.coverage.1, 1));
             if let Some(t) = swarm.crossing_s {
                 text += &format!(", crossings of {:.1} h", t / 3600.0);
             }
             if let (Some(area), Some(au)) = (swarm.element_m2, swarm.semi_major_au) {
-                text += &format!(", elements of {:.1e} m² at {au:.2} AU", area);
+                text += &format!(", elements of {} m² at {au:.2} AU", scientific(area, 1));
             }
             text
         }
-        Kind::Belts { excess: Some((e, sigma)) } => format!("belts only; thermal glow {e:.1e} ± {sigma:.1e}"),
+        Kind::Belts { excess: Some((e, sigma)) } => format!("belts only; thermal glow {} ± {}", scientific(*e, 1), scientific(*sigma, 1)),
         Kind::Belts { excess: None } => "belts only".into(),
     }
 }
@@ -166,7 +168,7 @@ fn conclusion(ui: &mut egui::Ui, game: &Game, out: &mut MessageWriter<Requested>
         let from = c.from_ly.map_or(String::new(), |p| format!(" from {:.2}, {:.2}, {:.2} ly", p.x, p.y, p.z));
         ui.label(format!("{whose}'s log{from}:"));
         for h in c.transits.iter().chain(&c.populations).filter(|h| h.probability >= 0.005) {
-            ui.label(format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0));
+            ui.label(raised(ui.style(), &format!("  {} — {:.0}%", describe(&h.kind), h.probability * 100.0), None));
         }
         let searched = match c.evidence.periods_s {
             Some((lo, hi)) => format!("periods {:.1} to {:.1} d searched", lo / day, hi / day),
@@ -377,7 +379,7 @@ fn curve(
         ui.label(format!("{} samples", curve.len()));
         if curve.len() > 1 {
             ui.separator();
-            ui.label(format!("+/- {:.1e}", curve.uncertainty()));
+            ui.label(raised(ui.style(), &format!("± {}", scientific(curve.uncertainty(), 1)), None));
         }
     });
 
@@ -412,9 +414,7 @@ fn curve(
         } else {
             ("excess", -*last)
         };
-        ui.label(format!(
-            "last: {label} {value:.4e}   deepest dip {:.3e}",
-            curve.deepest()
-        ));
+        let last = format!("last: {label} {}   deepest dip {}", scientific(value, 4), scientific(curve.deepest(), 3));
+        ui.label(raised(ui.style(), &last, None));
     }
 }

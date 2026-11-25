@@ -12,6 +12,7 @@ lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
 glam = "0.32"
+em-ui = { path = "../em-ui", features = ["egui"] }
 em-plot = { path = "../em-plot", features = ["raster"] }
 
 [[bin]]
