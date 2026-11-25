@@ -7,8 +7,9 @@ use super::tuning::Tuning;
 
 /// `ocean` and `life` are stored in sixteenths.
 const FRACTION_STEPS: f64 = 16.0;
-/// The dex offsets are stored in tenths of a dex, within this many either side of zero.
-const DEX_STEP: f64 = 0.1;
+/// The dex offsets are stored in tenths of a dex, within this many either side of zero. Read back
+/// by dividing, so a stored 3 is the same double as the literal 0.3.
+const TENTHS: f64 = 10.0;
 pub const DEX_LIMIT: f64 = 1.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -30,7 +31,7 @@ impl SystemProfile {
     /// The nearest profile to these values, each clamped to its range.
     pub fn quantize(ocean: f64, life: f64, solids_dex: f64, belts_dex: f64, cloud_dex: f64) -> Self {
         let fraction = |v: f64| (v.clamp(0.0, 1.0) * FRACTION_STEPS).round() as u8;
-        let dex = |v: f64| (v.clamp(-DEX_LIMIT, DEX_LIMIT) / DEX_STEP).round() as i8;
+        let dex = |v: f64| (v.clamp(-DEX_LIMIT, DEX_LIMIT) * TENTHS).round() as i8;
         Self { ocean: fraction(ocean), life: fraction(life), solids: dex(solids_dex), belts: dex(belts_dex), cloud: dex(cloud_dex) }
     }
 
@@ -43,15 +44,15 @@ impl SystemProfile {
     }
 
     pub fn solids_dex(&self) -> f64 {
-        self.solids as f64 * DEX_STEP
+        self.solids as f64 / TENTHS
     }
 
     pub fn belts_dex(&self) -> f64 {
-        self.belts as f64 * DEX_STEP
+        self.belts as f64 / TENTHS
     }
 
     pub fn cloud_dex(&self) -> f64 {
-        self.cloud as f64 * DEX_STEP
+        self.cloud as f64 / TENTHS
     }
 
     /// The default tuning with this profile's shifts applied.
