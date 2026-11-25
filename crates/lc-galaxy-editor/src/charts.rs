@@ -11,6 +11,7 @@ use lc_galaxy::attributes::{MAX_MASS, MIN_MASS, age_fraction, imf_fraction, trac
 use lc_galaxy::kinds::MAX_AGE_GYR;
 use lc_galaxy::{BakedStar, Compiled, FeatureId};
 
+use crate::census::{CensusJob, Counted};
 use crate::doc::Doc;
 use crate::palette;
 
@@ -27,10 +28,12 @@ pub enum Plot {
     Mass,
     Age,
     Feh,
+    OceanByFeh,
+    OceanByMass,
 }
 
 impl Plot {
-    const ALL: [Plot; 4] = [Plot::Hr, Plot::Mass, Plot::Age, Plot::Feh];
+    const ALL: [Plot; 6] = [Plot::Hr, Plot::Mass, Plot::Age, Plot::Feh, Plot::OceanByFeh, Plot::OceanByMass];
 
     pub fn named(name: &str) -> Option<Plot> {
         Some(match name {
@@ -38,6 +41,8 @@ impl Plot {
             "mass" => Plot::Mass,
             "age" => Plot::Age,
             "feh" => Plot::Feh,
+            "ocean-feh" => Plot::OceanByFeh,
+            "ocean-mass" => Plot::OceanByMass,
             _ => return None,
         })
     }
@@ -48,7 +53,13 @@ impl Plot {
             Plot::Mass => "initial mass",
             Plot::Age => "age",
             Plot::Feh => "[Fe/H]",
+            Plot::OceanByFeh => "ocean by [Fe/H]",
+            Plot::OceanByMass => "ocean by mass",
         }
+    }
+
+    fn needs_census(self) -> bool {
+        matches!(self, Plot::OceanByFeh | Plot::OceanByMass)
     }
 }
 
@@ -56,6 +67,7 @@ impl Plot {
 struct Key {
     plot: Plot,
     generation: u64,
+    census: Option<u64>,
     size: (u32, u32),
 }
 
@@ -71,7 +83,7 @@ impl Charts {
     }
 }
 
-pub fn show(ui: &mut egui::Ui, charts: &mut Charts, doc: &Doc) {
+pub fn show(ui: &mut egui::Ui, charts: &mut Charts, doc: &Doc, census: &CensusJob) {
     let Some(r) = &doc.result else { return };
     let Ok(bake) = &r.bake else { return };
     ui.horizontal(|ui| {
@@ -81,9 +93,17 @@ pub fn show(ui: &mut egui::Ui, charts: &mut Charts, doc: &Doc) {
     });
     let width = ui.available_width().max(160.0);
     let size = (width as u32, (width * 0.62) as u32);
-    let key = Key { plot: charts.plot, generation: doc.generation, size };
+    let counted = match census.latest() {
+        Some((generation, Ok(c))) if charts.plot.needs_census() => Some((generation, c.as_slice())),
+        _ => None,
+    };
+    if charts.plot.needs_census() && counted.is_none() {
+        ui.spinner();
+        return;
+    }
+    let key = Key { plot: charts.plot, generation: doc.generation, census: counted.map(|(g, _)| g), size };
     if charts.drawn.as_ref().map(|(k, _)| *k) != Some(key) {
-        let image = render(charts.plot, &bake.stars, &r.compiled, size);
+        let image = render(charts.plot, &bake.stars, &r.compiled, size, counted.map(|(_, c)| c).unwrap_or(&[]));
         let texture = ui.ctx().load_texture("galaxy chart", image, egui::TextureOptions::LINEAR);
         charts.drawn = Some((key, texture));
     }
@@ -157,7 +177,7 @@ fn y_axis(bins: &[Bin], expected: &[Bin]) -> Axis {
     Axis { scale: Scale::Linear, range: (0.0, peak * 1.15), ticks: 4 }
 }
 
-fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)) -> egui::ColorImage {
+fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32), counted: &[Counted]) -> egui::ColorImage {
     let metrics = raster::BitmapMetrics;
     let counts = per_population(stars, compiled);
     let layers: Vec<Primitives> = match plot {
@@ -217,6 +237,11 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
             let c = chart(Axis::linear((-2.5, 1.0)), y_axis(&bins, &[]), size, &metrics);
             vec![c.frame(), c.histogram(&bins, BARS), titles(&c, "[Fe/H] (dex)", "stars")]
         }
+        Plot::OceanByFeh => ocean(counted, edges(-2.5, 1.0, 14, false), |s| s.feh, Axis::linear((-2.5, 1.0)), "[Fe/H] (dex)", size, &metrics),
+        Plot::OceanByMass => {
+            let x = Axis { scale: Scale::Log10, range: (MIN_MASS, MAX_MASS), ticks: 4 };
+            ocean(counted, edges(MIN_MASS, MAX_MASS, 16, true), |s| s.initial_mass_solar, x, "initial mass (Msun)", size, &metrics)
+        }
     };
     let refs: Vec<&Primitives> = layers.iter().collect();
     match raster::render(&refs, size.0, size.1, BG) {
@@ -224,4 +249,41 @@ fn render(plot: Plot, stars: &[BakedStar], compiled: &Compiled, size: (u32, u32)
         Some(pixmap) => egui::ColorImage::from_rgba_premultiplied([size.0 as usize, size.1 as usize], pixmap.data()),
         None => egui::ColorImage::new([1, 1], vec![egui::Color32::BLACK]),
     }
+}
+
+/// Ocean worlds per eligible star in each bin, as bars, and the share of stars that are eligible,
+/// as a line: where the line falls to zero is where the metallicity or mass condition cuts in.
+fn ocean(
+    counted: &[Counted],
+    edges: Vec<(f64, f64)>,
+    value: fn(&Counted) -> f64,
+    x: Axis,
+    x_title: &str,
+    size: (u32, u32),
+    metrics: &raster::BitmapMetrics,
+) -> Vec<Primitives> {
+    // Per bin: stars with a system, eligible stars, ocean worlds.
+    let mut per = vec![(0u32, 0u32, 0u32); edges.len()];
+    for s in counted {
+        let (Some(c), v) = (&s.census, value(s)) else { continue };
+        let Some(i) = edges.iter().position(|(lo, hi)| v >= *lo && v < *hi) else { continue };
+        per[i].0 += 1;
+        per[i].1 += c.eligible as u32;
+        per[i].2 += c.ocean_worlds;
+    }
+    let ratio = |n: u32, d: u32| if d > 0 { n as f64 / d as f64 } else { 0.0 };
+    let worlds: Vec<Bin> = edges.iter().zip(&per).map(|(&(lo, hi), &(_, e, w))| (lo, hi, ratio(w, e))).collect();
+    let eligible: Vec<Bin> = edges.iter().zip(&per).map(|(&(lo, hi), &(n, e, _))| (lo, hi, ratio(e, n))).collect();
+    let c = chart(x, y_axis(&worlds, &eligible), size, metrics);
+    let legend = Primitives {
+        labels: vec![Label {
+            at: Point::new(c.area.x + c.area.width - 4.0, c.area.y + 10.0),
+            text: "eligible / all stars".into(),
+            size: 10.0,
+            anchor: Anchor::End,
+            color: EXPECTED,
+        }],
+        ..Primitives::default()
+    };
+    vec![c.frame(), c.histogram(&worlds, BARS), c.steps(&eligible, EXPECTED), titles(&c, x_title, "ocean worlds / eligible star"), legend]
 }

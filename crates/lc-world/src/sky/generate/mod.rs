@@ -12,6 +12,7 @@
 
 pub mod architecture;
 pub mod belt;
+pub mod census;
 pub mod disc;
 pub mod listing;
 pub mod moon;

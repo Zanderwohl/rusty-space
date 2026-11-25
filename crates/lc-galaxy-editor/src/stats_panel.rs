@@ -1,10 +1,12 @@
 //! What the field promises against what the bake gave, and the picked star.
 
 use bevy_egui::egui::{self, Color32, RichText, Sense, Stroke, pos2, vec2};
-use lc_galaxy::Target;
+use lc_galaxy::{FeatureId, Target};
+use lc_world::sky::generate::census::Census;
 
 use em_ui::egui_text::{Unit, quantity};
 
+use crate::census::CensusJob;
 use crate::doc::Doc;
 use crate::palette;
 
@@ -44,6 +46,68 @@ pub fn statistics(ui: &mut egui::Ui, doc: &Doc) {
     let mean = finite.iter().sum::<f64>() / finite.len() as f64;
     let min = finite.iter().copied().fold(f64::INFINITY, f64::min);
     ui.label(format!("min {min:.2} ly, mean {mean:.2} ly, hard-core floor {:.2} ly", floor.unwrap_or(0.0)));
+}
+
+/// What the generator made of the baked stars' systems, per population and in total.
+pub fn systems(ui: &mut egui::Ui, census: &CensusJob, doc: &Doc) {
+    let (Some(r), Some((_, outcome))) = (&doc.result, census.latest()) else {
+        if census.running() {
+            ui.spinner();
+        }
+        return;
+    };
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("systems").strong());
+        if census.running() {
+            ui.spinner();
+        }
+    });
+    let counted = match outcome {
+        Ok(c) => c,
+        Err(why) => {
+            ui.label(format!("no census: {why}"));
+            return;
+        }
+    };
+    let of = |id: Option<FeatureId>| -> Vec<&Census> {
+        counted.iter().filter(|c| id.is_none() || c.population == id).filter_map(|c| c.census.as_ref()).collect()
+    };
+    let mut columns: Vec<(String, Vec<&Census>)> = r.compiled.populations.keys().map(|id| (doc.feature_name(*id), of(Some(*id)))).collect();
+    columns.push(("total".into(), of(None)));
+
+    type Measure = fn(&[&Census]) -> String;
+    fn per_star(cs: &[&Census], f: fn(&Census) -> u32) -> String {
+        if cs.is_empty() { "–".into() } else { format!("{:.2}", cs.iter().map(|c| f(c) as f64).sum::<f64>() / cs.len() as f64) }
+    }
+    fn share(cs: &[&Census], f: fn(&Census) -> bool) -> String {
+        if cs.is_empty() { "–".into() } else { format!("{:.0}%", 100.0 * cs.iter().filter(|c| f(c)).count() as f64 / cs.len() as f64) }
+    }
+    let rows: [(&str, Measure); 9] = [
+        ("systems", |cs| cs.len().to_string()),
+        ("planets / star", |cs| per_star(cs, |c| c.planets)),
+        ("giants / star", |cs| per_star(cs, |c| c.giants)),
+        ("with a belt", |cs| share(cs, |c| c.belt)),
+        ("with an Oort cloud", |cs| share(cs, |c| c.oort_cloud)),
+        ("habitable / star", |cs| per_star(cs, |c| c.habitable)),
+        ("ocean worlds", |cs| cs.iter().map(|c| c.ocean_worlds).sum::<u32>().to_string()),
+        ("eligible", |cs| cs.iter().filter(|c| c.eligible).count().to_string()),
+        ("ocean-first", |cs| cs.iter().filter(|c| c.ocean_first).count().to_string()),
+    ];
+    egui::Grid::new("systems").num_columns(columns.len() + 1).striped(true).show(ui, |ui| {
+        ui.label("");
+        for (name, _) in &columns {
+            ui.label(RichText::new(name).strong());
+        }
+        ui.end_row();
+        for (label, measure) in rows {
+            ui.label(label);
+            for (_, cs) in &columns {
+                ui.label(measure(cs));
+            }
+            ui.end_row();
+        }
+    });
 }
 
 /// Bars over `[0, max]`, with the hard-core floor marked.

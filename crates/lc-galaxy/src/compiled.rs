@@ -188,6 +188,17 @@ impl SystemField {
         matches!(self, SystemField::Solids | SystemField::Belts | SystemField::Cloud)
     }
 
+    /// This field's value in a star's quantized profile.
+    pub fn read(self, p: &lc_world::sky::generate::SystemProfile) -> f64 {
+        match self {
+            SystemField::Ocean => p.ocean(),
+            SystemField::Solids => p.solids_dex(),
+            SystemField::Belts => p.belts_dex(),
+            SystemField::Cloud => p.cloud_dex(),
+            SystemField::Life => p.life(),
+        }
+    }
+
     pub fn range(self) -> (f64, f64) {
         let dex = lc_world::sky::generate::profile::DEX_LIMIT;
         match self {

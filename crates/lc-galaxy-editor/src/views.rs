@@ -8,6 +8,7 @@
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use glam::DVec3;
 use lc_galaxy::attributes::State;
+use lc_galaxy::compiled::SystemField;
 use lc_galaxy::sample::cells_in;
 use lc_galaxy::{Aabb, BakedStar};
 
@@ -27,18 +28,31 @@ pub enum ColorBy {
     Metallicity,
     Age,
     Mass,
+    System(SystemField),
 }
 
 impl ColorBy {
-    pub const ALL: [ColorBy; 5] = [ColorBy::Temperature, ColorBy::Population, ColorBy::Metallicity, ColorBy::Age, ColorBy::Mass];
+    pub const ALL: [ColorBy; 10] = [
+        ColorBy::Temperature,
+        ColorBy::Population,
+        ColorBy::Metallicity,
+        ColorBy::Age,
+        ColorBy::Mass,
+        ColorBy::System(SystemField::Ocean),
+        ColorBy::System(SystemField::Solids),
+        ColorBy::System(SystemField::Belts),
+        ColorBy::System(SystemField::Cloud),
+        ColorBy::System(SystemField::Life),
+    ];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            ColorBy::Temperature => "temperature",
-            ColorBy::Population => "population",
-            ColorBy::Metallicity => "[Fe/H]",
-            ColorBy::Age => "age",
-            ColorBy::Mass => "mass",
+            ColorBy::Temperature => "temperature".into(),
+            ColorBy::Population => "population".into(),
+            ColorBy::Metallicity => "[Fe/H]".into(),
+            ColorBy::Age => "age".into(),
+            ColorBy::Mass => "mass".into(),
+            ColorBy::System(f) => format!("system: {}", f.label()),
         }
     }
 }
@@ -196,6 +210,12 @@ fn star_color(s: &BakedStar, by: ColorBy, doc: &Doc) -> Color32 {
         ColorBy::Metallicity => palette::diverging((a.feh + 1.0) / 1.5),
         ColorBy::Age => palette::sequential(a.age_gyr / 13.8),
         ColorBy::Mass => palette::sequential((a.initial_mass_solar.log10() + 1.1) / 3.1),
+        ColorBy::System(f) => {
+            let (lo, hi) = f.range();
+            let t = (f.read(&a.profile) - lo) / (hi - lo);
+            // Dex fields are signed about zero, so they diverge from the middle.
+            if f.in_dex() { palette::diverging(t) } else { palette::sequential(t) }
+        }
     }
 }
 

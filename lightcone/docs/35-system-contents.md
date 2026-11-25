@@ -6,9 +6,9 @@ star (see [34-galaxy-authoring.md](34-galaxy-authoring.md)), and the system gene
 into its system (see [26-system-generation.md](26-system-generation.md)). This document is the part
 between them.
 
-**Status: S1–S3 built.** The system fields, the per-chunk profile table (chunk format version 2),
-the profile on `CatalogStar` and the ocean-first construction are in. S4, Galaxy Forge's reporting,
-is not.
+**Status: built, S1–S4.** The system fields, the per-chunk profile table (chunk format version 2),
+the profile on `CatalogStar`, the ocean-first construction and Galaxy Forge's statistics, charts,
+System inspector and color-by are in. The estimate above the live-bake budget is not.
 
 The design in one paragraph: the galaxy's feature graph gains a small set of **system fields**,
 which are soft-edged, region-level values like the `[Fe/H]` offset it already has. The bake samples
