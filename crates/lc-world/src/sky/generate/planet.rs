@@ -283,7 +283,7 @@ fn water(
 ) -> f64 {
     let t = &tuning.world;
     let born_with = if rung.ocean {
-        // Seas whatever the giants did: the authored skew, drawn from the wet end of the range.
+        // The authored skew: seas whatever the giants delivered.
         let lo = super::ocean::SEAS_WATER_FRACTION.max(t.delivered_water.0);
         rng::uniform_in(h, lo.ln(), t.delivered_water.1.max(lo).ln()).exp()
     } else if rung.class.is_giant() {

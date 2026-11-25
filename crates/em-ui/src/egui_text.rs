@@ -54,7 +54,7 @@ pub fn raised(style: &Style, text: &str, color: Option<Color32>) -> LayoutJob {
     job
 }
 
-/// A unit written as a letter with the Sun's or the Earth's symbol under it.
+/// A unit written as a letter with the Sun's or the Earth's symbol as its subscript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     SolarMass,

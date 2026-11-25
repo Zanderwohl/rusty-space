@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use crate::distribution::{Distribution, Inclination};
 use crate::star::Star;
 
-/// What a population is. Every place that makes one says which.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// A rung a giant stirred past assembling, or one that never had the mass to.
@@ -22,7 +21,6 @@ pub enum Kind {
     /// The trans-planetary disc: the outer rungs that ran out of time.
     OuterDisc,
     OortCloud,
-    /// A planet's rings.
     Ring,
     /// Engineered collectors.
     Swarm,

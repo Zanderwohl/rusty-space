@@ -242,7 +242,8 @@ impl GalaxyChunk {
     }
 }
 
-/// The star a record loads as; `None` for a neutron star or black hole, which the sky leaves out.
+/// The star a record loads as; `None` for one the sky leaves out: a neutron star, a black hole, or
+/// a star with no light.
 pub fn catalog_star(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemProfile) -> Option<CatalogStar> {
     let id = r.id()?;
     let e = tracks::evolve_step(r.initial_mass_solar(), r.age_gyr(), r.feh);

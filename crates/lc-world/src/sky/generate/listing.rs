@@ -27,14 +27,12 @@ impl Kind {
     }
 }
 
-/// Planet-only values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct World {
     pub water_fraction: f64,
     pub habitable: bool,
     pub life: f64,
     pub moons: usize,
-    /// The world an ocean-first system was built around.
     pub ocean_first: bool,
     pub migrated: bool,
 }

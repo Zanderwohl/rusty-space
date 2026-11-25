@@ -25,8 +25,7 @@ fn digest(tuning: &Tuning) -> u64 {
             text += &format!("{} {:e} {:e} {:e} {:e} {} {:e} {}\n", p.name, p.semi_major_m, p.mass_kg, p.radius_m, p.water_fraction, p.habitable, p.life, p.moons.len());
         }
         for pop in &sys.populations {
-            // Without `kind`, which master's populations did not have, so the pin still compares
-            // the values.
+            // `kind` is left out so the digest still matches master's.
             let debug = format!("{pop:?}");
             let kind = format!("kind: {:?}, ", pop.kind);
             text += &debug.replacen(&kind, "", 1);

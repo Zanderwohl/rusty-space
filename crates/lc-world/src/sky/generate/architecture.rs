@@ -137,9 +137,8 @@ fn rungs_of(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64) -> Vec<
     assemble(disc, star, tuning, seed, &axes)
 }
 
-/// An ocean-first ladder: the ocean world's rung first, then rungs laid inward and outward from it
-/// with the usual spacing. Its rung takes its mass from its own annulus, so the disc is still
-/// conserved.
+/// Rungs laid inward and outward from the ocean world's. Its mass comes from its own annulus, so
+/// the disc is still conserved.
 fn ocean_rungs(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64, site: &super::ocean::Site) -> Vec<Rung> {
     let t = &tuning.ladder;
     let spacing = |k: u64| rng::uniform_in(rng::hash(&[seed, super::ocean::SALT_LADDER, k]), t.spacing.0, t.spacing.1);

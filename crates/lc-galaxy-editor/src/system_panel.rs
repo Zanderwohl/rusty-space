@@ -129,7 +129,6 @@ fn color(kind: Kind) -> Color32 {
     }
 }
 
-/// One body or population.
 fn entry(ui: &mut egui::Ui, e: &Entry) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
