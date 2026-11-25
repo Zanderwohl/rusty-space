@@ -23,7 +23,7 @@ pub struct SystemProfile {
 
 impl Default for SystemProfile {
     fn default() -> Self {
-        Self::quantize(0.0, Tuning::default().world.life_fraction, 0.0, 0.0, 0.0)
+        Self::quantize(0.0, super::tuning::LIFE_FRACTION, 0.0, 0.0, 0.0)
     }
 }
 
@@ -60,9 +60,10 @@ impl SystemProfile {
         let mut t = Tuning::default();
         let scale = |dex: f64| 10f64.powf(dex);
         t.disc.solid_earths *= scale(self.solids_dex());
-        t.belts.belt_survival *= scale(self.belts_dex());
-        t.belts.kuiper_survival *= scale(self.belts_dex());
-        t.belts.oort_efficiency *= scale(self.cloud_dex());
+        // Shares of a mass, so capped at all of it.
+        t.belts.belt_survival = (t.belts.belt_survival * scale(self.belts_dex())).min(1.0);
+        t.belts.kuiper_survival = (t.belts.kuiper_survival * scale(self.belts_dex())).min(1.0);
+        t.belts.oort_efficiency = (t.belts.oort_efficiency * scale(self.cloud_dex())).min(1.0);
         t.world.life_fraction = self.life();
         t.world.ocean_first = self.ocean();
         t

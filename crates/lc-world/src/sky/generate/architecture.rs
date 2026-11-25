@@ -145,7 +145,7 @@ fn ocean_rungs(disc: &Disc, star: &CatalogStar, tuning: &Tuning, seed: u64, site
     let spacing = |k: u64| rng::uniform_in(rng::hash(&[seed, super::ocean::SALT_LADDER, k]), t.spacing.0, t.spacing.1);
     let mut inner = Vec::new();
     let mut a = site.semi_major_m;
-    loop {
+    while inner.len() + 1 < t.max_rungs {
         a /= spacing(inner.len() as u64 + 1);
         if a < disc.inner_m * t.first_rung.0 {
             break;

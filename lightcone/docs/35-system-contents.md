@@ -150,10 +150,10 @@ The ocean world is placed before anything else, and the rest of the system is bu
 5. **Life.** Drawn as for any habitable world, at the star's `life` value.
 6. **The rest of the ladder.** Rungs are laid inward and outward from the ocean world's rung with
    the usual spacing draws, instead of outward from the disc's inner edge. Then everything the
-   generator does after the ladder runs as usual, with three exceptions that protect the ocean world:
+   generator does after the ladder runs as usual, with these protections for the ocean world:
    - a migrating giant stops at the first stable orbit outside it instead of sweeping through;
    - a gas giant's resonance band does not stir its rung;
-   - an unstable pair that includes it merges the other planet into its neighbor instead.
+   - giant pairs are the only ones merged, so the ocean world, which is rocky, never is.
 
 Belts and the Oort cloud then come out of what is left, as they always do, so an ocean-first system
 can have fewer belts than its neighbors if its giants were pushed outward.

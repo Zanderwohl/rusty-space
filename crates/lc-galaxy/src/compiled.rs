@@ -169,7 +169,7 @@ impl SystemField {
     /// Its value where nothing contributes.
     pub fn neutral(self) -> f64 {
         match self {
-            SystemField::Life => lc_world::sky::generate::Tuning::default().world.life_fraction,
+            SystemField::Life => lc_world::sky::generate::tuning::LIFE_FRACTION,
             _ => 0.0,
         }
     }

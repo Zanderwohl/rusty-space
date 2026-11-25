@@ -231,6 +231,10 @@ pub struct Tuning {
     pub belts: Belts,
 }
 
+/// The default share of habitable worlds with life; a constant so the galaxy bake can read it
+/// without building a whole `Tuning`.
+pub const LIFE_FRACTION: f64 = 0.5;
+
 impl Default for Tuning {
     fn default() -> Self {
         Self {
@@ -275,7 +279,7 @@ impl Default for Tuning {
                 rocky_spin_s: (4.0 * 3600.0, 250.0 * 86_400.0),
                 typical_obliquity_rad: 0.35,
                 tumbled_chance: 0.1,
-                life_fraction: 0.5,
+                life_fraction: LIFE_FRACTION,
                 ocean_first: 0.0,
             },
             moons: Moons {
