@@ -12,7 +12,7 @@ use super::architecture::Architecture;
 use super::disc::EARTH_MASS;
 use super::tuning::Tuning;
 use crate::distribution::{Distribution, Inclination};
-use crate::population::Population;
+use crate::population::{Kind, Population};
 use crate::rng;
 
 /// The populations of one system.
@@ -33,6 +33,7 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
         let mass = rung.debris_earths * EARTH_MASS * survival;
         thrown += rung.debris_earths * (1.0 - survival);
         if let Some(p) = belt(
+            Kind::Belt,
             pole,
             mass,
             (rung.zone_m.0, rung.zone_m.1),
@@ -55,6 +56,7 @@ pub fn populations(arch: &Architecture, pole: DVec3, seed: u64, tuning: &Tuning)
     if let Some(inner) = outer.first() {
         thrown += leftover * (1.0 - t.kuiper_survival);
         if let Some(p) = belt(
+            Kind::OuterDisc,
             pole,
             leftover * EARTH_MASS * t.kuiper_survival,
             (inner.zone_m.0, arch.disc.outer_m),
@@ -98,6 +100,7 @@ fn oort(arch: &Architecture, thrown_earths: f64, seed: u64, tuning: &Tuning) -> 
         dust[b] = extinction::RATIO[b] as f32;
     }
     belt(
+        Kind::OortCloud,
         // Isotropic, so it has no plane of its own to be tilted out of.
         DVec3::Z,
         mass,
@@ -123,13 +126,13 @@ pub fn solar(pole: DVec3, tuning: &Tuning) -> Vec<Population> {
     }
     [
         // 3e21 kg between 2.1 and 3.3 astronomical units, inclined by up to twenty degrees.
-        belt(pole, 3.0e21, (2.1 * AU, 3.3 * AU), (0.0, 0.3), 0.35, t.belt_area_per_kg, t.belt_element_m,
+        belt(Kind::Belt, pole, 3.0e21, (2.1 * AU, 3.3 * AU), (0.0, 0.3), 0.35, t.belt_area_per_kg, t.belt_element_m,
             PerBand::splat(1.0), 0),
         // The Kuiper belt proper, a fiftieth of an Earth mass between Neptune and the cliff.
-        belt(pole, 0.02 * EARTH_MASS, (30.0 * AU, 50.0 * AU), (0.0, 0.25), 0.35, t.kuiper_area_per_kg,
+        belt(Kind::OuterDisc, pole, 0.02 * EARTH_MASS, (30.0 * AU, 50.0 * AU), (0.0, 0.25), 0.35, t.kuiper_area_per_kg,
             t.kuiper_element_m, PerBand::splat(1.0), 0),
         // A few Earth masses of comets, isotropic, out where the shell radius is.
-        belt(DVec3::Z, 5.0 * EARTH_MASS, (t.oort_au.0 * AU, t.oort_au.1 * AU), t.oort_eccentricity,
+        belt(Kind::OortCloud, DVec3::Z, 5.0 * EARTH_MASS, (t.oort_au.0 * AU, t.oort_au.1 * AU), t.oort_eccentricity,
             std::f64::consts::FRAC_PI_2, t.oort_area_per_kg, t.oort_element_m, dust, 0),
     ]
     .into_iter()
@@ -144,6 +147,7 @@ pub fn solar(pole: DVec3, tuning: &Tuning) -> Vec<Population> {
 /// comparable mass and look nothing alike.
 #[allow(clippy::too_many_arguments)]
 fn belt(
+    kind: Kind,
     pole: DVec3,
     mass_kg: f64,
     span_m: (f64, f64),
@@ -163,6 +167,7 @@ fn belt(
         return None;
     }
     Some(Population {
+        kind,
         pole,
         semi_major: Distribution::uniform(span_m.0, span_m.1, 9),
         eccentricity: Distribution::uniform(eccentricity.0, eccentricity.1, 5),

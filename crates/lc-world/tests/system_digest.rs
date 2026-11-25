@@ -25,7 +25,12 @@ fn digest(tuning: &Tuning) -> u64 {
             text += &format!("{} {:e} {:e} {:e} {:e} {} {:e} {}\n", p.name, p.semi_major_m, p.mass_kg, p.radius_m, p.water_fraction, p.habitable, p.life, p.moons.len());
         }
         for pop in &sys.populations {
-            text += &format!("{pop:?}\n");
+            // Without `kind`, which master's populations did not have, so the pin still compares
+            // the values.
+            let debug = format!("{pop:?}");
+            let kind = format!("kind: {:?}, ", pop.kind);
+            text += &debug.replacen(&kind, "", 1);
+            text += "\n";
         }
     }
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))

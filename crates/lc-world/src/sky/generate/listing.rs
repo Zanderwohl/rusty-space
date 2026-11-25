@@ -4,31 +4,25 @@ use super::architecture::Class;
 use super::disc::EARTH_MASS;
 use super::tuning::Tuning;
 use super::{AU, GeneratedSystem};
-use crate::population::Population;
+use crate::population::{self, Population};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Planet(Class),
-    /// A rung a giant stirred, or one that never had the mass to assemble.
-    Belt,
-    /// The trans-planetary disc: the outer rungs that ran out of time.
-    OuterDisc,
-    OortCloud,
-    /// Engineered collectors; their mass is not modeled.
-    Swarm,
+    Population(population::Kind),
 }
 
 impl Kind {
+    pub const BELT: Kind = Kind::Population(population::Kind::Belt);
+    pub const OORT_CLOUD: Kind = Kind::Population(population::Kind::OortCloud);
+
     pub fn label(self) -> &'static str {
         match self {
             Kind::Planet(Class::Rocky) => "rocky",
             Kind::Planet(Class::Icy) => "icy",
             Kind::Planet(Class::IceGiant) => "ice giant",
             Kind::Planet(Class::GasGiant) => "gas giant",
-            Kind::Belt => "belt",
-            Kind::OuterDisc => "outer disc",
-            Kind::OortCloud => "Oort cloud",
-            Kind::Swarm => "swarm",
+            Kind::Population(k) => k.label(),
         }
     }
 }
@@ -79,8 +73,8 @@ pub struct Listing {
     pub entries: Vec<Entry>,
 }
 
-/// `tuning` must be the one `system` was generated under: a belt's mass is read back from its
-/// element count through the tuning's area per kilogram.
+/// `tuning` must be the one `system` was generated under: a population's mass is read back from
+/// its element count through the tuning's area per kilogram.
 pub fn listing(system: &GeneratedSystem, tuning: &Tuning) -> Listing {
     let disc = &system.architecture.disc;
     let zones = Zones {
@@ -113,7 +107,7 @@ pub fn listing(system: &GeneratedSystem, tuning: &Tuning) -> Listing {
     entries.extend(system.populations.iter().filter_map(|p| population(p, tuning)));
     entries.sort_by(|a, b| a.mean_au().total_cmp(&b.mean_au()));
     let mut belts = 0;
-    for e in entries.iter_mut().filter(|e| e.kind == Kind::Belt) {
+    for e in entries.iter_mut().filter(|e| e.kind == Kind::BELT) {
         belts += 1;
         e.name = format!("belt {belts}");
     }
@@ -123,16 +117,14 @@ pub fn listing(system: &GeneratedSystem, tuning: &Tuning) -> Listing {
 fn population(p: &Population, tuning: &Tuning) -> Option<Entry> {
     let extent = p.extent()?;
     let t = &tuning.belts;
-    let kuiper_section = std::f64::consts::PI * t.kuiper_element_m * t.kuiper_element_m;
-    let (kind, area_per_kg) = if p.radiating_ratio == Population::PANEL {
-        (Kind::Swarm, None)
-    } else if extent.half_angle_rad >= std::f64::consts::FRAC_PI_2 - 1.0e-6 {
-        (Kind::OortCloud, Some(t.oort_area_per_kg))
-    } else if p.cross_section == kuiper_section {
-        (Kind::OuterDisc, Some(t.kuiper_area_per_kg))
-    } else {
-        (Kind::Belt, Some(t.belt_area_per_kg))
+    // Rings and swarms are not made from a mass, so none can be read back.
+    let area_per_kg = match p.kind {
+        population::Kind::Belt => Some(t.belt_area_per_kg),
+        population::Kind::OuterDisc => Some(t.kuiper_area_per_kg),
+        population::Kind::OortCloud => Some(t.oort_area_per_kg),
+        population::Kind::Ring | population::Kind::Swarm => None,
     };
+    let kind = Kind::Population(p.kind);
     Some(Entry {
         name: kind.label().into(),
         kind,
@@ -159,7 +151,7 @@ mod tests {
             assert_eq!(planets, system.planets.len());
             assert_eq!(l.entries.len() - planets, system.populations.iter().filter(|p| p.extent().is_some()).count());
             assert!(l.entries.windows(2).all(|w| w[0].mean_au() <= w[1].mean_au()));
-            for e in l.entries.iter().filter(|e| e.kind == Kind::Belt) {
+            for e in l.entries.iter().filter(|e| e.kind == Kind::BELT) {
                 belts += 1;
                 assert!(e.mass_earths.is_some_and(|m| m > 0.0) && e.inner_au < e.outer_au, "{e:?}");
             }

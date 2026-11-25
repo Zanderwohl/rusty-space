@@ -787,6 +787,7 @@ mod tests {
 
     fn population(inclination: Inclination, count: f64) -> Population {
         Population {
+            kind: lc_world::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::normal(3.0e11, 2.0e10, 9),
             eccentricity: Distribution::uniform(0.0, 0.05, 5),

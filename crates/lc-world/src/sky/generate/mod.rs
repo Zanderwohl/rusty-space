@@ -220,6 +220,7 @@ fn swarm(seed: u64, star: &CatalogStar) -> Option<Population> {
     let element = 1.0e6;
 
     Some(Population {
+        kind: crate::population::Kind::Swarm,
         pole: DVec3::Z,
         semi_major: Distribution::normal(radius, radius * 0.05, 9),
         eccentricity: Distribution::uniform(0.0, 0.02, 3),

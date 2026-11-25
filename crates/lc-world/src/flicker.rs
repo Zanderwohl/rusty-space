@@ -156,6 +156,7 @@ mod tests {
 
     fn pop(count: f64, cross_section: f64, a: f64) -> Population {
         Population {
+            kind: crate::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(a),
             eccentricity: Distribution::delta(0.0),

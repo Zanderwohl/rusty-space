@@ -678,6 +678,7 @@ mod tests {
         use lc_world::distribution::{Distribution, Inclination};
         let au = lc_world::navigation::AU;
         lc_world::population::Population {
+            kind: lc_world::population::Kind::Belt,
             pole: DVec3::Z,
             semi_major: Distribution::normal(2.7 * au, 0.5 * au, 9),
             eccentricity: Distribution::uniform(0.0, 0.25, 5),
@@ -891,6 +892,7 @@ mod tests {
     #[test]
     fn an_isotropic_cloud_comes_out_spherical() {
         let cloud = lc_world::population::Population {
+            kind: lc_world::population::Kind::OortCloud,
             inclination: lc_world::distribution::Inclination::isotropic(),
             ..belt()
         };
@@ -914,6 +916,7 @@ mod tests {
     #[test]
     fn an_empty_population_has_no_outline() {
         let nothing = lc_world::population::Population {
+            kind: lc_world::population::Kind::Belt,
             semi_major: lc_world::distribution::Distribution::delta(0.0),
             ..belt()
         };

@@ -199,6 +199,7 @@ mod tests {
 
     fn swarm(count: f64, response: PerBand<f32>) -> Population {
         Population {
+            kind: crate::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(AU),
             eccentricity: Distribution::delta(0.0),
@@ -418,6 +419,7 @@ mod tests {
         let radius = 1.495_978_707e11;
         let element = 1.0e6;
         Population {
+            kind: crate::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::normal(radius, radius * 0.05, 9),
             eccentricity: Distribution::uniform(0.0, 0.02, 3),

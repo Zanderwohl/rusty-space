@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use bevy_egui::egui::{self, Color32, RichText, Sense, Stroke, pos2, vec2};
 use lc_galaxy::StarId;
 use lc_world::sky::galaxy::{GalaxyRecord, catalog_star};
+use lc_world::population::Kind as PopulationKind;
 use lc_world::sky::generate::listing::{Entry, Kind, Listing, listing};
 use lc_world::sky::generate::{Class, SystemProfile, system_with};
 
@@ -113,9 +114,9 @@ fn color(kind: Kind) -> Color32 {
         Kind::Planet(Class::Icy) => Color32::from_rgb(190, 220, 240),
         Kind::Planet(Class::IceGiant) => Color32::from_rgb(100, 160, 230),
         Kind::Planet(Class::GasGiant) => Color32::from_rgb(230, 190, 120),
-        Kind::Belt | Kind::OuterDisc => Color32::from_gray(150),
-        Kind::OortCloud => Color32::from_gray(110),
-        Kind::Swarm => palette::READ_BY,
+        Kind::Population(PopulationKind::Belt | PopulationKind::OuterDisc | PopulationKind::Ring) => Color32::from_gray(150),
+        Kind::Population(PopulationKind::OortCloud) => Color32::from_gray(110),
+        Kind::Population(PopulationKind::Swarm) => palette::READ_BY,
     }
 }
 
@@ -167,7 +168,7 @@ fn entry(ui: &mut egui::Ui, e: &Entry) {
 /// sized by mass. The Oort cloud is left off; it would push everything else into a corner.
 fn strip(ui: &mut egui::Ui, l: &Listing) {
     let z = &l.zones;
-    let shown = || l.entries.iter().filter(|e| e.kind != Kind::OortCloud);
+    let shown = || l.entries.iter().filter(|e| e.kind != Kind::OORT_CLOUD);
     let lo = shown().map(|e| e.inner_au).fold(z.inner_au, f64::min).max(1e-4) / 1.3;
     let hi = shown().map(|e| e.outer_au).fold(z.outer_au, f64::max) * 1.3;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 80.0), Sense::hover());

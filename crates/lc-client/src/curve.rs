@@ -200,6 +200,7 @@ mod tests {
         let star = Star::SOL;
         let mut model = EmissionModel::new(star, 5);
         model.populations.push(Population {
+            kind: lc_world::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(AU),
             eccentricity: Distribution::delta(0.0),
