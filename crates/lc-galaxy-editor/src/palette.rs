@@ -20,6 +20,11 @@ pub const AXIS_X: Color32 = Color32::from_rgb(190, 70, 70);
 pub const AXIS_Y: Color32 = Color32::from_rgb(70, 170, 80);
 pub const AXIS_Z: Color32 = Color32::from_rgb(80, 110, 220);
 pub const HISTOGRAM: Color32 = Color32::from_rgb(110, 150, 200);
+/// A star against the pinned bake.
+pub const DIFF_NEW: Color32 = Color32::from_rgb(110, 210, 120);
+pub const DIFF_CHANGED: Color32 = Color32::from_rgb(230, 180, 70);
+pub const DIFF_SAME: Color32 = Color32::from_gray(85);
+pub const DIFF_GONE: Color32 = Color32::from_rgb(235, 90, 80);
 
 /// Distinct hues for populations, in timeline order.
 pub const POPULATIONS: [Color32; 6] = [

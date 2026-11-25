@@ -7,6 +7,7 @@
 
 mod census;
 mod charts;
+mod compare;
 mod doc;
 mod palette;
 mod params_panel;

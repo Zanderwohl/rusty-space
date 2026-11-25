@@ -9,6 +9,8 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec
 use glam::DVec3;
 use lc_galaxy::attributes::State;
 use lc_galaxy::compiled::SystemField;
+
+use crate::compare::{self, Marks, Reference, Solo};
 use lc_galaxy::sample::cells_in;
 use lc_galaxy::{Aabb, BakedStar};
 
@@ -133,6 +135,12 @@ pub struct ViewState {
     pub look_pitch: f64,
     pub sky_fov: f64,
     fitted: bool,
+    pub solo: Option<Solo>,
+    pub reference: Option<Reference>,
+    /// Colors stars against `reference`; off draws them by `color_by`.
+    pub difference: bool,
+    pins: u64,
+    marks: Option<Marks>,
 }
 
 impl Default for ViewState {
@@ -148,6 +156,11 @@ impl Default for ViewState {
             look_pitch: 0.0,
             sky_fov: 90f64.to_radians(),
             fitted: false,
+            solo: None,
+            reference: None,
+            difference: false,
+            pins: 0,
+            marks: None,
         }
     }
 }
@@ -162,6 +175,37 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
                 ui.selectable_value(&mut state.color_by, c, c.label());
             }
         });
+        let options = doc.result.as_ref().map(|r| Solo::options(&r.compiled)).unwrap_or_default();
+        if state.solo.is_some_and(|s| !options.contains(&s)) {
+            state.solo = None;
+        }
+        let shown = state.solo.map_or("everything".to_string(), |s| format!("solo {}", s.label(doc)));
+        egui::ComboBox::from_id_salt("solo").selected_text(shown).show_ui(ui, |ui| {
+            ui.selectable_value(&mut state.solo, None, "everything");
+            for s in options {
+                ui.selectable_value(&mut state.solo, Some(s), s.label(doc));
+            }
+        });
+        ui.separator();
+        if ui.button("Pin").clicked() {
+            state.pins += 1;
+            state.reference = Some(Reference::of(doc.stars(), state.pins));
+        }
+        if state.reference.is_some() {
+            ui.toggle_value(&mut state.difference, "difference");
+            if ui.button("Unpin").clicked() {
+                state.reference = None;
+                state.difference = false;
+            }
+            // Last frame's marks: the view below works out this frame's after the toolbar.
+            if state.difference
+                && let Some(m) = &state.marks
+            {
+                let (new, changed, gone) = m.counts();
+                ui.label(format!("{new} new, {changed} changed, {gone} gone"));
+            }
+        }
+        ui.separator();
         if state.view == View::Region {
             ui.toggle_value(&mut state.show_cells, "cells");
             ui.toggle_value(&mut state.show_supports, "supports");
@@ -280,16 +324,19 @@ fn region(
     selected_gizmo(painter, &proj, doc, cam.distance);
 
     let stars = doc.stars();
+    let reference = state.reference.as_ref().filter(|_| state.difference);
+    let marks = compare::marks(&mut state.marks, doc, state.solo, reference);
     let mut drawn: Vec<(usize, Pos2, f64)> = stars
         .iter()
         .enumerate()
+        .filter(|(i, _)| marks.shown[*i])
         .filter_map(|(i, s)| proj.project(s.position_ly).map(|(p, z)| (i, p, z)))
         .collect();
     drawn.sort_by(|a, b| b.2.total_cmp(&a.2));
     let picked = doc.picked_star().map(|(i, _)| i);
     for &(i, p, z) in &drawn {
         let s = &stars[i];
-        let color = star_color(s, state.color_by, doc);
+        let color = if reference.is_some() { marks.change[i].color() } else { star_color(s, state.color_by, doc) };
         let r = region_radius(s.attributes.luminosity_solar);
         if matches!(s.attributes.state, State::WhiteDwarf | State::NeutronStar | State::BlackHole) {
             painter.circle_stroke(p, r.max(2.5), Stroke::new(1.0, color));
@@ -304,7 +351,15 @@ fn region(
             painter.circle_stroke(p, r + 4.0, Stroke::new(1.5, palette::PICK));
         }
     }
-    scale_bar(painter, rect, proj.focal / cam.distance);
+    if let Some(r) = reference {
+        for &i in &marks.gone {
+            let s = &r.stars[i];
+            if let Some((p, _)) = proj.project(s.position_ly) {
+                painter.circle_stroke(p, region_radius(s.attributes.luminosity_solar).max(2.5), Stroke::new(1.5, palette::DIFF_GONE));
+            }
+        }
+    }
+    scale_bar(painter, rect, proj.focal / state.camera.distance);
 
     if response.clicked()
         && let Some(at) = response.interact_pointer_pos()
@@ -415,8 +470,10 @@ fn sky(
         }
     }
 
+    let reference = state.reference.as_ref().filter(|_| state.difference);
+    let marks = compare::marks(&mut state.marks, doc, state.solo, reference);
     for (i, s) in doc.stars().iter().enumerate() {
-        if Some(i) == own || s.attributes.luminosity_solar <= 0.0 {
+        if Some(i) == own || s.attributes.luminosity_solar <= 0.0 || !marks.shown[i] {
             continue;
         }
         let d2 = s.position_ly.distance_squared(eye).max(1e-6);
@@ -428,10 +485,18 @@ fn sky(
         let b = (s.attributes.luminosity_solar / d2).log10();
         let r = (3.0 + 0.7 * b).clamp(1.5, 8.0) as f32;
         let alpha = ((b + 5.0) / 4.0).clamp(0.5, 1.0) as f32;
-        let color = star_color(s, state.color_by, doc).gamma_multiply(alpha);
+        let base = if reference.is_some() { marks.change[i].color() } else { star_color(s, state.color_by, doc) };
+        let color = base.gamma_multiply(alpha);
         painter.add(Shape::circle_filled(p, r, color));
         if r > 3.5 {
             painter.circle_filled(p, r * 2.2, color.gamma_multiply(0.12));
+        }
+    }
+    if let Some(r) = reference {
+        for &i in &marks.gone {
+            if let Some((p, _)) = proj.project(r.stars[i].position_ly).filter(|(p, _)| rect.contains(*p)) {
+                painter.circle_stroke(p, 3.0, Stroke::new(1.5, palette::DIFF_GONE));
+            }
         }
     }
 }
