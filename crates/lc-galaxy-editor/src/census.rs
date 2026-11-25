@@ -25,7 +25,7 @@ type Outcome = Result<Arc<Vec<Counted>>, &'static str>;
 pub enum CensusJob {
     #[default]
     NotDispatched,
-    /// `previous` stays on screen until this one lands, so a drag does not blank the panels.
+    /// `previous` stays on screen until this one finishes, so a drag does not blank the panels.
     Waiting { generation: u64, slot: Arc<OnceLock<Outcome>>, previous: Option<(u64, Outcome)> },
     Ready { generation: u64, results: Outcome },
 }

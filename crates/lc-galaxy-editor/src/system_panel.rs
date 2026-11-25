@@ -78,7 +78,6 @@ fn dispatch(doc: &Doc, key: Key) -> Job {
     }
 }
 
-/// The section's state: the generation job and which of its entries is selected.
 #[derive(Default)]
 pub struct SystemView {
     job: Job,
@@ -216,7 +215,7 @@ enum Mark {
 
 /// The system on a log-AU line: habitable zone, snow line, belts as bands and planets as dots
 /// sized by mass. The Oort cloud is left off; it would push everything else into a corner.
-/// Clicking picks the entry under the pointer, or clears the pick; returns whether it did.
+/// A click picks the entry under the pointer, or clears the pick; returns whether there was a click.
 fn strip(ui: &mut egui::Ui, l: &Listing, selected: &mut Option<usize>) -> bool {
     let z = &l.zones;
     let shown = || l.entries.iter().enumerate().filter(|(_, e)| e.kind != Kind::OORT_CLOUD);

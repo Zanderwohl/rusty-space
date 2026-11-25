@@ -18,7 +18,6 @@ pub struct Census {
     pub oort_cloud: bool,
     /// Could have an ocean world at all, whatever its profile; see [`ocean::eligible`].
     pub eligible: bool,
-    /// Built around an ocean world placed first.
     pub ocean_first: bool,
 }
 
