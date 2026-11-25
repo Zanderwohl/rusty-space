@@ -99,6 +99,9 @@ pub struct CatalogStar {
     /// `[Fe/H]`, synthesized from kinematics; see [`metallicity`].
     pub metallicity: f64,
     pub component: Component,
+    /// The authored shifts to its system's generation, when an authored galaxy gives any.
+    #[serde(default)]
+    pub system: Option<generate::SystemProfile>,
 }
 
 impl CatalogStar {
@@ -191,6 +194,7 @@ impl AuthoredStars {
                 mass_solar: mass,
                 metallicity: 0.0,
                 component: Component { index: 1, group: None },
+                system: None,
             }
         };
         Self::new("authored", vec![make(1, 4.2, 3000.0, 0.0017), make(2, 11.0, 5772.0, 1.0), make(3, 25.0, 9500.0, 25.0)])

@@ -15,11 +15,13 @@ pub mod belt;
 pub mod disc;
 pub mod moon;
 pub mod planet;
+pub mod profile;
 pub mod tuning;
 
 pub use architecture::{Architecture, Class, Rung, architecture};
 pub use moon::Moon;
 pub use planet::Planet;
+pub use profile::SystemProfile;
 pub use tuning::Tuning;
 
 use em_sim::appearance::{Appearance, DebugBall, AppearanceColor};

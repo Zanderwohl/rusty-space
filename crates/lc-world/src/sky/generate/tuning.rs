@@ -147,6 +147,10 @@ pub struct World {
     /// Share of habitable planets on which something lives. Nobody knows; a half is a
     /// universe that is worth the trip.
     pub life_fraction: f64,
+    /// Chance, `[0, 1]`, that a star able to have an ocean world builds one before anything
+    /// else. Zero leaves the generator's own order and draws. See
+    /// `lightcone/docs/35-system-contents.md`.
+    pub ocean_first: f64,
 }
 
 /// Moons, of both origins.
@@ -272,6 +276,7 @@ impl Default for Tuning {
                 typical_obliquity_rad: 0.35,
                 tumbled_chance: 0.1,
                 life_fraction: 0.5,
+                ocean_first: 0.0,
             },
             moons: Moons {
                 regular_mass_ratio: 1.0e-4,

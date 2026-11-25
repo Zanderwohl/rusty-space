@@ -1,4 +1,4 @@
-//! The grid, the built id, and the 16 bytes a published star stores.
+//! The grid, the built id, and the 17 bytes a published star stores.
 //!
 //! What is stored is what cannot be recomputed: identity, position and the draws. State,
 //! luminosity, temperature, radius and velocity follow from them on load.
@@ -59,6 +59,8 @@ pub struct GalaxyRecord {
     pub feh: i8,
     /// Low four bits: the population's index in its chunk. Bit 4: tier A.
     pub flags: u8,
+    /// Index into its chunk's system profiles; 0 is the default profile.
+    pub profile: u8,
 }
 
 const POPULATION_BITS: u8 = 0x0f;
@@ -91,6 +93,7 @@ impl GalaxyRecord {
             age,
             feh,
             flags: (population & POPULATION_BITS) | if tier_a { TIER_A } else { 0 },
+            profile: 0,
         }
     }
 

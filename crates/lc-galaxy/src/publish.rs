@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use lc_world::sky::galaxy::{GalaxyChunk, MANIFEST_FORMAT, Manifest, ManifestChunk, chunk_of, content_hash};
+use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, MANIFEST_FORMAT, Manifest, ManifestChunk, chunk_of, content_hash};
+use lc_world::sky::generate::SystemProfile;
 
 use crate::attributes::kinematics;
 use crate::sample::default_threads;
@@ -35,8 +36,8 @@ pub fn refusals(timeline: &Timeline, compiled: &Compiled) -> Vec<String> {
     out
 }
 
-/// The bake cut into chunks, each brightest first.
-pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Vec<GalaxyChunk> {
+/// The bake cut into chunks, each brightest first, each with its table of system profiles.
+pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Result<Vec<GalaxyChunk>, String> {
     let populations: Vec<_> = compiled.populations.keys().map(|id| kinematics(compiled, *id).expect("a compiled population has its frame")).collect();
     let mut by_chunk: BTreeMap<[i32; 3], Vec<_>> = BTreeMap::new();
     for s in &bake.stars {
@@ -46,7 +47,22 @@ pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Vec<GalaxyChunk> 
         .into_iter()
         .map(|(chunk, mut stars)| {
             stars.sort_by(|a, b| b.attributes.luminosity_solar.total_cmp(&a.attributes.luminosity_solar).then(a.id.cmp(&b.id)));
-            GalaxyChunk { graph, chunk, populations: populations.clone(), records: stars.iter().map(|s| s.attributes.record).collect() }
+            let mut profiles = vec![SystemProfile::default()];
+            let mut records = Vec::with_capacity(stars.len());
+            for s in &stars {
+                let index = match profiles.iter().position(|p| *p == s.attributes.profile) {
+                    Some(i) => i,
+                    None => {
+                        profiles.push(s.attributes.profile);
+                        profiles.len() - 1
+                    }
+                };
+                if index > u8::MAX as usize {
+                    return Err(format!("chunk {chunk:?} needs more than 256 system profiles; widen the system fields' edges"));
+                }
+                records.push(GalaxyRecord { profile: index as u8, ..s.attributes.record });
+            }
+            Ok(GalaxyChunk { graph, chunk, populations: populations.clone(), profiles, records })
         })
         .collect()
 }
@@ -62,7 +78,7 @@ pub fn publish(timeline: &Timeline, name: &str, out: &Path) -> Result<Manifest, 
     let baked = bake(&compiled, timeline.seed, compiled.bounds(), default_threads()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out.join("chunks")).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut entries = Vec::new();
-    for chunk in chunks(&compiled, &baked, graph) {
+    for chunk in chunks(&compiled, &baked, graph)? {
         let bytes = chunk.encode().map_err(|e| e.to_string())?;
         let hash = content_hash(&bytes);
         let file = format!("chunks/{hash}.lcg");

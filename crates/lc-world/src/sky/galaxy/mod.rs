@@ -11,6 +11,7 @@ use glam::{DMat3, DVec3};
 use serde::{Deserialize, Serialize};
 
 use super::{CatalogStar, Component, Provenance, StarProvider};
+use crate::sky::generate::SystemProfile;
 use crate::star::Star;
 
 mod kinematics;
@@ -21,14 +22,14 @@ pub use kinematics::{Kinematics, Rotation};
 pub use record::{CELL_HALF_RANGE, CELL_LY, FEH_STEP, GalaxyRecord, MASS_RANGE, MAX_AGE_GYR, cell_in_grid, pack_cell, star_id};
 
 const MAGIC: &[u8; 6] = b"LCGAL\x00";
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// Cells per chunk along each axis: a chunk is 256 ly on a side, and a record names its cell
 /// within the chunk in 15 bits.
 pub const CHUNK_CELLS: i32 = 32;
 
-/// Bytes per record: cell in chunk, index, offset, mass, age, `[Fe/H]`, flags.
-const RECORD: usize = 2 + 2 + 6 + 2 + 2 + 1 + 1;
+/// Bytes per record: cell in chunk, index, offset, mass, age, `[Fe/H]`, flags, profile.
+const RECORD: usize = 2 + 2 + 6 + 2 + 2 + 1 + 1 + 1;
 
 /// The `source` a galaxy star's provenance names.
 pub const SOURCE: &str = "galaxy";
@@ -47,6 +48,8 @@ pub enum GalaxyError {
     /// A record's cell is not in the chunk being written.
     WrongChunk { chunk: [i32; 3], cell: [i32; 3] },
     TooManyPopulations(usize),
+    /// A chunk needs from 1 to 256 system profiles.
+    Profiles(usize),
     /// A chunk's bytes do not hash to what the manifest says.
     HashMismatch { file: String },
     Manifest(String),
@@ -61,6 +64,7 @@ impl std::fmt::Display for GalaxyError {
             Self::BadRecord(i) => write!(f, "record {i} does not describe a star"),
             Self::WrongChunk { chunk, cell } => write!(f, "cell {cell:?} is not in chunk {chunk:?}"),
             Self::TooManyPopulations(n) => write!(f, "{n} populations; a chunk holds at most 16"),
+            Self::Profiles(n) => write!(f, "{n} system profiles; a chunk holds 1 to 256"),
             Self::HashMismatch { file } => write!(f, "{file} does not hash to what the manifest says"),
             Self::Manifest(e) => write!(f, "the manifest does not read: {e}"),
         }
@@ -77,6 +81,8 @@ pub struct GalaxyChunk {
     pub chunk: [i32; 3],
     /// Indexed by a record's population.
     pub populations: Vec<Kinematics>,
+    /// Indexed by a record's profile; the first is the default profile.
+    pub profiles: Vec<SystemProfile>,
     pub records: Vec<GalaxyRecord>,
 }
 
@@ -117,6 +123,13 @@ impl GalaxyChunk {
             f(&mut out, k.dispersion_km_s);
             f(&mut out, k.dispersion_exponent);
         }
+        if self.profiles.is_empty() || self.profiles.len() > 256 {
+            return Err(GalaxyError::Profiles(self.profiles.len()));
+        }
+        out.push((self.profiles.len() - 1) as u8);
+        for p in &self.profiles {
+            out.extend_from_slice(&[p.ocean, p.life, p.solids as u8, p.belts as u8, p.cloud as u8]);
+        }
         out.extend_from_slice(&(self.records.len() as u32).to_le_bytes());
         let base = self.chunk.map(|v| v * CHUNK_CELLS);
         for r in &self.records {
@@ -134,6 +147,7 @@ impl GalaxyChunk {
             out.extend_from_slice(&r.age.to_le_bytes());
             out.push(r.feh as u8);
             out.push(r.flags);
+            out.push(r.profile);
         }
         Ok(out)
     }
@@ -169,6 +183,12 @@ impl GalaxyChunk {
                 dispersion_exponent: r.f64()?,
             });
         }
+        let profile_count = r.u8()? as usize + 1;
+        let mut profiles = Vec::with_capacity(profile_count);
+        for _ in 0..profile_count {
+            let b = r.take(5)?;
+            profiles.push(SystemProfile { ocean: b[0], life: b[1], solids: b[2] as i8, belts: b[3] as i8, cloud: b[4] as i8 });
+        }
         let n = r.u32()? as usize;
         if bytes.len() - r.at < n.saturating_mul(RECORD) {
             return Err(GalaxyError::Truncated);
@@ -190,13 +210,17 @@ impl GalaxyChunk {
                 age: r.u16()?,
                 feh: r.u8()? as i8,
                 flags: r.u8()?,
+                profile: r.u8()?,
             };
-            if record.population() as usize >= populations.len() || !cell_in_grid(cell) {
+            if record.population() as usize >= populations.len()
+                || record.profile as usize >= profiles.len()
+                || !cell_in_grid(cell)
+            {
                 return Err(GalaxyError::BadRecord(i));
             }
             records.push(record);
         }
-        Ok(Self { graph, chunk, populations, records })
+        Ok(Self { graph, chunk, populations, profiles, records })
     }
 
     /// The chunk's stars, and the number of remnants left out because they emit nothing.
@@ -206,7 +230,8 @@ impl GalaxyChunk {
             .records
             .iter()
             .filter_map(|r| {
-                let star = assemble(r, &self.populations[r.population() as usize]);
+                let profile = self.profiles[r.profile as usize];
+                let star = assemble(r, &self.populations[r.population() as usize], profile);
                 if star.is_none() {
                     skipped += 1;
                 }
@@ -217,7 +242,7 @@ impl GalaxyChunk {
     }
 }
 
-fn assemble(r: &GalaxyRecord, kinematics: &Kinematics) -> Option<CatalogStar> {
+fn assemble(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemProfile) -> Option<CatalogStar> {
     let id = r.id()?;
     let e = tracks::evolve_step(r.initial_mass_solar(), r.age_gyr(), r.feh);
     // Neutron stars and black holes are left out: their light is X-rays or nothing, and the sky
@@ -241,6 +266,7 @@ fn assemble(r: &GalaxyRecord, kinematics: &Kinematics) -> Option<CatalogStar> {
         mass_solar: e.mass_solar,
         metallicity: r.feh(),
         component: Component { index: 1, group: None },
+        system: (!profile.is_default()).then_some(profile),
     })
 }
 

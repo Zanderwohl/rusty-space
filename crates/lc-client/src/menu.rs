@@ -242,6 +242,7 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogStar {
         mass_solar: mass,
         metallicity: 0.0,
         component: StarComponent { index: 1, group: None },
+        system: None,
     }
 }
 

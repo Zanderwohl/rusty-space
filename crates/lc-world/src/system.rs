@@ -162,7 +162,10 @@ impl LocalSystem {
     pub fn for_star(star: &CatalogStar) -> Option<Self> {
         // Once. Generating a system is the expensive part of loading one, and the populations
         // and the bodies both come out of the same pass.
-        let generated = generate::system_for(star);
+        let generated = match star.system {
+            Some(profile) => generate::system_with(star, &profile.tuning()),
+            None => generate::system_for(star),
+        };
         let contents = match star.provenance.name.as_deref() {
             // The one system with measured data rather than generated: two hundred and thirty
             // bodies fitted against JPL, moons and comets included. Its belts are still the

@@ -349,6 +349,7 @@ mod tests {
             mass_solar: 1.0,
             metallicity: 0.0,
             component: StarComponent { index: 1, group: None },
+            system: None,
         }
     }
 

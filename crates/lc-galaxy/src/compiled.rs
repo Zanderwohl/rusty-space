@@ -143,13 +143,65 @@ pub enum Target {
     Exclusion,
     /// An offset in dex to a population's `[Fe/H]`.
     FeH(FeatureId),
+    /// One of a star's system fields, whatever its population. See
+    /// `lightcone/docs/35-system-contents.md`.
+    System(SystemField),
+}
+
+/// A region-level shift to the system generator, read at each star.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SystemField {
+    /// The chance an eligible star builds an ocean world first, `[0, 1]`.
+    Ocean,
+    /// Disc solid mass, dex.
+    Solids,
+    /// Belt and Kuiper-belt survival, dex.
+    Belts,
+    /// Oort-cloud efficiency, dex.
+    Cloud,
+    /// The share of habitable worlds something lives on, `[0, 1]`.
+    Life,
+}
+
+impl SystemField {
+    pub const ALL: [SystemField; 5] = [SystemField::Ocean, SystemField::Solids, SystemField::Belts, SystemField::Cloud, SystemField::Life];
+
+    /// Its value where nothing contributes.
+    pub fn neutral(self) -> f64 {
+        match self {
+            SystemField::Life => lc_world::sky::generate::Tuning::default().world.life_fraction,
+            _ => 0.0,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SystemField::Ocean => "ocean-first",
+            SystemField::Solids => "disc solids",
+            SystemField::Belts => "belts",
+            SystemField::Cloud => "Oort cloud",
+            SystemField::Life => "life",
+        }
+    }
+
+    pub fn in_dex(self) -> bool {
+        matches!(self, SystemField::Solids | SystemField::Belts | SystemField::Cloud)
+    }
+
+    pub fn range(self) -> (f64, f64) {
+        let dex = lc_world::sky::generate::profile::DEX_LIMIT;
+        match self {
+            SystemField::Ocean | SystemField::Life => (0.0, 1.0),
+            _ => (-dex, dex),
+        }
+    }
 }
 
 impl Target {
     pub fn population(&self) -> Option<FeatureId> {
         match self {
             Target::Density(p) | Target::FeH(p) => Some(*p),
-            Target::Exclusion => None,
+            Target::Exclusion | Target::System(_) => None,
         }
     }
 }
@@ -228,6 +280,21 @@ pub struct Sample {
     pub packing: f64,
     /// Dex, one per population in the same order.
     pub feh_offset: Vec<f64>,
+    /// Indexed by `SystemField as usize`, clamped to each field's range.
+    pub system: [f64; 5],
+}
+
+impl Sample {
+    pub fn profile(&self) -> lc_world::sky::generate::SystemProfile {
+        let v = |f: SystemField| self.system[f as usize];
+        lc_world::sky::generate::SystemProfile::quantize(
+            v(SystemField::Ocean),
+            v(SystemField::Life),
+            v(SystemField::Solids),
+            v(SystemField::Belts),
+            v(SystemField::Cloud),
+        )
+    }
 }
 
 impl Sample {
@@ -256,13 +323,19 @@ impl Compiled {
 
     fn sample_with(&self, p: DVec3, mut seen: impl FnMut(&Term, f64, f64)) -> Sample {
         let n = self.populations.len();
-        let mut s = Sample { density: vec![0.0; n], packing: DEFAULT_PACKING, feh_offset: vec![0.0; n] };
+        let mut s = Sample {
+            density: vec![0.0; n],
+            packing: DEFAULT_PACKING,
+            feh_offset: vec![0.0; n],
+            system: SystemField::ALL.map(SystemField::neutral),
+        };
         for term in &self.terms {
             let Some(shape) = self.shapes.get(&term.shape) else { continue };
             let slot = match term.target {
                 Target::Density(pop) => self.population_index(pop).map(|i| &mut s.density[i]),
                 Target::FeH(pop) => self.population_index(pop).map(|i| &mut s.feh_offset[i]),
                 Target::Exclusion => Some(&mut s.packing),
+                Target::System(f) => Some(&mut s.system[f as usize]),
             };
             let Some(slot) = slot else { continue };
             let w = shape.weight(p);
@@ -277,6 +350,10 @@ impl Compiled {
             *d = d.max(0.0);
         }
         s.packing = s.packing.clamp(0.0, MAX_PACKING);
+        for f in SystemField::ALL {
+            let (lo, hi) = f.range();
+            s.system[f as usize] = s.system[f as usize].clamp(lo, hi);
+        }
         s
     }
 

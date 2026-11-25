@@ -184,6 +184,7 @@ mod tests {
                 index: 1,
                 group: None,
             },
+            system: None,
         }
     }
 

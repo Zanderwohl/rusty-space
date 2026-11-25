@@ -73,6 +73,7 @@ impl StarRecord {
             mass_solar,
             metallicity: metallicity::from_speed(self.velocity.length(), id.get()),
             component: Component { index: self.component_index, group: self.group },
+            system: None,
         })
     }
 }

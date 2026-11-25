@@ -111,6 +111,7 @@ pub fn inspector(ui: &mut egui::Ui, doc: &Doc) {
                 Target::Density(p) => format!("density of {}", doc.feature_name(p)),
                 Target::FeH(p) => format!("[Fe/H] of {}", doc.feature_name(p)),
                 Target::Exclusion => "packing".into(),
+                Target::System(f) => format!("system: {}", f.label()),
             });
             ui.label(format!("{:.4} to {:.4}", c.before, c.after));
             ui.end_row();
