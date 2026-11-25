@@ -162,15 +162,12 @@ the system of every baked star and reports what the fields did:
 Above the budget, the editor counts eligible stars from the fields and the star draws alone, and
 estimates ocean worlds as eligible stars times `ocean`, plus the natural rate below it.
 
-## Publishing and freezing
+## Changing the generator
 
-A published star stores its profile, and its system is generated from it and from the generator's
-code. Changing the generator therefore changes the system of every published star, which breaks
-whatever players have charted there. The stellar tracks already make the same bargain for
-brightness, but a planet that moves is worse than a star that dims.
-
-Before the first public shard, the generator needs a version recorded in each chunk and honored by
-the loader, so that a published chunk keeps the system generator it was published with. See Open.
+A published star stores its profile, and its system is generated from that profile and the
+generator's code, so a change to the generator changes the system of every published star. During
+development that is handled the way any other change to the world is: the dev shard is wiped and
+the galaxy republished. Nothing in this design is versioned.
 
 ## Order of work
 
@@ -180,10 +177,8 @@ the loader, so that a published chunk keeps the system generator it was publishe
 | S2 | the profile on `CatalogStar`, and `LocalSystem::for_star` building a `Tuning` from it; `solids`, `belts`, `cloud` and `life` take effect |
 | S3 | eligibility and the ocean-first construction in `lc_world::sky::generate`, behind the separate salt; a test that `ocean = 0` reproduces today's systems for a thousand stars bit for bit |
 | S4 | Galaxy Forge statistics, charts, inspector and color-by for the system fields |
-| S5 | a system generator version per chunk, honored by the loader |
 
-S1–S3 can go to Phase II's playtest; S4 is what makes them tunable, and S5 is required before any
-public shard.
+S1–S3 can go to Phase II's playtest, and S4 is what makes them tunable.
 
 ## Open
 
@@ -192,4 +187,3 @@ public shard.
 | The seas threshold | Earth's water fraction is the proposed line between an ocean world and a damp one. A higher line makes ocean worlds wetter and rarer at `ocean = 0`; the setting is unaffected. |
 | Binary companions | The generator gives a binary the primary's system unchanged ([26](26-system-generation.md), Open). An ocean-first world in a binary inherits that gap. |
 | More than one ocean world | `ocean` guarantees at most one per star. A second field for the chance of a second one is possible, but each extra planet placed first constrains the ladder more. |
-| Keeping old generators | S5 means keeping every system-generator version that a published chunk names. How many versions to carry, and when a shard may republish a region under a new one, is a hosting question as much as a design one. |
