@@ -8,6 +8,7 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
 [dependencies]
 lc-galaxy = { path = "../lc-galaxy" }
+lc-world = { path = "../lc-world", default-features = false }
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
 glam = "0.32"

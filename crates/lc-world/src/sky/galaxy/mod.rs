@@ -231,7 +231,7 @@ impl GalaxyChunk {
             .iter()
             .filter_map(|r| {
                 let profile = self.profiles[r.profile as usize];
-                let star = assemble(r, &self.populations[r.population() as usize], profile);
+                let star = catalog_star(r, &self.populations[r.population() as usize], profile);
                 if star.is_none() {
                     skipped += 1;
                 }
@@ -242,7 +242,8 @@ impl GalaxyChunk {
     }
 }
 
-fn assemble(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemProfile) -> Option<CatalogStar> {
+/// The star a record loads as; `None` for a neutron star or black hole, which the sky leaves out.
+pub fn catalog_star(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemProfile) -> Option<CatalogStar> {
     let id = r.id()?;
     let e = tracks::evolve_step(r.initial_mass_solar(), r.age_gyr(), r.feh);
     // Neutron stars and black holes are left out: their light is X-rays or nothing, and the sky

@@ -5085,6 +5085,7 @@ dependencies = [
  "em-plot",
  "glam",
  "lc-galaxy",
+ "lc-world",
 ]
 
 [[package]]

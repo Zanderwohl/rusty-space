@@ -10,6 +10,7 @@ mod doc;
 mod palette;
 mod params_panel;
 mod stats_panel;
+mod system_panel;
 mod timeline_panel;
 mod views;
 
@@ -69,6 +70,7 @@ struct Ui {
     view: ViewState,
     charts: charts::Charts,
     dialog: Option<Dialog>,
+    system: system_panel::Job,
 }
 
 enum Dialog {
@@ -104,7 +106,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
-        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None })
+        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None, system: default() })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
@@ -154,6 +156,7 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
             egui::CollapsingHeader::new("Statistics").default_open(true).show(ui, |ui| stats_panel::statistics(ui, doc));
             egui::CollapsingHeader::new("Charts").default_open(true).show(ui, |ui| charts::show(ui, &mut state.charts, doc));
             egui::CollapsingHeader::new("Inspector").default_open(true).show(ui, |ui| stats_panel::inspector(ui, doc));
+            egui::CollapsingHeader::new("System").default_open(true).show(ui, |ui| system_panel::show(ui, &mut state.system, doc));
         });
     });
     egui::CentralPanel::no_frame().show(&mut root, |ui| {
