@@ -23,8 +23,8 @@ pub struct Key {
     profile: SystemProfile,
 }
 
-/// `None`: the star is a remnant the sky leaves out, so it has no system.
-type Outcome = Option<Listing>;
+/// `Err` says why the star has no system to show.
+type Outcome = Result<Listing, &'static str>;
 
 #[derive(Default)]
 pub enum Job {
@@ -32,6 +32,7 @@ pub enum Job {
     NotDispatched,
     /// The worker fills the slot; a `Resource` must be `Sync`, which a channel receiver is not.
     Waiting { key: Key, results: Arc<OnceLock<Outcome>> },
+    /// Kept until the pick or its record changes, so a refused or failed star is not retried.
     Ready { key: Key, results: Arc<Outcome> },
 }
 
@@ -43,31 +44,38 @@ impl Job {
         }
     }
 
-    /// Moves a finished job to `Ready`. A worker that died is retried on the next frame.
     fn poll(&mut self) {
         let Job::Waiting { key, results } = self else { return };
         if let Some(outcome) = results.get() {
             *self = Job::Ready { key: *key, results: Arc::new(outcome.clone()) };
-        } else if Arc::strong_count(results) == 1 {
-            *self = Job::NotDispatched;
         }
     }
 }
 
-fn dispatch(doc: &Doc, key: Key) -> Option<Job> {
-    let (_, s) = doc.picked_star()?;
-    let compiled = &doc.result.as_ref()?.compiled;
-    let kinematics = lc_galaxy::attributes::kinematics(compiled, s.attributes.population?)?;
+fn dispatch(doc: &Doc, key: Key) -> Job {
+    let refused = |why| Job::Ready { key, results: Arc::new(Err(why)) };
+    let Some((_, s)) = doc.picked_star() else { return refused("no star picked") };
+    let Some(result) = &doc.result else { return refused("nothing baked") };
+    let Some(population) = s.attributes.population else { return refused("the star has no population") };
+    let Some(kinematics) = lc_galaxy::attributes::kinematics(&result.compiled, population) else {
+        return refused("its population has no frame");
+    };
     let slot = Arc::new(OnceLock::new());
     let filled = slot.clone();
     let spawned = std::thread::Builder::new().name("system".into()).spawn(move || {
-        let outcome = catalog_star(&key.record, &kinematics, key.profile).map(|star| {
+        // Caught so the slot is always filled: an empty slot would leave the section waiting.
+        let outcome = std::panic::catch_unwind(|| {
+            let star = catalog_star(&key.record, &kinematics, key.profile).ok_or("the sky leaves this star out")?;
             let tuning = key.profile.tuning();
-            listing(&system_with(&star, &tuning), &tuning)
-        });
+            Ok(listing(&system_with(&star, &tuning), &tuning))
+        })
+        .unwrap_or(Err("generating it panicked"));
         let _ = filled.set(outcome);
     });
-    spawned.ok().map(|_| Job::Waiting { key, results: slot })
+    match spawned {
+        Ok(_) => Job::Waiting { key, results: slot },
+        Err(_) => refused("no worker thread could be started"),
+    }
 }
 
 pub fn show(ui: &mut egui::Ui, job: &mut Job, doc: &Doc) {
@@ -77,13 +85,11 @@ pub fn show(ui: &mut egui::Ui, job: &mut Job, doc: &Doc) {
     };
     let key = Key { id: s.id, record: s.attributes.record, profile: s.attributes.profile };
     if job.key() != Some(key) {
-        *job = dispatch(doc, key).unwrap_or_default();
+        *job = dispatch(doc, key);
     }
     job.poll();
     match job {
-        Job::NotDispatched => {
-            ui.label("no system: the star has no population");
-        }
+        Job::NotDispatched => {}
         Job::Waiting { .. } => {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -92,10 +98,10 @@ pub fn show(ui: &mut egui::Ui, job: &mut Job, doc: &Doc) {
             ui.ctx().request_repaint();
         }
         Job::Ready { results, .. } => match results.as_ref() {
-            None => {
-                ui.label("no system: a neutron star or black hole");
+            Err(why) => {
+                ui.label(format!("no system: {why}"));
             }
-            Some(l) => {
+            Ok(l) => {
                 strip(ui, l);
                 ui.add_space(4.0);
                 egui::ScrollArea::vertical().id_salt("system list").min_scrolled_height(600.0).max_height(600.0).auto_shrink([false, true]).show(ui, |ui| {

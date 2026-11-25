@@ -10,6 +10,8 @@ pub fn scientific(value: f64, decimals: usize) -> String {
     if !value.is_finite() {
         return value.to_string();
     }
+    // `-0.0` would keep its sign.
+    let value = if value == 0.0 { 0.0 } else { value };
     let written = format!("{value:.decimals$e}");
     let (mantissa, exponent) = written.split_once('e').expect("`e` formatting writes an exponent");
     let exponent: i32 = exponent.parse().expect("`e` formatting writes an integer exponent");
@@ -45,6 +47,7 @@ mod tests {
     fn a_zero_exponent_has_no_power() {
         assert_eq!(scientific(2.5, 1), "2.5");
         assert_eq!(scientific(0.0, 2), "0.00");
+        assert_eq!(scientific(-0.0, 2), "0.00");
     }
 
     #[test]
