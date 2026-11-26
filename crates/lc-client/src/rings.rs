@@ -1,21 +1,24 @@
-//! Planetary rings: the annulus each ringed body gets, the bands its shader reads, and keeping it
-//! on its body.
+//! Planetary rings: the annulus each ringed body gets, the bands and light its shader reads, and
+//! keeping it on its body.
 //!
-//! The band list goes to the shader whole (`ring.wgsl`), so this module only packs it and places
-//! the mesh. Brightness is still the old display mapping, [`ring_opacity`]; see
-//! `ring-rendering-plan.md` phase 2 for what replaces it.
+//! A ring is shaded as its planet is: starlight its particles reflect and heat they radiate, per
+//! band, through the current band mapping, and tone-mapped per fragment in the planet's exposure
+//! (`ring.wgsl`). On top of that is a display floor, so a ring too thin to see is still faintly
+//! there.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::render_space::sim_to_render;
 use em_render::ring_material::{RING_BANDS, RingMaterial, RingUniform};
+use em_spectra::{BANDS, Band, BandMapping, PerBand};
 use glam::DVec3;
+use lc_world::ground::Ground;
 use lc_world::rings::RingSystem;
 
 use crate::envelope::{opacity_of, orientation};
-use crate::system::{M_PER_LY, UNIT_M};
+use crate::system::{Drawable, M_PER_LY, UNIT_M};
 
 /// Longitude divisions of the annulus. The bands are drawn by the shader, so this only has to
 /// keep the outline round.
@@ -26,14 +29,25 @@ const SEGMENTS: usize = 128;
 /// edge still has a fragment to filter.
 const MARGIN: f32 = 0.01;
 
-const TINT: Vec4 = Vec4::new(0.88, 0.84, 0.76, 1.0);
-
 /// Grains across the outer radius. The grain varies with radius only, so it reads as ringlets.
 const GRAIN_FREQUENCY: f32 = 40.0;
 const GRAIN_STRENGTH: f32 = 0.35;
 
-/// How opaque a ring system is drawn. Rings are solid and reflective rather than a shadow, so
-/// this is what they cover of their own disc, not of a sphere.
+/// What a band is drawn at, at least, for its coverage `c` before lighting: `RING_FLOOR c^(1/4)`.
+///
+/// A display decision, as `envelope::DISPLAY_LEVEL` is for a population: the planet's exposure
+/// window is two and a half stops, so by its true brightness a ring under an optical depth of a
+/// few hundredths is black beside its planet. Tuned on the reference shots so Jupiter's rings
+/// (optical depth 3e-6) are barely there and a generated ring at 0.1 is plain, while Saturn's B
+/// ring, where the true brightness is higher, is unchanged.
+pub const RING_FLOOR: f32 = 0.25;
+
+/// Particles at least this bright are ice. The generator draws rocky rings from 0.03 to 0.1 and
+/// icy ones from 0.1 to 0.6, and the measured systems split the same way.
+const ICY_ALBEDO: f64 = 0.1;
+
+/// How opaque a ring system was drawn before its light was its own; the beauty shots still
+/// choose rings by it (`ring-rendering-plan.md` phase 6). What the rings cover of their own disc.
 pub fn ring_opacity(rings: &RingSystem) -> f32 {
     let disc = std::f64::consts::PI * rings.outer_m().powi(2);
     opacity_of(rings.cross_section_m2() / disc.max(f64::MIN_POSITIVE))
@@ -76,18 +90,23 @@ impl Span {
     }
 }
 
-/// The bands as the shader takes them, inside out: `(inner, outer, depth, icy)` in units of the
-/// outer edge with depth over the deepest band's, and how many there are.
+pub fn is_icy(rings: &RingSystem) -> bool {
+    rings.albedo >= ICY_ALBEDO
+}
+
+/// The bands as the shader takes them, inside out: `(inner, outer, optical depth, icy)` with radii
+/// in units of the outer edge, and how many there are. Every band takes the system's composition
+/// until a band carries its own.
 ///
 /// A system with more bands than the uniform holds loses its narrowest gaps first. No system
 /// does today: the generator names at most twelve and the measured ones have four.
 pub fn pack(rings: &RingSystem) -> (usize, [Vec4; RING_BANDS]) {
     let spans = fitted(rings.bands.iter().map(|b| Span { inner: b.inner_m, outer: b.outer_m, depth: b.optical_depth }).collect());
     let outer = rings.outer_m().max(f64::MIN_POSITIVE);
-    let peak = spans.iter().map(|s| s.depth).fold(0.0, f64::max).max(f64::MIN_POSITIVE);
+    let icy = f32::from(u8::from(is_icy(rings)));
     let mut packed = [Vec4::ZERO; RING_BANDS];
     for (slot, s) in packed.iter_mut().zip(&spans) {
-        *slot = Vec4::new((s.inner / outer) as f32, (s.outer / outer) as f32, (s.depth / peak) as f32, 0.0);
+        *slot = Vec4::new((s.inner / outer) as f32, (s.outer / outer) as f32, s.depth as f32, icy);
     }
     (spans.len(), packed)
 }
@@ -108,19 +127,98 @@ fn fitted(mut spans: Vec<Span>) -> Vec<Span> {
     spans
 }
 
-/// `depth_over` in `ring.wgsl`: packed depth averaged over the radii `radius +- width / 2`.
+/// Packed optical depth averaged over the radii `radius +- width / 2`, as `ring.wgsl` takes each
+/// band's share of a pixel.
 pub fn depth_over(bands: &[Vec4], count: usize, radius: f32, width: f32) -> f32 {
     let half = 0.5 * width;
     let within = |edge: f32| (edge - radius).clamp(-half, half);
     bands.iter().take(count.min(RING_BANDS)).map(|b| b.z * (within(b.y) - within(b.x))).sum::<f32>() / width
 }
 
-pub fn uniform(rings: &RingSystem, seed: f32) -> RingUniform {
-    let (count, bands) = pack(rings);
+/// `lit_face` in `ring.wgsl`: the sunlit face of a sheet at optical depth `tau`, seen at `mu` and
+/// lit at `mu0`, as a share of a thick sheet lit and seen face-on.
+pub fn lit_face(mu: f32, mu0: f32, tau: f32) -> f32 {
+    if mu0 <= 0.0 {
+        return 0.0;
+    }
+    2.0 * mu0 / (mu + mu0) * (1.0 - (-tau * (1.0 / mu + 1.0 / mu0)).exp())
+}
+
+/// `unlit_face` in `ring.wgsl`: the face away from the star.
+pub fn unlit_face(mu: f32, mu0: f32, tau: f32) -> f32 {
+    if mu0 <= 0.0 {
+        return 0.0;
+    }
+    if (mu - mu0).abs() < 1.0e-3 {
+        return 2.0 * mu0 * tau / (mu * mu) * (-tau / mu).exp();
+    }
+    2.0 * mu0 / (mu - mu0) * ((-tau / mu).exp() - (-tau / mu0).exp())
+}
+
+/// The floor `ring.wgsl` draws a band at, on its sunlit face, seen at `mu`.
+pub fn floor_of(tau: f32, mu: f32) -> f32 {
+    RING_FLOOR * opacity_of(f64::from(1.0 - (-tau / mu).exp()))
+}
+
+/// What a ring's particles are, band by band: reflectance scaled so V is the ring's albedo, and
+/// emissivity by Kirchhoff where they reflect.
+pub struct Particles {
+    pub reflectance: [f32; BANDS],
+    pub emissivity: [f32; BANDS],
+}
+
+pub fn particles(ground: Ground, albedo: f64) -> Particles {
+    let shape = ground.reflectance();
+    let scale = albedo as f32 / shape[Band::V.index()].max(f32::MIN_POSITIVE);
+    let reflectance = shape.map(|r| (r * scale).clamp(0.0, 1.0));
+    let measured = ground.emissivity();
+    let emissivity = std::array::from_fn(|k| match Band::ALL[k] {
+        Band::ThermalIr | Band::Radio => measured[k],
+        _ => 1.0 - reflectance[k],
+    });
+    Particles { reflectance, emissivity }
+}
+
+/// A particle's temperature: in equilibrium with the star at the planet's distance, warmed by
+/// what it absorbs.
+pub fn particle_k(star_luminosity_w: f64, distance_m: f64, albedo: f64) -> f64 {
+    lc_world::system::equilibrium_temperature(star_luminosity_w, distance_m) * (1.0 - albedo).max(0.0).powf(0.25)
+}
+
+/// The star as a ring at one distance sees it.
+#[derive(Clone, Copy)]
+pub struct Starlight {
+    pub radius_m: f64,
+    pub teff_k: f64,
+    pub luminosity_w: f64,
+    pub distance_m: f64,
+}
+
+/// What a filled sheet of these particles reflects and radiates, as linear display light through
+/// `mapping`: `(reflected, emitted)`.
+pub fn light_of(particles: &Particles, albedo: f64, star: Starlight, mapping: &BandMapping) -> (Vec3, Vec3) {
+    let incident = crate::resolved::lit_radiance(1.0, star.radius_m, star.teff_k, star.distance_m);
+    let glow = crate::session::spectrum_at(particle_k(star.luminosity_w, star.distance_m, albedo));
+    let reflected = PerBand::new(std::array::from_fn(|k| particles.reflectance[k] * incident[Band::ALL[k]]));
+    let emitted = PerBand::new(std::array::from_fn(|k| particles.emissivity[k] * glow[Band::ALL[k]]));
+    (Vec3::from_array(mapping.apply(&reflected)), Vec3::from_array(mapping.apply(&emitted)))
+}
+
+/// Everything the shader reads for one ring this frame.
+pub fn uniform(rings: &lc_world::system::Rings, star: Starlight, to_star: DVec3, mapping: &BandMapping, tone: &crate::tonemap::ToneMap, seed: f32) -> RingUniform {
+    let (count, bands) = pack(&rings.system);
+    let albedo = rings.system.albedo;
+    let (reflected_rocky, emitted_rocky) = light_of(&particles(Ground::Basalt, albedo), albedo, star, mapping);
+    let (reflected_icy, emitted_icy) = light_of(&particles(Ground::Ice, albedo), albedo, star, mapping);
     RingUniform {
-        tint: TINT,
         bands,
-        params: Vec4::new(count as f32, ring_opacity(rings), RingUniform::default().params.z, 0.0),
+        params: Vec4::new(count as f32, RING_FLOOR, 0.0, 0.0),
+        reflected_rocky: reflected_rocky.extend(0.0),
+        reflected_icy: reflected_icy.extend(0.0),
+        emitted_rocky: emitted_rocky.extend(0.0),
+        emitted_icy: emitted_icy.extend(0.0),
+        to_star: sim_to_render(to_star.normalize_or_zero()).as_vec3().extend(0.0),
+        exposure: Vec4::new(tone.surface_reference, tone.surface_stops, 0.0, 0.0),
         grain: Vec4::new(GRAIN_FREQUENCY, GRAIN_STRENGTH, seed, 0.0),
     }
 }
@@ -147,7 +245,7 @@ pub fn build_annulus(inner: f32) -> Mesh {
 }
 
 /// Where a body's rings go this frame, seen from `eye_ly`.
-fn placement(body: &crate::system::Drawable, rings: &lc_world::system::Rings, eye_ly: DVec3) -> Transform {
+fn placement(body: &Drawable, rings: &lc_world::system::Rings, eye_ly: DVec3) -> Transform {
     Transform {
         translation: sim_to_render((body.position_ly - eye_ly) * M_PER_LY / UNIT_M).as_vec3(),
         rotation: orientation(rings.pole),
@@ -155,17 +253,24 @@ fn placement(body: &crate::system::Drawable, rings: &lc_world::system::Rings, ey
     }
 }
 
-/// Spawn a ring for every drawn body that has one, and keep each on its body.
+fn seed_of(index: usize) -> f32 {
+    index as f32 * 3.77 + 0.5
+}
+
+/// Spawn a ring for every drawn body that has one, and keep each on its body, on its body's
+/// layer, and lit for this frame.
 pub fn update_rings(
     mut commands: Commands,
     session: Res<crate::app::Game>,
     eye: Res<crate::hull::Eye>,
     bodies: Res<crate::starfield::Bodies>,
+    shot: Res<crate::beauty::ShotBody>,
+    camera: Query<(&Projection, &Camera), With<crate::app::SkyCamera>>,
     mut state: ResMut<Rings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RingMaterial>>,
     grain: Res<crate::procedural::PopulationGrain>,
-    mut placed: Query<(Entity, &mut Transform, &RingMesh)>,
+    mut placed: Query<(Entity, &mut Transform, &mut Visibility, &mut RenderLayers, &MeshMaterial3d<RingMaterial>, &RingMesh)>,
 ) {
     let here = session.system.as_ref().map(|s| s.star);
     if state.star != here || state.drawn != bodies.drawn.len() {
@@ -177,30 +282,58 @@ pub fn update_rings(
         for (i, body) in bodies.drawn.iter().enumerate() {
             let Some(rings) = &body.rings else { continue };
             let inner = (rings.system.inner_m() / rings.system.outer_m().max(f64::MIN_POSITIVE)) as f32;
+            // Lit and layered from the next frame, with the rest.
             commands.spawn((
                 Mesh3d(meshes.add(build_annulus(inner))),
-                MeshMaterial3d(materials.add(RingMaterial {
-                    uniforms: uniform(&rings.system, i as f32 * 3.77 + 0.5),
-                    grain: grain.image.clone(),
-                })),
+                MeshMaterial3d(materials.add(RingMaterial { uniforms: RingUniform::default(), grain: grain.image.clone() })),
                 placement(body, rings, eye.at_ly),
+                Visibility::Hidden,
+                RenderLayers::layer(0),
                 NoFrustumCulling,
                 RingMesh { body: i, radius: (rings.system.outer_m() / UNIT_M) as f32 },
             ));
         }
         return;
     }
-    for (_, mut transform, ring) in &mut placed {
+    let Some(system) = session.system.as_ref() else { return };
+    let rad_per_px = crate::starfield::camera_scale(&camera);
+    let star_ly = system.star_position_ly();
+    for (_, mut transform, mut visibility, mut layers, material, ring) in &mut placed {
         let Some(body) = bodies.drawn.get(ring.body) else { continue };
         let Some(rings) = &body.rings else { continue };
         *transform = placement(body, rings, eye.at_ly);
+        let Some(layer) = crate::resolved::layer_for(body, rings.system.outer_m(), eye.at_ly, rad_per_px, &shot) else {
+            visibility.set_if_neq(Visibility::Hidden);
+            continue;
+        };
+        visibility.set_if_neq(Visibility::Inherited);
+        layers.set_if_neq(RenderLayers::layer(layer));
+
+        let star = Starlight {
+            radius_m: system.star_radius_m(),
+            teff_k: system.star_teff_k(),
+            luminosity_w: system.star_luminosity_w(),
+            distance_m: star_ly.distance(body.position_ly) * M_PER_LY,
+        };
+        // A ring only the telescope draws is exposed with its planet, which is metered for itself.
+        let mut tone = session.tone;
+        if layer != 0 {
+            let radiance = crate::resolved::surface_radiance(body, star.radius_m, star.teff_k, star.distance_m);
+            tone.surface_reference = crate::resolved::metered_for(&tone, &radiance, &session.mapping);
+        }
+        let next = uniform(rings, star, star_ly - body.position_ly, &session.mapping, &tone, seed_of(ring.body));
+        if let Some(mut asset) = materials.get_mut(&material.0)
+            && asset.uniforms != next
+        {
+            asset.uniforms = next;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lc_world::rings::{Band, for_body};
+    use lc_world::rings::for_body;
     use std::borrow::Cow;
 
     const PIXEL: f32 = 1.0e-3;
@@ -217,7 +350,7 @@ mod tests {
         let at = |r: f32| depth_over(&bands, count, r, PIXEL);
         let r_saturn = 5.8232e7 / 1.36775e8;
         let (b, division, a) = (at(1.8 * r_saturn), at(2.06 * r_saturn), at(2.2 * r_saturn));
-        assert!((b - 1.0).abs() < 1e-5, "the B ring is the peak: {b}");
+        assert!((b - 1.5).abs() < 1e-5, "the B ring at its own depth: {b}");
         assert!(division > 0.0 && division < b / 10.0, "the division is thin, not empty: {division}");
         assert!(a > division * 4.0, "and the A ring is thicker again: {a}");
         assert_eq!(at(1.1 * r_saturn), 0.0, "nothing inside the C ring");
@@ -232,7 +365,10 @@ mod tests {
             assert_eq!(count, for_body(id).unwrap().bands.len());
             assert!(bands[..count].windows(2).all(|w| w[0].y <= w[1].x), "{id}: out of order");
             assert!((bands[count - 1].y - 1.0).abs() < 1e-6, "{id}: the outermost band ends at one");
-            assert!(bands[..count].iter().all(|b| b.z > 0.0 && b.z <= 1.0), "{id}: depths over the peak");
+            let system = for_body(id).unwrap();
+            assert!(bands[..count].iter().zip(system.bands.iter()).all(|(p, b)| p.z == b.optical_depth as f32), "{id}: depths as measured");
+            let icy = f32::from(u8::from(id == "Saturn"));
+            assert!(bands[..count].iter().all(|b| b.w == icy), "{id}: only Saturn's rings are ice");
             assert!(bands[count..].iter().all(|b| *b == Vec4::ZERO), "{id}: unused slots are empty");
         }
     }
@@ -258,8 +394,8 @@ mod tests {
         let gap = 1.0e-4;
         let system = RingSystem {
             bands: Cow::Owned(vec![
-                Band { name: "A", inner_m: 0.5, outer_m: 0.75 - gap / 2.0, optical_depth: 1.0 },
-                Band { name: "B", inner_m: 0.75 + gap / 2.0, outer_m: 1.0, optical_depth: 1.0 },
+                lc_world::rings::Band { name: "A", inner_m: 0.5, outer_m: 0.75 - gap / 2.0, optical_depth: 1.0 },
+                lc_world::rings::Band { name: "B", inner_m: 0.75 + gap / 2.0, outer_m: 1.0, optical_depth: 1.0 },
             ]),
             albedo: 0.5,
         };
@@ -271,12 +407,12 @@ mod tests {
     /// Past the uniform's capacity the narrowest gaps close first, and the material is kept.
     #[test]
     fn too_many_bands_close_their_narrowest_gaps_and_keep_the_material() {
-        let bands: Vec<Band> = (0..20)
+        let bands: Vec<lc_world::rings::Band> = (0..20)
             .map(|i| {
                 let inner = 1.0 + i as f64;
                 // Every fourth gap is wide, the rest narrow.
                 let gap = if i % 4 == 3 { 0.5 } else { 0.01 };
-                Band { name: "x", inner_m: inner, outer_m: inner + 1.0 - gap, optical_depth: 0.1 }
+                lc_world::rings::Band { name: "x", inner_m: inner, outer_m: inner + 1.0 - gap, optical_depth: 0.1 }
             })
             .collect();
         let system = RingSystem { bands: Cow::Owned(bands), albedo: 0.5 };
@@ -318,5 +454,101 @@ mod tests {
         assert!(uranus < saturn * 0.5 && uranus > 0.05, "Uranus's are faint but real: {uranus}");
         assert!(neptune < uranus, "Neptune's fainter still: {neptune}");
         assert!(jupiter < 0.05, "and Jupiter's took Voyager to find: {jupiter}");
+    }
+
+    const AU: f64 = 1.495_978_707e11;
+
+    fn sun_at(au: f64) -> Starlight {
+        Starlight { radius_m: 6.957e8, teff_k: 5772.0, luminosity_w: 3.828e26, distance_m: au * AU }
+    }
+
+    /// Display light of a sheet through `mapping`, against a gray sheet of the same albedo, per
+    /// channel: what the particles' spectrum does to the color, with the star's taken out.
+    fn against_gray(ground: Ground, mapping: &BandMapping) -> Vec3 {
+        let star = sun_at(9.5);
+        let (ice, _) = light_of(&particles(ground, 0.5), 0.5, star, mapping);
+        let gray = Particles { reflectance: [0.5; BANDS], emissivity: [0.5; BANDS] };
+        let (flat, _) = light_of(&gray, 0.5, star, mapping);
+        Vec3::select(flat.cmpgt(Vec3::ZERO), ice / flat, Vec3::ZERO)
+    }
+
+    #[test]
+    fn particles_are_as_bright_in_v_as_the_albedo_says() {
+        for ground in [Ground::Ice, Ground::Basalt] {
+            for albedo in [0.03, 0.1, 0.5] {
+                let p = particles(ground, albedo);
+                assert!((p.reflectance[Band::V.index()] - albedo as f32).abs() < 1e-6);
+                assert!(p.emissivity.iter().all(|e| (0.0..=1.0).contains(e)));
+            }
+        }
+    }
+
+    /// Thermal maps 10 µm, K and V to red, green and blue. Ice is bright in V and dark by 2 µm,
+    /// so an icy ring loses green against blue; rock barely changes across them.
+    #[test]
+    fn an_icy_ring_is_dark_in_k_and_bright_in_v() {
+        let thermal = em_spectra::presets::thermal();
+        let (ice, rock) = (against_gray(Ground::Ice, &thermal), against_gray(Ground::Basalt, &thermal));
+        assert!(ice.y < ice.z * 0.3, "ice in K against V: {ice}");
+        assert!(rock.y > rock.z * 0.8, "rock in K against V: {rock}");
+    }
+
+    /// Dust penetration maps 21 cm, 10 µm and K. Nothing reflects at the first two, so all a ring
+    /// sends there is its own glow; K is all its reflection.
+    #[test]
+    fn under_dust_penetration_a_ring_reflects_only_in_k() {
+        let dust = em_spectra::presets::dust_penetration();
+        let (reflected, emitted) = light_of(&particles(Ground::Ice, 0.5), 0.5, sun_at(9.5), &dust);
+        assert_eq!((reflected.x, reflected.y), (0.0, 0.0), "{reflected}");
+        assert!(reflected.z > 0.0 && emitted.y > 0.0, "{reflected} {emitted}");
+    }
+
+    /// A rocky ring at 0.03 AU is hundreds of kelvin and glows at 10 µm; an icy one at 10 AU is
+    /// eighty and barely does.
+    #[test]
+    fn a_hot_rocky_ring_glows_and_a_cold_icy_one_barely_does() {
+        let thermal = em_spectra::presets::thermal();
+        let (_, hot) = light_of(&particles(Ground::Basalt, 0.06), 0.06, sun_at(0.03), &thermal);
+        let (_, cold) = light_of(&particles(Ground::Ice, 0.5), 0.5, sun_at(10.0), &thermal);
+        assert!(hot.x > cold.x * 1.0e3, "10 µm: {} against {}", hot.x, cold.x);
+        assert!(particle_k(3.828e26, 0.03 * AU, 0.06) > 1000.0);
+    }
+
+    /// A thick ring is dark from the side away from the star; a thin one looks about the same
+    /// from both.
+    #[test]
+    fn only_a_thick_ring_is_dark_on_its_unlit_face() {
+        let (mu, mu0) = (0.5, 0.3);
+        let ratio = |tau: f32| unlit_face(mu, mu0, tau) / lit_face(mu, mu0, tau);
+        assert!(ratio(2.0) < 0.1, "thick: {}", ratio(2.0));
+        assert!(ratio(0.05) > 0.8, "thin: {}", ratio(0.05));
+        // The limit where the two angles meet is continuous with the general formula.
+        let near = unlit_face(0.5, 0.5 + 2.0e-3, 0.4);
+        assert!((unlit_face(0.5, 0.5, 0.4) / near - 1.0).abs() < 0.02);
+        assert_eq!(lit_face(0.5, 0.0, 1.0), 0.0, "with the star in the ring's plane nothing is lit");
+    }
+
+    /// Saturn's B ring and Saturn have about the same albedo, and face-on the ring's depth of 1.5
+    /// makes it nearly a filled sheet, so the two are about equally bright: the ring is what puts
+    /// back the planet's missing brightness in `system.rs`.
+    #[test]
+    fn saturns_b_ring_is_about_as_bright_as_saturn() {
+        let saturn = for_body("Saturn").unwrap();
+        let ring = saturn.albedo as f32 * lit_face(1.0, 1.0, 1.5);
+        let disc = 0.499;
+        assert!((0.5..2.0).contains(&(ring / disc)), "ring over disc: {}", ring / disc);
+    }
+
+    /// The floor keeps the measured systems in order by their densest band, and sits where the
+    /// tuning says: Jupiter's barely, a generated ring at 0.1 plainly.
+    #[test]
+    fn the_floor_keeps_the_order_and_its_targets() {
+        let densest = |id: &str| for_body(id).unwrap().bands.iter().map(|b| b.optical_depth as f32).fold(0.0, f32::max);
+        let floor = |id: &str| floor_of(densest(id), 1.0);
+        assert!(floor("Saturn") > floor("Uranus") && floor("Uranus") > floor("Neptune") && floor("Neptune") > floor("Jupiter"));
+        assert!(floor_of(3.0e-6, 1.0) < 0.015, "Jupiter's main ring: {}", floor_of(3.0e-6, 1.0));
+        assert!(floor_of(0.1, 1.0) > 0.1, "a generated ring at 0.1: {}", floor_of(0.1, 1.0));
+        assert!(floor_of(100.0, 0.01) <= RING_FLOOR);
+        assert_eq!(floor_of(0.0, 1.0), 0.0);
     }
 }
