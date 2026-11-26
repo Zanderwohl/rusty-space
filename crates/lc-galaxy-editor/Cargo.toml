@@ -15,6 +15,11 @@ glam = "0.32"
 em-ui = { path = "../em-ui", features = ["egui"] }
 em-plot = { path = "../em-plot", features = ["raster"] }
 lc-icon = { path = "../lc-icon" }
+rfd = "0.17.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder"] }
 
 [[bin]]
 name = "lc-galaxy-editor"
