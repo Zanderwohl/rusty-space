@@ -14,8 +14,33 @@ use serde::{Deserialize, Serialize};
 use crate::distribution::{Distribution, Inclination};
 use crate::star::Star;
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A rung a giant stirred past assembling, or one that never had the mass to.
+    Belt,
+    /// The trans-planetary disc: the outer rungs that ran out of time.
+    OuterDisc,
+    OortCloud,
+    Ring,
+    /// Engineered collectors.
+    Swarm,
+}
+
+impl Kind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Belt => "belt",
+            Kind::OuterDisc => "outer disc",
+            Kind::OortCloud => "Oort cloud",
+            Kind::Ring => "ring",
+            Kind::Swarm => "swarm",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Population {
+    pub kind: Kind,
     /// Unit normal of the population's reference plane.
     pub pole: DVec3,
     /// Semi-major axis, meters.
@@ -268,6 +293,7 @@ mod tests {
 
     fn swarm(inc: Inclination, count: f64, a: f64) -> Population {
         Population {
+            kind: Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(a),
             eccentricity: Distribution::delta(0.0),

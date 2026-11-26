@@ -18,13 +18,14 @@ use lc_world::craft::{Craft, CraftId, Kind};
 use lc_world::motion::LIGHT_US_PER_LY;
 use lc_world::signal::Beam;
 use lc_world::sky::{CatalogStar, StarId};
-use lc_world::system::{LOCAL_SHELL_LY, LocalSystem};
+use lc_world::sky::shells::MAX_SHELL_LY;
+use lc_world::system::LocalSystem;
 
 /// The stars a shard is authoritative over, and the systems loaded around them.
 ///
 /// Where the stars come from is the caller's business — a packed sky, an authored galaxy, a
 /// handful in a test. The server's business is which one a craft is inside, and that is
-/// [`LOCAL_SHELL_LY`] from a star and nothing more: the same rule the client uses, so the two
+/// [`lc_world::system::holding`] and nothing more: the same rule the client uses, so the two
 /// never disagree about whether a ship is in a system.
 #[derive(Default)]
 pub struct World {
@@ -40,7 +41,7 @@ pub struct World {
     loaded: HashMap<StarId, Held>,
     /// Where each star sits in `stars`. Built once, because the catalog never changes.
     index: HashMap<StarId, usize>,
-    /// Catalog positions of the stars in each [`LOCAL_SHELL_LY`] cube, ascending. Asked for every
+    /// Catalog positions of the stars in each [`MAX_SHELL_LY`] cube, ascending. Asked for every
     /// craft every tick, idle shard included, where a scan was the whole catalog.
     cells: HashMap<[i64; 3], Vec<usize>>,
 }
@@ -76,7 +77,7 @@ fn index_of(stars: &[CatalogStar]) -> HashMap<StarId, usize> {
 }
 
 fn cell_of(position_ly: DVec3) -> [i64; 3] {
-    let c = (position_ly / LOCAL_SHELL_LY).floor();
+    let c = (position_ly / MAX_SHELL_LY).floor();
     [c.x as i64, c.y as i64, c.z as i64]
 }
 
@@ -152,8 +153,8 @@ impl World {
         Some(self.stars[self.containing(position_ly)?].id)
     }
 
-    /// The star whose system holds `position_ly`, by [`lc_world::system::holding`]. Cells are a
-    /// shell wide, so the 27 around the position hold every candidate.
+    /// The star whose system holds `position_ly`, by [`lc_world::system::holding`]. Cells are the
+    /// largest shell wide, so the 27 around the position hold every candidate.
     fn containing(&self, position_ly: DVec3) -> Option<usize> {
         let [x, y, z] = cell_of(position_ly);
         let candidates = (-1..=1).flat_map(|dx| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dz| [dx, dy, dz])))

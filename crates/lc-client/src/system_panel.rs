@@ -389,17 +389,24 @@ fn courses(
 fn star_details(ui: &mut egui::Ui, host: &lc_world::knowledge::Host) {
     use em_spectra::stellar::{SOLAR_LUMINOSITY, SOLAR_RADIUS};
     let solar_kg = em_spectra::stellar::SOLAR_MU / lc_world::knowledge::body::GRAVITY;
+    use em_ui::egui_text::{Unit, quantity};
+    enum Shown {
+        Text(&'static str),
+        Symbol(Unit),
+    }
     let rows = [
-        ("Distance", host.distance_m, lc_world::navigation::AU, "AU"),
-        ("Radius", host.radius_m, SOLAR_RADIUS, "R☉"),
-        ("Temperature", host.teff_k, 1.0, "K"),
-        ("Luminosity", host.luminosity_w, SOLAR_LUMINOSITY, "L☉"),
-        ("Mass", host.mass_kg, solar_kg, "M☉"),
+        ("Distance", host.distance_m, lc_world::navigation::AU, Shown::Text("AU")),
+        ("Radius", host.radius_m, SOLAR_RADIUS, Shown::Symbol(Unit::SolarRadius)),
+        ("Temperature", host.teff_k, 1.0, Shown::Text("K")),
+        ("Luminosity", host.luminosity_w, SOLAR_LUMINOSITY, Shown::Symbol(Unit::SolarLuminosity)),
+        ("Mass", host.mass_kg, solar_kg, Shown::Symbol(Unit::SolarMass)),
     ];
-    for (name, value, unit, symbol) in rows {
-        if let Some((v, sigma)) = value {
-            ui.label(format!("{name}: {}", with_error(v / unit, sigma / unit, symbol)));
-        }
+    for (name, value, scale, unit) in rows {
+        let Some((v, sigma)) = value else { continue };
+        match unit {
+            Shown::Symbol(unit) => quantity(ui, &format!("{name}: {}", with_error(v / scale, sigma / scale, "").trim_end()), unit),
+            Shown::Text(text) => ui.label(format!("{name}: {}", with_error(v / scale, sigma / scale, text))),
+        };
     }
 }
 

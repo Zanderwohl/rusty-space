@@ -18,6 +18,10 @@ pub const LIVE_CELL_BUDGET: f64 = 200_000.0;
 /// Points per axis for the field's expected count.
 const EXPECTED_RESOLUTION: usize = 32;
 
+/// Shared by every document, so caches keyed on a generation never mistake a new document's
+/// bake for the one they hold.
+static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// While a drag is changing the timeline, rebuild at most this often.
 const DRAG_REBUILD_INTERVAL: Duration = Duration::from_millis(150);
 
@@ -26,6 +30,8 @@ pub struct Result {
     pub bake: std::result::Result<Bake, String>,
     pub expected: Vec<(FeatureId, f64)>,
     pub nearest: Vec<f64>,
+    /// Each star's shell radius as the game assigns it, ly; NaN for a star the sky leaves out.
+    pub shells: Vec<f64>,
     pub took: Duration,
 }
 
@@ -169,9 +175,10 @@ impl Doc {
             lc_galaxy::bake(&compiled, self.timeline.seed, bounds, default_threads()).map_err(|e| e.to_string())
         };
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
-        self.result = Some(Result { compiled, bake, expected, nearest, took: start.elapsed() });
+        let shells = bake.as_ref().map(|b| lc_galaxy::publish::shells(&b.stars)).unwrap_or_default();
+        self.result = Some(Result { compiled, bake, expected, nearest, shells, took: start.elapsed() });
         self.built_from = Some(key);
-        self.generation += 1;
+        self.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.built_at = Some(Instant::now());
     }
 

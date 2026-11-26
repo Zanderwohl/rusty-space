@@ -1122,7 +1122,7 @@ mod tests {
             let offset = leave(from);
             let radius = (from - star).normalize();
             assert!(offset.normalize().dot(radius) > 0.999, "{body} did not leave radially");
-            assert!(offset.length() > crate::system::LOCAL_SHELL_LY, "still inside the shell");
+            assert!(offset.length() > crate::sky::shells::SOLAR_SHELL_LY, "still inside the shell");
         }
         // Two bodies on opposite sides of the star leave in opposite directions, which is the
         // whole difference from a fixed axis.

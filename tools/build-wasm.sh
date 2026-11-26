@@ -33,7 +33,7 @@ CATALOG=assets/catalogs/hygdata_v42.csv
 # An authored galaxy's timeline, published into the build in place of CATALOG when set. The
 # playtest phases of lightcone/docs/34-galaxy-authoring.md set it; committed, so the build id
 # names the galaxy as well as the code.
-GALAXY=crates/lc-galaxy/galaxies/phase-1.ron
+GALAXY=crates/lc-galaxy/galaxies/phase-2.ron
 
 for tool in wasm-bindgen wasm-opt; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }

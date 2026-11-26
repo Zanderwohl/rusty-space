@@ -245,6 +245,7 @@ mod tests {
 
     fn swarm(inc: Inclination) -> Population {
         Population {
+            kind: crate::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(AU),
             eccentricity: Distribution::delta(0.0),

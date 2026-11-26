@@ -190,6 +190,7 @@ mod tests {
 
     fn reference_swarm() -> Population {
         Population {
+            kind: crate::population::Kind::Swarm,
             pole: DVec3::Z,
             semi_major: Distribution::delta(AU),
             eccentricity: Distribution::delta(0.0),

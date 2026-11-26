@@ -1,7 +1,7 @@
 //! The selected feature's fields, or an unread line as text to fix.
 
 use bevy_egui::egui::{self, DragValue, RichText};
-use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation};
+use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
 use lc_galaxy::kinds::{Contribution, FrameKind, Plummer, PopulationKind, Variable};
 use lc_galaxy::{FeatureId, Num, Params, Row, Target, Timeline, Unread, codec};
 
@@ -282,6 +282,7 @@ fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs, a
                 let unit = match (&target, &op) {
                     (Target::Density(_), OpSpec::Add(_)) if adds_count_stars => " stars",
                     (Target::FeH(_), OpSpec::Add(_) | OpSpec::Set(_)) => " dex",
+                    (Target::System(f), OpSpec::Add(_) | OpSpec::Set(_)) if f.in_dex() => " dex",
                     _ => "",
                 };
                 match op {
@@ -309,6 +310,7 @@ fn target_picker(ui: &mut egui::Ui, target: &mut Target, refs: &Refs) {
         Target::Density(p) => format!("density of {}", name(*p)),
         Target::FeH(p) => format!("[Fe/H] of {}", name(*p)),
         Target::Exclusion => "packing".into(),
+        Target::System(f) => format!("system: {}", f.label()),
     };
     egui::ComboBox::from_id_salt("target").selected_text(shown).show_ui(ui, |ui| {
         for (id, n) in &refs.populations {
@@ -316,6 +318,9 @@ fn target_picker(ui: &mut egui::Ui, target: &mut Target, refs: &Refs) {
             ui.selectable_value(target, Target::FeH(*id), format!("[Fe/H] of {n}"));
         }
         ui.selectable_value(target, Target::Exclusion, "packing");
+        for f in SystemField::ALL {
+            ui.selectable_value(target, Target::System(f), format!("system: {}", f.label()));
+        }
     });
 }
 

@@ -21,6 +21,7 @@ pub mod galaxy;
 pub mod generate;
 pub mod metallicity;
 pub mod record;
+pub mod shells;
 
 #[cfg(feature = "hyg")]
 pub mod hyg;
@@ -99,9 +100,22 @@ pub struct CatalogStar {
     /// `[Fe/H]`, synthesized from kinematics; see [`metallicity`].
     pub metallicity: f64,
     pub component: Component,
+    /// The authored shifts to its system's generation, when an authored galaxy gives any.
+    #[serde(default)]
+    pub system: Option<generate::SystemProfile>,
+    /// Its shell's radius against its neighbors, ly, which a provider assigns over the stars it
+    /// loaded; 0 until then. Read it through [`CatalogStar::shell_radius_ly`].
+    #[serde(default)]
+    pub shell_ly: f64,
 }
 
 impl CatalogStar {
+    /// The shell that bounds its system, ly: the clamped radius once a provider has assigned it,
+    /// the nominal one for a star no provider has placed among others.
+    pub fn shell_radius_ly(&self) -> f64 {
+        if self.shell_ly > 0.0 { self.shell_ly } else { shells::nominal_ly(self.mass_solar) }
+    }
+
     /// Seed for everything generated about this star. Derived from the id, so generation is
     /// reproducible and independent of load order.
     pub fn seed(&self) -> u64 {
@@ -163,7 +177,8 @@ pub struct AuthoredStars {
 }
 
 impl AuthoredStars {
-    pub fn new(name: impl Into<String>, stars: Vec<CatalogStar>) -> Self {
+    pub fn new(name: impl Into<String>, mut stars: Vec<CatalogStar>) -> Self {
+        shells::assign(&mut stars);
         Self { name: name.into(), stars }
     }
 
@@ -191,6 +206,8 @@ impl AuthoredStars {
                 mass_solar: mass,
                 metallicity: 0.0,
                 component: Component { index: 1, group: None },
+                system: None,
+                shell_ly: 0.0,
             }
         };
         Self::new("authored", vec![make(1, 4.2, 3000.0, 0.0017), make(2, 11.0, 5772.0, 1.0), make(3, 25.0, 9500.0, 25.0)])

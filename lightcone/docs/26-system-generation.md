@@ -15,6 +15,9 @@ out of them without ever having been described. Every number any of it draws fro
 [`sky::generate::tuning`](../../crates/lc-world/src/sky/generate/tuning.rs), so the whole
 architecture can be swept rather than recompiled.
 
+An authored galaxy steers these defaults by region, with a per-star profile and an ocean-world
+setting: see [35-system-contents.md](35-system-contents.md).
+
 The code runs one way:
 
 | module | what it decides |

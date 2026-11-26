@@ -13,10 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::persist::Saved;
 
-/// From the same place `crate::world::system_at` takes it, or the console and the game
-/// disagree about where somebody is.
-pub use lc_world::system::LOCAL_SHELL_LY;
-
 /// Where a craft is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Whereabouts {
@@ -103,7 +99,7 @@ pub(crate) fn nearest_within_shell(
     at: glam::DVec3,
     stars: &[CatalogStar],
 ) -> Option<&CatalogStar> {
-    nearest(at, stars).filter(|(_, ly)| *ly < LOCAL_SHELL_LY).map(|(star, _)| star)
+    nearest(at, stars).filter(|(star, ly)| *ly < star.shell_radius_ly()).map(|(star, _)| star)
 }
 
 fn whereabouts(at: glam::DVec3, stars: &[CatalogStar]) -> Whereabouts {
@@ -116,7 +112,9 @@ fn whereabouts(at: glam::DVec3, stars: &[CatalogStar]) -> Whereabouts {
         .name
         .clone()
         .unwrap_or_else(|| format!("star {}", star.id.get()));
-    if ly < LOCAL_SHELL_LY {
+    // Each star's own shell, as `lc_world::system::holding` uses, or the console and the game
+    // disagree about where somebody is.
+    if ly < star.shell_radius_ly() {
         Whereabouts::In {
             star: star.id.get(),
             name,
@@ -184,6 +182,8 @@ mod tests {
                 index: 1,
                 group: None,
             },
+            system: None,
+            shell_ly: 0.0,
         }
     }
 
@@ -197,7 +197,7 @@ mod tests {
         ];
 
         // Just inside Sol's shell.
-        let close = whereabouts(glam::DVec3::new(LOCAL_SHELL_LY * 0.5, 0.0, 0.0), &stars);
+        let close = whereabouts(glam::DVec3::new(lc_world::sky::shells::SOLAR_SHELL_LY * 0.5, 0.0, 0.0), &stars);
         match close {
             Whereabouts::In { name, au, star } => {
                 assert_eq!(name, "Sol");

@@ -38,10 +38,18 @@ shell does three jobs:
 
 Sizing. The shell sits outside the system's outermost population — in the solar system's
 case the Oort cloud, at roughly 1e5 AU = 1.58 ly, against a nearest star 4.25 ly away, so
-shells at that radius do not intersect for typical spacings. Shell radius
-scales with the star's mass and is clamped so that no two shells overlap: if two stars are
-closer than the sum of their nominal radii, both shrink to half the separation, or they are
-merged into one multi-star system.
+shells at that radius do not intersect for typical spacings. A shell's nominal radius is
+1.6 ly × (M/M☉)^⅓, the cube root a tidal radius follows, over the record's 0.08–150 M☉ (0.69 to
+8.5 ly). Shells are clamped so that no two overlap: where two stars are closer than the sum of
+their nominal radii, both shrink in proportion to their nominal radii until they touch, which for
+equal masses is half the separation (`lc_world::sky::shells`). A published galaxy stores each
+star's radius, worked out at publish against its neighbors across chunk faces, so a shard or client
+holding only some chunks still reads the same radius. A catalog held whole, such as HYG, assigns
+the radii when it loads.
+
+The 1.6 ly is an Oort-cloud size, not a precision limit. f64 meters resolve 2 m at that distance.
+The Sun's pull there, 5.8 × 10⁻¹³ m/s², is about seven times the galactic tide at a local density
+of 0.1 M☉/pc³, and the two balance near 3.0 ly.
 
 Crossing the shell is an event. That is the natural place to cut the world:
 

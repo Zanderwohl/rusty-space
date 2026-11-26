@@ -5,7 +5,10 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "egui")]
+pub mod egui_text;
 pub mod field;
+pub mod number;
 pub mod picking;
 pub mod pointer;
 pub mod reticle;

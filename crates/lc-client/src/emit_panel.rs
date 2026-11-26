@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use em_ui::egui_text::raised;
+use em_ui::number::scientific;
 use glam::DVec3;
 use lc_proto::{Aim, Apertures, Lead, Order, Outbound, Refusal, ShipId, Shade, Spectrum};
 use lc_world::craft::{BEAM_PER_LENGTH, Craft};
@@ -573,7 +575,7 @@ pub fn wavelength(m: f64) -> String {
 fn band(spectrum: Spectrum) -> String {
     match spectrum {
         Spectrum::Line { wavelength_m } => wavelength(wavelength_m),
-        Spectrum::Blackbody { temperature_k } => format!("{temperature_k:.1e} K"),
+        Spectrum::Blackbody { temperature_k } => format!("{} K", scientific(temperature_k, 1)),
     }
 }
 
@@ -588,7 +590,7 @@ fn fine_m(m: f64) -> String {
 }
 
 fn watts(w: f64) -> String {
-    format!("{w:.2e} W")
+    format!("{} W", scientific(w, 2))
 }
 
 fn angle(rad: f64) -> String {
@@ -668,7 +670,7 @@ pub(crate) fn emit(
     egui::Grid::new("emit_settings").num_columns(2).show(ui, |ui| {
         ui.label("power");
         let top_w = rating_w.max(POWER_MIN_W * 10.0);
-        ui.add(egui::Slider::new(&mut draft.power_w, POWER_MIN_W..=top_w).logarithmic(true).custom_formatter(|w, _| watts(w)));
+        ui.add(egui::Slider::new(&mut draft.power_w, POWER_MIN_W..=top_w).logarithmic(true).custom_formatter(|w, _| format!("{w:.2e} W")));
         ui.end_row();
         ui.label("spread");
         let lit = preview(draft, &session.ship, now_s, None);
@@ -785,17 +787,18 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
                     true => ui.colored_label(hazard(), lead),
                     false => ui.label(lead),
                 };
-                ui.label(format!("arriving {} ({:.1e} of it)", watts(at.arriving_w), at.fraction));
-                ui.label(match at.absorbed_w {
+                ui.label(raised(ui.style(), &format!("arriving {} ({} of it)", watts(at.arriving_w), scientific(at.fraction, 1)), None));
+                let absorbed = match at.absorbed_w {
                     Some(w) => format!("absorbed {}", watts(w)),
                     None => "shade unknown".to_string(),
-                });
+                };
+                ui.label(raised(ui.style(), &absorbed, None));
                 match receiver.rating_w {
-                    Some(r) => ui.label(format!("its rating {} · room unknown", watts(r))),
+                    Some(r) => ui.label(raised(ui.style(), &format!("its rating {} · room unknown", watts(r)), None)),
                     None => ui.label("rating unknown · room unknown"),
                 };
                 if let Some(over) = at.past_rating_w {
-                    ui.colored_label(hazard(), format!("{} past its rating", watts(over)));
+                    ui.label(raised(ui.style(), &format!("{} past its rating", watts(over)), Some(hazard())));
                 }
                 match (at.if_full, at.with_room) {
                     (None, _) => {
@@ -820,16 +823,17 @@ fn show_preview(ui: &mut egui::Ui, seen: &Preview, receiver: Option<&Receiver>, 
     });
     let me = |j: f64| match j / module_j {
         0.0 => "0 ME".to_string(),
-        me if me < 0.01 => format!("{me:.2e} ME"),
+        me if me < 0.01 => format!("{} ME", scientific(me, 2)),
         me => format!("{me:.2} ME"),
     };
-    ui.label(format!(
+    let cost = format!(
         "{} at {} · {} from heat, {} from storage",
         me(seen.cost_j),
         watts(seen.drawn_w),
         me(seen.from_heat_j),
         me(seen.from_storage_j),
-    ));
+    );
+    ui.label(raised(ui.style(), &cost, None));
 }
 
 fn fate_line(ui: &mut egui::Ui, case: &str, fate: Fate) {
@@ -888,13 +892,13 @@ fn incoming(ui: &mut egui::Ui, session: &crate::session::Session, uplink: &crate
             watts(landing.power_w),
             watts(landing.power_w * absorptivity)
         );
-        if ui.selectable_label(draft.aimed == back, row).clicked() {
+        if ui.selectable_label(draft.aimed == back, raised(ui.style(), &row, None)).clicked() {
             draft.aimed = back;
         }
     }
     if let Some(fitting) = fitting {
         let (stored_w, heat_w) = field_takes(fitting, &session.ship.motion, now_s, uplink.incoming.landing_w());
-        ui.label(format!("to storage {} · to heat {}", watts(stored_w), watts(heat_w)));
+        ui.label(raised(ui.style(), &format!("to storage {} · to heat {}", watts(stored_w), watts(heat_w)), None));
     }
 }
 

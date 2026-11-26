@@ -1,6 +1,7 @@
 use glam::{DMat3, DVec3};
 
 use super::*;
+use crate::sky::generate::SystemProfile;
 use crate::sky::StarProvider;
 
 fn kinematics() -> Kinematics {
@@ -22,6 +23,7 @@ fn chunk() -> GalaxyChunk {
         graph: 0xfeed,
         chunk: [-1, -1, -1],
         populations: vec![kinematics()],
+        profiles: vec![SystemProfile::default(), SystemProfile::quantize(1.0, 0.75, 0.3, 0.0, -0.5)],
         records: vec![
             record([-1, -1, -1], 3, DVec3::new(-1.0, -2.0, -3.0), 1.0),
             record([-2, -1, -1], 0, DVec3::new(-9.5, -2.0, -3.0), 0.3),
@@ -112,7 +114,7 @@ fn a_record_whose_cell_leaves_its_chunk_is_refused() {
     let c = chunk();
     let mut bytes = c.encode().unwrap();
     // The first record's cell-within-chunk field sits right after the record count.
-    let header = bytes.len() - c.records.len() * 16;
+    let header = bytes.len() - c.records.len() * 19;
     bytes[header..header + 2].copy_from_slice(&0x8000u16.to_le_bytes());
     assert_eq!(GalaxyChunk::decode(&bytes), Err(GalaxyError::BadRecord(0)));
 }
@@ -124,4 +126,20 @@ fn a_manifest_names_only_files_beside_it() {
     for bad in ["../a.lcg", "chunks/../../a.lcg", "/etc/hosts", "./a.lcg", ""] {
         assert!(entry(bad).checked_file().is_err(), "{bad}");
     }
+}
+
+/// A record's profile index reaches the loaded star's system profile; the default stays `None`.
+#[test]
+fn a_record_carries_its_system_profile() {
+    let mut c = chunk();
+    c.records[0].profile = 1;
+    let decoded = GalaxyChunk::decode(&c.encode().unwrap()).unwrap();
+    let (stars, _) = decoded.stars();
+    let id0 = c.records[0].id().unwrap();
+    for s in &stars {
+        let want = if s.id == id0 { Some(c.profiles[1]) } else { None };
+        assert_eq!(s.system, want);
+    }
+    c.records[0].profile = 2;
+    assert!(GalaxyChunk::decode(&c.encode().unwrap()).is_err(), "an index past the table is refused");
 }

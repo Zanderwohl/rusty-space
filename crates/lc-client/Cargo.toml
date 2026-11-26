@@ -13,7 +13,7 @@ em-plot = { path = "../em-plot", features = ["raster"] }
 em-render = { path = "../em-render" }
 em-spectra = { path = "../em-spectra" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
-em-ui = { path = "../em-ui" }
+em-ui = { path = "../em-ui", features = ["egui"] }
 lc-books = { path = "../lc-books" }
 lc-proto = { path = "../lc-proto" }
 lc-spacetime = { path = "../lc-spacetime" }

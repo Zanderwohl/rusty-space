@@ -1,15 +1,18 @@
 //! Galaxy Forge: the editor for the Lightcone galaxy. See `lightcone/docs/34-galaxy-authoring.md`.
 //!
 //! ```text
-//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh]
+//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh|ocean-feh|ocean-mass]
 //!                  [--shot <png> [--frames <n>]]
 //! ```
 
+mod census;
 mod charts;
+mod compare;
 mod doc;
 mod palette;
 mod params_panel;
 mod stats_panel;
+mod system_panel;
 mod timeline_panel;
 mod views;
 
@@ -69,6 +72,8 @@ struct Ui {
     view: ViewState,
     charts: charts::Charts,
     dialog: Option<Dialog>,
+    system: system_panel::SystemView,
+    census: census::CensusJob,
 }
 
 enum Dialog {
@@ -104,7 +109,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
-        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None })
+        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None, system: default(), census: default() })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
@@ -151,9 +156,17 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             params_panel::show(ui, doc);
             ui.add_space(8.0);
-            egui::CollapsingHeader::new("Statistics").default_open(true).show(ui, |ui| stats_panel::statistics(ui, doc));
-            egui::CollapsingHeader::new("Charts").default_open(true).show(ui, |ui| charts::show(ui, &mut state.charts, doc));
+            egui::CollapsingHeader::new("Statistics").default_open(true).show(ui, |ui| {
+                stats_panel::statistics(ui, doc);
+                state.census.update(doc);
+                stats_panel::systems(ui, &state.census, doc);
+            });
+            egui::CollapsingHeader::new("Charts").default_open(true).show(ui, |ui| {
+                state.census.update(doc);
+                charts::show(ui, &mut state.charts, doc, &state.census);
+            });
             egui::CollapsingHeader::new("Inspector").default_open(true).show(ui, |ui| stats_panel::inspector(ui, doc));
+            egui::CollapsingHeader::new("System").default_open(true).show(ui, |ui| system_panel::show(ui, &mut state.system, doc));
         });
     });
     egui::CentralPanel::no_frame().show(&mut root, |ui| {
@@ -197,6 +210,7 @@ fn menu(ui: &mut egui::Ui, doc: &mut Doc, state: &mut Ui) {
         ui.menu_button("File", |ui| {
             if ui.button("New").clicked() {
                 *doc = Doc::new(Timeline::new(1), None);
+                state.view.forget_document();
                 ui.close();
             }
             if ui.button("Open…").clicked() {
@@ -276,7 +290,10 @@ fn dialog(ctx: &egui::Context, doc: &mut Doc, state: &mut Ui) {
         let path = PathBuf::from(path.trim());
         match d {
             Dialog::Open(_) => match Doc::open(path) {
-                Ok(new) => *doc = new,
+                Ok(new) => {
+                    *doc = new;
+                    state.view.forget_document();
+                }
                 Err(e) => doc.notice = Some(e),
             },
             Dialog::SaveAs(_) => {

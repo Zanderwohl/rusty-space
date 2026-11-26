@@ -6,6 +6,7 @@
 use glam::DVec3;
 use lc_world::rng;
 use lc_world::sky::galaxy::{GalaxyRecord, Kinematics};
+use lc_world::sky::generate::SystemProfile;
 
 pub use lc_world::sky::galaxy::tracks;
 pub use lc_world::sky::galaxy::tracks::State;
@@ -35,6 +36,8 @@ pub struct Attributes {
     pub velocity_km_s: DVec3,
     /// What a publish writes; the fields above are derived from it.
     pub record: GalaxyRecord,
+    /// The system fields here, quantized; a publish turns it into the record's profile index.
+    pub profile: SystemProfile,
 }
 
 struct Draws(u64);
@@ -108,6 +111,7 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Op
         radius_solar: e.radius_solar,
         velocity_km_s: velocity,
         record,
+        profile: sample.profile(),
     })
 }
 

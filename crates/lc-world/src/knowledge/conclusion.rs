@@ -608,6 +608,8 @@ mod tests {
             mass_solar: mass,
             metallicity: 0.0,
             component: Component { index: 1, group: None },
+            system: None,
+            shell_ly: 0.0,
         }
     }
 

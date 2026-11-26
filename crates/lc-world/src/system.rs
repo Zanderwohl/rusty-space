@@ -27,15 +27,9 @@ pub const DEFAULT_ALBEDO: f64 = 0.3;
 /// this one, so the list does not reshuffle while it is being read.
 pub const INVENTORY_EPOCH_S: f64 = 0.0;
 
-/// Inside this of a star, the ship is in its system and the star is drawn as an object rather
-/// than as a point of the background.
-///
-/// An Oort cloud reaches about a hundred thousand astronomical units, which is 1.6 light-years,
-/// and 03-world-model.md already makes that shell the partition boundary. Being inside it is
-/// the same statement as being in the system.
-pub const LOCAL_SHELL_LY: f64 = 1.6;
-
-/// The star whose system holds `at`: the nearest one within [`LOCAL_SHELL_LY`], ties by id.
+/// The star whose system holds `at`: the nearest one within its own shell
+/// ([`crate::sky::shells`]), ties by id. Inside a star's shell the ship is in its system, and the
+/// star is drawn as an object rather than as a point of the background.
 ///
 /// Nearest rather than first in any list: where stars are closer than two shells apart the
 /// shells overlap, and a ship beside one star is inside its neighbor's shell too. The shard and
@@ -44,7 +38,7 @@ pub fn holding<'a>(at: DVec3, stars: impl IntoIterator<Item = &'a CatalogStar>) 
     stars
         .into_iter()
         .map(|s| (s.position_ly.distance(at), s))
-        .filter(|(d, _)| *d < LOCAL_SHELL_LY)
+        .filter(|(d, s)| *d < s.shell_radius_ly())
         .min_by(|(da, a), (db, b)| da.total_cmp(db).then(a.id.cmp(&b.id)))
         .map(|(_, s)| s)
 }
@@ -123,6 +117,8 @@ pub struct LocalSystem {
     pub populations: Vec<crate::population::Population>,
     /// Where the system's barycenter sits, light-years from the world origin.
     pub origin_ly: DVec3,
+    /// Its star's shell radius, ly.
+    pub shell_ly: f64,
     /// The normal of the plane the planets and belts orbit in. What a player means by this
     /// system's ecliptic, and what the map's plane option measures against.
     pub pole: DVec3,
@@ -162,7 +158,10 @@ impl LocalSystem {
     pub fn for_star(star: &CatalogStar) -> Option<Self> {
         // Once. Generating a system is the expensive part of loading one, and the populations
         // and the bodies both come out of the same pass.
-        let generated = generate::system_for(star);
+        let generated = match star.system {
+            Some(profile) => generate::system_with(star, &profile.tuning()),
+            None => generate::system_for(star),
+        };
         let contents = match star.provenance.name.as_deref() {
             // The one system with measured data rather than generated: two hundred and thirty
             // bodies fitted against JPL, moons and comets included. Its belts are still the
@@ -182,6 +181,7 @@ impl LocalSystem {
             star_name: star.provenance.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
+            shell_ly: star.shell_radius_ly(),
             pole: star.system_pole(),
             star_spin: star.spin_axis(),
             sim,
@@ -522,7 +522,7 @@ impl LocalSystem {
             .iter()
             .map(|p| p.semi_major.nodes().iter().map(|(a, _)| *a).fold(0.0f64, f64::max))
             .fold(0.0f64, f64::max);
-        (bodies.max(populations) / M_PER_LY).max(LOCAL_SHELL_LY)
+        (bodies.max(populations) / M_PER_LY).max(self.shell_ly)
     }
 
     pub fn star_luminosity_w(&self) -> f64 {

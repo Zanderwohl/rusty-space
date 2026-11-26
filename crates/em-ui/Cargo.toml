@@ -6,6 +6,11 @@ description = "Reusable Bevy-native menu widgets. Knows no game or TTRPG rule."
 license = "MIT"
 authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 
+[features]
+# Raised exponents in egui text, for the apps that draw panels with it.
+egui = ["dep:egui"]
+
 [dependencies]
 # What this crate uses and nothing more; the app decides the rest. See AGENTS.md, "Bevy features".
 bevy = { version = "0.19.1", default-features = false, features = ["std", "bevy_ui", "bevy_input_focus"] }
+egui = { version = "0.36", default-features = false, optional = true }

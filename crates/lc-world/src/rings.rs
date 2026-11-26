@@ -85,6 +85,7 @@ impl RingSystem {
         // run from centimeters to meters and nothing here depends on which.
         let cross_section = 1.0;
         Population {
+            kind: crate::population::Kind::Ring,
             pole,
             semi_major: Distribution::uniform(inner, outer, 9),
             eccentricity: Distribution::uniform(0.0, 0.002, 3),

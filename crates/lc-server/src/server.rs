@@ -2175,7 +2175,7 @@ use crate::transport::Loopback;
         let mut wire = Loopback::new();
         let watcher = ClientId(2);
         server.admit(watcher, crate::world::still(ShipId(2), DVec3::ZERO), 0.0);
-        let far = lc_world::system::LOCAL_SHELL_LY * 2.0 * lc_world::motion::LIGHT_US_PER_LY;
+        let far = lc_world::sky::shells::SOLAR_SHELL_LY * 2.0 * lc_world::motion::LIGHT_US_PER_LY;
         server.admit(
             ClientId(1),
             crate::world::still(ShipId(1), DVec3::new(far, 0.0, 0.0)),
@@ -3567,7 +3567,7 @@ mod hello_tests {
         let Some(here) = a_star() else { return };
         let mut there = here.clone();
         there.id = lc_world::sky::StarId::synthesize("test", 7);
-        // Further apart than `LOCAL_SHELL_LY`, or the two shells overlap and being "in" one of
+        // Further apart than a solar-mass shell, or the two shells overlap and being "in" one of
         // them is whichever the lookup reaches first rather than a fact about where the ship is.
         there.position_ly = here.position_ly + DVec3::new(2.0, 0.0, 0.0);
 

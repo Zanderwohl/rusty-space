@@ -168,7 +168,7 @@ fn a_published_galaxy_loads_as_baked() {
     use lc_world::sky::galaxy::GalaxyChunk;
     let (t, c) = uniform_ball(300.0, 8.0, 13);
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
-    let chunks = lc_galaxy::publish::chunks(&c, &b, 7);
+    let chunks = lc_galaxy::publish::chunks(&c, &b, 7).unwrap();
     assert!(chunks.len() > 1, "the ball straddles the origin, so several chunks");
     let decoded: Vec<_> = chunks.iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = lc_world::sky::galaxy::GalaxyProvider::new("t".into(), &decoded);
@@ -219,19 +219,30 @@ fn republishing_removes_chunks_the_manifest_no_longer_names() {
     std::fs::remove_dir_all(&out).unwrap();
 }
 
-/// Phase I's stars are closer than two shells apart, so shells overlap. A ship beside any star
-/// must be in that star's system, which is what the shard and the client both decide by.
+/// Phase I's stars are closer than their nominal shells reach, so the clamp runs. The shells the
+/// publish stored load as computed, rounded down, and do not overlap. A ship beside any star is
+/// in that star's system.
 #[test]
 fn in_phase_one_a_ship_beside_a_star_is_in_its_system() {
     use lc_world::sky::StarProvider;
     use lc_world::sky::galaxy::{GalaxyChunk, GalaxyProvider};
     let (t, c) = phase_one();
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
-    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = GalaxyProvider::new("phase-1".into(), &chunks);
     let stars = provider.stars();
-    let overlapping = stars.iter().any(|a| stars.iter().any(|b| a.id != b.id && a.position_ly.distance(b.position_ly) < lc_world::system::LOCAL_SHELL_LY));
-    assert!(overlapping, "premise: some shells overlap");
+    use lc_world::sky::shells::nominal_ly;
+    let pairs = || stars.iter().flat_map(|a| stars.iter().filter(move |b| a.id != b.id).map(move |b| (a, b, a.position_ly.distance(b.position_ly))));
+    assert!(pairs().any(|(a, b, d)| d < nominal_ly(a.mass_solar) + nominal_ly(b.mass_solar)), "premise: some nominal shells overlap");
+    for (a, b, d) in pairs() {
+        assert!(a.shell_radius_ly() + b.shell_radius_ly() <= d * (1.0 + 1e-12), "clamped shells overlap");
+    }
+    let computed: std::collections::HashMap<_, _> = b.stars.iter().map(|s| s.id).zip(lc_galaxy::publish::shells(&b.stars)).collect();
+    let step = lc_world::sky::shells::MAX_SHELL_LY / u16::MAX as f64;
+    for s in stars {
+        let want = computed[&s.id];
+        assert!(s.shell_ly <= want && want - s.shell_ly < step, "{} stored against {want} computed", s.shell_ly);
+    }
     for s in stars {
         let beside = s.position_ly + DVec3::new(1e-6, 0.0, 0.0);
         assert_eq!(lc_world::system::holding(beside, stars).map(|h| h.id), Some(s.id));
@@ -252,4 +263,49 @@ fn the_imf_and_age_fractions_sum_to_one_and_match_the_draws() {
         assert!((age_fraction(&age, 0.0, 13.8) - 1.0).abs() < 1e-9, "{age:?}");
     }
     assert!((age_fraction(&Age::Uniform { min_gyr: 1.0, max_gyr: 5.0 }, 2.0, 3.0) - 0.25).abs() < 1e-12);
+}
+
+/// A shape that sets a system field gives the stars it covers that profile, through publishing
+/// and loading; stars it does not reach keep the default and load with none.
+#[test]
+fn system_fields_reach_the_loaded_star() {
+    use lc_galaxy::compiled::SystemField;
+    use lc_world::sky::StarProvider;
+    use lc_world::sky::galaxy::{GalaxyChunk, GalaxyProvider};
+    let (mut t, _) = uniform_ball(300.0, 8.0, 3);
+    let frame = lc_galaxy::FeatureId(0);
+    t.push(
+        Box::new(Plummer {
+            frame,
+            center_ly: (4.0, 0.0, 0.0),
+            core_ly: Num::Lit(100.0),
+            radius_ly: Num::Lit(4.0),
+            edge_ly: Num::Lit(0.0),
+            contributes: vec![
+                Contribution(Target::System(SystemField::Ocean), OpSpec::Set(Num::Lit(1.0))),
+                Contribution(Target::System(SystemField::Solids), OpSpec::Add(Num::Lit(0.3))),
+            ],
+            ..Plummer::new()
+        }),
+        None,
+    );
+    let c = t.compile(t.len(), None);
+    assert!(c.problems.is_empty(), "{:?}", c.problems);
+    let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
+    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let provider = GalaxyProvider::new("t".into(), &chunks);
+    let (mut inside, mut outside) = (0, 0);
+    for s in provider.stars() {
+        let near = s.position_ly.distance(glam::DVec3::new(4.0, 0.0, 0.0)) < 3.9;
+        let far = s.position_ly.distance(glam::DVec3::new(4.0, 0.0, 0.0)) > 4.1;
+        if near {
+            let p = s.system.expect("a star inside has a profile");
+            assert_eq!((p.ocean(), p.solids_dex()), (1.0, 0.3));
+            inside += 1;
+        } else if far {
+            assert_eq!(s.system, None);
+            outside += 1;
+        }
+    }
+    assert!(inside > 5 && outside > 5, "{inside} inside, {outside} outside");
 }

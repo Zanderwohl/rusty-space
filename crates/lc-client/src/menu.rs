@@ -197,9 +197,9 @@ const BACKDROP_SEED: u64 = 0x11_6b_7c_0e;
 /// still above the floor.
 const BACKDROP_RADIUS_LY: f64 = 400.0;
 
-/// Inside this the starfield would draw a star as a nearby object rather than as background -
-/// see [`crate::starfield::LOCAL_SHELL_LY`]. No backdrop star may be there.
-const BACKDROP_MIN_LY: f64 = 8.0;
+/// Inside the largest shell the starfield could draw a star as a nearby object rather than as
+/// background. No backdrop star may be there.
+const BACKDROP_MIN_LY: f64 = lc_world::sky::shells::MAX_SHELL_LY;
 
 /// A field of main-sequence stars, isotropic and uniform in volume.
 fn backdrop_sky(count: usize, seed: u64) -> AuthoredStars {
@@ -242,6 +242,8 @@ fn backdrop_star(seed: u64, index: u64) -> CatalogStar {
         mass_solar: mass,
         metallicity: 0.0,
         component: StarComponent { index: 1, group: None },
+        system: None,
+        shell_ly: 0.0,
     }
 }
 
@@ -270,7 +272,7 @@ mod tests {
             .map(|s| s.position_ly.length())
             .fold(f64::INFINITY, f64::min);
         assert!(
-            nearest > crate::starfield::LOCAL_SHELL_LY,
+            nearest > lc_world::sky::shells::MAX_SHELL_LY,
             "a backdrop star at {nearest} ly would be drawn as a local object"
         );
     }
