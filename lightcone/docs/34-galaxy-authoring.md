@@ -12,9 +12,9 @@ Galaxy Forge's Charts panel (an HR diagram over the zero-age main sequence, and 
 `[Fe/H]` histograms against the IMF and age distributions they were drawn from) is built ahead of
 Phase II, with a draft Phase II galaxy in `crates/lc-galaxy/galaxies/phase-2.ron`. Phase I is under way: since 2026-11-24 the dev shard and the promoted browser build run the
 Phase I galaxy (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, solo and
-difference in both views, and authored system contents
-([35-system-contents.md](35-system-contents.md)) are built; the shell-radius histogram,
-`lc-galaxy stats` and the separate-process determinism tests are not. Tier A and the CDN path of
+difference in both views, per-star shells with their histogram, and authored system contents
+([35-system-contents.md](35-system-contents.md)) are built; `lc-galaxy stats` and the
+separate-process determinism tests are not. Tier A and the CDN path of
 Phase III are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
