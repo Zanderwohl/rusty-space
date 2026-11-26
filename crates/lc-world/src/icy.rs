@@ -1,4 +1,5 @@
-//! What an airless icy world looks like from orbit, from what it is.
+//! What an icy world looks like from orbit, from what it is: its ground, under whatever air
+//! [`crate::climate`] gives it.
 //!
 //! The counterpart of [`crate::airless`] for ice: three series of craters, a dark lag of rock and
 //! organics on the old ground, young plains where tidal heat resurfaced it, and lineae along the
@@ -60,15 +61,22 @@ pub fn tidal_heat(planet_mass_kg: f64, radius_m: f64, eccentricity: f64, semi_ma
     (1.0 + (this / io).log10() / 3.0).clamp(0.0, 1.0)
 }
 
-/// `None` for anything with air or without ice on top.
+/// `None` for anything without ice on top.
 pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64, mass_kg: f64, equilibrium_k: f64, tags: &[String]) -> Option<Icy> {
-    if world.atmosphere != Atmosphere::None || world.top != Top::Ice || surface.is_banded() {
+    if world.top != Top::Ice || world.atmosphere == Atmosphere::Envelope || surface.is_banded() {
         return None;
     }
     let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
     let density = if volume > 0.0 { mass_kg / volume } else { 0.0 };
     let heat = heat_of(tags).unwrap_or(0.0);
-    measured(id).or_else(|| Some(derived(radius_m, density, equilibrium_k, heat, crate::climate::variety(id))))
+    let mut icy = measured(id).unwrap_or_else(|| derived(radius_m, density, equilibrium_k, heat, crate::climate::variety(id)));
+    if world.atmosphere == Atmosphere::Thick {
+        // A thick atmosphere burns up the small impactors and its weather fills what lands, as
+        // on Titan: the youngest series goes first.
+        let [ancient, later, fresh] = icy.craters;
+        icy.craters = [0.3 * ancient, 0.2 * later, 0.1 * fresh];
+    }
+    Some(icy)
 }
 
 pub fn derived(radius_m: f64, density: f64, equilibrium_k: f64, heat: f64, variety: crate::climate::Variety) -> Icy {
@@ -198,8 +206,21 @@ mod tests {
         assert!(of("Europa", europa, Surface::Ice, 1.56e6, 4.8e22, 102.0, &[]).is_some());
         let luna = crate::worlds::for_body("Luna").unwrap();
         assert!(of("Luna", luna, Surface::Weathered, 1.737e6, 7.35e22, 270.0, &[]).is_none());
+        let jupiter = crate::worlds::for_body("Jupiter").unwrap();
+        assert!(of("Jupiter", jupiter, Surface::GasGiant, 7.0e7, 1.9e27, 110.0, &[]).is_none());
         let generated = crate::worlds::of("Kettle b I", Surface::Ice, &[], None);
         assert!(of("Kettle b I", &generated, Surface::Ice, 6.0e5, 1.7e21, 90.0, &[]).is_some());
+    }
+
+    #[test]
+    fn ice_under_air_is_icy_and_thick_air_hides_the_craters() {
+        let tags = |air| crate::worlds::Stated::tags(air, Top::Ice, false);
+        let bare = crate::worlds::of("Kettle c", Surface::Ice, &tags(Atmosphere::None), None);
+        let thin = crate::worlds::of("Kettle c", Surface::Ice, &tags(Atmosphere::Thin), None);
+        let thick = crate::worlds::of("Kettle c", Surface::Ice, &tags(Atmosphere::Thick), None);
+        let paint = |w: &World| of("Kettle c", w, Surface::Ice, 5.0e6, 3.0e24, 90.0, &[]).expect("ice on top");
+        assert_eq!(paint(&thin), paint(&bare));
+        assert!(paint(&thick).craters.iter().zip(paint(&bare).craters).all(|(a, b)| *a < b));
     }
 
     #[test]
