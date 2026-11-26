@@ -10,7 +10,6 @@ use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, MANIFEST_FORMAT, Manifest
 use lc_world::sky::generate::SystemProfile;
 
 use crate::attributes::{State, kinematics};
-use crate::sample::default_threads;
 use crate::{Bake, BakedStar, Compiled, Row, StarId, Timeline, bake, codec};
 
 /// Bumped whenever the generator would bake a different galaxy from the same timeline.
@@ -88,14 +87,14 @@ pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Result<Vec<Galaxy
 }
 
 /// Bakes `timeline` and writes `out/manifest.galaxy` and `out/chunks/<hash>.lcg`.
-pub fn publish(timeline: &Timeline, name: &str, out: &Path) -> Result<Manifest, String> {
+pub fn publish(timeline: &Timeline, name: &str, out: &Path, threads: usize) -> Result<Manifest, String> {
     let compiled = timeline.compile(timeline.len(), None);
     let refused = refusals(timeline, &compiled);
     if !refused.is_empty() {
         return Err(format!("not publishable:\n  {}", refused.join("\n  ")));
     }
     let graph = graph_version(timeline);
-    let baked = bake(&compiled, timeline.seed, compiled.bounds(), default_threads()).map_err(|e| e.to_string())?;
+    let baked = bake(&compiled, timeline.seed, compiled.bounds(), threads).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out.join("chunks")).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut entries = Vec::new();
     for chunk in chunks(&compiled, &baked, graph)? {

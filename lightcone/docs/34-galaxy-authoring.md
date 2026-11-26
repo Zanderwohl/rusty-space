@@ -13,8 +13,9 @@ Galaxy Forge's Charts panel (an HR diagram over the zero-age main sequence, and 
 Phase II, with a draft Phase II galaxy in `crates/lc-galaxy/galaxies/phase-2.ron`. Phase I is under way: since 2026-11-24 the dev shard and the promoted browser build run the
 Phase I galaxy (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, solo and
 difference in both views, per-star shells with their histogram, and authored system contents
-([35-system-contents.md](35-system-contents.md)) and `lc-galaxy stats` are built; the
-separate-process determinism tests are not. Tier A and the CDN path of
+([35-system-contents.md](35-system-contents.md)), `lc-galaxy stats` and the separate-process
+determinism test (`crates/lc-galaxy/tests/cli.rs`, publishing with one thread and with seven) are
+built. Tier A and the CDN path of
 Phase III are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
@@ -611,8 +612,8 @@ about fifteen minutes on sixteen cores before I/O, and tier A is seconds. A desi
 loop bakes boxes of a few hundred light-years, which is interactive.
 
 Determinism is tested the usual way for this repo: the same graph version gives byte-identical
-chunk files twice, in separate processes, with one thread and with many; a region baked alone
-equals the same region cut from a larger bake.
+chunk files twice, in separate processes, with one thread and with many (`lc-galaxy publish
+--threads`); a region baked alone equals the same region cut from a larger bake.
 
 ## Publishing and freezing
 
