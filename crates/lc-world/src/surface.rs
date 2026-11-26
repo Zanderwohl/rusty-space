@@ -37,6 +37,11 @@ pub const ICY_SURFACE_DENSITY: f64 = 3200.0;
 /// Phobos (0.011) have none. Air a generator states is kept regardless.
 pub const WEATHER_ESCAPE_M_S: f64 = 1000.0;
 
+fn density(radius_m: f64, mass_kg: f64) -> f64 {
+    let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
+    if volume > 0.0 { mass_kg / volume } else { f64::INFINITY }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Surface {
     /// Banded, warm, turbulent. Jupiter and Saturn.
@@ -54,16 +59,38 @@ pub enum Surface {
 }
 
 impl Surface {
+    /// [`Surface::classify`], except that stated air decides whether a body is a giant.
+    ///
+    /// Generated ice giants run 2,500 to 10,000 kg/m^3 and super-Jupiters denser still, so
+    /// density alone calls them rock and they would be drawn and measured as rock. The other
+    /// way, a puffy world stated without an envelope is not a giant however light it is.
+    pub fn of(radius_m: f64, mass_kg: f64, equilibrium_k: f64, tags: &[String]) -> Self {
+        Self::stated(radius_m, mass_kg, equilibrium_k, &crate::worlds::Stated::from_tags(tags))
+    }
+
+    pub fn stated(radius_m: f64, mass_kg: f64, equilibrium_k: f64, stated: &crate::worlds::Stated) -> Self {
+        match stated.atmosphere {
+            Some(crate::worlds::Atmosphere::Envelope) if stated.gas_giant => Self::GasGiant,
+            Some(crate::worlds::Atmosphere::Envelope) => Self::IceGiant,
+            Some(_) => Self::solid(radius_m, mass_kg, equilibrium_k),
+            None => Self::classify(radius_m, mass_kg, equilibrium_k),
+        }
+    }
+
     /// Classify a body from what the simulation already knows about it.
     pub fn classify(radius_m: f64, mass_kg: f64, equilibrium_k: f64) -> Self {
-        let volume = 4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3);
-        let density = if volume > 0.0 { mass_kg / volume } else { f64::INFINITY };
+        let density = density(radius_m, mass_kg);
 
         // Density first, because it is the one that cannot be faked: nothing rocky is that
         // light and nothing gaseous is that heavy.
         if density < GIANT_DENSITY && radius_m > 1.0e7 {
             return if mass_kg >= GAS_GIANT_MASS { Self::GasGiant } else { Self::IceGiant };
         }
+        Self::solid(radius_m, mass_kg, equilibrium_k)
+    }
+
+    fn solid(radius_m: f64, mass_kg: f64, equilibrium_k: f64) -> Self {
+        let density = density(radius_m, mass_kg);
         if equilibrium_k > SCORCHED_K {
             return Self::Scorched;
         }
@@ -291,6 +318,24 @@ mod tests {
     fn a_small_light_body_is_not_a_giant() {
         // A comet is less dense than water and is not Jupiter.
         assert!(!Surface::classify(5.0e3, 2.2e14, 150.0).is_banded());
+    }
+
+    #[test]
+    fn a_stated_envelope_is_a_giant_at_any_density() {
+        use crate::worlds::{Atmosphere, Stated, Top};
+        let radius = 2.5e7;
+        let dense = 5000.0 * 4.0 / 3.0 * std::f64::consts::PI * radius * radius * radius;
+        let icy = Stated::tags(Atmosphere::Envelope, Top::Cloud, false);
+        let gassy = Stated::tags(Atmosphere::Envelope, Top::Cloud, true);
+        assert_eq!(Surface::of(radius, dense, 80.0, &icy), Surface::IceGiant);
+        assert_eq!(Surface::of(radius, dense, 80.0, &gassy), Surface::GasGiant);
+        assert_eq!(Surface::of(radius, dense, 80.0, &[]), Surface::classify(radius, dense, 80.0));
+        assert!(!Surface::of(radius, dense, 80.0, &[]).is_banded());
+
+        let light = 1500.0 * 4.0 / 3.0 * std::f64::consts::PI * radius * radius * radius;
+        assert!(Surface::of(radius, light, 80.0, &[]).is_banded());
+        let solid = Stated::tags(Atmosphere::Thick, Top::Ice, false);
+        assert_eq!(Surface::of(radius, light, 80.0, &solid), Surface::Ice);
     }
 
     #[test]
