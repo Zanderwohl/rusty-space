@@ -101,6 +101,7 @@ pub fn form(planet: &Planet, moons: &mut Vec<Moon>, h: u64, tuning: &Tuning) -> 
     if spilled > 0.0 {
         let radius = (3.0 * spilled / (4.0 * PI * t.particle_density)).cbrt();
         if radius >= t.moonlet_min_radius_m {
+            let (atmosphere, top) = super::moon::stated(spilled, radius, true, planet.equilibrium_k, tuning);
             moons.push(Moon {
                 name: String::new(),
                 semi_major_m: limit * rng::uniform_in(g(3), 1.02, 1.1),
@@ -111,6 +112,8 @@ pub fn form(planet: &Planet, moons: &mut Vec<Moon>, h: u64, tuning: &Tuning) -> 
                 radius_m: radius,
                 mass_kg: spilled,
                 regular: true,
+                atmosphere,
+                top,
                 moons: Vec::new(),
             });
         }

@@ -5,10 +5,11 @@
 //! inclination, eccentric, more often than not retrograde. The two are meant to be told apart
 //! from their orbits alone.
 
-use super::disc::{EARTH_MASS, SOLAR_MASS_KG};
+use super::disc::{EARTH_MASS, EARTH_RADIUS, SOLAR_MASS_KG};
 use super::planet::Planet;
 use super::tuning::Tuning;
 use crate::rng;
+use crate::worlds::{Atmosphere, Top};
 
 /// A satellite of a generated planet.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +27,8 @@ pub struct Moon {
     pub mass_kg: f64,
     /// Condensed in a disc rather than caught.
     pub regular: bool,
+    pub atmosphere: Atmosphere,
+    pub top: Top,
     /// Its own moons: see [`submoons_of`].
     pub moons: Vec<Moon>,
 }
@@ -96,6 +99,7 @@ pub fn submoons_of(moon: &Moon, planet: &Planet, h: u64, tuning: &Tuning) -> Vec
     let hill = moon.semi_major_m * (moon.mass_kg / (3.0 * planet.mass_kg)).cbrt();
     let mass = moon.mass_kg * rng::uniform_in(g(1), t.submoon_mass_ratio.0.ln(), t.submoon_mass_ratio.1.ln()).exp();
     let density = rng::uniform_in(g(2), t.density.0, t.density.1);
+    let (atmosphere, top) = stated(mass, radius_of(mass, density), true, planet.equilibrium_k, tuning);
     let moon_density = moon.mass_kg / (4.0 / 3.0 * std::f64::consts::PI * moon.radius_m.powi(3));
     let inner = (t.roche_coefficient * moon.radius_m * (moon_density / density).cbrt()).max(moon.radius_m);
     let outer = hill * PROGRADE_STABLE;
@@ -112,6 +116,8 @@ pub fn submoons_of(moon: &Moon, planet: &Planet, h: u64, tuning: &Tuning) -> Vec
         radius_m: radius_of(mass, density),
         mass_kg: mass,
         regular: true,
+        atmosphere,
+        top,
         moons: Vec::new(),
     }]
 }
@@ -159,6 +165,7 @@ fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
             let mass = planet.mass_kg * share * weights[j as usize] / total;
             let density = rng::uniform_in(g(3), t.density.0, t.density.1);
             let inner = roche_m(planet, density, t.roche_coefficient);
+            let (atmosphere, top) = stated(mass, radius_of(mass, density), true, planet.equilibrium_k, tuning);
             Moon {
                 name: String::new(),
                 // Log-spaced, so a retinue spreads out the way a real one does rather than
@@ -172,6 +179,8 @@ fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
                 radius_m: radius_of(mass, density),
                 mass_kg: mass,
                 regular: true,
+                atmosphere,
+                top,
                 moons: Vec::new(),
             }
         })
@@ -227,10 +236,32 @@ fn captured(planet: &Planet, hill: f64, star_mass_solar: f64, snow_m: f64, h: u6
                 radius_m: radius,
                 mass_kg: density * 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3),
                 regular: false,
+                atmosphere: Atmosphere::None,
+                top: Top::Rock,
                 moons: Vec::new(),
             })
         })
         .collect()
+}
+
+/// What a regular moon has over its surface, by the rule a planet's air follows.
+///
+/// A captured moon is bare rock whatever it is made of, because what is caught is dark,
+/// carbon-rich rubble; that is stated where it is made rather than here.
+pub(super) fn stated(mass_kg: f64, radius_m: f64, regular: bool, equilibrium_k: f64, tuning: &Tuning) -> (Atmosphere, Top) {
+    if !regular {
+        return (Atmosphere::None, Top::Rock);
+    }
+    let air = super::planet::air(mass_kg / EARTH_MASS, radius_m / EARTH_RADIUS, equilibrium_k, false, tuning);
+    let density = mass_kg / (4.0 / 3.0 * std::f64::consts::PI * radius_m.powi(3)).max(f64::MIN_POSITIVE);
+    let icy = equilibrium_k < crate::surface::ICE_LINE_K && density < crate::surface::ICY_SURFACE_DENSITY;
+    let top = match air {
+        // Titan's deck where it is cold, Venus's where it is not.
+        Atmosphere::Thick => Top::Cloud,
+        _ if icy => Top::Ice,
+        _ => Top::Rock,
+    };
+    (air, top)
 }
 
 fn radius_of(mass_kg: f64, density: f64) -> f64 {
@@ -284,6 +315,19 @@ mod tests {
     /// Inside the Roche limit a body is a ring, not a moon. The limit moves with the density
     /// ratio, so a flat multiple of the planet's radius lets icy moons sit where they would be
     /// torn up.
+    #[test]
+    fn a_moon_holds_air_by_the_planets_rule() {
+        let t = Tuning::default();
+        // Titan holds an opaque deck because it is cold; Rhea is too small to hold anything.
+        assert_eq!(stated(1.345e23, 2.575e6, true, 85.0, &t), (Atmosphere::Thick, Top::Cloud));
+        assert_eq!(stated(2.31e21, 7.64e5, true, 80.0, &t), (Atmosphere::None, Top::Ice));
+        // A cold moon at 3,600 kg/m^3 is too dense for an icy top, and Luna is too warm.
+        let dense = 3600.0 * 4.0 / 3.0 * std::f64::consts::PI * 5.0e5_f64.powi(3);
+        assert_eq!(stated(dense, 5.0e5, true, 110.0, &t), (Atmosphere::None, Top::Rock));
+        assert_eq!(stated(7.35e22, 1.737e6, true, 270.0, &t), (Atmosphere::None, Top::Rock));
+        assert_eq!(stated(7.35e22, 1.737e6, false, 80.0, &t), (Atmosphere::None, Top::Rock), "caught");
+    }
+
     #[test]
     fn no_regular_moon_sits_inside_its_own_roche_limit() {
         let t = Tuning::default();
