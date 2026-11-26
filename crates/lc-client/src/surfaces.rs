@@ -107,6 +107,8 @@ pub enum Paint {
     Giant,
     Airless,
     Icy,
+    /// An icy ground under a climate's air and clouds.
+    IcyClimate,
     Class,
 }
 
@@ -128,8 +130,17 @@ impl SurfaceManifest {
     pub fn look_for(&self, name: &str, class: Surface, paint: Paint) -> Option<Look<'_>> {
         if !self.bodies.contains_key(name) {
             let alone = |graph| Some(Look { ground: Ground::Color(graph), clouds: None });
-            if let (Paint::Icy, Some(icy)) = (paint, &self.icy) {
-                return alone(&icy.ground);
+            match (paint, &self.icy, &self.rocky) {
+                (Paint::Icy, Some(icy), _) => return alone(&icy.ground),
+                (Paint::IcyClimate, icy, Some(rocky)) => {
+                    // Without an icy graph, the rocky one's ice layer covers it.
+                    let ground = icy.as_ref().map_or(&rocky.ground, |i| &i.ground);
+                    return Some(Look {
+                        ground: Ground::Color(ground),
+                        clouds: Some(&rocky.clouds),
+                    });
+                }
+                _ => {}
             }
             match (paint, &self.rocky, &self.giants, &self.airless) {
                 (Paint::Climate, Some(rocky), ..) => {
@@ -529,6 +540,7 @@ fn route(
     };
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
         let paint = match (body.climate, body.giant, body.airless, body.icy) {
+            (Some(_), .., Some(_)) => Paint::IcyClimate,
             (Some(_), ..) => Paint::Climate,
             (None, Some(_), ..) => Paint::Giant,
             (None, None, Some(_), _) => Paint::Airless,
@@ -1146,6 +1158,22 @@ mod tests {
             })
         );
         assert_eq!(manifest.look_for("Europa", Surface::Ice, Paint::Class), None);
+        assert_eq!(
+            manifest.look_for("Kettle f", Surface::Ice, Paint::IcyClimate),
+            Some(Look {
+                ground: Ground::Color("worlds/rocky.tgraph"),
+                clouds: Some("worlds/clouds.tgraph"),
+            }),
+            "no [icy] in this manifest"
+        );
+        let real = self::manifest();
+        assert_eq!(
+            real.look_for("Kettle f", Surface::Ice, Paint::IcyClimate),
+            Some(Look {
+                ground: Ground::Color("worlds/icy.tgraph"),
+                clouds: Some("worlds/earthlike-clouds.tgraph"),
+            })
+        );
     }
 
     /// giant.tgraph's masks bake as the CPU evaluates them. Outside `[0, 1]` texture-graph's GPU
