@@ -83,6 +83,8 @@ tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 # Without `storage`: that shard never saves, so no Postgres, no checkpoints and no admin routes.
 lc-server = { path = "../lc-server", default-features = false }
 tokio = { version = "1", features = ["rt", "macros", "time"] }
+# The window and Dock icon. The browser tab's icon is the site's.
+lc-icon = { path = "../lc-icon" }
 
 # The browser build. `getrandom` needs its wasm backend named here as well as in
 # `.cargo/config.toml`; one without the other is not enough.

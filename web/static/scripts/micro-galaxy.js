@@ -14,7 +14,8 @@
 //
 // `data-debug` on the host outlines the disc ellipse and the bulge, and marks θ = 0.
 
-const ELEVATION = (30 * Math.PI) / 180;
+// tools/app-icon/render.html sets the global to tilt the app icon further toward face-on.
+const ELEVATION = ((globalThis.microGalaxyElevation ?? 30) * Math.PI) / 180;
 const SQUASH = Math.sin(ELEVATION);
 const LIFT = Math.cos(ELEVATION);
 const PERIOD_MS = 240_000; // 0.25 rpm
@@ -278,7 +279,16 @@ function sizeHost(host) {
   else host.style.aspectRatio = "16 / 9";
 }
 
-// `t` in [0, 1) is the fraction of one turn; `seconds` is running time, for twinkling.
+function fillSpace(ctx) {
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = SPACE;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+// Adds the galaxy onto whatever the canvas holds. `t` in [0, 1) is the fraction of one turn;
+// `seconds` is running time, for twinkling. tools/build-app-icons.sh calls this on a clear
+// canvas, which leaves the alpha the brightness.
 function draw(ctx, res, t, seconds, debug) {
   const { width: w, height: h } = ctx.canvas;
   const cx = w / 2;
@@ -286,10 +296,6 @@ function draw(ctx, res, t, seconds, debug) {
   const radius = 0.47 * Math.min(w, h / SQUASH);
   const spin = 2 * Math.PI * t;
 
-  ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = SPACE;
-  ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = "lighter";
 
   ctx.save();
@@ -393,6 +399,7 @@ function start(host) {
   const render = (now) => {
     pending = 0;
     const elapsed = still.matches ? 0 : now - epoch;
+    fillSpace(ctx);
     draw(ctx, res, (elapsed % PERIOD_MS) / PERIOD_MS, elapsed / 1000, debug);
     if (visible && !still.matches) pending = requestAnimationFrame(render);
   };

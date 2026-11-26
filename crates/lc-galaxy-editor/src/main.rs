@@ -106,6 +106,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(lc_icon::AppIconPlugin(lc_icon::GALAXY))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
         .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), files: default(), system: default(), census: default() })

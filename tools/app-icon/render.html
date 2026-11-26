@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- One still frame of web/static/scripts/micro-galaxy.js on a clear canvas, for
+     tools/build-app-icons.sh. Query: size (px), t (fraction of a turn), elevation (degrees). -->
+<meta charset="utf-8">
+<body style="margin:0">
+<canvas id="icon" style="display:block"></canvas>
+<script>
+  globalThis.microGalaxyElevation = Number(new URLSearchParams(location.search).get("elevation") || 30);
+</script>
+<script src="../../web/static/scripts/micro-galaxy.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const size = Number(q.get("size") || 1024);
+  const canvas = document.getElementById("icon");
+  canvas.width = size;
+  canvas.height = size;
+  draw(canvas.getContext("2d"), initResources(), Number(q.get("t") || 0), 0, false);
+</script>
