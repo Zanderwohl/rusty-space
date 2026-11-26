@@ -32,6 +32,9 @@ struct VertexOutput {
     @location(0) world_position: vec3<f32>,
     @location(1) local_position: vec3<f32>,
     @location(2) normal: vec3<f32>,
+    // The direction to the star in the ring's own frame, where the planet is a sphere about the
+    // origin. Constant over the instance.
+    @location(3) @interpolate(flat) local_star: vec3<f32>,
 }
 
 /// Must match `em_render::ring_material::RING_BANDS`.
@@ -105,6 +108,19 @@ fn unlit_face(mu: f32, mu0: f32, tau: f32) -> f32 {
     return 2.0 * mu0 / (mu - mu0) * (exp(-tau / mu) - exp(-tau / mu0));
 }
 
+/// How much starlight reaches `at` past the planet: one in the open, zero in its shadow.
+///
+/// `at` and `to_star` are in the ring's frame, where the planet is a sphere of radius `planet`
+/// about the origin. `off` is how far the ray toward the star passes from the planet's center,
+/// and `edge` the width the boundary is softened over, a pixel's worth.
+fn sunlit(along: f32, off: f32, planet: f32, edge: f32) -> f32 {
+    // Sunward of the planet's center nothing is in the way.
+    if (along >= 0.0) {
+        return 1.0;
+    }
+    return smoothstep(planet - 0.5 * edge, planet + 0.5 * edge, off);
+}
+
 /// `envelope::opacity_of`: a coverage as a display level, by its fourth root.
 fn opacity_of(coverage: f32) -> f32 {
     if (coverage <= FAINTEST) {
@@ -123,6 +139,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = position_world_to_clip(world.xyz);
     out.local_position = vertex.position;
     out.normal = normalize(mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index));
+    let local_from_world = mesh_functions::get_local_from_world(vertex.instance_index);
+    out.local_star = normalize((local_from_world * vec4<f32>(material.to_star.xyz, 0.0)).xyz);
     return out;
 }
 
@@ -141,6 +159,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let mu = max(abs(seen), MIN_MU);
     let mu0 = abs(lit);
     let sunlit_side = seen * lit > 0.0;
+    let along = dot(in.local_position, in.local_star);
+    let off = sqrt(max(dot(in.local_position, in.local_position) - along * along, 0.0));
+    // Outside the branch, because a derivative needs every neighbor to run it.
+    let shadow = sunlit(along, off, material.params.z, max(fwidth(off), 1e-6));
     // Mean-preserving: the grain moves depth about, it does not add any.
     let speckle = 1.0 + material.grain.y * (2.0 * grain_at(radius, width) - 1.0);
 
@@ -165,9 +187,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let coverage = 1.0 - exp(-tau / mu);
         let sunward = lit_face(mu, mu0, tau);
         let face = select(unlit_face(mu, mu0, tau), sunward, sunlit_side);
-        let here = reflected * face + emitted * coverage;
+        // The planet's shadow takes starlight from both faces; the particles' own glow stays.
+        let here = reflected * face * shadow + emitted * coverage;
         // The floor follows the lighting: a thin ring is about as bright from either side, a thick
-        // one is dark from the side away from the star, and neither shines with no star on it.
+        // one is dark from the side away from the star, neither shines with no star on it, and
+        // the planet's shadow darkens it as it does the light.
         let full = dot(reflected * sunward + emitted * coverage, LUMA);
         let lighting = select(0.0, dot(here, LUMA) / full, full > 0.0);
         light = light + share * here;
