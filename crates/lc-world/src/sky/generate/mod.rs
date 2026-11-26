@@ -418,7 +418,7 @@ impl GeneratedSystem {
             let equator = spin_axis_of(self.pole, p);
             for moon in &p.moons {
                 // Loose bodies a planet happens to hold, not a retinue.
-                let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
+                let tags: &[&str] = if moon.regular { &["Moon"] } else { &[crate::worlds::Stated::CAPTURED] };
                 let plane = tilted(equator, moon.inclination_rad, moon.node_rad);
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                     info: moon_info(moon, tags),
