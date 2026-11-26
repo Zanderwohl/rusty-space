@@ -23,7 +23,6 @@ pub enum Action {
 enum Purpose {
     Open,
     SaveAs,
-    /// Saving for the first time on the way to an action; canceling returns to the prompt.
     SaveThen(Action),
 }
 
@@ -41,7 +40,7 @@ enum Step {
 #[derive(Default)]
 pub struct Files {
     step: Option<Step>,
-    /// Why the last save from the prompt failed; drawn in the prompt, which covers the status bar.
+    /// Shown in the prompt, because its backdrop covers the status bar.
     failed: Option<String>,
     /// A close request that arrived while a picker was open.
     quit_queued: bool,
@@ -55,7 +54,7 @@ impl Files {
     }
 
     /// Runs `action` at once if nothing would be lost, and otherwise asks first.
-    /// A close request made while busy is kept: it replaces a prompt's action, or waits for a picker.
+    /// A close request while busy replaces a prompt's action, or waits for the picker.
     pub fn request(&mut self, action: Action, doc: &mut Doc, view: &mut ViewState) -> bool {
         match (&mut self.step, action) {
             (None, _) => {}
@@ -209,7 +208,6 @@ fn save_to(path: PathBuf, doc: &mut Doc) -> Result<(), String> {
     doc.save().inspect_err(|_| doc.path = old)
 }
 
-/// Starts in the document's folder, or the bundled galaxies for a new document.
 fn pick(open: bool, doc: &Doc, parent: Option<&RawHandleWrapper>) -> Task<Option<PathBuf>> {
     let mut dialog = rfd::AsyncFileDialog::new().add_filter("Galaxy timeline", &["ron"]);
     if let Some(parent) = parent {
@@ -223,7 +221,7 @@ fn pick(open: bool, doc: &Doc, parent: Option<&RawHandleWrapper>) -> Task<Option
     if !open && let Some(name) = doc.path.as_ref().and_then(|p| p.file_name()) {
         dialog = dialog.set_file_name(name.to_string_lossy());
     }
-    // The future is made here, on the main thread; only the waiting moves to the pool.
+    // Made here, on the main thread, for the reason on `Files::show`.
     let chosen: Pin<Box<dyn Future<Output = Option<rfd::FileHandle>> + Send>> =
         if open { Box::pin(dialog.set_title("Open").pick_file()) } else { Box::pin(dialog.set_title("Save as").save_file()) };
     IoTaskPool::get().spawn(async move { chosen.await.map(|h| h.path().to_path_buf()) })
