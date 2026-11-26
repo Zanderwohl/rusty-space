@@ -144,7 +144,7 @@ pub struct ViewState {
 }
 
 impl ViewState {
-    /// For a new document: a pin of another file's bake compares nothing.
+    /// Drops the pin, which holds the previous document's bake.
     pub fn forget_document(&mut self) {
         self.reference = None;
         self.difference = false;
