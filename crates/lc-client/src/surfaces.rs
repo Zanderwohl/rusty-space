@@ -27,6 +27,7 @@ use em_render::body_surface_material::{BodySurfaceMaterial, BodySurfaceUniform};
 use lc_world::airless::Airless;
 use lc_world::climate::Climate;
 use lc_world::giant::Giant;
+use lc_world::icy::Icy;
 use lc_world::sky::StarId;
 use lc_world::surface::Surface;
 use serde::Deserialize;
@@ -79,6 +80,7 @@ pub struct SurfaceManifest {
     pub rocky: Option<Rocky>,
     pub giants: Option<Giants>,
     pub airless: Option<Bare>,
+    pub icy: Option<Bare>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +106,7 @@ pub enum Paint {
     Climate,
     Giant,
     Airless,
+    Icy,
     Class,
 }
 
@@ -125,6 +128,9 @@ impl SurfaceManifest {
     pub fn look_for(&self, name: &str, class: Surface, paint: Paint) -> Option<Look<'_>> {
         if !self.bodies.contains_key(name) {
             let alone = |graph| Some(Look { ground: Ground::Color(graph), clouds: None });
+            if let (Paint::Icy, Some(icy)) = (paint, &self.icy) {
+                return alone(&icy.ground);
+            }
             match (paint, &self.rocky, &self.giants, &self.airless) {
                 (Paint::Climate, Some(rocky), ..) => {
                     return Some(Look {
@@ -291,6 +297,7 @@ struct Body {
     climate: Option<Climate>,
     giant: Option<Giant>,
     airless: Option<Airless>,
+    icy: Option<Icy>,
     /// `None` until the manifest has said.
     drawn: Option<Drawn>,
     deck: Option<Deck>,
@@ -351,6 +358,7 @@ impl Surfaces {
         climate: Option<Climate>,
         giant: Option<Giant>,
         airless: Option<Airless>,
+        icy: Option<Icy>,
         images: &mut Assets<Image>,
     ) -> BodyImages {
         self.by_body
@@ -361,6 +369,7 @@ impl Surfaces {
                 climate,
                 giant,
                 airless,
+                icy,
                 drawn: None,
                 deck: None,
                 bytes: 0,
@@ -519,11 +528,12 @@ fn route(
         return;
     };
     for (name, body) in surfaces.by_body.iter_mut().filter(|(_, b)| b.drawn.is_none()) {
-        let paint = match (body.climate, body.giant, body.airless) {
+        let paint = match (body.climate, body.giant, body.airless, body.icy) {
             (Some(_), ..) => Paint::Climate,
-            (None, Some(_), _) => Paint::Giant,
-            (None, None, Some(_)) => Paint::Airless,
-            (None, None, None) => Paint::Class,
+            (None, Some(_), ..) => Paint::Giant,
+            (None, None, Some(_), _) => Paint::Airless,
+            (None, None, None, Some(_)) => Paint::Icy,
+            (None, None, None, None) => Paint::Class,
         };
         let Some(look) = manifest.look_for(name, body.class, paint) else {
             warn!("no surface graph for {name} or its class, {:?}", body.class);
@@ -545,7 +555,10 @@ fn route(
             (.., Some(airless)) if drawn_as(manifest.airless.as_ref().map(|a| &a.ground)) => {
                 (airless_params(&airless), &[], true)
             }
-            _ => (Params::new(), &[], false),
+            _ => match body.icy {
+                Some(icy) if drawn_as(manifest.icy.as_ref().map(|a| &a.ground)) => (icy_params(&icy), &[], true),
+                _ => (Params::new(), &[], false),
+            },
         };
         let mut bytes = 0;
         let mut bake = |path: &str, target: Target, image: &Handle<Image>, params: Params| {
@@ -700,6 +713,69 @@ fn airless_params(a: &Airless) -> Params {
     ]
 }
 
+/// The share of icy.tgraph's surface its plains cover across its `resurfaced` parameter, measured
+/// like [`SEA_LEVELS`]; `the_plains_cover_what_the_table_says`.
+const PLAINS_LEVELS: [(f32, f32); 15] = [
+    (0.10, 0.0),
+    (0.15, 0.0005),
+    (0.20, 0.005),
+    (0.25, 0.02),
+    (0.30, 0.054),
+    (0.35, 0.119),
+    (0.40, 0.244),
+    (0.45, 0.389),
+    (0.50, 0.549),
+    (0.55, 0.722),
+    (0.60, 0.831),
+    (0.65, 0.905),
+    (0.70, 0.95),
+    (0.75, 0.984),
+    (0.85, 1.0),
+];
+
+/// The same for its `lag` over the old ground; `the_lag_covers_what_the_table_says`.
+const LAG_LEVELS: [(f32, f32); 14] = [
+    (0.15, 0.0),
+    (0.20, 0.0003),
+    (0.25, 0.0035),
+    (0.30, 0.023),
+    (0.35, 0.081),
+    (0.40, 0.188),
+    (0.45, 0.329),
+    (0.50, 0.506),
+    (0.55, 0.666),
+    (0.60, 0.804),
+    (0.65, 0.892),
+    (0.70, 0.962),
+    (0.75, 0.994),
+    (0.80, 1.0),
+];
+
+fn icy_params(i: &Icy) -> Params {
+    let scalar = ParamValue::Scalar;
+    let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
+    let [ancient, later, fresh] = i.craters;
+    let share = |table: &[(f32, f32)], s: f32| match s {
+        s if s <= 0.0 => 0.0,
+        s if s >= 1.0 => 1.0,
+        s => level(table, s),
+    };
+    vec![
+        ("ancient craters", scalar(ancient)),
+        ("later craters", scalar(later)),
+        ("fresh craters", scalar(fresh)),
+        ("resurfaced", scalar(share(&PLAINS_LEVELS, i.resurfaced))),
+        ("lag", scalar(share(&LAG_LEVELS, i.lag))),
+        ("fractures", scalar(i.fractures)),
+        ("rays", scalar(i.rays)),
+        ("frost", color(i.frost)),
+        ("dark", color(i.dark)),
+        ("plains", color(i.plains)),
+        ("lineae", color(i.lineae)),
+        ("ejecta", color(i.ejecta)),
+    ]
+}
+
 fn giant_params(g: &Giant) -> Params {
     let scalar = ParamValue::Scalar;
     let color = |[l, c, h]: [f32; 3]| ParamValue::Color(oklcha(l, c, h, 1.0));
@@ -831,6 +907,12 @@ mod tests {
         baker
             .bake_scalar_cube(&bare, height, 8, ScalarFormat::R16Float, &eval)
             .unwrap_or_else(|e| panic!("airless height: {e}"));
+        let icy = graph(&manifest.icy.as_ref().expect("icy worlds are routed").ground);
+        baker.bake_color_cube(&icy, 8, &eval).unwrap_or_else(|e| panic!("icy: {e}"));
+        let height = icy.layers.iter().find(|l| Some(l.name.as_str()) == RELIEF.layer).expect("a height layer").id;
+        baker
+            .bake_scalar_cube(&icy, height, 8, ScalarFormat::R16Float, &eval)
+            .unwrap_or_else(|e| panic!("icy height: {e}"));
         let giants = manifest.giants.as_ref().expect("giants are routed");
         let giant = graph(&giants.graph);
         baker
@@ -1217,10 +1299,27 @@ mod tests {
         holds(&MARIA_LEVELS, |maria| share(&g, "mare", "maria", maria), |share| level(&MARIA_LEVELS, share));
     }
 
+    #[test]
+    fn the_plains_cover_what_the_table_says() {
+        let g = graph(&manifest().icy.unwrap().ground);
+        holds(&PLAINS_LEVELS, |r| share(&g, "plains", "resurfaced", r), |share| level(&PLAINS_LEVELS, share));
+    }
+
+    #[test]
+    fn the_lag_covers_what_the_table_says() {
+        let g = graph(&manifest().icy.unwrap().ground);
+        holds(&LAG_LEVELS, |r| share(&g, "lag cover", "lag", r), |share| level(&LAG_LEVELS, share));
+    }
+
     /// The shader assumes [`RELIEF_SCALE`] for every series.
     #[test]
     fn the_relief_is_drawn_at_the_scale_the_shader_assumes() {
-        let g = graph(&manifest().airless.unwrap().ground);
+        for bare in [manifest().airless.unwrap(), manifest().icy.unwrap()] {
+            relief_scale_holds(&graph(&bare.ground));
+        }
+    }
+
+    fn relief_scale_holds(g: &Graph) {
         let mut series = 0;
         for layer in &g.layers {
             if let texture_graph_core::LayerKind::Craters(c) = &layer.kind {
@@ -1236,7 +1335,7 @@ mod tests {
     fn held(names: &[&str], images: &mut Assets<Image>) -> Surfaces {
         let mut surfaces = Surfaces::empty(images);
         for name in names {
-            surfaces.images(name, Surface::Rock, None, None, None, images);
+            surfaces.images(name, Surface::Rock, None, None, None, None, images);
             surfaces.by_body.get_mut(*name).unwrap().bytes = IDLE_BYTES / 2;
         }
         surfaces
@@ -1258,7 +1357,7 @@ mod tests {
         surfaces.keep(Some(sol), [], &mut bakes);
         assert_eq!(kept(&surfaces), ["Earth", "Mars"], "within the budget and the same system");
 
-        surfaces.images("Proxima b", Surface::Rock, None, None, None, &mut images);
+        surfaces.images("Proxima b", Surface::Rock, None, None, None, None, &mut images);
         surfaces.keep(Some(other), ["Proxima b"], &mut bakes);
         assert_eq!(kept(&surfaces), ["Proxima b"]);
 

@@ -77,6 +77,8 @@ pub struct Drawable {
     pub giant: Option<crate::giant::Giant>,
     /// What a rocky world without air is painted with. See [`crate::airless`].
     pub airless: Option<crate::airless::Airless>,
+    /// What an icy world without air is painted with. See [`crate::icy`].
+    pub icy: Option<crate::icy::Icy>,
     /// Spin axis, simulation axes. Ecliptic north where the data says nothing.
     pub pole: DVec3,
     /// How long it takes to turn once, seconds. `None` where the arena states no rotation.
@@ -326,6 +328,12 @@ impl LocalSystem {
                     giant,
                     airless: painted
                         .then(|| crate::airless::of(self.sim.name(i), &world, surface, radius_m, tags))
+                        .flatten(),
+                    icy: painted
+                        .then(|| {
+                            let mass_kg = self.sim.info(i).mass;
+                            crate::icy::of(self.sim.name(i), &world, surface, radius_m, mass_kg, equilibrium_k, tags)
+                        })
                         .flatten(),
                     world,
                     pole,

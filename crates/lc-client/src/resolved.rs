@@ -680,7 +680,7 @@ pub fn update_resolved(
             .mesh
             .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(LONGITUDES, LATITUDES)))
             .clone();
-        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, body.airless, &mut images);
+        let own = surfaces.images(&body.name, body.surface, body.climate, body.giant, body.airless, body.icy, &mut images);
         let uniforms = shade(body, &mut surfaces, *layer != RenderLayers::layer(0));
         let air = air_uniforms(&uniforms);
         let sphere = commands
@@ -734,6 +734,7 @@ mod tests {
             climate: None,
             giant: None,
             airless: None,
+            icy: None,
             pole: DVec3::Z,
             spin_s: None,
             position_ly: at,
