@@ -21,8 +21,9 @@ pub struct RingUniform {
     /// edge; `icy` is the share of the band that is ice rather than rock. Bands past `params.x`
     /// are ignored.
     pub bands: [Vec4; RING_BANDS],
-    /// `(band count, display floor, 0, 0)`. The floor is the least a band is drawn at for its
-    /// coverage, before its lighting; see `ring.wgsl`.
+    /// `(band count, display floor, planet radius, 0)`. The floor is the least a band is drawn at
+    /// for its coverage, before its lighting; see `ring.wgsl`. The planet's radius is in units of
+    /// the outer edge, for its shadow.
     pub params: Vec4,
     /// Starlight a fully filled sheet of rock or ice sends back face-on, as linear display light
     /// through the current band mapping.

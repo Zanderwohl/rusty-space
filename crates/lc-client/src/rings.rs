@@ -154,6 +154,13 @@ pub fn coverage_over(bands: &[Vec4], count: usize, radius: f32, width: f32, mu: 
     (sum / width).clamp(0.0, 1.0)
 }
 
+/// `sunlit` in `ring.wgsl`, with a hard edge: whether starlight reaches `at` past a planet of
+/// radius `planet` at the origin. Everything in units of the ring's outer edge.
+pub fn sunlit(at: Vec3, to_star: Vec3, planet: f32) -> bool {
+    let along = at.dot(to_star);
+    along >= 0.0 || (at.length_squared() - along * along).max(0.0).sqrt() >= planet
+}
+
 /// `lit_face` in `ring.wgsl`: the sunlit face of a sheet at optical depth `tau`, seen at `mu` and
 /// lit at `mu0`, as a share of a thick sheet lit and seen face-on.
 pub fn lit_face(mu: f32, mu0: f32, tau: f32) -> f32 {
@@ -237,14 +244,14 @@ pub fn light_of(particles: &Particles, albedo: f64, star: Starlight, mapping: &B
 }
 
 /// Everything the shader reads for one ring this frame.
-pub fn uniform(rings: &lc_world::system::Rings, star: Starlight, to_star: DVec3, mapping: &BandMapping, tone: &crate::tonemap::ToneMap, seed: f32) -> RingUniform {
+pub fn uniform(rings: &lc_world::system::Rings, planet_m: f64, star: Starlight, to_star: DVec3, mapping: &BandMapping, tone: &crate::tonemap::ToneMap, seed: f32) -> RingUniform {
     let (count, bands) = pack(&rings.system);
     let albedo = rings.system.albedo;
     let (reflected_rocky, emitted_rocky) = light_of(&particles(Material::Rock, albedo), albedo, star, mapping);
     let (reflected_icy, emitted_icy) = light_of(&particles(Material::Ice, albedo), albedo, star, mapping);
     RingUniform {
         bands,
-        params: Vec4::new(count as f32, RING_FLOOR, 0.0, 0.0),
+        params: Vec4::new(count as f32, RING_FLOOR, (planet_m / rings.system.outer_m().max(f64::MIN_POSITIVE)) as f32, 0.0),
         reflected_rocky: reflected_rocky.extend(0.0),
         reflected_icy: reflected_icy.extend(0.0),
         emitted_rocky: emitted_rocky.extend(0.0),
@@ -353,7 +360,7 @@ pub fn update_rings(
             let radiance = crate::resolved::surface_radiance(body, star.radius_m, star.teff_k, star.distance_m);
             tone.surface_reference = crate::resolved::metered_for(&tone, &radiance, &session.mapping);
         }
-        let next = uniform(rings, star, star_ly - body.position_ly, &session.mapping, &tone, seed_of(ring.body));
+        let next = uniform(rings, body.radius_m, star, star_ly - body.position_ly, &session.mapping, &tone, seed_of(ring.body));
         if let Some(mut asset) = materials.get_mut(&material.0)
             && asset.uniforms != next
         {
@@ -601,5 +608,22 @@ mod tests {
         let (count, bands) = packed("Jupiter");
         let main = bands[1];
         assert!(coverage_over(&bands, count, 0.5 * (main.x + main.y), PIXEL, 1.0) < 1.0e-5);
+    }
+
+    /// The planet shadows the stretch of ring behind it from the star and nothing else: not the
+    /// sunward side, not the flanks, and not past the planet's radius off the line to the star.
+    #[test]
+    fn the_planet_shadows_only_the_ring_behind_it() {
+        let planet = 0.43;
+        let to_star = Vec3::X;
+        assert!(!sunlit(Vec3::new(-0.8, 0.0, 0.0), to_star, planet), "straight behind");
+        assert!(!sunlit(Vec3::new(-0.8, 0.4, 0.0), to_star, planet), "behind, inside the radius");
+        assert!(sunlit(Vec3::new(-0.8, 0.5, 0.0), to_star, planet), "behind, outside the radius");
+        assert!(sunlit(Vec3::new(0.8, 0.0, 0.0), to_star, planet), "sunward");
+        assert!(sunlit(Vec3::new(0.0, 0.8, 0.0), to_star, planet), "the flank");
+        // With the star high over the ring's plane the shadow falls short of the ring at this
+        // radius: the ray toward the star leaves the plane before it reaches the planet.
+        let high = Vec3::new(1.0, 0.0, 2.0).normalize();
+        assert!(sunlit(Vec3::new(-0.8, 0.0, 0.0), high, planet));
     }
 }
