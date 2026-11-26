@@ -26,14 +26,38 @@ pub struct Airless {
 }
 
 /// `None` for anything with air or with ice on top.
-pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64) -> Option<Airless> {
+pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64, tags: &[String]) -> Option<Airless> {
     if world.atmosphere != Atmosphere::None || world.top != Top::Rock {
         return None;
     }
     if matches!(surface, Surface::GasGiant | Surface::IceGiant) {
         return None;
     }
-    measured(id).or_else(|| Some(derived(surface, radius_m, crate::climate::variety(id))))
+    let variety = crate::climate::variety(id);
+    if crate::worlds::Stated::captured(tags) {
+        return measured(id).or(Some(rubble(variety)));
+    }
+    measured(id).or_else(|| Some(derived(surface, radius_m, variety)))
+}
+
+/// What a planet catches: carbon-rich rubble, cratered at every scale and never flooded.
+///
+/// L 0.48 against Luna's 0.66 is the ratio of their albedos, 0.05 to 0.12, taken in linear light.
+pub fn rubble(variety: crate::climate::Variety) -> Airless {
+    let [a, b, c, d] = variety.0;
+    let l = 0.48 + 0.06 * (b - 0.5);
+    // Neutral gray C-type to the redder D-type.
+    let (chroma, hue) = (0.005 + 0.012 * a, 60.0 + 25.0 * a);
+    // Ejecta stays bright where an impact digs through the dark lag to cleaner material below,
+    // which is most of what shows Phoebe's craters at all.
+    Airless {
+        craters: [1.0, 0.6 + 0.2 * c, 0.3 + 0.2 * d],
+        maria: 0.0,
+        rays: 0.3 + 0.15 * c,
+        highland: [l, chroma, hue],
+        mare: [l - 0.06, 0.004, hue],
+        ejecta: [l + 0.16, 0.5 * chroma, hue],
+    }
 }
 
 /// Lava needs heat, which a small body lost early: nothing under 800 km, a few to twenty per cent
@@ -104,12 +128,12 @@ mod tests {
 
     #[test]
     fn only_bare_rock_is_airless() {
-        assert!(of("Luna", world("Luna"), Surface::Weathered, 1.737e6).is_some());
-        assert!(of("Mercury", world("Mercury"), Surface::Scorched, 2.44e6).is_some());
-        assert!(of("Mars", world("Mars"), Surface::Weathered, 3.39e6).is_none(), "Mars has air");
-        assert!(of("Europa", world("Europa"), Surface::Ice, 1.56e6).is_none(), "Europa is ice");
+        assert!(of("Luna", world("Luna"), Surface::Weathered, 1.737e6, &[]).is_some());
+        assert!(of("Mercury", world("Mercury"), Surface::Scorched, 2.44e6, &[]).is_some());
+        assert!(of("Mars", world("Mars"), Surface::Weathered, 3.39e6, &[]).is_none(), "Mars has air");
+        assert!(of("Europa", world("Europa"), Surface::Ice, 1.56e6, &[]).is_none(), "Europa is ice");
         let generated = crate::worlds::of("Kettle b", Surface::Rock, &[], None);
-        assert!(of("Kettle b", &generated, Surface::Rock, 5.0e5).is_some());
+        assert!(of("Kettle b", &generated, Surface::Rock, 5.0e5, &[]).is_some());
     }
 
     #[test]
@@ -124,9 +148,27 @@ mod tests {
     #[test]
     fn maria_are_darker_than_highland_and_ejecta_brighter() {
         for id in ["a", "b", "c", "d", "e", "Luna", "Mercury"] {
-            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[], None), Surface::Rock, 2.0e6).unwrap();
+            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[], None), Surface::Rock, 2.0e6, &[]).unwrap();
             assert!(p.mare[0] < p.highland[0] && p.highland[0] < p.ejecta[0], "{id}: {p:?}");
             assert!(p.craters.windows(2).all(|w| w[1] <= w[0]), "{id}: the old series is the densest");
+        }
+    }
+
+    #[test]
+    fn captured_rubble_is_darker_than_any_rock() {
+        use crate::worlds::{Atmosphere, Stated, Top};
+        let mut tags = Stated::tags(Atmosphere::None, Top::Rock, false);
+        tags.push(Stated::CAPTURED.to_string());
+        let luna = of("Luna", world("Luna"), Surface::Weathered, 1.737e6, &[]).unwrap();
+        for id in ["a", "b", "c", "d", "e"] {
+            let caught = crate::worlds::of(id, Surface::Ice, &tags, None);
+            let grown = crate::worlds::of(id, Surface::Ice, &tags[..2], None);
+            assert!(caught.gray_albedo() < 0.08, "{id}: {}", caught.gray_albedo());
+            assert!(caught.gray_albedo() < 0.6 * grown.gray_albedo(), "{id}");
+            let rubble = of(id, &caught, Surface::Ice, 3.0e4, &tags).expect("caught moons are airless");
+            assert_eq!(rubble.maria, 0.0);
+            assert!(rubble.highland[0] < luna.highland[0] - 0.1, "{id}: {rubble:?}");
+            assert!(rubble.mare[0] < rubble.highland[0] && rubble.highland[0] < rubble.ejecta[0]);
         }
     }
 
