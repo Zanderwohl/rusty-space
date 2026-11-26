@@ -6,6 +6,8 @@ use lc_world::sky::generate::census::Census;
 
 use em_ui::egui_text::{Unit, quantity};
 
+use lc_world::sky::shells;
+
 use crate::census::CensusJob;
 use crate::doc::Doc;
 use crate::palette;
@@ -46,6 +48,31 @@ pub fn statistics(ui: &mut egui::Ui, doc: &Doc) {
     let mean = finite.iter().sum::<f64>() / finite.len() as f64;
     let min = finite.iter().copied().fold(f64::INFINITY, f64::min);
     ui.label(format!("min {min:.2} ly, mean {mean:.2} ly, hard-core floor {:.2} ly", floor.unwrap_or(0.0)));
+
+    let Some(b) = bake else { return };
+    let shells: Vec<(f64, f64)> = r
+        .shells
+        .iter()
+        .zip(&b.stars)
+        .filter(|(r, _)| r.is_finite())
+        .map(|(r, s)| (*r, shells::nominal_ly(s.attributes.mass_solar)))
+        .collect();
+    if shells.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new("shell radius").strong());
+    let radii: Vec<f64> = shells.iter().map(|(r, _)| *r).collect();
+    histogram(ui, &radii, Some(shells::SOLAR_SHELL_LY));
+    // A clamped shell is the proportional share of a gap, never more than its nominal radius.
+    let clamped = shells.iter().filter(|(r, nominal)| *r < nominal * (1.0 - 1e-9)).count();
+    let mean = radii.iter().sum::<f64>() / radii.len() as f64;
+    ui.label(format!(
+        "clamped {clamped} of {} ({:.0}%), mean {mean:.2} ly, solar nominal {:.2} ly",
+        shells.len(),
+        100.0 * clamped as f64 / shells.len() as f64,
+        shells::SOLAR_SHELL_LY
+    ));
 }
 
 /// What the generator made of the baked stars' systems, per population and in total.
@@ -112,10 +139,11 @@ pub fn systems(ui: &mut egui::Ui, census: &CensusJob, doc: &Doc) {
     });
 }
 
-/// Bars over `[0, max]`, with the hard-core floor marked.
+/// Bars over `[0, max]`, with one value marked: the hard-core floor, or the solar shell.
 fn histogram(ui: &mut egui::Ui, values: &[f64], floor: Option<f64>) {
     const BINS: usize = 24;
-    let max = values.iter().copied().fold(0.0, f64::max).max(1e-6) * 1.05;
+    let marked = floor.filter(|f| f.is_finite()).unwrap_or(0.0);
+    let max = values.iter().copied().fold(marked, f64::max).max(1e-6) * 1.05;
     let mut counts = [0usize; BINS];
     for v in values {
         counts[((v / max * BINS as f64) as usize).min(BINS - 1)] += 1;
@@ -173,6 +201,9 @@ pub fn inspector(ui: &mut egui::Ui, doc: &Doc) {
         row(ui, "exclusion", format!("{:.3} ly", s.exclusion_ly));
         if let Some(d) = r.nearest.get(index).filter(|d| d.is_finite()) {
             row(ui, "nearest", format!("{d:.3} ly"));
+        }
+        if let Some(shell) = r.shells.get(index).filter(|d| d.is_finite()) {
+            row(ui, "shell", format!("{shell:.3} ly of {:.3} nominal", shells::nominal_ly(a.mass_solar)));
         }
     });
     ui.add_space(6.0);

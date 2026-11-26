@@ -30,6 +30,8 @@ pub struct Result {
     pub bake: std::result::Result<Bake, String>,
     pub expected: Vec<(FeatureId, f64)>,
     pub nearest: Vec<f64>,
+    /// Each star's shell radius as the game assigns it, ly; NaN for a star the sky leaves out.
+    pub shells: Vec<f64>,
     pub took: Duration,
 }
 
@@ -173,7 +175,8 @@ impl Doc {
             lc_galaxy::bake(&compiled, self.timeline.seed, bounds, default_threads()).map_err(|e| e.to_string())
         };
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
-        self.result = Some(Result { compiled, bake, expected, nearest, took: start.elapsed() });
+        let shells = bake.as_ref().map(|b| shells(&b.stars)).unwrap_or_default();
+        self.result = Some(Result { compiled, bake, expected, nearest, shells, took: start.elapsed() });
         self.built_from = Some(key);
         self.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.built_at = Some(Instant::now());
@@ -198,4 +201,20 @@ impl Doc {
             None => format!("{id}"),
         }
     }
+}
+
+/// Shells over the stars the game loads, at the positions and masses it loads them with, so the
+/// radii here are the shard's and the client's.
+fn shells(stars: &[BakedStar]) -> Vec<f64> {
+    use lc_galaxy::attributes::State;
+    let in_sky = |s: &BakedStar| {
+        s.attributes.luminosity_solar > 0.0 && !matches!(s.attributes.state, State::NeutronStar | State::BlackHole)
+    };
+    let kept: Vec<usize> = (0..stars.len()).filter(|&i| in_sky(&stars[i])).collect();
+    let at: Vec<_> = kept.iter().map(|&i| (stars[i].attributes.record.position_ly(), stars[i].attributes.mass_solar)).collect();
+    let mut out = vec![f64::NAN; stars.len()];
+    for (&i, r) in kept.iter().zip(lc_world::sky::shells::radii(&at)) {
+        out[i] = r;
+    }
+    out
 }
