@@ -295,6 +295,12 @@ fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> B
     info
 }
 
+fn moon_info(moon: &moon::Moon, tags: &[&str]) -> BodyInfo {
+    let mut info = info(&moon.name, moon.mass_kg, false, tags);
+    info.tags.extend(crate::worlds::Stated::tags(moon.atmosphere, moon.top, false));
+    info
+}
+
 fn info(id: &str, mass: f64, major: bool, tags: &[&str]) -> BodyInfo {
     BodyInfo {
         name: Some(id.to_string()),
@@ -412,10 +418,10 @@ impl GeneratedSystem {
             let equator = spin_axis_of(self.pole, p);
             for moon in &p.moons {
                 // Loose bodies a planet happens to hold, not a retinue.
-                let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
+                let tags: &[&str] = if moon.regular { &["Moon"] } else { &[crate::worlds::Stated::CAPTURED] };
                 let plane = tilted(equator, moon.inclination_rad, moon.node_rad);
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                    info: info(&moon.name, moon.mass_kg, false, tags),
+                    info: moon_info(moon, tags),
                     params: {
                         let (inclination, node) = euler_of(plane);
                         kepler(
@@ -435,7 +441,7 @@ impl GeneratedSystem {
                 for sub in &moon.moons {
                     let (inclination, node) = euler_of(tilted(plane, sub.inclination_rad, sub.node_rad));
                     bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                        info: info(&sub.name, sub.mass_kg, false, &["Submoon"]),
+                        info: moon_info(sub, &["Submoon"]),
                         params: kepler(&moon.name, sub.semi_major_m, sub.eccentricity, inclination, node, sub.mean_anomaly_deg, None),
                         appearance: debug_ball(sub.radius_m, (120, 120, 130)),
                         rotation: None,
@@ -501,6 +507,26 @@ mod tests {
             }
         }
         assert!(checked > 20, "only {checked} moons across forty systems");
+    }
+
+    /// What `worlds::of` reads for a moon: without it a moon's air is guessed from its class.
+    #[test]
+    fn every_moon_states_its_air() {
+        let mut moons = 0;
+        for key in 0..40u64 {
+            let star = AuthoredStars::sample().stars()[2].clone();
+            let seeded = CatalogStar { id: crate::sky::StarId::synthesize("air", key), ..star };
+            for body in system_for(&seeded).to_universe().bodies {
+                let SomeBody::KeplerEntry(entry) = body else { continue };
+                let tags = &entry.info.tags;
+                if tags.iter().any(|t| ["Moon", "Irregular", "Submoon"].contains(&t.as_str())) {
+                    let stated = crate::worlds::Stated::from_tags(tags);
+                    assert!(stated.atmosphere.is_some() && stated.top.is_some(), "{tags:?}");
+                    moons += 1;
+                }
+            }
+        }
+        assert!(moons > 20, "only {moons} moons across forty systems");
     }
 
     /// A moon has to be outside the planet and inside the star's reach, or it is not a moon.

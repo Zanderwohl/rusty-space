@@ -316,6 +316,12 @@ impl Stated {
     pub const AIR: &'static str = "Air:";
     pub const TOP: &'static str = "Top:";
     pub const GAS_GIANT: &'static str = "GasGiant";
+    /// A captured moon: caught rubble rather than a body grown in a disc.
+    pub const CAPTURED: &'static str = "Irregular";
+
+    pub fn captured(tags: &[String]) -> bool {
+        tags.iter().any(|t| t == Self::CAPTURED)
+    }
 
     pub fn from_tags(tags: &[String]) -> Self {
         let mut out = Self::default();
@@ -357,7 +363,7 @@ pub fn of(id: &str, surface: Surface, tags: &[String], giant: Option<&crate::gia
     let top = stated.top.unwrap_or_else(|| derived_top(surface));
     let reflectance = match giant {
         Some(giant) if atmosphere == Atmosphere::Envelope => giant.reflectance(),
-        _ => reflectance_of(top, atmosphere, surface, stated.gas_giant, varied(id)),
+        _ => reflectance_of(top, atmosphere, surface, stated.gas_giant, Stated::captured(tags), varied(id)),
     };
     World {
         body_id: "",
@@ -394,8 +400,17 @@ fn varied(id: &str) -> (f64, f64) {
 /// generated ocean is Earth's curve, a generated ice world is between Europa's and Callisto's,
 /// a generated gas giant is Jupiter's and an ice giant is Uranus's. The third digit is not the
 /// point; the ordering and the color are.
-fn reflectance_of(top: Top, atmosphere: Atmosphere, surface: Surface, gas_giant: bool, varied: (f64, f64)) -> [f64; BANDS] {
+fn reflectance_of(
+    top: Top,
+    atmosphere: Atmosphere,
+    surface: Surface,
+    gas_giant: bool,
+    captured: bool,
+    varied: (f64, f64),
+) -> [f64; BANDS] {
     let base = match (top, atmosphere) {
+        // Carbon-rich rubble, as dark as coal and slightly red: Phoebe 0.08, Himalia 0.05.
+        (Top::Rock, Atmosphere::None) if captured => optical(0.045, 0.05, 0.056, 0.062, 0.07),
         // A giant's deck. Jupiter is banded and warm; Uranus is methane-blue and eats the red
         // end, which is the one color difference that tells the two kinds of giant apart.
         (Top::Cloud, Atmosphere::Envelope) if gas_giant => optical(0.47, 0.50, 0.53, 0.54, 0.27),

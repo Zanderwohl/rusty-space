@@ -325,7 +325,7 @@ impl LocalSystem {
                         .flatten(),
                     giant,
                     airless: painted
-                        .then(|| crate::airless::of(self.sim.name(i), &world, surface, radius_m))
+                        .then(|| crate::airless::of(self.sim.name(i), &world, surface, radius_m, tags))
                         .flatten(),
                     world,
                     pole,
