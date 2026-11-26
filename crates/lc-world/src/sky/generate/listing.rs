@@ -34,6 +34,9 @@ pub struct World {
     pub life: f64,
     pub moons: usize,
     pub submoons: usize,
+    /// Its ring bands, and the deepest band's optical depth.
+    pub ring_bands: usize,
+    pub ring_depth: f64,
     pub ocean_first: bool,
     pub migrated: bool,
 }
@@ -99,6 +102,8 @@ pub fn listing(system: &GeneratedSystem, tuning: &Tuning) -> Listing {
                 life: p.life,
                 moons: p.moons.len(),
                 submoons: p.moons.iter().map(|m| m.moons.len()).sum(),
+                ring_bands: p.rings.as_ref().map_or(0, |r| r.bands.len()),
+                ring_depth: p.rings.as_ref().map_or(0.0, |r| r.bands.iter().map(|b| b.optical_depth).fold(0.0, f64::max)),
                 ocean_first: rung.ocean,
                 migrated: p.migrated,
             }),

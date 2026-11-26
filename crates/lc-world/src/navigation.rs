@@ -508,7 +508,7 @@ impl Course {
             )),
             Course::Rings(body) => {
                 let index = system.body_named(body)?;
-                let rings = crate::rings::for_body(system.sim().name(index))?;
+                let rings = system.rings_of(index)?;
                 Some(Waypoint::Orbit(Orbit {
                     about: Anchor::Body(body.clone()),
                     radius_m: rings.outer_m() * RING_STANDOFF,
@@ -757,7 +757,7 @@ pub fn options_for(system: &LocalSystem, target: &Target) -> Vec<(String, Course
             out.push((what.to_string(), Course::Hangout { body: name.clone(), point }));
         }
     }
-    if crate::rings::for_body(system.sim().name(index)).is_some() {
+    if system.rings_of(index).is_some() {
         out.push(("above the rings".to_string(), Course::Rings(name.clone())));
     }
     if index == system.primary() {

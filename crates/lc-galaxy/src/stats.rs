@@ -88,7 +88,7 @@ pub fn census_of(star: &BakedStar, kinematics: &Kinematics) -> Option<Census> {
 pub type Measure = fn(&[&Census]) -> String;
 
 /// The systems table's rows, in order.
-pub fn system_rows() -> [(&'static str, Measure); 13] {
+pub fn system_rows() -> [(&'static str, Measure); 15] {
     fn per_star(cs: &[&Census], f: fn(&Census) -> u32) -> String {
         if cs.is_empty() { "–".into() } else { format!("{:.2}", cs.iter().map(|c| f(c) as f64).sum::<f64>() / cs.len() as f64) }
     }
@@ -112,6 +112,14 @@ pub fn system_rows() -> [(&'static str, Measure); 13] {
         ("planets with a moon", |cs| {
             let planets: u32 = cs.iter().map(|c| c.planets).sum();
             if planets == 0 { "–".into() } else { format!("{:.0}%", 100.0 * cs.iter().map(|c| c.planets_with_moons).sum::<u32>() as f64 / planets as f64) }
+        }),
+        ("ringed planets", |cs| {
+            let planets: u32 = cs.iter().map(|c| c.planets).sum();
+            if planets == 0 { "–".into() } else { format!("{:.0}%", 100.0 * cs.iter().map(|c| c.ringed_planets).sum::<u32>() as f64 / planets as f64) }
+        }),
+        ("bands / ringed planet", |cs| {
+            let ringed: u32 = cs.iter().map(|c| c.ringed_planets).sum();
+            if ringed == 0 { "–".into() } else { format!("{:.1}", cs.iter().map(|c| c.ring_bands).sum::<u32>() as f64 / ringed as f64) }
         }),
     ]
 }

@@ -47,9 +47,9 @@ pub fn holding<'a>(at: DVec3, stars: impl IntoIterator<Item = &'a CatalogStar>) 
 pub const SOL: &str = "Sol";
 
 /// A body's rings, as the renderer wants them.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Rings {
-    pub system: &'static crate::rings::RingSystem,
+    pub system: std::sync::Arc<crate::rings::RingSystem>,
     /// Unit normal of the ring plane, simulation axes.
     pub pole: DVec3,
 }
@@ -117,6 +117,9 @@ pub struct LocalSystem {
     pub populations: Vec<crate::population::Population>,
     /// Where the system's barycenter sits, light-years from the world origin.
     pub origin_ly: DVec3,
+    /// Ring systems by the `em-sim` id of the body they circle: measured for Sol, generated
+    /// otherwise.
+    rings: std::collections::HashMap<String, std::sync::Arc<crate::rings::RingSystem>>,
     /// Its star's shell radius, ly.
     pub shell_ly: f64,
     /// The normal of the plane the planets and belts orbit in. What a player means by this
@@ -169,6 +172,14 @@ impl LocalSystem {
             Some(SOL) => em_sim::presets::solar_system(),
             _ => generated.to_universe(),
         };
+        let rings = match star.provenance.name.as_deref() {
+            Some(SOL) => crate::rings::ALL.iter().map(|(body, r)| (body.to_string(), std::sync::Arc::new(r.clone()))).collect(),
+            _ => generated
+                .planets
+                .iter()
+                .filter_map(|p| Some((p.name.clone(), std::sync::Arc::new(p.rings.clone()?))))
+                .collect(),
+        };
         let populations = generated.populations;
         let sim = System::from_contents(&contents).ok()?;
         // The most massive body is the primary. Not the first: a multiple is a barycenter with
@@ -181,6 +192,7 @@ impl LocalSystem {
             star_name: star.provenance.name.clone().unwrap_or_else(|| format!("{:x}", star.id.get())),
             populations,
             origin_ly: star.position_ly,
+            rings,
             shell_ly: star.shell_radius_ly(),
             pole: star.system_pole(),
             star_spin: star.spin_axis(),
@@ -255,7 +267,8 @@ impl LocalSystem {
                 let to_observer = observer_m - at;
                 let phase = phase_factor(to_star, to_observer);
 
-                let Fixed { kind, pole, spin_s, rings, .. } = *fixed;
+                let Fixed { kind, pole, spin_s, .. } = *fixed;
+                let rings = fixed.rings.clone();
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
                 let surface = crate::surface::Surface::classify(
@@ -287,7 +300,7 @@ impl LocalSystem {
                 let world = crate::worlds::of(self.sim.name(i), surface, tags, giant.as_ref());
                 let giant = giant.filter(|_| world.atmosphere == crate::worlds::Atmosphere::Envelope);
                 let mut albedo = world.gray_albedo();
-                if let Some(rings) = rings {
+                if let Some(rings) = &rings {
                     let lit = rings.pole.dot(to_star.normalize_or_zero()).abs();
                     let seen = rings.pole.dot(to_observer.normalize_or_zero()).abs();
                     let ring_area = rings.system.cross_section_m2() * lit * seen;
@@ -349,7 +362,7 @@ impl LocalSystem {
                         kind: crate::navigation::Kind::of(&self.sim.info(i).tags),
                         pole,
                         spin_s: self.sim.rotation(i).and_then(|r| self.spin_of(i, r)),
-                        rings: crate::rings::for_body(self.sim.name(i)).map(|system| Rings { system, pole }),
+                        rings: self.rings_of(i).map(|system| Rings { system: system.clone(), pole }),
                     }
                 })
                 .collect()
@@ -363,6 +376,11 @@ impl LocalSystem {
     }
 
     /// The propagated bodies, for anything that needs more than [`LocalSystem::drawables`].
+    /// The rings around a body, if it has any.
+    pub fn rings_of(&self, index: BodyIndex) -> Option<&std::sync::Arc<crate::rings::RingSystem>> {
+        self.rings.get(self.sim.name(index))
+    }
+
     pub fn sim(&self) -> &System {
         &self.sim
     }
@@ -1025,7 +1043,7 @@ mod tests {
                 assert_eq!(body.pole, pole, "{}", body.name);
                 assert_eq!(body.kind, crate::navigation::Kind::of(&system.sim.info(i).tags), "{}", body.name);
                 assert_eq!(body.spin_s, system.sim.rotation(i).and_then(|r| system.spin_of(i, r)), "{}", body.name);
-                assert_eq!(body.rings.is_some(), crate::rings::for_body(system.sim.name(i)).is_some(), "{}", body.name);
+                assert_eq!(body.rings.is_some(), system.rings_of(i).is_some(), "{}", body.name);
             }
         }
     }

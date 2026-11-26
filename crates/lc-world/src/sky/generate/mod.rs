@@ -19,6 +19,7 @@ pub mod moon;
 pub mod ocean;
 pub mod planet;
 pub mod profile;
+pub mod ring;
 pub mod tuning;
 
 pub use architecture::{Architecture, Class, Rung, architecture};
@@ -133,7 +134,7 @@ pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
 
     let mut planets = planet::planets(&name, &arch, star, tuning);
     for (k, p) in planets.iter_mut().enumerate() {
-        p.moons = moon::moons_of(p, star.mass_solar, arch.disc.snow_m, seed, k, tuning);
+        (p.moons, p.rings) = moon::moons_of(p, star.mass_solar, arch.disc.snow_m, seed, k, tuning);
     }
 
     // Sol's bodies are measured, so its belts are too -- see [`belt::solar`].

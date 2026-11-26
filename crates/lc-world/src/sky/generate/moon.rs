@@ -59,18 +59,26 @@ pub fn hill_radius_m(semi_major_m: f64, mass_kg: f64, star_mass_solar: f64) -> f
 /// Everything orbiting one planet, innermost first.
 ///
 /// `snow_m` is the star's snow line, which anchors how many bodies a planet captures.
-pub fn moons_of(planet: &Planet, star_mass_solar: f64, snow_m: f64, seed: u64, index: usize, tuning: &Tuning) -> Vec<Moon> {
+pub fn moons_of(
+    planet: &Planet,
+    star_mass_solar: f64,
+    snow_m: f64,
+    seed: u64,
+    index: usize,
+    tuning: &Tuning,
+) -> (Vec<Moon>, Option<crate::rings::RingSystem>) {
     let h = |tag: u64| rng::hash(&[seed, 0x_6d30_306e, index as u64, tag]);
     let hill = hill_radius_m(planet.semi_major_m, planet.mass_kg, star_mass_solar);
 
     let mut out = regular(planet, hill, h(1), tuning);
     out.extend(captured(planet, hill, star_mass_solar, snow_m, h(2), tuning));
+    let rings = super::ring::form(planet, &mut out, h(4), tuning);
     out.sort_by(|a, b| a.semi_major_m.total_cmp(&b.semi_major_m));
     for (j, moon) in out.iter_mut().enumerate() {
         moon.name = format!("{} {}", planet.name, roman(j as u32 + 1));
         moon.moons = submoons_of(moon, planet, rng::hash(&[h(3), j as u64]), tuning);
     }
-    out
+    (out, rings)
 }
 
 /// A moon's own moons, from an impact as a planet's Luna is.
@@ -155,7 +163,8 @@ fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
                 name: String::new(),
                 // Log-spaced, so a retinue spreads out the way a real one does rather than
                 // clumping at one radius.
-                semi_major_m: rng::uniform_in(g(1), inner.ln(), outer.ln()).exp(),
+                // From inside the Roche limit: the ones that land there are rings.
+                semi_major_m: rng::uniform_in(g(1), (inner * tuning.rings.breakup_reach).ln(), outer.ln()).exp(),
                 eccentricity: rng::uniform_in(g(4), 0.0, 0.02),
                 inclination_rad: rng::gaussian(g(6)).abs() * 0.02,
                 node_rad: rng::uniform_in(g(7), 0.0, std::f64::consts::TAU),
@@ -265,7 +274,7 @@ mod tests {
                 let arch = architecture(&s, &t);
                 let mut planets = planet::planets("S", &arch, &s, &t);
                 for (j, p) in planets.iter_mut().enumerate() {
-                    p.moons = moons_of(p, s.mass_solar, arch.disc.snow_m, s.seed(), j, &t);
+                    (p.moons, p.rings) = moons_of(p, s.mass_solar, arch.disc.snow_m, s.seed(), j, &t);
                 }
                 planets
             })
@@ -331,19 +340,26 @@ mod tests {
 
     /// **The measured constant this rests on.** Jupiter's, Saturn's and Uranus's satellite
     /// systems all come to about a ten-thousandth of their planet, and that one number is what
-    /// sizes a generated retinue without any other tuning.
+    /// sizes a generated retinue without any other tuning. A ringed giant's retinue is lighter
+    /// by what broke up, and heavier by at most the moonlet its disc ring spilled.
     #[test]
     fn a_giants_retinue_weighs_a_ten_thousandth_of_it() {
-        let want = Tuning::default().moons.regular_mass_ratio;
-        let mut checked = 0;
+        let t = Tuning::default();
+        let want = t.moons.regular_mass_ratio;
+        let (mut exact, mut ringed) = (0, 0);
         for planets in systems(30) {
             for p in planets.iter().filter(|p| p.class.is_giant()) {
                 let retinue: f64 = p.moons.iter().filter(|m| m.regular).map(|m| m.mass_kg).sum();
-                assert!((retinue / (p.mass_kg * want) - 1.0).abs() < 1.0e-9, "{}", p.name);
-                checked += 1;
+                if p.rings.is_none() {
+                    assert!((retinue / (p.mass_kg * want) - 1.0).abs() < 1.0e-9, "{}", p.name);
+                    exact += 1;
+                } else {
+                    assert!(retinue <= p.mass_kg * (want + t.rings.giant_mass_ratio.1) * (1.0 + 1.0e-9), "{}", p.name);
+                    ringed += 1;
+                }
             }
         }
-        assert!(checked > 40, "only {checked} giants");
+        assert!(exact > 5 && ringed > 5, "{exact} unringed and {ringed} ringed giants");
     }
 
     /// The two origins have to be tellable apart from their orbits alone, because that is how

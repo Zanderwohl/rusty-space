@@ -79,6 +79,8 @@ pub struct Planet {
     /// What orbits it. **A planet with no moon has no mass anybody can measure**: a
     /// satellite's period through Kepler's third law is the only route a telescope has to it.
     pub moons: Vec<super::moon::Moon>,
+    /// Its rings: see [`super::ring`].
+    pub rings: Option<crate::rings::RingSystem>,
 }
 
 impl Planet {
@@ -261,6 +263,7 @@ fn of(
         metals: crate::giant::metals(mass_earths * EARTH_MASS, rung.class == Class::GasGiant, star_feh)
             + 0.15 * rng::gaussian(h(21)),
         moons: Vec::new(),
+        rings: None,
     }
 }
 

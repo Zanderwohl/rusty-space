@@ -628,7 +628,7 @@ fn spawn_rings(
         field: Field::default(),
     }));
     for (i, body) in drawn.iter().enumerate() {
-        let Some(rings) = body.rings else { continue };
+        let Some(rings) = &body.rings else { continue };
         // No display gain, unlike a population. The gain exists because even a Kuiper belt is
         // a trace and would otherwise be nothing; Saturn's rings cover a third of their own
         // annulus and need no help. Applying it here made Jupiter's rings -- three parts per
@@ -636,7 +636,7 @@ fn spawn_rings(
         let _ = gain;
         let uniform = PopulationUniform {
             tint: Vec4::new(0.88, 0.84, 0.76, 1.0),
-            opacity: ring_opacity(rings.system),
+            opacity: ring_opacity(&rings.system),
             seed: i as f32 * 3.77 + 0.5,
             // A ring is not a cloud: its texture is banding, not speckle.
             grain_frequency: 12.0,
@@ -646,7 +646,7 @@ fn spawn_rings(
             ..default()
         };
         commands.spawn((
-            Mesh3d(meshes.add(build_ring(rings.system))),
+            Mesh3d(meshes.add(build_ring(&rings.system))),
             MeshMaterial3d(
                 materials.add(PopulationMaterial {
                     uniforms: uniform,
@@ -751,7 +751,7 @@ pub fn update_envelopes(
     // Rings ride their body, so unlike a shell they are placed every frame.
     for (mut transform, ring) in ringed.iter_mut() {
         let Some(body) = bodies.drawn.get(ring.body) else { continue };
-        let Some(rings) = body.rings else { continue };
+        let Some(rings) = &body.rings else { continue };
         transform.translation =
             sim_to_render((body.position_ly - eye.at_ly) * M_PER_LY / UNIT_M).as_vec3();
         transform.rotation = orientation(rings.pole);

@@ -153,6 +153,45 @@ pub struct World {
     pub ocean_first: f64,
 }
 
+/// Rings: see [`super::ring`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rings {
+    /// Regular moons are drawn from this share of their Roche limit outward, so the ones that
+    /// land inside break up into rings.
+    pub breakup_reach: f64,
+    /// Half-width of a broken moon's band, as a share of its orbit.
+    pub debris_width: f64,
+    /// Share of a broken moon's mass the ring keeps; the rest falls on the planet or spreads
+    /// away. Log-uniform.
+    pub debris_kept: (f64, f64),
+    /// Densest a ring stays: past it self-gravity clumps the material, and the excess joins
+    /// what spreads past the Roche limit. Saturn's B ring is between 1.5 and 5.
+    pub max_depth: f64,
+    /// Chance a giant keeps a band of its formation disc, and how heavy one is against the
+    /// planet: Saturn's rings are about 3e-8 of Saturn, Jupiter's far less.
+    pub giant_chance: f64,
+    pub giant_mass_ratio: (f64, f64),
+    /// No band reaches closer than this, in planet radii.
+    pub inner_edge_radii: f64,
+    /// Ring particles: water ice, a meter across. Together they set optical depth from mass.
+    pub particle_density: f64,
+    pub particle_radius_m: f64,
+    /// Smallest moonlet spreading makes; less than this stays dust.
+    pub moonlet_min_radius_m: f64,
+    /// Half-width of an embedded moon's gap, in its Hill radii. Pan's Encke gap is about
+    /// seventeen of Pan's.
+    pub gap_hill: f64,
+    /// Smallest moon, against its planet, that clears its 2:1 resonance, and the half-width it
+    /// clears as a share of that radius. Mimas is 7e-8 of Saturn; the Cassini Division is about
+    /// two percent of its radius either side.
+    pub resonance_min_ratio: f64,
+    pub resonance_width: f64,
+    /// Fainter bands are dropped.
+    pub min_depth: f64,
+    pub icy_albedo: (f64, f64),
+    pub rocky_albedo: (f64, f64),
+}
+
 /// Moons, of both origins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Moons {
@@ -239,6 +278,7 @@ pub struct Tuning {
     pub ladder: Ladder,
     pub world: World,
     pub moons: Moons,
+    pub rings: Rings,
     pub belts: Belts,
 }
 
@@ -313,6 +353,24 @@ impl Default for Tuning {
                 submoon_min_orbit_radii: 20.0,
                 submoon_chance: 0.2,
                 submoon_mass_ratio: (1.0e-4, 1.0e-2),
+            },
+            rings: Rings {
+                breakup_reach: 0.9,
+                debris_width: 0.15,
+                debris_kept: (1.0e-5, 1.0e-1),
+                max_depth: 2.0,
+                giant_chance: 0.75,
+                giant_mass_ratio: (1.0e-12, 1.0e-7),
+                inner_edge_radii: 1.1,
+                particle_density: 900.0,
+                particle_radius_m: 1.0,
+                moonlet_min_radius_m: 1.0e3,
+                gap_hill: 8.0,
+                resonance_min_ratio: 3.0e-8,
+                resonance_width: 0.02,
+                min_depth: 1.0e-9,
+                icy_albedo: (0.1, 0.6),
+                rocky_albedo: (0.03, 0.1),
             },
             belts: Belts {
                 belt_survival: 5.0e-4,

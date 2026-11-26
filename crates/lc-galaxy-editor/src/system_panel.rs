@@ -205,6 +205,11 @@ fn entry(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
                         n => format!("{} ({n} submoons)", w.moons),
                     });
                     ui.end_row();
+                    if w.ring_bands > 0 {
+                        ui.label("rings");
+                        ui.label(raised(ui.style(), &format!("{} bands, depth {}", w.ring_bands, scientific(w.ring_depth, 1)), None));
+                        ui.end_row();
+                    }
                 }
             });
         });

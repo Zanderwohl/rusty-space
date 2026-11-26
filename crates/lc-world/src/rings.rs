@@ -1,4 +1,5 @@
-//! Ring systems, as measured.
+//! Ring systems: the solar system's as measured, and the shape a generated one takes
+//! ([`crate::sky::generate::ring`]).
 //!
 //! Radii are from the IAU and Cassini/Voyager results; optical depths are area-averaged over
 //! each band and are the roughest number here, because a real ring's depth varies by an order
@@ -8,6 +9,7 @@
 //! Poles are not here. `em-sim`'s presets already carry every body's IAU rotation, and a second
 //! copy of a pole is a second chance to have it wrong.
 
+use std::borrow::Cow;
 use std::f64::consts::PI;
 
 use glam::DVec3;
@@ -41,11 +43,10 @@ impl Band {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RingSystem {
-    /// The `em-sim` body id this belongs to.
-    pub body_id: &'static str,
-    pub bands: &'static [Band],
+    /// Inside out, not overlapping. Borrowed for a measured system, owned for a generated one.
+    pub bands: Cow<'static, [Band]>,
     /// Geometric albedo of the particles. Saturn's are water ice and bright; everything else in
     /// the solar system is dark dust and rubble.
     pub albedo: f64,
@@ -133,15 +134,18 @@ pub const NEPTUNE: &[Band] = &[
     Band { name: "Adams", inner_m: 6.2900e7, outer_m: 6.2970e7, optical_depth: 3.0e-2 },
 ];
 
-pub const ALL: [RingSystem; 4] = [
-    RingSystem { body_id: "Saturn", bands: SATURN, albedo: 0.50 },
-    RingSystem { body_id: "Jupiter", bands: JUPITER, albedo: 0.05 },
-    RingSystem { body_id: "Uranus", bands: URANUS, albedo: 0.03 },
-    RingSystem { body_id: "Neptune", bands: NEPTUNE, albedo: 0.03 },
+/// The measured systems, by the `em-sim` body id of the planet each belongs to.
+pub const ALL: [(&str, RingSystem); 4] = [
+    ("Saturn", RingSystem { bands: Cow::Borrowed(SATURN), albedo: 0.50 }),
+    ("Jupiter", RingSystem { bands: Cow::Borrowed(JUPITER), albedo: 0.05 }),
+    ("Uranus", RingSystem { bands: Cow::Borrowed(URANUS), albedo: 0.03 }),
+    ("Neptune", RingSystem { bands: Cow::Borrowed(NEPTUNE), albedo: 0.03 }),
 ];
 
+/// A measured system. A loaded system's rings, measured or generated, are
+/// `LocalSystem::rings_of`.
 pub fn for_body(id: &str) -> Option<&'static RingSystem> {
-    ALL.iter().find(|r| r.body_id == id)
+    ALL.iter().find(|(body, _)| *body == id).map(|(_, r)| r)
 }
 
 #[cfg(test)]

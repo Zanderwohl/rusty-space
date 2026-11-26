@@ -35,10 +35,11 @@ fn digest(tuning: &Tuning) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))
 }
 
-/// Computed on master before the ocean-first setting existed. A change here moved default systems.
+/// Re-pinned when every planet began to capture and rings took broken moons; the digest counts
+/// each planet's moons. A change here moved default systems.
 #[test]
 fn default_systems_are_unchanged() {
-    assert_eq!(format!("{:016x}", digest(&Tuning::default())), "91ef98f6f95e4e3e");
+    assert_eq!(format!("{:016x}", digest(&Tuning::default())), "f6a83e20d1868a77");
 }
 
 fn ocean_worlds(sys: &generate::GeneratedSystem) -> usize {

@@ -559,8 +559,8 @@ pub fn subjects<'a>(
     }
 
     for body in drawn {
-        let Some(rings) = body.rings else { continue };
-        if crate::envelope::ring_opacity(rings.system) < MIN_RING_OPACITY {
+        let Some(rings) = &body.rings else { continue };
+        if crate::envelope::ring_opacity(&rings.system) < MIN_RING_OPACITY {
             continue;
         }
         let outer = rings.system.outer_m();
@@ -719,7 +719,7 @@ pub fn aim(
         }
         Subject::Rings(name) => {
             let b = body(name)?;
-            let rings = b.rings?;
+            let rings = b.rings.as_ref()?;
             let (forward, field) = framed(to_m(b.position_ly), rings.system.outer_m());
             let caption = format!("{} · rings", session.body_label(name));
             // Square to the pole, the rings' long axis lies level.
@@ -727,7 +727,7 @@ pub fn aim(
         }
         Subject::Ringside(name) => {
             let b = body(name)?;
-            let rings = b.rings?;
+            let rings = b.rings.as_ref()?;
             let (inner, outer) = (rings.system.inner_m(), rings.system.outer_m());
             let (forward, up, field) =
                 ringside(to_m(b.position_ly), inner, outer, rings.pole, toward_star)?;

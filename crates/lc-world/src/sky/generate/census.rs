@@ -24,6 +24,8 @@ pub struct Census {
     pub captured_moons: u32,
     pub planets_with_moons: u32,
     pub submoons: u32,
+    pub ringed_planets: u32,
+    pub ring_bands: u32,
 }
 
 impl Census {
@@ -47,6 +49,8 @@ impl Census {
             captured_moons: system.moons().filter(|m| !m.regular).count() as u32,
             planets_with_moons: count(&|p| !p.moons.is_empty()),
             submoons: system.moons().map(|m| m.moons.len() as u32).sum(),
+            ringed_planets: count(&|p| p.rings.is_some()),
+            ring_bands: system.planets.iter().filter_map(|p| p.rings.as_ref()).map(|r| r.bands.len() as u32).sum(),
         }
     }
 }

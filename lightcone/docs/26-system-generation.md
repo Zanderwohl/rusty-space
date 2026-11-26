@@ -228,9 +228,18 @@ its own gravity. The density ratio is why this is not a flat multiple of the pla
 an icy moon around a rocky planet is pulled apart half again as far out as a rocky one, and
 inside that limit there is a ring rather than a moon.
 
-A **catch** was a passing body the planet held. How many is a cross-section, so the count goes
-as the square of the Hill radius — a Jupiter analog reaches the ninety-odd the real one has,
-and the mean over all giants is nearer forty because most of them hold a smaller sphere. They sit far out, eccentric, at any inclination, and two thirds go backwards.
+A **catch** was a passing body the planet held, and any planet can make one. The mean count is
+a cross-section, the square of the Hill radius, times a supply of passing bodies that thins
+with distance as the disc's surface density does, `a^-1.25`; both are taken against a Jupiter
+at twice the star's snow line, so a dim star's system captures as a scaled solar system would.
+That gives a Jupiter analog about forty, a Neptune about twenty and a Mars a few hundredths,
+and the count is a Poisson draw from the mean, so a small planet now and then catches one or two.
+They sit far out, eccentric, at any inclination, and two thirds go backwards.
+
+A large moon far from its planet can keep a **submoon**, from an impact as a planet keeps a
+Luna: at least a thousand kilometers across and twenty planet radii out, because closer in the
+planet's tides strip it (Kollmeier and Raymond, 2019). The submoon sits between its own Roche
+limit around the moon and four tenths of the moon's Hill radius.
 
 ![Moon semi-major axis against inclination](plots/moons.png)
 
@@ -239,6 +248,28 @@ retrograde orbits stay bound, which is part of why so many distant moons go back
 
 A migrated giant dragged its retinue into a Hill sphere a tenth the size, so what is left of it
 is crowded against the planet rather than spread through a disc.
+
+## Rings
+
+Rings come out of the same pass, by three rules rather than a simulated disc
+([`ring.rs`](../../crates/lc-world/src/sky/generate/ring.rs)):
+
+1. **Breakup.** A retinue is drawn from nine tenths of its Roche limit outward, so some moons
+   land inside it. Those break up: the ring keeps a share of the moon, log-uniform between
+   10⁻⁵ and a tenth, and the rest falls on the planet or spreads away. A giant may also keep a
+   band of its formation disc, 10⁻¹² to 10⁻⁷ of its mass; Saturn's rings are about 3 × 10⁻⁸ of
+   Saturn.
+2. **Spreading.** What spreads past the Roche limit of ice gathers into a moonlet just outside
+   it, and so does anything denser than an optical depth of two, where self-gravity clumps a
+   ring.
+3. **Gaps.** A moon inside a band clears eight of its Hill radii either side, as Pan clears the
+   Encke gap, and a moon of at least 3 × 10⁻⁸ of its planet clears its 2:1 resonance, as Mimas
+   clears the Cassini Division. Either splits a band in two.
+
+A band's optical depth is its mass over its area, `tau = 3 Sigma / (4 rho r)` for meter-sized
+ice. Over the Phase II galaxy about three giants in four are ringed and one in five brightly, at
+a depth of a tenth or more, which is the solar system's one in four; a rocky or icy planet is
+ringed about one time in a hundred, almost always by a broken impact moon.
 
 Captured stragglers are tagged as minor bodies rather than moons, so the map and the inventory
 treat them as the loose rubble they are.
@@ -319,8 +350,9 @@ visit. See [25-system-knowledge.md](25-system-knowledge.md).
   their light, so their planets' exospheres should be hotter than this model makes them and
   their atmospheres harder to keep. Modeling it would cost the galaxy a good share of its
   habitable worlds, which is a reason to do it carefully rather than not at all.
-- **Rings are not generated.** [`crate::rings`](../../crates/lc-world/src/rings.rs) has the real
-  ones and nothing gives a generated giant its own.
+- **Ice giants capture little.** The capture rule gives a Neptune analog twenty, but the ice
+  giants the ladder makes are mostly five Earth masses at Jupiter's relative distance, which
+  catch about three.
 - **Binaries take the primary's system unchanged.** A companion at twenty astronomical units
   truncates a disc and this does not know it.
 - **Nothing ages.** Every system is handed over at the same moment in its life, so there are no
