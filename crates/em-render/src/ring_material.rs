@@ -74,9 +74,17 @@ impl Material for RingMaterial {
         "shaders/ring.wgsl".into()
     }
 
-    /// Additive, with the fragment returning alpha zero: premultiplied `src + dst * (1 - alpha)`.
+    /// Premultiplied, `src + dst * (1 - alpha)`, with alpha the share of the pixel the particles
+    /// cover: a ring in front of its planet hides it as well as adding its own light.
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Add
+        AlphaMode::Premultiplied
+    }
+
+    /// Sorted just nearer than anything else centered on the planet, so it draws after the
+    /// planet's atmosphere shell, which has the same center and would otherwise tie. In render
+    /// units; far smaller than the gap between any two bodies.
+    fn depth_bias(&self) -> f32 {
+        1.0e-4
     }
 
     fn specialize(

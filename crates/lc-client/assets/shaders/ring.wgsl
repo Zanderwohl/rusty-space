@@ -8,6 +8,7 @@
 // Each band is lit as a sheet of particles by single scattering, through the current band
 // mapping as a planet is, and tone-mapped with the planet's own curve. Over that sits a display
 // floor, so a thin ring stays faintly visible where its true brightness is under the window.
+// What the particles cover is the alpha, so a ring hides what is behind it in every band.
 //
 // Per-vertex:
 //   POSITION : the annulus in its own frame, unit outer radius, centered on the planet
@@ -148,6 +149,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var light = vec3<f32>(0.0);
     var least = 0.0;
     var covered = 0.0;
+    var alpha = 0.0;
     let count = min(u32(material.params.x), RING_BANDS);
     for (var i = 0u; i < count; i = i + 1u) {
         let band = material.bands[i];
@@ -171,12 +173,15 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         light = light + share * here;
         least = least + share * material.params.y * opacity_of(coverage) * lighting;
         covered = covered + share;
+        alpha = alpha + share * coverage;
     }
     if (covered <= 0.0) {
         discard;
     }
 
     let value = max(tone_value(light, material.exposure.x, material.exposure.y), least);
-    // Premultiplied and additive: alpha leaves as zero and the color carries it.
-    return vec4<f32>(tone_chroma(light) * value, 0.0);
+    // Premultiplied: the color is what the ring sends, and alpha the share of what is behind it
+    // that the particles stop. Blended after the tone map, so the mix is of display values, as
+    // the planet's own pixels are.
+    return vec4<f32>(tone_chroma(light) * value, clamp(alpha, 0.0, 1.0));
 }
