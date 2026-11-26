@@ -33,6 +33,7 @@ pub struct World {
     pub habitable: bool,
     pub life: f64,
     pub moons: usize,
+    pub submoons: usize,
     pub ocean_first: bool,
     pub migrated: bool,
 }
@@ -97,6 +98,7 @@ pub fn listing(system: &GeneratedSystem, tuning: &Tuning) -> Listing {
                 habitable: p.habitable,
                 life: p.life,
                 moons: p.moons.len(),
+                submoons: p.moons.iter().map(|m| m.moons.len()).sum(),
                 ocean_first: rung.ocean,
                 migrated: p.migrated,
             }),

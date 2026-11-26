@@ -133,7 +133,7 @@ pub fn system_with(star: &CatalogStar, tuning: &Tuning) -> GeneratedSystem {
 
     let mut planets = planet::planets(&name, &arch, star, tuning);
     for (k, p) in planets.iter_mut().enumerate() {
-        p.moons = moon::moons_of(p, star.mass_solar, seed, k, tuning);
+        p.moons = moon::moons_of(p, star.mass_solar, arch.disc.snow_m, seed, k, tuning);
     }
 
     // Sol's bodies are measured, so its belts are too -- see [`belt::solar`].
@@ -336,7 +336,7 @@ impl GeneratedSystem {
     /// in that case and the primary otherwise.
     pub fn to_universe(&self) -> UniverseFileContents {
         const SOLAR_MASS: f64 = 1.988_41e30;
-        let moons: usize = self.planets.iter().map(|p| p.moons.len()).sum();
+        let moons: usize = self.planets.iter().flat_map(|p| &p.moons).map(|m| 1 + m.moons.len()).sum();
         let mut bodies = Vec::with_capacity(self.planets.len() + moons + self.stars.len() + 1);
 
         let center = if self.is_multiple() {
@@ -412,11 +412,11 @@ impl GeneratedSystem {
             for moon in &p.moons {
                 // Loose bodies a planet happens to hold, not a retinue.
                 let tags: &[&str] = if moon.regular { &["Moon"] } else { &["Irregular"] };
+                let plane = tilted(equator, moon.inclination_rad, moon.node_rad);
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
                     info: info(&moon.name, moon.mass_kg, false, tags),
                     params: {
-                        let (inclination, node) =
-                            euler_of(tilted(equator, moon.inclination_rad, moon.node_rad));
+                        let (inclination, node) = euler_of(plane);
                         kepler(
                             &p.name,
                             moon.semi_major_m,
@@ -430,6 +430,16 @@ impl GeneratedSystem {
                     appearance: debug_ball(moon.radius_m, (120, 120, 130)),
                     rotation: None,
                 }));
+                // A submoon orbits its moon, in about the moon's own orbital plane.
+                for sub in &moon.moons {
+                    let (inclination, node) = euler_of(tilted(plane, sub.inclination_rad, sub.node_rad));
+                    bodies.push(SomeBody::KeplerEntry(KeplerEntry {
+                        info: info(&sub.name, sub.mass_kg, false, &["Submoon"]),
+                        params: kepler(&moon.name, sub.semi_major_m, sub.eccentricity, inclination, node, sub.mean_anomaly_deg, None),
+                        appearance: debug_ball(sub.radius_m, (120, 120, 130)),
+                        rotation: None,
+                    }));
+                }
             }
         }
 

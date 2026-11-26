@@ -26,6 +26,8 @@ pub struct Moon {
     pub mass_kg: f64,
     /// Condensed in a disc rather than caught.
     pub regular: bool,
+    /// Its own moons: see [`submoons_of`].
+    pub moons: Vec<Moon>,
 }
 
 impl Moon {
@@ -55,17 +57,55 @@ pub fn hill_radius_m(semi_major_m: f64, mass_kg: f64, star_mass_solar: f64) -> f
 }
 
 /// Everything orbiting one planet, innermost first.
-pub fn moons_of(planet: &Planet, star_mass_solar: f64, seed: u64, index: usize, tuning: &Tuning) -> Vec<Moon> {
+///
+/// `snow_m` is the star's snow line, which anchors how many bodies a planet captures.
+pub fn moons_of(planet: &Planet, star_mass_solar: f64, snow_m: f64, seed: u64, index: usize, tuning: &Tuning) -> Vec<Moon> {
     let h = |tag: u64| rng::hash(&[seed, 0x_6d30_306e, index as u64, tag]);
     let hill = hill_radius_m(planet.semi_major_m, planet.mass_kg, star_mass_solar);
 
     let mut out = regular(planet, hill, h(1), tuning);
-    out.extend(irregular(planet, hill, star_mass_solar, h(2), tuning));
+    out.extend(captured(planet, hill, star_mass_solar, snow_m, h(2), tuning));
     out.sort_by(|a, b| a.semi_major_m.total_cmp(&b.semi_major_m));
     for (j, moon) in out.iter_mut().enumerate() {
         moon.name = format!("{} {}", planet.name, roman(j as u32 + 1));
+        moon.moons = submoons_of(moon, planet, rng::hash(&[h(3), j as u64]), tuning);
     }
     out
+}
+
+/// A moon's own moons, from an impact as a planet's Luna is.
+///
+/// Only a large moon far from its planet can keep one: the submoon has to fit between its own
+/// Roche limit around the moon and the stable part of the moon's Hill sphere, and the planet's
+/// tides strip anything around a moon close in.
+pub fn submoons_of(moon: &Moon, planet: &Planet, h: u64, tuning: &Tuning) -> Vec<Moon> {
+    let t = &tuning.moons;
+    let far_enough = moon.semi_major_m * (1.0 - moon.eccentricity) >= t.submoon_min_orbit_radii * planet.radius_m;
+    if moon.radius_m < t.submoon_min_radius_m || !far_enough || rng::uniform(h) >= t.submoon_chance {
+        return Vec::new();
+    }
+    let g = |tag: u64| rng::hash(&[h, 0x5ab, tag]);
+    let hill = moon.semi_major_m * (moon.mass_kg / (3.0 * planet.mass_kg)).cbrt();
+    let mass = moon.mass_kg * rng::uniform_in(g(1), t.submoon_mass_ratio.0.ln(), t.submoon_mass_ratio.1.ln()).exp();
+    let density = rng::uniform_in(g(2), t.density.0, t.density.1);
+    let moon_density = moon.mass_kg / (4.0 / 3.0 * std::f64::consts::PI * moon.radius_m.powi(3));
+    let inner = (t.roche_coefficient * moon.radius_m * (moon_density / density).cbrt()).max(moon.radius_m);
+    let outer = hill * PROGRADE_STABLE;
+    if outer <= inner {
+        return Vec::new();
+    }
+    vec![Moon {
+        name: format!("{} a", moon.name),
+        semi_major_m: rng::uniform_in(g(3), inner.ln(), outer.ln()).exp(),
+        eccentricity: rng::uniform_in(g(4), 0.0, 0.05),
+        inclination_rad: rng::gaussian(g(5)).abs() * 0.05,
+        node_rad: rng::uniform_in(g(6), 0.0, std::f64::consts::TAU),
+        mean_anomaly_deg: rng::uniform_in(g(7), 0.0, 360.0),
+        radius_m: radius_of(mass, density),
+        mass_kg: mass,
+        regular: true,
+        moons: Vec::new(),
+    }]
 }
 
 /// The retinue a planet grew for itself.
@@ -123,51 +163,63 @@ fn regular(planet: &Planet, hill: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
                 radius_m: radius_of(mass, density),
                 mass_kg: mass,
                 regular: true,
+                moons: Vec::new(),
             }
         })
         .collect()
 }
 
-/// The stragglers a planet caught.
+/// The stragglers a planet caught, any planet.
 ///
-/// Capture is a cross-section, so the count goes as the square of the Hill radius. A Jupiter
-/// at 5 AU reaches the ninety-odd the real one has.
-fn irregular(planet: &Planet, hill: f64, star_mass_solar: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
+/// The mean count is a cross-section, the square of the Hill radius, times a supply of passing
+/// bodies that thins with distance as the disc's surface density does. Both are taken against a
+/// Jupiter at twice the star's snow line, where Jupiter sits, so a dim star's system captures as
+/// a scaled solar system would. The count is a Poisson draw, so a small planet usually catches
+/// nothing and now and then catches one or two.
+fn captured(planet: &Planet, hill: f64, star_mass_solar: f64, snow_m: f64, h: u64, tuning: &Tuning) -> Vec<Moon> {
     let t = &tuning.moons;
-    if !planet.class.is_giant() {
-        return Vec::new();
+    let jupiter_m = t.capture_reference_snow * snow_m;
+    let reference = hill_radius_m(jupiter_m, super::disc::JUPITER_EARTHS * EARTH_MASS, star_mass_solar);
+    let mean = t.captured_mean
+        * (hill / reference).powi(2)
+        * (planet.semi_major_m / jupiter_m).powf(-t.capture_supply_index);
+    // Inversion is only accurate to a mean near 30; past it the normal approximation is.
+    let count = if mean < 25.0 {
+        rng::poisson(rng::mix(h), mean)
+    } else {
+        (mean + mean.sqrt() * rng::gaussian(rng::mix(h))).round().max(0.0) as u32
     }
-    // Anchored on Jupiter, the one that has been counted.
-    let reference = hill_radius_m(5.2 * super::AU, 317.83 * EARTH_MASS, star_mass_solar.max(1.0e-3));
-    let scale = (hill / reference).powi(2).min(1.5);
-    let count = (t.irregular_most as f64 * scale * rng::uniform(h).powf(t.irregular_index)) as u32;
-    let count = count.min(t.irregular_most);
+    .min(t.captured_most);
+    // Inside the Roche limit of the densest catch, or inside the planet, nothing stays.
+    let floor = roche_m(planet, t.density.1, t.roche_coefficient).max(planet.radius_m);
 
     (0..count)
-        .map(|j| {
+        .filter_map(|j| {
             let g = |tag: u64| rng::hash(&[h, 0xcab7, j as u64, tag]);
             let retrograde = rng::uniform(g(8)) < t.retrograde_share;
+            let outer = t.irregular_hill.1.min(if retrograde { RETROGRADE_STABLE } else { PROGRADE_STABLE });
+            let eccentricity = rng::uniform_in(g(4), t.irregular_eccentricity.0, t.irregular_eccentricity.1);
+            let semi_major_m = hill * rng::uniform_in(g(1), t.irregular_hill.0, outer);
+            if semi_major_m * (1.0 - eccentricity) <= floor {
+                return None;
+            }
             // Isotropic within its half: a capture remembers nothing of the planet's plane.
             let cosine = rng::uniform_in(g(6), 0.0, 1.0);
             let tilt = cosine.acos();
             let radius = rng::uniform_in(g(3), t.irregular_radius_m.0.ln(), t.irregular_radius_m.1.ln()).exp();
             let density = rng::uniform_in(g(2), t.density.0, t.density.1);
-            Moon {
+            Some(Moon {
                 name: String::new(),
-                semi_major_m: hill
-                    * rng::uniform_in(
-                        g(1),
-                        t.irregular_hill.0,
-                        t.irregular_hill.1.min(if retrograde { RETROGRADE_STABLE } else { PROGRADE_STABLE }),
-                    ),
-                eccentricity: rng::uniform_in(g(4), t.irregular_eccentricity.0, t.irregular_eccentricity.1),
+                semi_major_m,
+                eccentricity,
                 inclination_rad: if retrograde { std::f64::consts::PI - tilt } else { tilt },
                 node_rad: rng::uniform_in(g(7), 0.0, std::f64::consts::TAU),
                 mean_anomaly_deg: rng::uniform_in(g(5), 0.0, 360.0),
                 radius_m: radius,
                 mass_kg: density * 4.0 / 3.0 * std::f64::consts::PI * radius.powi(3),
                 regular: false,
-            }
+                moons: Vec::new(),
+            })
         })
         .collect()
 }
@@ -213,7 +265,7 @@ mod tests {
                 let arch = architecture(&s, &t);
                 let mut planets = planet::planets("S", &arch, &s, &t);
                 for (j, p) in planets.iter_mut().enumerate() {
-                    p.moons = moons_of(p, s.mass_solar, s.seed(), j, &t);
+                    p.moons = moons_of(p, s.mass_solar, arch.disc.snow_m, s.seed(), j, &t);
                 }
                 planets
             })
@@ -376,4 +428,29 @@ mod tests {
             }
         }
     }
+
+    /// A submoon sits outside its own Roche limit around its moon and inside the stable part of
+    /// the moon's Hill sphere, around a moon large and far out enough to keep one.
+    #[test]
+    fn a_submoon_sits_where_one_can_stay() {
+        let t = Tuning::default();
+        let mut found = 0;
+        for planets in systems(300) {
+            for p in &planets {
+                for m in &p.moons {
+                    for sub in &m.moons {
+                        found += 1;
+                        assert!(m.radius_m >= t.moons.submoon_min_radius_m, "{} is too small to keep {}", m.name, sub.name);
+                        assert!(m.semi_major_m >= t.moons.submoon_min_orbit_radii * p.radius_m);
+                        let hill = m.semi_major_m * (m.mass_kg / (3.0 * p.mass_kg)).cbrt();
+                        assert!(sub.semi_major_m < hill * PROGRADE_STABLE && sub.semi_major_m > m.radius_m, "{}", sub.name);
+                        assert!(sub.mass_kg < m.mass_kg * t.moons.submoon_mass_ratio.1 * (1.0 + 1e-12));
+                        assert!(sub.moons.is_empty(), "no moons of submoons");
+                    }
+                }
+            }
+        }
+        assert!(found > 0, "no submoon in three hundred Sun-like systems");
+    }
+
 }

@@ -174,12 +174,16 @@ pub struct Moons {
     /// Earth by mass and nothing else in the inner system has anything like it.
     pub impact_moon_chance: f64,
     pub impact_mass_ratio: (f64, f64),
-    /// Most captured irregulars a planet may hold, and the power law that decides how many.
-    ///
-    /// The cap is what a Jupiter reaches; the mean lands nearer forty, because most giants
-    /// hold a smaller sphere.
-    pub irregular_most: u32,
-    pub irregular_index: f64,
+    /// Mean captures of a Jupiter at `capture_reference_snow` snow lines; the real one's
+    /// counted irregulars are about ninety, many of them too small for this model's floor.
+    pub captured_mean: f64,
+    /// Where the reference Jupiter sits, in snow lines. The Sun's is near 2.7 AU.
+    pub capture_reference_snow: f64,
+    /// How fast the supply of passing bodies thins with distance, as the disc's surface
+    /// density: with it, a Neptune averages about twenty captures and a Mars a few hundredths.
+    pub capture_supply_index: f64,
+    /// Most captures a planet may hold.
+    pub captured_most: u32,
     /// Where an irregular sits, as a share of the Hill radius.
     pub irregular_hill: (f64, f64),
     pub irregular_eccentricity: (f64, f64),
@@ -189,6 +193,13 @@ pub struct Moons {
     pub irregular_radius_m: (f64, f64),
     /// Densities a satellite may have: icy near 1200, rocky near 3500.
     pub density: (f64, f64),
+    /// A moon can keep a submoon only if it is at least this large and this far out, in
+    /// planet radii; closer in, the planet's tides strip it (Kollmeier & Raymond 2019).
+    pub submoon_min_radius_m: f64,
+    pub submoon_min_orbit_radii: f64,
+    /// Chance an eligible moon took an impact and kept the debris, as a planet does a Luna.
+    pub submoon_chance: f64,
+    pub submoon_mass_ratio: (f64, f64),
 }
 
 /// Belts, the Kuiper analog and the Oort cloud.
@@ -289,13 +300,19 @@ impl Default for Tuning {
                 regular_outer_hill: 0.05,
                 impact_moon_chance: 0.15,
                 impact_mass_ratio: (1.0e-3, 2.0e-2),
-                irregular_most: 100,
-                irregular_index: 1.8,
+                captured_mean: 40.0,
+                capture_reference_snow: 2.0,
+                capture_supply_index: 1.25,
+                captured_most: 100,
                 irregular_hill: (0.1, 0.5),
                 irregular_eccentricity: (0.1, 0.7),
                 retrograde_share: 0.65,
                 irregular_radius_m: (1.0e3, 6.0e4),
                 density: (1200.0, 3500.0),
+                submoon_min_radius_m: 1.0e6,
+                submoon_min_orbit_radii: 20.0,
+                submoon_chance: 0.2,
+                submoon_mass_ratio: (1.0e-4, 1.0e-2),
             },
             belts: Belts {
                 belt_survival: 5.0e-4,

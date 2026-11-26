@@ -23,6 +23,7 @@ pub struct Census {
     /// Caught rather than grown in a disc or knocked off by an impact; see [`super::moon`].
     pub captured_moons: u32,
     pub planets_with_moons: u32,
+    pub submoons: u32,
 }
 
 impl Census {
@@ -45,6 +46,7 @@ impl Census {
             moons: system.planets.iter().map(|p| p.moons.len() as u32).sum(),
             captured_moons: system.moons().filter(|m| !m.regular).count() as u32,
             planets_with_moons: count(&|p| !p.moons.is_empty()),
+            submoons: system.moons().map(|m| m.moons.len() as u32).sum(),
         }
     }
 }

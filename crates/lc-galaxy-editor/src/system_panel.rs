@@ -199,7 +199,11 @@ fn entry(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
                     ui.label("life");
                     ui.label(format!("{:.2}", w.life));
                     ui.label("moons");
-                    ui.label(w.moons.to_string());
+                    ui.label(match w.submoons {
+                        0 => w.moons.to_string(),
+                        1 => format!("{} (1 submoon)", w.moons),
+                        n => format!("{} ({n} submoons)", w.moons),
+                    });
                     ui.end_row();
                 }
             });

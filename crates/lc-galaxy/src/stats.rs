@@ -88,7 +88,7 @@ pub fn census_of(star: &BakedStar, kinematics: &Kinematics) -> Option<Census> {
 pub type Measure = fn(&[&Census]) -> String;
 
 /// The systems table's rows, in order.
-pub fn system_rows() -> [(&'static str, Measure); 12] {
+pub fn system_rows() -> [(&'static str, Measure); 13] {
     fn per_star(cs: &[&Census], f: fn(&Census) -> u32) -> String {
         if cs.is_empty() { "–".into() } else { format!("{:.2}", cs.iter().map(|c| f(c) as f64).sum::<f64>() / cs.len() as f64) }
     }
@@ -108,6 +108,7 @@ pub fn system_rows() -> [(&'static str, Measure); 12] {
         ("moons / star", |cs| per_star(cs, |c| c.moons)),
         ("captured / star", |cs| per_star(cs, |c| c.captured_moons)),
         // Of all planets, not a per-star mean: a star with no planets has no planet to count.
+        ("submoons", |cs| cs.iter().map(|c| c.submoons).sum::<u32>().to_string()),
         ("planets with a moon", |cs| {
             let planets: u32 = cs.iter().map(|c| c.planets).sum();
             if planets == 0 { "–".into() } else { format!("{:.0}%", 100.0 * cs.iter().map(|c| c.planets_with_moons).sum::<u32>() as f64 / planets as f64) }
