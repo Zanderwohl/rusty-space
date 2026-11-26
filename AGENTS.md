@@ -90,6 +90,8 @@ The window is always 1280×720, and frame timings from lavapipe are meaningless.
 | `--burst-every <k>` | space a burst's photographs `k` frames apart: one window that catches a moment whose frame cannot be known in advance, such as a staged scene's burn |
 | `--bench <n>` | time `n` frames after `--frames` of warm-up and quit: frame time, main-world CPU, render passes. See `src/bench.rs` |
 | `--at <body>` / `--station <course>` | stand off a body, or start on a station |
+| `--star <id>` | start offline in another star's system, by its raw catalog id (`0x…` as the console prints ids, or decimal), two astronomical units out. Placed before `--station` and `--at` look for their body, so `--star 0x218f017673fe1f5e --station "rings:Ran h"` ends on a generated ring station. Ignored with a shard, which says where its ships are |
+| `--band <n>` | start in a band preset, by its place in `em_spectra::mapping::presets::all`: 0 natural, 1 deep natural, 2 thermal, 3 dust penetration, 4 composition, 5 survey |
 | `--charted` | seed what the ship knows from truth. **A ship knows nothing on creation, so it photographs nothing**: without this every body shot is a ship staring at an empty panel and `--focus` names a body the panel does not list. The charting office kept as a dev tool |
 | `--lift <deg>` | raise the ship out of the ecliptic about the star, keeping its distance |
 | `--panel <name>` / `--tune` | open a panel. `--panel map` is the exception: the map is a mode of the main view, so this is a pin holding it there |
@@ -159,6 +161,27 @@ three months of running becomes about a minute of watching.
 
 Most of what has gone wrong in the renderer was found this way and could not have been found
 any other way.
+
+**Ring reference shots.** Rings are checked on four subjects, each in natural, thermal and dust
+penetration (`--band 0`, `2`, `3`): twelve windows. The ring close-up is a beauty shot, so it
+comes from `--beauty-dir`; the main window's `--shot` from these runs has come back black. A
+generated planet's shot waits up to three seconds for its surface bake, which is why the run is
+1200 frames:
+
+```bash
+lightcone assets/catalogs/hygdata_v42.csv --star <id> --station "rings:<body>" --rate 0 \
+    --band 0 --beauty-kind ringside --beauty-period 60 --beauty-dir <dir> --shot <dir>/main.png --frames 1200
+```
+
+| subject | `--star` | body | what it checks |
+|---|---|---|---|
+| Saturn | (none) | `Saturn` | the measured system: B ring thick, Cassini Division thin |
+| Ran h | `0x218f017673fe1f5e` | `Ran h` | gaps and a narrow ringlet, optical depth 0.24 |
+| ice giant m | `0x1162f52f7fafca24` | `Star 1162f52f7fafca24 m` | five bands at optical depth 3.8e-5: faint |
+| rocky d | `0xf18fb46d0cdd199b` | `Star f18fb46d0cdd199b d` | optical depth 2 at albedo 0.10: dark and dense |
+
+In a script, pass `--star` and its value as two words. zsh does not split an unquoted
+`${star:+--star $star}`, and the client then never sees the flag.
 
 `--lift` is there because every station is in the ecliptic and every population's pole is the
 ecliptic pole, so without it a belt is edge-on in every photograph that can be taken and a
