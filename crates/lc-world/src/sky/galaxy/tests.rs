@@ -114,7 +114,7 @@ fn a_record_whose_cell_leaves_its_chunk_is_refused() {
     let c = chunk();
     let mut bytes = c.encode().unwrap();
     // The first record's cell-within-chunk field sits right after the record count.
-    let header = bytes.len() - c.records.len() * 17;
+    let header = bytes.len() - c.records.len() * 19;
     bytes[header..header + 2].copy_from_slice(&0x8000u16.to_le_bytes());
     assert_eq!(GalaxyChunk::decode(&bytes), Err(GalaxyError::BadRecord(0)));
 }

@@ -1,11 +1,13 @@
-//! The grid, the built id, and the 17 bytes a published star stores.
+//! The grid, the built id, and the 19 bytes a published star stores.
 //!
-//! What is stored is what cannot be recomputed: identity, position and the draws. State,
-//! luminosity, temperature, radius and velocity follow from them on load.
+//! What is stored is what cannot be recomputed: identity, position and the draws, and the shell
+//! radius, which depends on neighbors a loader may not have. State, luminosity, temperature,
+//! radius and velocity follow from the draws on load.
 
 use glam::DVec3;
 
 use crate::sky::StarId;
+use crate::sky::shells::MAX_SHELL_LY;
 
 /// Side of a grid cell in ly. Part of the format: the grid is anchored at the origin and never
 /// moves.
@@ -61,6 +63,9 @@ pub struct GalaxyRecord {
     pub flags: u8,
     /// Index into its chunk's system profiles; 0 is the default profile.
     pub profile: u8,
+    /// The shell radius the publish computed against every neighbor, linear over
+    /// `0..MAX_SHELL_LY`.
+    pub shell: u16,
 }
 
 const POPULATION_BITS: u8 = 0x0f;
@@ -94,7 +99,18 @@ impl GalaxyRecord {
             feh,
             flags: (population & POPULATION_BITS) | if tier_a { TIER_A } else { 0 },
             profile: 0,
+            shell: 0,
         }
+    }
+
+    /// Rounded down, so shells the publish made touch still do not overlap after quantizing.
+    pub fn with_shell(self, shell_ly: f64) -> Self {
+        let steps = (shell_ly / MAX_SHELL_LY * u16::MAX as f64).floor().clamp(0.0, u16::MAX as f64) as u16;
+        Self { shell: steps, ..self }
+    }
+
+    pub fn shell_ly(&self) -> f64 {
+        self.shell as f64 / u16::MAX as f64 * MAX_SHELL_LY
     }
 
     /// The center of the stored position's step.

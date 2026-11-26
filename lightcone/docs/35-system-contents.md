@@ -6,7 +6,7 @@ star (see [34-galaxy-authoring.md](34-galaxy-authoring.md)), and the system gene
 into its system (see [26-system-generation.md](26-system-generation.md)). This document is the part
 between them.
 
-**Status: built, S1–S4.** The system fields, the per-chunk profile table (chunk format version 2),
+**Status: built, S1–S4.** The system fields, the per-chunk profile table,
 the profile on `CatalogStar`, the ocean-first construction and Galaxy Forge's statistics, charts,
 System inspector and color-by are in. The estimate above the live-bake budget is not.
 
@@ -72,7 +72,8 @@ always at index 0, and stores the index in a new record byte. The fields are smo
 large, so a chunk holds a handful of distinct profiles. More than 255 is a bake error naming the
 chunk, and the remedy is wider edges or coarser steps.
 
-The record grows from 16 to 17 bytes, and the chunk format moves to version 2. A whole profile per
+The record grows from 16 to 17 bytes. (It is 19 bytes and chunk format version 3 since each star
+also stores its shell radius; see [03-world-model.md](03-world-model.md), "Sizing".) A whole profile per
 star would cost 3 bytes; a table index costs 1. If all of tier B's 1.5e11 stars were published, the
 two bytes saved per star would be 300 GB.
 

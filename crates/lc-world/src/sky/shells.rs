@@ -4,8 +4,10 @@
 //! A shell's nominal radius scales with the cube root of the star's mass, as a tidal radius does,
 //! and is [`SOLAR_SHELL_LY`] for one solar mass. Where two nominal shells would overlap, both
 //! shrink in proportion to their nominal radii until they touch, which for equal masses is half
-//! the separation. Every provider assigns the radii once over the stars it loaded, so the shard,
-//! the client and Galaxy Forge read the same numbers.
+//! the separation. A published galaxy stores each radius, worked out at publish against every
+//! neighbor across chunk faces, because a loader may hold only some chunks; a catalog held whole
+//! (HYG, authored stars) assigns them at load. Either way the shard, the client and Galaxy Forge
+//! read the same numbers.
 
 use glam::DVec3;
 

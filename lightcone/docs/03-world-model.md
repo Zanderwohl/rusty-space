@@ -42,8 +42,10 @@ shells at that radius do not intersect for typical spacings. A shell's nominal r
 1.6 ly × (M/M☉)^⅓, the cube root a tidal radius follows, over the record's 0.08–150 M☉ (0.69 to
 8.5 ly). Shells are clamped so that no two overlap: where two stars are closer than the sum of
 their nominal radii, both shrink in proportion to their nominal radii until they touch, which for
-equal masses is half the separation. Every star provider assigns the radii over the stars it
-loaded, so the shard and the client agree on them (`lc_world::sky::shells`).
+equal masses is half the separation (`lc_world::sky::shells`). A published galaxy stores each
+star's radius, worked out at publish against its neighbors across chunk faces, so a shard or client
+holding only some chunks still reads the same radius. A catalog held whole, such as HYG, assigns
+the radii when it loads.
 
 The 1.6 ly is an Oort-cloud size, not a precision limit. f64 meters resolve 2 m at that distance.
 The Sun's pull there, 5.8 × 10⁻¹³ m/s², is about seven times the galactic tide at a local density

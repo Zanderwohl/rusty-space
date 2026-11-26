@@ -22,14 +22,14 @@ pub use kinematics::{Kinematics, Rotation};
 pub use record::{CELL_HALF_RANGE, CELL_LY, FEH_STEP, GalaxyRecord, MASS_RANGE, MAX_AGE_GYR, cell_in_grid, pack_cell, star_id};
 
 const MAGIC: &[u8; 6] = b"LCGAL\x00";
-const VERSION: u16 = 2;
+const VERSION: u16 = 3;
 
 /// Cells per chunk along each axis: a chunk is 256 ly on a side, and a record names its cell
 /// within the chunk in 15 bits.
 pub const CHUNK_CELLS: i32 = 32;
 
-/// Bytes per record: cell in chunk, index, offset, mass, age, `[Fe/H]`, flags, profile.
-const RECORD: usize = 2 + 2 + 6 + 2 + 2 + 1 + 1 + 1;
+/// Bytes per record: cell in chunk, index, offset, mass, age, `[Fe/H]`, flags, profile, shell.
+const RECORD: usize = 2 + 2 + 6 + 2 + 2 + 1 + 1 + 1 + 2;
 
 /// The `source` a galaxy star's provenance names.
 pub const SOURCE: &str = "galaxy";
@@ -148,6 +148,7 @@ impl GalaxyChunk {
             out.push(r.feh as u8);
             out.push(r.flags);
             out.push(r.profile);
+            out.extend_from_slice(&r.shell.to_le_bytes());
         }
         Ok(out)
     }
@@ -211,6 +212,7 @@ impl GalaxyChunk {
                 feh: r.u8()? as i8,
                 flags: r.u8()?,
                 profile: r.u8()?,
+                shell: r.u16()?,
             };
             if record.population() as usize >= populations.len()
                 || record.profile as usize >= profiles.len()
@@ -269,7 +271,7 @@ pub fn catalog_star(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemPr
         metallicity: r.feh(),
         component: Component { index: 1, group: None },
         system: (!profile.is_default()).then_some(profile),
-        shell_ly: 0.0,
+        shell_ly: r.shell_ly(),
     })
 }
 
@@ -415,7 +417,6 @@ impl GalaxyProvider {
         stars.sort_by(|a: &CatalogStar, b: &CatalogStar| {
             a.position_ly.length().total_cmp(&b.position_ly.length()).then(a.id.cmp(&b.id))
         });
-        crate::sky::shells::assign(&mut stars);
         let mut cells: HashMap<[i32; 3], Vec<usize>> = HashMap::new();
         for (i, s) in stars.iter().enumerate() {
             cells.entry(cell_containing(s.position_ly)).or_default().push(i);
