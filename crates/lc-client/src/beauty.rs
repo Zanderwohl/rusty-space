@@ -80,9 +80,6 @@ const NEIGHBOR_MIN_RAD: f64 = 1.5e-4;
 const MAX_COVERED: f64 = 0.7;
 /// The least of a target's face that must be lit. A crescent passes; a new moon does not.
 const MIN_LIT: f64 = 0.3;
-/// The faintest rings worth a photograph, as the renderer draws them. Uranus's pass; Jupiter's,
-/// which took Voyager to find, do not.
-const MIN_RING_OPACITY: f32 = 0.05;
 /// Within this many of its outer radii of a ring system, a stretch of it gets a shot of its own.
 const RINGSIDE_RADII: f64 = 6.0;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
@@ -560,7 +557,10 @@ pub fn subjects<'a>(
 
     for body in drawn {
         let Some(rings) = &body.rings else { continue };
-        if crate::rings::ring_opacity(&rings.system) < MIN_RING_OPACITY {
+        // As the renderer would draw them in a photograph: Uranus's pass, and Jupiter's, which
+        // took Voyager to find, do not.
+        let Some(system) = system else { continue };
+        if crate::rings::shown_value(body, rings, system, session) < crate::rings::MIN_SHOT_VALUE {
             continue;
         }
         let outer = rings.system.outer_m();

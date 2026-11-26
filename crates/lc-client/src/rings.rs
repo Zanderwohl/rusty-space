@@ -56,11 +56,51 @@ const RING_ICE_EMISSIVE: (f32, f32) = (0.97, 0.05);
 /// icy ones from 0.1 to 0.6, and the measured systems split the same way.
 const ICY_ALBEDO: f64 = 0.1;
 
-/// How opaque a ring system was drawn before its light was its own; the beauty shots still
-/// choose rings by it (`ring-rendering-plan.md` phase 6). What the rings cover of their own disc.
-pub fn ring_opacity(rings: &RingSystem) -> f32 {
-    let disc = std::f64::consts::PI * rings.outer_m().powi(2);
-    opacity_of(rings.cross_section_m2() / disc.max(f64::MIN_POSITIVE))
+/// The least a ring's brightest band may be drawn at, lit and seen face-on, for the ring to be
+/// worth a photograph. Linear, about 39 of 255 encoded: Jupiter's rings (0.004) are under it,
+/// Neptune's arcs (0.04) and Uranus's epsilon ring (0.09) over.
+pub const MIN_SHOT_VALUE: f32 = 0.02;
+
+/// `tone_value` in `tonemap.wgsl`.
+fn tone_value(light: Vec3, reference: f32, stops: f32) -> f32 {
+    let luminance = light.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    if luminance > 0.0 && reference > 0.0 && stops > 0.0 {
+        ((luminance / reference).log2() / stops + 1.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// What `ring.wgsl` draws a ring's brightest band at, lit and seen face-on, given the sheet's
+/// `(reflected, emitted)` light for rock and for ice and the exposure it is seen in.
+pub fn brightest(rings: &RingSystem, rock: (Vec3, Vec3), ice: (Vec3, Vec3), reference: f32, stops: f32) -> f32 {
+    let (reflected, emitted) = if is_icy(rings) { ice } else { rock };
+    rings
+        .bands
+        .iter()
+        .map(|b| {
+            let tau = b.optical_depth as f32;
+            let light = reflected * lit_face(1.0, 1.0, tau) + emitted * (1.0 - (-tau).exp());
+            tone_value(light, reference, stops).max(floor_of(tau, 1.0))
+        })
+        .fold(0.0, f32::max)
+}
+
+/// [`brightest`] for a body's rings as they would be seen now: through the current band mapping,
+/// in the body's own metered exposure, as a photograph of it is taken.
+pub fn shown_value(body: &Drawable, rings: &lc_world::system::Rings, system: &lc_world::system::LocalSystem, session: &crate::session::Session) -> f32 {
+    let star = Starlight {
+        radius_m: system.star_radius_m(),
+        teff_k: system.star_teff_k(),
+        luminosity_w: system.star_luminosity_w(),
+        distance_m: system.star_position_ly().distance(body.position_ly) * M_PER_LY,
+    };
+    let radiance = crate::resolved::surface_radiance(body, star.radius_m, star.teff_k, star.distance_m);
+    let reference = crate::resolved::metered_for(&session.tone, &radiance, &session.mapping);
+    let albedo = rings.system.albedo;
+    let rock = light_of(&particles(Material::Rock, albedo), albedo, star, &session.mapping);
+    let ice = light_of(&particles(Material::Ice, albedo), albedo, star, &session.mapping);
+    brightest(&rings.system, rock, ice, reference, session.tone.surface_stops)
 }
 
 /// A ring system, which unlike a population is attached to a body and therefore moves.
@@ -516,16 +556,28 @@ mod tests {
         assert!(normals.iter().all(|n| *n == normals[0]), "every normal is the pole");
     }
 
-    /// The four measured systems, in the order a person would rank them by eye.
+    /// The four measured systems as a photograph would show them, each beside a planet of albedo
+    /// one half metered to the top of its window: Saturn's are the thing you see, Uranus's and
+    /// Neptune's faint but worth a picture, and Jupiter's, which took Voyager to find, are not.
     #[test]
     fn the_ring_systems_come_out_in_the_right_order() {
-        let drawn = |id: &str| ring_opacity(for_body(id).unwrap());
-        let (saturn, uranus, neptune, jupiter) =
-            (drawn("Saturn"), drawn("Uranus"), drawn("Neptune"), drawn("Jupiter"));
+        let natural = em_spectra::presets::natural();
+        let shown = |id: &str, au: f64| {
+            let rings = for_body(id).unwrap();
+            let star = sun_at(au);
+            let planet = light_of(&Particles { reflectance: [0.5; BANDS], emissivity: [0.5; BANDS] }, 0.5, star, &natural).0;
+            // The metering puts a lit surface at 0.9 of a five-stop window.
+            let reference = planet.dot(Vec3::new(0.2126, 0.7152, 0.0722)) * 2f32.powf(0.5);
+            let albedo = rings.albedo;
+            let rock = light_of(&particles(Material::Rock, albedo), albedo, star, &natural);
+            let ice = light_of(&particles(Material::Ice, albedo), albedo, star, &natural);
+            brightest(rings, rock, ice, reference, 5.0)
+        };
+        let (saturn, uranus, neptune, jupiter) = (shown("Saturn", 9.5), shown("Uranus", 19.2), shown("Neptune", 30.1), shown("Jupiter", 5.2));
         assert!(saturn > 0.5, "Saturn's rings are the thing you see: {saturn}");
-        assert!(uranus < saturn * 0.5 && uranus > 0.05, "Uranus's are faint but real: {uranus}");
-        assert!(neptune < uranus, "Neptune's fainter still: {neptune}");
-        assert!(jupiter < 0.05, "and Jupiter's took Voyager to find: {jupiter}");
+        assert!(uranus < saturn && uranus >= MIN_SHOT_VALUE, "Uranus's are faint but real: {uranus}");
+        assert!(neptune < uranus && neptune >= MIN_SHOT_VALUE, "Neptune's fainter still: {neptune}");
+        assert!(jupiter < MIN_SHOT_VALUE, "and Jupiter's took Voyager to find: {jupiter}");
     }
 
     const AU: f64 = 1.495_978_707e11;
