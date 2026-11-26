@@ -1,7 +1,7 @@
 //! ```text
 //! lc-galaxy check   <timeline.ron>
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
-//! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>]
+//! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
 //! ```
 
 use std::path::PathBuf;
@@ -14,9 +14,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
-        eprintln!("usage: lc-galaxy check|stats|publish <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <dir>] [--name <name>]");
+        eprintln!("usage: lc-galaxy check|stats|publish <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <dir>] [--name <name>] [--threads <n>]");
         return ExitCode::FAILURE;
     };
     let text = match std::fs::read_to_string(path) {
@@ -72,7 +72,16 @@ fn main() -> ExitCode {
             let name = after("--name").unwrap_or_else(|| {
                 PathBuf::from(path).file_stem().map_or("galaxy".into(), |s| s.to_string_lossy().into_owned())
             });
-            match publish::publish(&timeline, &name, &PathBuf::from(&out)) {
+            // The output must not depend on this; tests/cli.rs publishes with 1 and with many.
+            let threads = match after("--threads").map(|t| t.parse::<usize>()) {
+                Some(Ok(n)) if n > 0 => n,
+                Some(_) => {
+                    eprintln!("--threads needs a whole number above zero");
+                    return ExitCode::FAILURE;
+                }
+                None => default_threads(),
+            };
+            match publish::publish(&timeline, &name, &PathBuf::from(&out), threads) {
                 Ok(m) => {
                     let stars: u32 = m.chunks.iter().map(|c| c.stars).sum();
                     println!("{name}: {stars} stars in {} chunk(s), graph {}, to {out}", m.chunks.len(), m.graph);

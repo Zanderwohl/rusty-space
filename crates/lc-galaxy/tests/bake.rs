@@ -207,9 +207,9 @@ fn republishing_removes_chunks_the_manifest_no_longer_names() {
     let out = std::env::temp_dir().join(format!("lc-galaxy-publish-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);
     let (mut t, _) = uniform_ball(50.0, 6.0, 1);
-    lc_galaxy::publish::publish(&t, "a", &out).unwrap();
+    lc_galaxy::publish::publish(&t, "a", &out, 4).unwrap();
     t.seed = 2;
-    let m = lc_galaxy::publish::publish(&t, "a", &out).unwrap();
+    let m = lc_galaxy::publish::publish(&t, "a", &out, 4).unwrap();
     let mut on_disk: Vec<String> =
         std::fs::read_dir(out.join("chunks")).unwrap().map(|e| format!("chunks/{}", e.unwrap().file_name().to_string_lossy())).collect();
     let mut listed: Vec<String> = m.chunks.iter().map(|c| c.file.clone()).collect();
