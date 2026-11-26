@@ -185,8 +185,15 @@ pub struct DevEntry {
 }
 
 /// How far from its star `--star` leaves the ship when nothing else places it: in the system,
-/// and well clear of the star itself.
+/// and well clear of the star itself, a giant included.
 const START_STAR_STANDOFF_M: f64 = 2.0 * lc_world::sky::generate::AU;
+const START_STAR_STANDOFF_RADII: f64 = 4.0;
+
+/// Whether `--star` named a star the ship is not in, so nothing else should place it yet: a
+/// station or a body of the system it began in would be the wrong one.
+fn waiting_for_star(dev: &DevEntry, game: &Game) -> bool {
+    dev.start_star.is_some_and(|id| game.system.as_ref().map(|s| s.star.get()) != Some(id))
+}
 
 /// Move the ship into the system of the star `--star` names, once, before anything that looks for
 /// a body there. Offline only: a shard says where its ships are.
@@ -201,15 +208,19 @@ pub(crate) fn place_at_star(
     }
     let Some(id) = dev.start_star else { return };
     *done = true;
+    // Logged as well as said, because a `--shot` run has no one to read the interface.
     if game.remote {
+        warn!("--star is offline only; a shard says where its ships are");
         ui.notify("--star is offline only".to_string(), 0.0);
         return;
     }
     let Some(star) = game.star_by_raw(id) else {
+        warn!("--star: no star {id:#x} in the loaded sky");
         ui.notify(format!("no star {id:#x} in the loaded sky"), 0.0);
         return;
     };
-    let at = star.position_ly + DVec3::X * START_STAR_STANDOFF_M / crate::system::M_PER_LY;
+    let standoff_m = START_STAR_STANDOFF_M.max(START_STAR_STANDOFF_RADII * star.star.radius_m);
+    let at = star.position_ly + DVec3::X * standoff_m / crate::system::M_PER_LY;
     game.0.place_at(at);
     // Now rather than at the next body update, so a `--station` checked later this frame does
     // not resolve against the system the ship just left.
@@ -232,6 +243,9 @@ pub(crate) fn place_on_station(
         return;
     }
     let Some(spec) = &dev.station else { return };
+    if waiting_for_star(&dev, &game) {
+        return;
+    }
     let Some(course) = crate::navigation::Course::parse(spec) else {
         ui.notify(format!("no such course: {spec}"), 0.0);
         *done = true;
@@ -421,6 +435,9 @@ pub(crate) fn place_at_body(
         return;
     }
     let Some(want) = &dev.at_body else { return };
+    if waiting_for_star(&dev, &game) {
+        return;
+    }
     let Some(body) = bodies.drawn.iter().find(|d| &d.name == want) else { return };
     // Far enough out that the body is a disc rather than a wall. Rings reach a couple of
     // planetary radii, so this has to clear them.

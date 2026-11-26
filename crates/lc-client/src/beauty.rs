@@ -314,8 +314,8 @@ fn shoot(
     dev: Res<crate::dev::DevEntry>,
     mut beauty: ResMut<Beauty>,
     mut shot_body: ResMut<ShotBody>,
-    surfaces: Res<crate::surfaces::Surfaces>,
-    bakes: Res<crate::procedural::Bakes>,
+    // One parameter, because a system takes sixteen.
+    (surfaces, bakes, resolved): (Res<crate::surfaces::Surfaces>, Res<crate::procedural::Bakes>, Res<crate::resolved::Resolved>),
     mut images: ResMut<Assets<Image>>,
     camera: Single<
         (&mut Camera, &mut Transform, &mut Projection, &mut RenderTarget, &mut Exposure),
@@ -359,8 +359,8 @@ fn shoot(
         }
         // Seeded from the clock as well, so two sessions do not visit the neighbors in step.
         let seed = beauty.taken ^ time.elapsed().as_nanos() as u64;
-        let resolved = uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id)));
-        let mut list = subjects(&game.0, &bodies.drawn, resolved, eye.at_ly, seed);
+        let contacts = uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id)));
+        let mut list = subjects(&game.0, &bodies.drawn, contacts, eye.at_ly, resolved.sky_rad_per_px, seed);
         list.retain(held_on);
         beauty.idle = list.is_empty();
         let Some(subject) = list.get((beauty.turn % list.len().max(1) as u64) as usize) else {
@@ -470,6 +470,8 @@ pub fn subjects<'a>(
     // Those the sky resolves: one it draws as a point has its hull hidden.
     contacts: impl Iterator<Item = &'a Contact>,
     eye_ly: DVec3,
+    // The sky camera's, which decides the exposure a planet's rings are photographed in.
+    sky_rad_per_px: f32,
     seed: u64,
 ) -> Vec<Subject> {
     let now = session.coordinate_time_s();
@@ -560,7 +562,7 @@ pub fn subjects<'a>(
         // As the renderer would draw them in a photograph: Uranus's pass, and Jupiter's, which
         // took Voyager to find, do not.
         let Some(system) = system else { continue };
-        if crate::rings::shown_value(body, rings, system, session) < crate::rings::MIN_SHOT_VALUE {
+        if crate::rings::shown_value(body, rings, system, session, eye_ly, sky_rad_per_px) < crate::rings::MIN_SHOT_VALUE {
             continue;
         }
         let outer = rings.system.outer_m();

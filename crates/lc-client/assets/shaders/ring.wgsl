@@ -121,6 +121,12 @@ fn sunlit(along: f32, off: f32, planet: f32, edge: f32) -> f32 {
     return smoothstep(planet - 0.5 * edge, planet + 0.5 * edge, off);
 }
 
+/// `1 - exp(-x)`, by its first-order term where f32 would round it to nothing: `exp(-x)` is
+/// exactly one under about 6e-8, which a generated ring reaches.
+fn coverage_of(x: f32) -> f32 {
+    return select(1.0 - exp(-x), x, x < 1.0e-4);
+}
+
 /// `envelope::opacity_of`: a coverage as a display level, by its fourth root.
 fn opacity_of(coverage: f32) -> f32 {
     if (coverage <= FAINTEST) {
@@ -184,7 +190,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let tau = band.z * speckle;
         let reflected = mix(material.reflected_rocky.rgb, material.reflected_icy.rgb, band.w);
         let emitted = mix(material.emitted_rocky.rgb, material.emitted_icy.rgb, band.w);
-        let coverage = 1.0 - exp(-tau / mu);
+        let coverage = coverage_of(tau / mu);
         let sunward = lit_face(mu, mu0, tau);
         let face = select(unlit_face(mu, mu0, tau), sunward, sunlit_side);
         // The planet's shadow takes starlight from both faces; the particles' own glow stays.
