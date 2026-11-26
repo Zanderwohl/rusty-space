@@ -25,6 +25,12 @@ enum Purpose {
     SaveThen(Action),
 }
 
+enum Choice {
+    Cancel,
+    Discard,
+    Save,
+}
+
 enum Step {
     Prompt(Action),
     Pick(Purpose, Task<Option<PathBuf>>),
@@ -40,13 +46,12 @@ impl Files {
         self.step.is_some()
     }
 
-    /// Runs `action` at once if nothing would be lost, and otherwise asks first. A document
-    /// with no path counts as unsaved even when it is unchanged.
+    /// Runs `action` at once if nothing would be lost, and otherwise asks first.
     pub fn request(&mut self, action: Action, doc: &mut Doc, view: &mut ViewState) -> bool {
         if self.busy() {
             return false;
         }
-        if doc.dirty() || doc.path.is_none() {
+        if doc.dirty() {
             self.step = Some(Step::Prompt(action));
             false
         } else {
@@ -92,16 +97,19 @@ impl Files {
     }
 
     fn prompt(&mut self, ctx: &egui::Context, action: Action, doc: &mut Doc, view: &mut ViewState) -> bool {
-        let mut chosen = None;
+        let mut chosen = ctx.input(|i| i.key_pressed(egui::Key::Escape)).then_some(Choice::Cancel);
         egui::Modal::new("unsaved".into()).show(ctx, |ui| {
             ui.label("There are unsaved changes.");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    chosen = Some(Choice::Cancel);
+                }
                 if ui.button("Discard").clicked() {
-                    chosen = Some(false);
+                    chosen = Some(Choice::Discard);
                 }
                 if ui.button("Save").clicked() {
-                    chosen = Some(true);
+                    chosen = Some(Choice::Save);
                 }
             });
         });
@@ -110,8 +118,9 @@ impl Files {
                 self.step = Some(Step::Prompt(action));
                 false
             }
-            Some(false) => self.perform(action, doc, view),
-            Some(true) if doc.path.is_some() => match doc.save() {
+            Some(Choice::Cancel) => false,
+            Some(Choice::Discard) => self.perform(action, doc, view),
+            Some(Choice::Save) if doc.path.is_some() => match doc.save() {
                 Ok(()) => self.perform(action, doc, view),
                 Err(e) => {
                     doc.notice = Some(e);
@@ -119,7 +128,7 @@ impl Files {
                     false
                 }
             },
-            Some(true) => {
+            Some(Choice::Save) => {
                 self.step = Some(Step::Pick(Purpose::SaveThen(action), pick(false, doc)));
                 false
             }
