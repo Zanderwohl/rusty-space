@@ -273,10 +273,11 @@ impl LocalSystem {
                 let rings = fixed.rings.clone();
 
                 let equilibrium_k = equilibrium_temperature(self.star_luminosity_w, distance_m);
-                let surface = crate::surface::Surface::classify(
+                let surface = crate::surface::Surface::of(
                     radius_m,
                     self.sim.info(i).mass,
                     equilibrium_k,
+                    &self.sim.info(i).tags,
                 );
 
                 // What actually reflects: the lit disc, plus whatever of the rings is turned

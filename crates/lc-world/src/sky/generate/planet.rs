@@ -93,13 +93,22 @@ impl Planet {
 
     /// What a survey of it reads under `star`: the same join `system::LocalSystem` makes.
     pub fn world(&self, star: &crate::sky::CatalogStar) -> crate::worlds::World {
-        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        let surface = self.surface();
         let tags = crate::worlds::Stated::tags(self.atmosphere, self.top, self.class == Class::GasGiant);
         crate::worlds::of(&self.name, surface, &tags, self.giant(star).as_ref())
     }
 
+    pub fn surface(&self) -> crate::surface::Surface {
+        let stated = crate::worlds::Stated {
+            atmosphere: Some(self.atmosphere),
+            top: Some(self.top),
+            gas_giant: self.class == Class::GasGiant,
+        };
+        crate::surface::Surface::stated(self.radius_m, self.mass_kg, self.equilibrium_k, &stated)
+    }
+
     pub fn giant(&self, star: &crate::sky::CatalogStar) -> Option<crate::giant::Giant> {
-        let surface = crate::surface::Surface::classify(self.radius_m, self.mass_kg, self.equilibrium_k);
+        let surface = self.surface();
         surface.is_banded().then(|| {
             let inputs = crate::giant::Inputs {
                 mass_kg: self.mass_kg,
