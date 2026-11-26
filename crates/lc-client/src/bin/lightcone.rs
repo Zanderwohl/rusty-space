@@ -47,5 +47,6 @@ fn main() {
         .insert_resource(lc_client::uplink::Demo(entry.demo))
         .insert_resource(entry.dev)
         .add_plugins(ClientPlugin)
+        .add_plugins(lc_icon::AppIconPlugin(lc_icon::LIGHTCONE))
         .run();
 }

@@ -1,0 +1,22 @@
+[package]
+name = "lc-icon"
+version = "0.1.0"
+edition = "2024"
+description = "The galaxy app icon for the Lightcone desktop client and Galaxy Forge, and the plugin that sets it at run time."
+license = "MIT"
+authors = ["Alexander Lowry <zander@zanderlowry.com>"]
+
+[dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["bevy_winit", "bevy_log"] }
+# `Icon` is the one type Bevy does not re-export. The version Bevy already brings.
+winit = { version = "0.30", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# A bare binary run from a terminal has no bundle, so the Dock shows a generic icon unless
+# the app sets one itself.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std", "NSApplication", "NSResponder", "NSImage",
+] }
