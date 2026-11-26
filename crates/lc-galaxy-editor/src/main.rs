@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::ecs::system::NonSendMarker;
-use bevy::window::{WindowCloseRequested, WindowResolution};
+use bevy::window::{PrimaryWindow, RawHandleWrapper, WindowCloseRequested, WindowResolution};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use lc_galaxy::Timeline;
 
@@ -98,10 +98,10 @@ fn main() {
     if let Some(v) = a.view {
         view.view = v;
     }
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: TITLE.into(), resolution: WindowResolution::new(1600, 1000), ..default() }),
-            // Closing asks first when there is unsaved work.
+            // Closing, by the button or ⌘Q, asks first when there is unsaved work.
             close_when_requested: false,
             ..default()
         }))
@@ -114,8 +114,33 @@ fn main() {
             commands.spawn(Camera2d);
         })
         .add_systems(EguiPrimaryContextPass, ui)
-        .add_systems(Update, (title, shoot))
-        .run();
+        .add_systems(Update, (title, shoot));
+    #[cfg(target_os = "macos")]
+    app.add_systems(Update, quit_asks_first);
+    app.run();
+}
+
+/// winit's app menu sends `terminate:`, which exits with no close request. Sent as
+/// `performClose:` it closes the key window instead, so Quit asks first like the close button.
+#[cfg(target_os = "macos")]
+fn quit_asks_first(mut done: Local<bool>, _main: NonSendMarker) {
+    use objc2::{MainThreadMarker, sel};
+    use objc2_app_kit::NSApplication;
+    if *done {
+        return;
+    }
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let Some(menu) = NSApplication::sharedApplication(mtm).mainMenu() else { return };
+    for top in menu.itemArray() {
+        let Some(sub) = top.submenu() else { continue };
+        for item in sub.itemArray() {
+            if item.action() == Some(sel!(terminate:)) {
+                // SAFETY: `performClose:` takes the sender, as `terminate:` does.
+                unsafe { item.setAction(Some(sel!(performClose:))) };
+                *done = true;
+            }
+        }
+    }
 }
 
 fn title(doc: Res<Doc>, mut windows: Query<&mut Window>) {
@@ -139,11 +164,13 @@ fn ui(
     shot: Res<Shot>,
     mut close: MessageReader<WindowCloseRequested>,
     mut exit: MessageWriter<AppExit>,
+    window: Query<&RawHandleWrapper, With<PrimaryWindow>>,
     _main: NonSendMarker,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let doc = &mut *doc;
     let state = &mut *state;
+    state.files.parent = window.single().ok().cloned();
     // Keys pressed while the window takes focus must not change a screenshot.
     if shot.path.is_some() {
         ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
