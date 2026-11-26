@@ -64,6 +64,11 @@ pub struct Resolved {
 
 /// Whether a body is close enough to be worth drawing as a sphere.
 pub fn is_resolved(body: &Drawable, observer_ly: DVec3, rad_per_px: f32) -> bool {
+    reaches(body, body.radius_m, observer_ly, rad_per_px)
+}
+
+/// [`is_resolved`] for something of `radius_m` centered on `body`: its rings.
+fn reaches(body: &Drawable, radius_m: f64, observer_ly: DVec3, rad_per_px: f32) -> bool {
     if rad_per_px <= 0.0 {
         return false;
     }
@@ -71,7 +76,7 @@ pub fn is_resolved(body: &Drawable, observer_ly: DVec3, rad_per_px: f32) -> bool
     if distance_m <= 0.0 {
         return true;
     }
-    (body.radius_m / distance_m) as f32 / rad_per_px > RESOLVE_PX
+    (radius_m / distance_m) as f32 / rad_per_px > RESOLVE_PX
 }
 
 /// The tone map's level for a lit surface: where it sits in the displayed window.
@@ -564,11 +569,18 @@ pub fn metered_for(tone: &crate::tonemap::ToneMap, radiance: &PerBand<f32>, mapp
 /// The layer a body's sphere is drawn on, if it has one.
 fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
     -> Option<usize> {
-    if is_resolved(body, eye_ly, rad_per_px) {
+    layer_for(body, body.radius_m, eye_ly, rad_per_px, shot)
+}
+
+/// The layer something of `radius_m` centered on `body` is drawn on: the sky's when the sky
+/// resolves it, the telescope's when only a shot of `body` does, and none below a pixel, where
+/// the body's point already carries its light.
+pub fn layer_for(body: &Drawable, radius_m: f64, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
+    -> Option<usize> {
+    if reaches(body, radius_m, eye_ly, rad_per_px) {
         return Some(0);
     }
-    (shot.name.as_deref() == Some(body.name.as_str())
-        && is_resolved(body, eye_ly, shot.rad_per_px))
+    (shot.name.as_deref() == Some(body.name.as_str()) && reaches(body, radius_m, eye_ly, shot.rad_per_px))
         .then_some(crate::beauty::SHOT_LAYER)
 }
 

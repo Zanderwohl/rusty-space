@@ -17,12 +17,24 @@ pub const RING_BANDS: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, ShaderType)]
 pub struct RingUniform {
-    pub tint: Vec4,
-    /// Per band, inside out: `(inner, outer, depth, icy)`. Radii are in units of the outer edge;
-    /// depth is optical depth over the deepest band's. Bands past `params.x` are ignored.
+    /// Per band, inside out: `(inner, outer, optical depth, icy)`. Radii are in units of the outer
+    /// edge; `icy` is the share of the band that is ice rather than rock. Bands past `params.x`
+    /// are ignored.
     pub bands: [Vec4; RING_BANDS],
-    /// `(band count, opacity, limb gain, 0)`.
+    /// `(band count, display floor, 0, 0)`. The floor is the least a band is drawn at for its
+    /// coverage, before its lighting; see `ring.wgsl`.
     pub params: Vec4,
+    /// Starlight a fully filled sheet of rock or ice sends back face-on, as linear display light
+    /// through the current band mapping.
+    pub reflected_rocky: Vec4,
+    pub reflected_icy: Vec4,
+    /// What the same sheet radiates at its own temperature, in the same units.
+    pub emitted_rocky: Vec4,
+    pub emitted_icy: Vec4,
+    /// World direction from the planet to the star.
+    pub to_star: Vec4,
+    /// `(surface_reference, stops, 0, 0)`: the tone map, evaluated per fragment.
+    pub exposure: Vec4,
     /// `(grains per outer radius, strength, seed, 0)`. The grain varies with radius only.
     pub grain: Vec4,
 }
@@ -30,9 +42,14 @@ pub struct RingUniform {
 impl Default for RingUniform {
     fn default() -> Self {
         Self {
-            tint: Vec4::ONE,
             bands: [Vec4::ZERO; RING_BANDS],
-            params: Vec4::new(0.0, 1.0, 0.15, 0.0),
+            params: Vec4::ZERO,
+            reflected_rocky: Vec4::ZERO,
+            reflected_icy: Vec4::ZERO,
+            emitted_rocky: Vec4::ZERO,
+            emitted_icy: Vec4::ZERO,
+            to_star: Vec4::ZERO,
+            exposure: Vec4::ZERO,
             grain: Vec4::new(40.0, 0.35, 0.0, 0.0),
         }
     }

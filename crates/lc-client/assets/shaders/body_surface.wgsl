@@ -15,6 +15,7 @@
     view_transformations::position_world_to_clip,
 }
 #import lightcone::scatter::{air_of, crossing, scatter, star_depth, top_of}
+#import "shaders/tonemap.wgsl"::{tone_chroma, tone_value}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -82,9 +83,6 @@ struct BodySurfaceUniform {
 
 /// Share of what the air scatters out of the beam that reaches the ground anyway.
 const SKYLIGHT: f32 = 0.85;
-
-/// Rec. 709, matching crate::tonemap.
-const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> material: BodySurfaceUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var pattern: texture_cube<f32>;
@@ -387,15 +385,6 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The tone map of crate::tonemap, evaluated here rather than per body: the two terms mix
     // differently across the disc and the curve is logarithmic, so one level for the whole
     // surface gets the terminator wrong in any band where both terms matter.
-    let reference = material.exposure.x;
-    let stops = material.exposure.y;
-    let luminance = dot(linear, LUMA);
-    let peak = max(linear.r, max(linear.g, linear.b));
-    var value = 0.0;
-    if (luminance > 0.0 && reference > 0.0 && stops > 0.0) {
-        value = clamp(log2(luminance / reference) / stops + 1.0, 0.0, 1.0);
-    }
-    let chroma = select(vec3<f32>(1.0), linear / peak, peak > 0.0);
-
-    return vec4<f32>(chroma * value, 1.0);
+    let value = tone_value(linear, material.exposure.x, material.exposure.y);
+    return vec4<f32>(tone_chroma(linear) * value, 1.0);
 }
