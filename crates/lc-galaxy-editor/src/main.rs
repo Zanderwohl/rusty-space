@@ -210,6 +210,7 @@ fn menu(ui: &mut egui::Ui, doc: &mut Doc, state: &mut Ui) {
         ui.menu_button("File", |ui| {
             if ui.button("New").clicked() {
                 *doc = Doc::new(Timeline::new(1), None);
+                state.view.forget_document();
                 ui.close();
             }
             if ui.button("Open…").clicked() {
@@ -289,7 +290,10 @@ fn dialog(ctx: &egui::Context, doc: &mut Doc, state: &mut Ui) {
         let path = PathBuf::from(path.trim());
         match d {
             Dialog::Open(_) => match Doc::open(path) {
-                Ok(new) => *doc = new,
+                Ok(new) => {
+                    *doc = new;
+                    state.view.forget_document();
+                }
                 Err(e) => doc.notice = Some(e),
             },
             Dialog::SaveAs(_) => {

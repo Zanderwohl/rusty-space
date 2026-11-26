@@ -18,6 +18,10 @@ pub const LIVE_CELL_BUDGET: f64 = 200_000.0;
 /// Points per axis for the field's expected count.
 const EXPECTED_RESOLUTION: usize = 32;
 
+/// Shared by every document, so caches keyed on a generation never mistake a new document's
+/// bake for the one they hold.
+static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// While a drag is changing the timeline, rebuild at most this often.
 const DRAG_REBUILD_INTERVAL: Duration = Duration::from_millis(150);
 
@@ -171,7 +175,7 @@ impl Doc {
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
         self.result = Some(Result { compiled, bake, expected, nearest, took: start.elapsed() });
         self.built_from = Some(key);
-        self.generation += 1;
+        self.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.built_at = Some(Instant::now());
     }
 

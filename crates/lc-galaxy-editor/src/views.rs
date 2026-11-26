@@ -143,6 +143,14 @@ pub struct ViewState {
     marks: Option<Marks>,
 }
 
+impl ViewState {
+    /// For a new document: a pin of another file's bake compares nothing.
+    pub fn forget_document(&mut self) {
+        self.reference = None;
+        self.difference = false;
+    }
+}
+
 impl Default for ViewState {
     fn default() -> Self {
         Self {
@@ -187,7 +195,8 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
             }
         });
         ui.separator();
-        if ui.button("Pin").clicked() {
+        let baked = doc.result.as_ref().is_some_and(|r| r.bake.is_ok());
+        if ui.add_enabled(baked, egui::Button::new("Pin")).clicked() {
             state.pins += 1;
             state.reference = Some(Reference::of(doc.stars(), state.pins));
         }
@@ -197,11 +206,10 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
                 state.reference = None;
                 state.difference = false;
             }
-            // Last frame's marks: the view below works out this frame's after the toolbar.
-            if state.difference
-                && let Some(m) = &state.marks
-            {
-                let (new, changed, gone) = m.counts();
+            if state.difference {
+                // Worked out here, after this frame's toggles; the view below reuses them.
+                let reference = state.reference.as_ref();
+                let (new, changed, gone) = compare::marks(&mut state.marks, doc, state.solo, reference).counts();
                 ui.label(format!("{new} new, {changed} changed, {gone} gone"));
             }
         }
