@@ -60,6 +60,9 @@ pub struct ResolvedAir(pub Handle<AtmosphereMaterial>, pub Entity);
 #[derive(Resource, Default)]
 pub struct Resolved {
     pub mesh: Option<Handle<Mesh>>,
+    /// The sky camera's radians per pixel this frame, for whatever decides by it what the sky
+    /// resolves without a query of its own.
+    pub sky_rad_per_px: f32,
 }
 
 /// Whether a body is close enough to be worth drawing as a sphere.
@@ -570,7 +573,7 @@ pub fn metered_for(tone: &crate::tonemap::ToneMap, radiance: &PerBand<f32>, mapp
 }
 
 /// The layer a body's sphere is drawn on, if it has one.
-fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
+pub fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
     -> Option<usize> {
     layer_for(body, body.radius_m, eye_ly, rad_per_px, shot)
 }
@@ -578,7 +581,7 @@ fn sphere_layer(body: &Drawable, eye_ly: DVec3, rad_per_px: f32, shot: &crate::b
 /// The layer something of `radius_m` centered on `body` is drawn on: the sky's when the sky
 /// resolves it, the telescope's when only a shot of `body` does, and none below a pixel, where
 /// the body's point already carries its light.
-pub fn layer_for(body: &Drawable, radius_m: f64, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
+fn layer_for(body: &Drawable, radius_m: f64, eye_ly: DVec3, rad_per_px: f32, shot: &crate::beauty::ShotBody)
     -> Option<usize> {
     if reaches(body, radius_m, eye_ly, rad_per_px) {
         return Some(0);
@@ -616,6 +619,7 @@ pub fn update_resolved(
     )>,
 ) {
     let rad_per_px = crate::starfield::camera_scale(&camera);
+    resolved.sky_rad_per_px = rad_per_px;
     let Some(system) = session.0.system.as_ref() else {
         for (entity, ..) in &placed {
             commands.entity(entity).despawn();

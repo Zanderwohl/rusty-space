@@ -56,11 +56,75 @@ const RING_ICE_EMISSIVE: (f32, f32) = (0.97, 0.05);
 /// icy ones from 0.1 to 0.6, and the measured systems split the same way.
 const ICY_ALBEDO: f64 = 0.1;
 
-/// How opaque a ring system was drawn before its light was its own; the beauty shots still
-/// choose rings by it (`ring-rendering-plan.md` phase 6). What the rings cover of their own disc.
-pub fn ring_opacity(rings: &RingSystem) -> f32 {
-    let disc = std::f64::consts::PI * rings.outer_m().powi(2);
-    opacity_of(rings.cross_section_m2() / disc.max(f64::MIN_POSITIVE))
+/// The least a ring's brightest band may be drawn at, lit and seen face-on, for the ring to be
+/// worth a photograph. Linear, about 39 of 255 encoded: Jupiter's rings (0.004) are under it,
+/// Neptune's arcs (0.04) and Uranus's epsilon ring (0.09) over.
+pub const MIN_SHOT_VALUE: f32 = 0.02;
+
+/// `tone_value` in `tonemap.wgsl`.
+fn tone_value(light: Vec3, reference: f32, stops: f32) -> f32 {
+    let luminance = light.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    if luminance > 0.0 && reference > 0.0 && stops > 0.0 {
+        ((luminance / reference).log2() / stops + 1.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+/// What `ring.wgsl` draws a ring's brightest band at, lit and seen face-on, given the sheet's
+/// `(reflected, emitted)` light for rock and for ice and the exposure it is seen in.
+pub fn brightest(rings: &RingSystem, rock: (Vec3, Vec3), ice: (Vec3, Vec3), reference: f32, stops: f32) -> f32 {
+    let (reflected, emitted) = if is_icy(rings) { ice } else { rock };
+    rings
+        .bands
+        .iter()
+        .map(|b| {
+            let tau = b.optical_depth as f32;
+            let light = reflected * lit_face(1.0, 1.0, tau) + emitted * coverage(tau);
+            tone_value(light, reference, stops).max(floor_of(tau, 1.0))
+        })
+        .fold(0.0, f32::max)
+}
+
+/// The star as `body` sees it.
+fn starlight_at(body: &Drawable, system: &lc_world::system::LocalSystem) -> Starlight {
+    Starlight {
+        radius_m: system.star_radius_m(),
+        teff_k: system.star_teff_k(),
+        luminosity_w: system.star_luminosity_w(),
+        distance_m: system.star_position_ly().distance(body.position_ly) * M_PER_LY,
+    }
+}
+
+/// The exposure a ring is drawn in on `layer`: its planet's, which is the sky's on layer zero and
+/// metered for the planet itself where only the telescope draws it.
+pub fn exposure_for(body: &Drawable, layer: usize, star: Starlight, session: &crate::session::Session) -> crate::tonemap::ToneMap {
+    let mut tone = session.tone;
+    if layer != 0 {
+        let radiance = crate::resolved::surface_radiance(body, star.radius_m, star.teff_k, star.distance_m);
+        tone.surface_reference = crate::resolved::metered_for(&tone, &radiance, &session.mapping);
+    }
+    tone
+}
+
+/// [`brightest`] for a body's rings as a photograph of the body would show them now: through the
+/// current band mapping, in the exposure the rings are drawn in. `sky_rad_per_px` is the sky
+/// camera's scale, which decides whether the planet is drawn there or only in the photograph.
+pub fn shown_value(
+    body: &Drawable,
+    rings: &lc_world::system::Rings,
+    system: &lc_world::system::LocalSystem,
+    session: &crate::session::Session,
+    eye_ly: DVec3,
+    sky_rad_per_px: f32,
+) -> f32 {
+    let star = starlight_at(body, system);
+    let layer = if crate::resolved::is_resolved(body, eye_ly, sky_rad_per_px) { 0 } else { crate::beauty::SHOT_LAYER };
+    let tone = exposure_for(body, layer, star, session);
+    let albedo = rings.system.albedo;
+    let rock = light_of(&particles(Material::Rock, albedo), albedo, star, &session.mapping);
+    let ice = light_of(&particles(Material::Ice, albedo), albedo, star, &session.mapping);
+    brightest(&rings.system, rock, ice, tone.surface_reference, tone.surface_stops)
 }
 
 /// A ring system, which unlike a population is attached to a body and therefore moves.
@@ -111,14 +175,24 @@ pub fn is_icy(rings: &RingSystem) -> bool {
 /// A system with more bands than the uniform holds loses its narrowest gaps first. No system
 /// does today: the generator names at most twelve and the measured ones have four.
 pub fn pack(rings: &RingSystem) -> (usize, [Vec4; RING_BANDS]) {
-    let spans = fitted(rings.bands.iter().map(|b| Span { inner: b.inner_m, outer: b.outer_m, depth: b.optical_depth }).collect());
     let outer = rings.outer_m().max(f64::MIN_POSITIVE);
     let icy = f32::from(u8::from(is_icy(rings)));
+    let slot = |s: Span| Vec4::new((s.inner / outer) as f32, (s.outer / outer) as f32, s.depth as f32, icy);
     let mut packed = [Vec4::ZERO; RING_BANDS];
-    for (slot, s) in packed.iter_mut().zip(&spans) {
-        *slot = Vec4::new((s.inner / outer) as f32, (s.outer / outer) as f32, s.depth as f32, icy);
+    let spans = rings.bands.iter().map(|b| Span { inner: b.inner_m, outer: b.outer_m, depth: b.optical_depth });
+    // Packed every frame for each drawn ring, and `RingSystem` keeps its bands inside out, so
+    // only a system too large for the uniform pays for sorting and merging.
+    if rings.bands.len() <= RING_BANDS {
+        for (to, s) in packed.iter_mut().zip(spans) {
+            *to = slot(s);
+        }
+        return (rings.bands.len(), packed);
     }
-    (spans.len(), packed)
+    let fit = fitted(spans.collect());
+    for (to, s) in packed.iter_mut().zip(&fit) {
+        *to = slot(*s);
+    }
+    (fit.len(), packed)
 }
 
 /// The bands as the planet's shader takes them for the rings' shadow: `(inner, outer, optical
@@ -178,12 +252,18 @@ pub fn depth_over(bands: &[Vec4], count: usize, radius: f32, width: f32) -> f32 
     bands.iter().take(count.min(RING_BANDS)).map(|b| b.z * (within(b.y) - within(b.x))).sum::<f32>() / width
 }
 
+/// `coverage` in `ring.wgsl`: `1 - exp(-x)`, by its first-order term where f32 would round it
+/// to nothing. `exp(-x)` is exactly one under about 6e-8, which a generated ring reaches.
+pub fn coverage(x: f32) -> f32 {
+    if x < 1.0e-4 { x } else { 1.0 - (-x).exp() }
+}
+
 /// The alpha `ring.wgsl` draws a pixel at: the share of what is behind it the particles stop,
 /// seen at `mu`, averaged over the radii `radius +- width / 2`.
 pub fn coverage_over(bands: &[Vec4], count: usize, radius: f32, width: f32, mu: f32) -> f32 {
     let half = 0.5 * width;
     let within = |edge: f32| (edge - radius).clamp(-half, half);
-    let sum: f32 = bands.iter().take(count.min(RING_BANDS)).map(|b| (within(b.y) - within(b.x)) * (1.0 - (-b.z / mu).exp())).sum();
+    let sum: f32 = bands.iter().take(count.min(RING_BANDS)).map(|b| (within(b.y) - within(b.x)) * coverage(b.z / mu)).sum();
     (sum / width).clamp(0.0, 1.0)
 }
 
@@ -216,7 +296,7 @@ pub fn unlit_face(mu: f32, mu0: f32, tau: f32) -> f32 {
 
 /// The floor `ring.wgsl` draws a band at, on its sunlit face, seen at `mu`.
 pub fn floor_of(tau: f32, mu: f32) -> f32 {
-    RING_FLOOR * opacity_of(f64::from(1.0 - (-tau / mu).exp()))
+    RING_FLOOR * opacity_of(f64::from(coverage(tau / mu)))
 }
 
 /// What a ring's particles are made of.
@@ -374,25 +454,18 @@ pub fn update_rings(
         let Some(body) = bodies.drawn.get(ring.body) else { continue };
         let Some(rings) = &body.rings else { continue };
         *transform = placement(body, rings, eye.at_ly);
-        let Some(layer) = crate::resolved::layer_for(body, rings.system.outer_m(), eye.at_ly, rad_per_px, &shot) else {
+        // On the planet's own layer, and only while its sphere is drawn: a planet drawn as a point
+        // already carries its rings' light (`system.rs`), and a ring beside a sphere exposed for
+        // itself has to be exposed the same.
+        let Some(layer) = crate::resolved::sphere_layer(body, eye.at_ly, rad_per_px, &shot) else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
         visibility.set_if_neq(Visibility::Inherited);
         layers.set_if_neq(RenderLayers::layer(layer));
 
-        let star = Starlight {
-            radius_m: system.star_radius_m(),
-            teff_k: system.star_teff_k(),
-            luminosity_w: system.star_luminosity_w(),
-            distance_m: star_ly.distance(body.position_ly) * M_PER_LY,
-        };
-        // A ring only the telescope draws is exposed with its planet, which is metered for itself.
-        let mut tone = session.tone;
-        if layer != 0 {
-            let radiance = crate::resolved::surface_radiance(body, star.radius_m, star.teff_k, star.distance_m);
-            tone.surface_reference = crate::resolved::metered_for(&tone, &radiance, &session.mapping);
-        }
+        let star = starlight_at(body, system);
+        let tone = exposure_for(body, layer, star, &session);
         let next = uniform(rings, body.radius_m, star, star_ly - body.position_ly, &session.mapping, &tone, seed_of(ring.body));
         if let Some(mut asset) = materials.get_mut(&material.0)
             && asset.uniforms != next
@@ -516,16 +589,28 @@ mod tests {
         assert!(normals.iter().all(|n| *n == normals[0]), "every normal is the pole");
     }
 
-    /// The four measured systems, in the order a person would rank them by eye.
+    /// The four measured systems as a photograph would show them, each beside a planet of albedo
+    /// one half metered to the top of its window: Saturn's are the thing you see, Uranus's and
+    /// Neptune's faint but worth a picture, and Jupiter's, which took Voyager to find, are not.
     #[test]
     fn the_ring_systems_come_out_in_the_right_order() {
-        let drawn = |id: &str| ring_opacity(for_body(id).unwrap());
-        let (saturn, uranus, neptune, jupiter) =
-            (drawn("Saturn"), drawn("Uranus"), drawn("Neptune"), drawn("Jupiter"));
+        let natural = em_spectra::presets::natural();
+        let shown = |id: &str, au: f64| {
+            let rings = for_body(id).unwrap();
+            let star = sun_at(au);
+            let planet = light_of(&Particles { reflectance: [0.5; BANDS], emissivity: [0.5; BANDS] }, 0.5, star, &natural).0;
+            // The metering puts a lit surface at 0.9 of a five-stop window.
+            let reference = planet.dot(Vec3::new(0.2126, 0.7152, 0.0722)) * 2f32.powf(0.5);
+            let albedo = rings.albedo;
+            let rock = light_of(&particles(Material::Rock, albedo), albedo, star, &natural);
+            let ice = light_of(&particles(Material::Ice, albedo), albedo, star, &natural);
+            brightest(rings, rock, ice, reference, 5.0)
+        };
+        let (saturn, uranus, neptune, jupiter) = (shown("Saturn", 9.5), shown("Uranus", 19.2), shown("Neptune", 30.1), shown("Jupiter", 5.2));
         assert!(saturn > 0.5, "Saturn's rings are the thing you see: {saturn}");
-        assert!(uranus < saturn * 0.5 && uranus > 0.05, "Uranus's are faint but real: {uranus}");
-        assert!(neptune < uranus, "Neptune's fainter still: {neptune}");
-        assert!(jupiter < 0.05, "and Jupiter's took Voyager to find: {jupiter}");
+        assert!(uranus < saturn && uranus >= MIN_SHOT_VALUE, "Uranus's are faint but real: {uranus}");
+        assert!(neptune < uranus && neptune >= MIN_SHOT_VALUE, "Neptune's fainter still: {neptune}");
+        assert!(jupiter < MIN_SHOT_VALUE, "and Jupiter's took Voyager to find: {jupiter}");
     }
 
     const AU: f64 = 1.495_978_707e11;
@@ -698,5 +783,85 @@ mod tests {
         assert!(north.iter().any(|t| *t > darkest * 2.0 && *t < 0.99), "under the division or the C ring");
         assert_eq!(north.last().copied(), Some(1.0), "toward the terminator, past the A ring's shadow");
         assert_eq!(transmission(&bands, ring, equator, (equator + pole * 1.0e-5).normalize()), 1.0, "the star in the ring's plane");
+    }
+
+    /// A ring is drawn on its planet's layer and in its planet's exposure, and not at all while the
+    /// planet is a point, even where the rings alone would span pixels. The photograph threshold
+    /// judges them in the same exposure they are drawn in.
+    #[test]
+    fn a_ring_follows_its_planets_layer_and_exposure() {
+        use lc_world::sky::{AuthoredStars, StarProvider};
+        let sky = AuthoredStars::sample();
+        let mut session = crate::session::Session::new(&sky, 64);
+        let (star, body) = sky
+            .stars()
+            .iter()
+            .find_map(|star| {
+                let system = lc_world::system::LocalSystem::for_star(star)?;
+                let body = system.drawables_at(star.position_ly, 0.0).into_iter().find(|d| d.rings.is_some())?;
+                Some((star.clone(), body))
+            })
+            .expect("a ringed planet around one of the sample stars");
+        session.place_at(star.position_ly + DVec3::X * 2.0 * 1.495_978_707e11 / M_PER_LY);
+        session.sync_system();
+        let system = session.system.clone().expect("in the system");
+        let rings = body.rings.clone().unwrap();
+        let rad_per_px = 1.0e-3_f32;
+        let px = crate::resolved::RESOLVE_PX;
+        // Planet under the threshold, rings over it.
+        let outer = rings.system.outer_m();
+        let between = 0.5 * (body.radius_m + outer) / (f64::from(rad_per_px * px));
+        assert!(body.radius_m / between < f64::from(rad_per_px * px) && outer / between > f64::from(rad_per_px * px));
+        let eye_at = |distance_m: f64| body.position_ly + DVec3::Y * distance_m / M_PER_LY;
+        let no_shot = crate::beauty::ShotBody::default();
+        assert_eq!(crate::resolved::sphere_layer(&body, eye_at(between), rad_per_px, &no_shot), None, "a point planet: no ring drawn");
+
+        // A photograph of the planet from there draws both on the shot's layer, metered for the planet.
+        let shot = crate::beauty::ShotBody { name: Some(body.name.clone()), rad_per_px: rad_per_px * 1.0e-3 };
+        let layer = crate::resolved::sphere_layer(&body, eye_at(between), rad_per_px, &shot);
+        assert_eq!(layer, Some(crate::beauty::SHOT_LAYER));
+        let light = starlight_at(&body, &system);
+        let radiance = crate::resolved::surface_radiance(&body, light.radius_m, light.teff_k, light.distance_m);
+        let metered = crate::resolved::metered_for(&session.tone, &radiance, &session.mapping);
+        assert_eq!(exposure_for(&body, crate::beauty::SHOT_LAYER, light, &session).surface_reference, metered);
+        assert_eq!(exposure_for(&body, 0, light, &session).surface_reference, session.tone.surface_reference);
+
+        // The threshold takes the exposure from the same rule: the sky's when the sky resolves the
+        // planet, the planet's own when only the photograph does.
+        let value = |tone: crate::tonemap::ToneMap| {
+            let albedo = rings.system.albedo;
+            let rock = light_of(&particles(Material::Rock, albedo), albedo, light, &session.mapping);
+            let ice = light_of(&particles(Material::Ice, albedo), albedo, light, &session.mapping);
+            brightest(&rings.system, rock, ice, tone.surface_reference, tone.surface_stops)
+        };
+        let close = body.radius_m * 10.0;
+        assert_eq!(shown_value(&body, &rings, &system, &session, eye_at(close), rad_per_px), value(session.tone));
+        let mut own = session.tone;
+        own.surface_reference = metered;
+        assert_eq!(shown_value(&body, &rings, &system, &session, eye_at(between), rad_per_px), value(own));
+    }
+
+    /// Coverage keeps its first-order term where f32 would round `1 - exp(-x)` to zero.
+    #[test]
+    fn the_faintest_rings_keep_their_coverage() {
+        assert!((coverage(1.0e-8) - 1.0e-8).abs() < 1.0e-12);
+        assert!(floor_of(1.0e-9, 1.0) > 0.0, "a generated ring at 1e-9 still has a floor");
+        assert!((coverage(1.0) - (1.0 - (-1.0f32).exp())).abs() < 1.0e-6);
+        assert!((coverage(1.0e-4) - 1.0e-4).abs() < 1.0e-7, "the two forms meet where they hand over");
+    }
+
+    /// Packing a system that fits needs no sort and gives what the general path gives.
+    #[test]
+    fn packing_a_system_that_fits_matches_the_general_path() {
+        for id in ["Saturn", "Jupiter", "Uranus", "Neptune"] {
+            let rings = for_body(id).unwrap();
+            let (count, fast) = pack(rings);
+            let outer = rings.outer_m();
+            let fit = fitted(rings.bands.iter().map(|b| Span { inner: b.inner_m, outer: b.outer_m, depth: b.optical_depth }).collect());
+            assert_eq!(count, fit.len());
+            for (p, s) in fast.iter().zip(&fit) {
+                assert_eq!((p.x, p.y, p.z), ((s.inner / outer) as f32, (s.outer / outer) as f32, s.depth as f32), "{id}");
+            }
+        }
     }
 }

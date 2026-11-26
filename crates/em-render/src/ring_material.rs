@@ -83,9 +83,11 @@ impl Material for RingMaterial {
 
     /// Sorted just nearer than anything else centered on the planet, so it draws after the
     /// planet's atmosphere shell, which has the same center and would otherwise tie. In render
-    /// units; far smaller than the gap between any two bodies.
+    /// units, which are astronomical units in the client: about fifteen meters, far below the
+    /// gap to anything else drawn transparent, such as the ship's field and plume at a ring
+    /// station.
     fn depth_bias(&self) -> f32 {
-        1.0e-4
+        1.0e-10
     }
 
     fn specialize(

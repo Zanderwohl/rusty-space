@@ -80,9 +80,6 @@ const NEIGHBOR_MIN_RAD: f64 = 1.5e-4;
 const MAX_COVERED: f64 = 0.7;
 /// The least of a target's face that must be lit. A crescent passes; a new moon does not.
 const MIN_LIT: f64 = 0.3;
-/// The faintest rings worth a photograph, as the renderer draws them. Uranus's pass; Jupiter's,
-/// which took Voyager to find, do not.
-const MIN_RING_OPACITY: f32 = 0.05;
 /// Within this many of its outer radii of a ring system, a stretch of it gets a shot of its own.
 const RINGSIDE_RADII: f64 = 6.0;
 /// A star's disc is almost never resolved, so this is the patch of sky around it.
@@ -317,8 +314,8 @@ fn shoot(
     dev: Res<crate::dev::DevEntry>,
     mut beauty: ResMut<Beauty>,
     mut shot_body: ResMut<ShotBody>,
-    surfaces: Res<crate::surfaces::Surfaces>,
-    bakes: Res<crate::procedural::Bakes>,
+    // One parameter, because a system takes sixteen.
+    (surfaces, bakes, resolved): (Res<crate::surfaces::Surfaces>, Res<crate::procedural::Bakes>, Res<crate::resolved::Resolved>),
     mut images: ResMut<Assets<Image>>,
     camera: Single<
         (&mut Camera, &mut Transform, &mut Projection, &mut RenderTarget, &mut Exposure),
@@ -362,8 +359,8 @@ fn shoot(
         }
         // Seeded from the clock as well, so two sessions do not visit the neighbors in step.
         let seed = beauty.taken ^ time.elapsed().as_nanos() as u64;
-        let resolved = uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id)));
-        let mut list = subjects(&game.0, &bodies.drawn, resolved, eye.at_ly, seed);
+        let contacts = uplink.contacts.iter().filter(|c| !distant.is_point(Some(c.ship_id)));
+        let mut list = subjects(&game.0, &bodies.drawn, contacts, eye.at_ly, resolved.sky_rad_per_px, seed);
         list.retain(held_on);
         beauty.idle = list.is_empty();
         let Some(subject) = list.get((beauty.turn % list.len().max(1) as u64) as usize) else {
@@ -473,6 +470,8 @@ pub fn subjects<'a>(
     // Those the sky resolves: one it draws as a point has its hull hidden.
     contacts: impl Iterator<Item = &'a Contact>,
     eye_ly: DVec3,
+    // The sky camera's, which decides the exposure a planet's rings are photographed in.
+    sky_rad_per_px: f32,
     seed: u64,
 ) -> Vec<Subject> {
     let now = session.coordinate_time_s();
@@ -560,17 +559,15 @@ pub fn subjects<'a>(
 
     for body in drawn {
         let Some(rings) = &body.rings else { continue };
-        if crate::rings::ring_opacity(&rings.system) < MIN_RING_OPACITY {
+        // As the renderer would draw them in a photograph: Uranus's pass, and Jupiter's, which
+        // took Voyager to find, do not.
+        let Some(system) = system else { continue };
+        if crate::rings::shown_value(body, rings, system, session, eye_ly, sky_rad_per_px) < crate::rings::MIN_SHOT_VALUE {
             continue;
         }
         let outer = rings.system.outer_m();
         let distance = body.position_ly.distance(eye_ly) * M_PER_LY;
-        // Framed whole only from far enough out that the frame holds them.
-        let wide = 2.0 * (outer / distance.max(outer)).asin();
-        if wide > NEIGHBOR_MIN_RAD
-            && wide * FRAME_MARGIN <= MAX_FIELD_RAD
-            && covered(body.position_ly, outer, eye_ly, &occluders) <= MAX_COVERED
-        {
+        if rings_framed(outer, distance) && covered(body.position_ly, outer, eye_ly, &occluders) <= MAX_COVERED {
             out.push(Subject::Rings(body.name.clone()));
         }
         if distance < RINGSIDE_RADII * outer {
@@ -841,6 +838,17 @@ pub fn framed(to_m: DVec3, radius_m: f64) -> (DVec3, f64) {
     (forward, (2.0 * half * FRAME_MARGIN).min(MAX_FIELD_RAD))
 }
 
+/// Whether rings of outer radius `outer_m`, `distance_m` away, get a shot of them whole: large
+/// enough to be a subject, and seen from outside them.
+///
+/// Closer than the frame holds them with its margin, [`framed`] takes the widest lens, which
+/// crops the margin and then the outer edge. That is what a ring station sees: at
+/// `navigation::RING_STANDOFF`, 1.25 outer radii, the rings span 106 degrees against the lens's
+/// 100.
+fn rings_framed(outer_m: f64, distance_m: f64) -> bool {
+    distance_m > outer_m && 2.0 * (outer_m / distance_m).asin() > NEIGHBOR_MIN_RAD
+}
+
 /// The field that spans [`NADIR_SPAN_RADII`] of ground straight down. `None` from inside.
 pub fn nadir_field(distance_m: f64, radius_m: f64) -> Option<f64> {
     let altitude = distance_m - radius_m;
@@ -919,6 +927,20 @@ mod tests {
         assert_eq!(forward, DVec3::Y);
         let disc = 2.0 * (EARTH_M / 4.0e8).asin();
         assert!((field / disc - FRAME_MARGIN).abs() < 1e-9);
+    }
+
+    /// From a ring station the rings are framed whole on the widest lens; from inside them, or
+    /// so far off they are a point, they are not.
+    #[test]
+    fn rings_are_framed_whole_from_their_station_on_the_widest_lens() {
+        let (inner, outer) = SATURN_RINGS;
+        let station = outer * lc_world::navigation::RING_STANDOFF;
+        assert!(rings_framed(outer, station));
+        let (_, field) = framed(DVec3::new(station, 0.0, 0.0), outer);
+        assert_eq!(field, MAX_FIELD_RAD, "the widest lens");
+        assert!(!rings_framed(outer, 0.5 * (inner + outer)), "not from among them");
+        assert!(!rings_framed(outer, outer * 1.0e5), "nor from where they are a point");
+        assert!(rings_framed(outer, outer * 10.0));
     }
 
     #[test]
