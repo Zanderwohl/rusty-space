@@ -14,6 +14,7 @@ bevy_egui = "0.42.0"
 glam = "0.32"
 em-ui = { path = "../em-ui", features = ["egui"] }
 em-plot = { path = "../em-plot", features = ["raster"] }
+rfd = "0.17.2"
 
 [[bin]]
 name = "lc-galaxy-editor"
