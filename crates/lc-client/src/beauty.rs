@@ -565,12 +565,7 @@ pub fn subjects<'a>(
         }
         let outer = rings.system.outer_m();
         let distance = body.position_ly.distance(eye_ly) * M_PER_LY;
-        // Framed whole only from far enough out that the frame holds them.
-        let wide = 2.0 * (outer / distance.max(outer)).asin();
-        if wide > NEIGHBOR_MIN_RAD
-            && wide * FRAME_MARGIN <= MAX_FIELD_RAD
-            && covered(body.position_ly, outer, eye_ly, &occluders) <= MAX_COVERED
-        {
+        if rings_framed(outer, distance) && covered(body.position_ly, outer, eye_ly, &occluders) <= MAX_COVERED {
             out.push(Subject::Rings(body.name.clone()));
         }
         if distance < RINGSIDE_RADII * outer {
@@ -841,6 +836,17 @@ pub fn framed(to_m: DVec3, radius_m: f64) -> (DVec3, f64) {
     (forward, (2.0 * half * FRAME_MARGIN).min(MAX_FIELD_RAD))
 }
 
+/// Whether rings of outer radius `outer_m`, `distance_m` away, get a shot of them whole: large
+/// enough to be a subject, and seen from outside them.
+///
+/// Closer than the frame holds them with its margin, [`framed`] takes the widest lens, which
+/// crops the margin and then the outer edge. That is what a ring station sees: at
+/// `navigation::RING_STANDOFF`, 1.25 outer radii, the rings span 106 degrees against the lens's
+/// 100.
+fn rings_framed(outer_m: f64, distance_m: f64) -> bool {
+    distance_m > outer_m && 2.0 * (outer_m / distance_m).asin() > NEIGHBOR_MIN_RAD
+}
+
 /// The field that spans [`NADIR_SPAN_RADII`] of ground straight down. `None` from inside.
 pub fn nadir_field(distance_m: f64, radius_m: f64) -> Option<f64> {
     let altitude = distance_m - radius_m;
@@ -919,6 +925,20 @@ mod tests {
         assert_eq!(forward, DVec3::Y);
         let disc = 2.0 * (EARTH_M / 4.0e8).asin();
         assert!((field / disc - FRAME_MARGIN).abs() < 1e-9);
+    }
+
+    /// From a ring station the rings are framed whole on the widest lens; from inside them, or
+    /// so far off they are a point, they are not.
+    #[test]
+    fn rings_are_framed_whole_from_their_station_on_the_widest_lens() {
+        let (inner, outer) = SATURN_RINGS;
+        let station = outer * lc_world::navigation::RING_STANDOFF;
+        assert!(rings_framed(outer, station));
+        let (_, field) = framed(DVec3::new(station, 0.0, 0.0), outer);
+        assert_eq!(field, MAX_FIELD_RAD, "the widest lens");
+        assert!(!rings_framed(outer, 0.5 * (inner + outer)), "not from among them");
+        assert!(!rings_framed(outer, outer * 1.0e5), "nor from where they are a point");
+        assert!(rings_framed(outer, outer * 10.0));
     }
 
     #[test]
