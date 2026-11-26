@@ -19,6 +19,10 @@ pub struct Census {
     /// Could have an ocean world at all, whatever its profile; see [`ocean::eligible`].
     pub eligible: bool,
     pub ocean_first: bool,
+    pub moons: u32,
+    /// Caught rather than grown in a disc or knocked off by an impact; see [`super::moon`].
+    pub captured_moons: u32,
+    pub planets_with_moons: u32,
 }
 
 impl Census {
@@ -38,6 +42,9 @@ impl Census {
             oort_cloud: has(Kind::OortCloud),
             eligible,
             ocean_first: system.architecture.rungs.iter().any(|r| r.ocean),
+            moons: system.planets.iter().map(|p| p.moons.len() as u32).sum(),
+            captured_moons: system.moons().filter(|m| !m.regular).count() as u32,
+            planets_with_moons: count(&|p| !p.moons.is_empty()),
         }
     }
 }
@@ -57,6 +64,7 @@ mod tests {
             assert!(!Census::of(&star, &Tuning::default()).ocean_first);
             let c = Census::of(&star, &first);
             assert_eq!(c.ocean_first, c.eligible);
+            assert!(c.captured_moons <= c.moons && c.planets_with_moons <= c.planets && c.planets_with_moons <= c.moons, "{c:?}");
             if c.eligible {
                 eligible += 1;
                 assert!(c.ocean_worlds >= 1 && c.habitable >= c.ocean_worlds && c.planets >= c.habitable, "{c:?}");
