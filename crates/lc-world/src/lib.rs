@@ -32,6 +32,7 @@ pub mod form;
 pub mod giant;
 pub mod glow;
 pub mod ground;
+pub mod icy;
 pub mod ignition;
 pub mod injection;
 pub mod instrument;

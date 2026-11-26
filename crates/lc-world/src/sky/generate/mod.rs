@@ -295,9 +295,13 @@ fn stated(id: &str, mass: f64, major: bool, tags: &[&str], planet: &Planet) -> B
     info
 }
 
-fn moon_info(moon: &moon::Moon, tags: &[&str]) -> BodyInfo {
+fn moon_info(moon: &moon::Moon, primary_kg: f64, tags: &[&str]) -> BodyInfo {
     let mut info = info(&moon.name, moon.mass_kg, false, tags);
     info.tags.extend(crate::worlds::Stated::tags(moon.atmosphere, moon.top, false));
+    if moon.regular {
+        let heat = crate::icy::tidal_heat(primary_kg, moon.radius_m, moon.eccentricity, moon.semi_major_m);
+        info.tags.push(crate::icy::heat_tag(heat));
+    }
     info
 }
 
@@ -421,7 +425,7 @@ impl GeneratedSystem {
                 let tags: &[&str] = if moon.regular { &["Moon"] } else { &[crate::worlds::Stated::CAPTURED] };
                 let plane = tilted(equator, moon.inclination_rad, moon.node_rad);
                 bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                    info: moon_info(moon, tags),
+                    info: moon_info(moon, p.mass_kg, tags),
                     params: {
                         let (inclination, node) = euler_of(plane);
                         kepler(
@@ -441,7 +445,7 @@ impl GeneratedSystem {
                 for sub in &moon.moons {
                     let (inclination, node) = euler_of(tilted(plane, sub.inclination_rad, sub.node_rad));
                     bodies.push(SomeBody::KeplerEntry(KeplerEntry {
-                        info: moon_info(sub, &["Submoon"]),
+                        info: moon_info(sub, moon.mass_kg, &["Submoon"]),
                         params: kepler(&moon.name, sub.semi_major_m, sub.eccentricity, inclination, node, sub.mean_anomaly_deg, None),
                         appearance: debug_ball(sub.radius_m, (120, 120, 130)),
                         rotation: None,

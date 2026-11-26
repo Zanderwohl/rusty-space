@@ -368,6 +368,7 @@ pub(crate) fn dress_worn(
         body.climate = paint.climate;
         body.giant = paint.giant;
         body.airless = paint.airless;
+        body.icy = None;
         body.world = paint.world;
     }
 }
