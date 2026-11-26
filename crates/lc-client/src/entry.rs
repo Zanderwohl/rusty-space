@@ -218,6 +218,7 @@ pub fn parse(args: &[String]) -> Entry {
                 || flag("--bench")
                 || flag("--at")
                 || flag("--station")
+                || flag("--star")
                 || flag("--form")
                 || flag("--refit-at")
                 || flag("--refit-from")
@@ -249,6 +250,7 @@ pub fn parse(args: &[String]) -> Entry {
         wear: after("--wear"),
         standoff_radii: value(args, "--standoff"),
         phase_deg: value(args, "--phase"),
+        start_star: after("--star").as_deref().and_then(star_id),
         station: after("--station"),
         charted: flag("--charted"),
         survey: flag("--survey"),
@@ -315,6 +317,15 @@ pub fn parse(args: &[String]) -> Entry {
         server: after("--server"),
         local: flag("--local") || demo.is_some(),
         demo,
+    }
+}
+
+/// A raw star id as `--star` takes it: hexadecimal with `0x`, as the console prints ids, or
+/// decimal.
+fn star_id(text: &str) -> Option<u64> {
+    match text.strip_prefix("0x") {
+        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+        None => text.parse().ok(),
     }
 }
 
@@ -451,6 +462,15 @@ mod tests {
         assert_eq!(dev.form.as_deref(), Some("cluster"));
         assert!(dev.observe_immediately, "a form asked for is a form to look at");
         assert_eq!(parse(&[]).dev.form, None);
+    }
+
+    #[test]
+    fn a_start_star_takes_hex_or_decimal_and_goes_straight_to_the_sky() {
+        let dev = parse(&args("--star 0x218f017673fe1f5e")).dev;
+        assert_eq!(dev.start_star, Some(0x218f_0176_73fe_1f5e));
+        assert!(dev.observe_immediately);
+        assert_eq!(parse(&args("--star 42")).dev.start_star, Some(42));
+        assert_eq!(parse(&args("--star Ran")).dev.start_star, None);
     }
 
     #[test]

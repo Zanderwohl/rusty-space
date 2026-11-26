@@ -60,6 +60,9 @@ pub struct DevEntry {
     /// sphere is borrowed; a generated system is otherwise a crossing away.
     /// On an airless body a name no planet has is a seed for another airless look.
     pub wear: Option<String>,
+    /// Start offline in another star's system, by its raw catalog id: `--star 0x218f017673fe1f5e`.
+    /// Placed before `--station` and `--at` look for their body, so they name one of its bodies.
+    pub start_star: Option<u64>,
     /// Put the ship straight onto a station, by [`crate::navigation::Course::parse`] spelling.
     /// The same courses the interface offers, without the crossing in between.
     pub station: Option<String>,
@@ -179,6 +182,39 @@ pub struct DevEntry {
     /// Run once on reaching the sky. Actions rather than flags, so a development entry can
     /// reach anything the interface can and needs no plumbing of its own.
     pub actions: Vec<Action>,
+}
+
+/// How far from its star `--star` leaves the ship when nothing else places it: in the system,
+/// and well clear of the star itself.
+const START_STAR_STANDOFF_M: f64 = 2.0 * lc_world::sky::generate::AU;
+
+/// Move the ship into the system of the star `--star` names, once, before anything that looks for
+/// a body there. Offline only: a shard says where its ships are.
+pub(crate) fn place_at_star(
+    dev: Res<DevEntry>,
+    mut game: ResMut<Game>,
+    mut ui: ResMut<Ui>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(id) = dev.start_star else { return };
+    *done = true;
+    if game.remote {
+        ui.notify("--star is offline only".to_string(), 0.0);
+        return;
+    }
+    let Some(star) = game.star_by_raw(id) else {
+        ui.notify(format!("no star {id:#x} in the loaded sky"), 0.0);
+        return;
+    };
+    let at = star.position_ly + DVec3::X * START_STAR_STANDOFF_M / crate::system::M_PER_LY;
+    game.0.place_at(at);
+    // Now rather than at the next body update, so a `--station` checked later this frame does
+    // not resolve against the system the ship just left.
+    game.0.sync_system();
+    ui.notify(format!("started at star {id:#x}"), game.coordinate_time_s());
 }
 
 /// Put the ship on a station named by `--station`, without flying it there.
@@ -828,6 +864,51 @@ pub(crate) fn photograph(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--star` with `--station rings:<body>` ends on that body's ring station: the star is placed
+    /// first, so the station resolves in the new system and not in the one the ship began in.
+    #[test]
+    fn a_start_star_puts_a_ring_station_in_reach() {
+        use lc_world::sky::{AuthoredStars, StarProvider};
+        let sky = AuthoredStars::sample();
+        let (star, body) = sky
+            .stars()
+            .iter()
+            .find_map(|star| {
+                let system = lc_world::system::LocalSystem::for_star(star)?;
+                let body = system.inventory().iter().find_map(|e| match &e.target {
+                    lc_world::navigation::Target::Body(key) => {
+                        system.rings_of(system.body_named(key)?).map(|_| key.clone())
+                    }
+                    _ => None,
+                })?;
+                Some((star.clone(), body))
+            })
+            .expect("a ringed planet around one of the sample stars");
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<Requested>()
+            .insert_resource(crate::app::Ui(crate::ui::UiState::default()))
+            .insert_resource(Game(crate::session::Session::new(&sky, 64)))
+            .insert_resource(DevEntry {
+                start_star: Some(star.id.get()),
+                station: Some(format!("rings:{body}")),
+                ..default()
+            })
+            .add_systems(Update, (place_at_star, place_on_station.after(place_at_star)));
+        app.update();
+        app.update();
+
+        let game = app.world().resource::<Game>();
+        let system = game.system.as_ref().expect("in a system");
+        assert_eq!(system.star, star.id, "in the system --star named");
+        let rings = system.rings_of(system.body_named(&body).unwrap()).unwrap();
+        let planet = system.body_position_ly(&body).unwrap();
+        let from_planet_m = game.ship.motion.position_ly.distance(planet) * crate::system::M_PER_LY;
+        let station_m = rings.outer_m() * lc_world::navigation::RING_STANDOFF;
+        assert!((from_planet_m / station_m - 1.0).abs() < 0.01, "{from_planet_m} m from {body}, station at {station_m} m");
+    }
 
     /// `--lift` is a rotation about the star, not a displacement: the ship keeps its distance
     /// and only its latitude changes. A belt station that moved radially as well would stop
