@@ -86,3 +86,20 @@ fn the_exhaust_uniforms_are_declared_in_one_order() {
         assert_eq!(in_shader, in_host, "the shader and the host disagree about {name}'s layout");
     }
 }
+
+/// The ring uniform carries its light in four fields of the same type, which a reorder would swap
+/// without any error: rock lit as ice, or reflection read as emission.
+#[test]
+fn the_ring_uniform_is_declared_in_one_order() {
+    let shader = include_str!("../assets/shaders/ring.wgsl");
+    let host = include_str!("../../em-render/src/ring_material.rs");
+
+    let in_shader = fields(shader, "struct RingUniform {");
+    let in_host = fields(host, "pub struct RingUniform {");
+
+    assert!(in_shader.len() > 6, "the parse found almost nothing: {in_shader:?}");
+    assert_eq!(
+        in_shader, in_host,
+        "the shader and the host disagree about the uniform's layout",
+    );
+}
