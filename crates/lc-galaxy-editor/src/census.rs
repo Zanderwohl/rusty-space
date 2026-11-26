@@ -6,7 +6,6 @@ use std::sync::{Arc, OnceLock};
 
 use lc_galaxy::FeatureId;
 use lc_galaxy::sample::default_threads;
-use lc_world::sky::galaxy::catalog_star;
 use lc_world::sky::generate::census::Census;
 
 use crate::doc::Doc;
@@ -78,7 +77,7 @@ fn dispatch(doc: &Doc, generation: u64, previous: Option<(u64, Outcome)>) -> Cen
             let k = a.population.and_then(|p| {
                 kinematics.entry(p).or_insert_with(|| compiled.and_then(|c| lc_galaxy::attributes::kinematics(c, p))).clone()
             });
-            (a.population, a.feh, a.initial_mass_solar, a.record, a.profile, k)
+            (s.clone(), k)
         })
         .collect();
     let slot = Arc::new(OnceLock::new());
@@ -93,14 +92,11 @@ fn dispatch(doc: &Doc, generation: u64, previous: Option<(u64, Outcome)>) -> Cen
                     .map(|part| {
                         scope.spawn(move || {
                             part.iter()
-                                .map(|(population, feh, mass, record, profile, k)| Counted {
-                                    population: *population,
-                                    feh: *feh,
-                                    initial_mass_solar: *mass,
-                                    census: k
-                                        .as_ref()
-                                        .and_then(|k| catalog_star(record, k, *profile))
-                                        .map(|star| Census::of(&star, &profile.tuning())),
+                                .map(|(s, k)| Counted {
+                                    population: s.attributes.population,
+                                    feh: s.attributes.feh,
+                                    initial_mass_solar: s.attributes.initial_mass_solar,
+                                    census: k.as_ref().and_then(|k| lc_galaxy::stats::census_of(s, k)),
                                 })
                                 .collect::<Vec<_>>()
                         })
