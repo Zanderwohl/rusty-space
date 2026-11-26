@@ -9,6 +9,7 @@ mod census;
 mod charts;
 mod compare;
 mod doc;
+mod files;
 mod palette;
 mod params_panel;
 mod stats_panel;
@@ -19,7 +20,8 @@ mod views;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy::window::WindowResolution;
+use bevy::ecs::system::NonSendMarker;
+use bevy::window::{PrimaryWindow, RawHandleWrapper, WindowCloseRequested, WindowResolution};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use lc_galaxy::Timeline;
 
@@ -62,7 +64,7 @@ fn args() -> Args {
     a
 }
 
-fn default_galaxy() -> PathBuf {
+pub(crate) fn default_galaxy() -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../lc-galaxy/galaxies/phase-1.ron");
     path.canonicalize().unwrap_or(path)
 }
@@ -71,14 +73,9 @@ fn default_galaxy() -> PathBuf {
 struct Ui {
     view: ViewState,
     charts: charts::Charts,
-    dialog: Option<Dialog>,
+    files: files::Files,
     system: system_panel::SystemView,
     census: census::CensusJob,
-}
-
-enum Dialog {
-    Open(String),
-    SaveAs(String),
 }
 
 #[derive(Resource)]
@@ -101,22 +98,49 @@ fn main() {
     if let Some(v) = a.view {
         view.view = v;
     }
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window { title: TITLE.into(), resolution: WindowResolution::new(1600, 1000), ..default() }),
+            // Closing, by the button or ⌘Q, asks first when there is unsaved work.
+            close_when_requested: false,
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
-        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), dialog: None, system: default(), census: default() })
+        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), files: default(), system: default(), census: default() })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
         })
         .add_systems(EguiPrimaryContextPass, ui)
-        .add_systems(Update, (title, shoot))
-        .run();
+        .add_systems(Update, (title, shoot));
+    #[cfg(target_os = "macos")]
+    app.add_systems(Update, quit_asks_first);
+    app.run();
+}
+
+/// winit's app menu sends `terminate:`, which exits with no close request. Sent as
+/// `performClose:` it closes the key window instead, so Quit asks first like the close button.
+#[cfg(target_os = "macos")]
+fn quit_asks_first(mut done: Local<bool>, _main: NonSendMarker) {
+    use objc2::{MainThreadMarker, sel};
+    use objc2_app_kit::NSApplication;
+    if *done {
+        return;
+    }
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let Some(menu) = NSApplication::sharedApplication(mtm).mainMenu() else { return };
+    for top in menu.itemArray() {
+        let Some(sub) = top.submenu() else { continue };
+        for item in sub.itemArray() {
+            if item.action() == Some(sel!(terminate:)) {
+                // SAFETY: `performClose:` takes the sender, as `terminate:` does.
+                unsafe { item.setAction(Some(sel!(performClose:))) };
+                *done = true;
+            }
+        }
+    }
 }
 
 fn title(doc: Res<Doc>, mut windows: Query<&mut Window>) {
@@ -132,15 +156,30 @@ fn title(doc: Res<Doc>, mut windows: Query<&mut Window>) {
     }
 }
 
-fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, shot: Res<Shot>) {
+/// On the main thread for the native file pickers; see [`files::Files::show`].
+fn ui(
+    mut contexts: EguiContexts,
+    mut doc: ResMut<Doc>,
+    mut state: ResMut<Ui>,
+    shot: Res<Shot>,
+    mut close: MessageReader<WindowCloseRequested>,
+    mut exit: MessageWriter<AppExit>,
+    window: Query<&RawHandleWrapper, With<PrimaryWindow>>,
+    _main: NonSendMarker,
+) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
     let doc = &mut *doc;
     let state = &mut *state;
+    state.files.parent = window.single().ok().cloned();
     // Keys pressed while the window takes focus must not change a screenshot.
     if shot.path.is_some() {
         ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
     } else {
-        shortcuts(ctx, doc);
+        shortcuts(ctx, doc, state);
+    }
+    let mut quit = false;
+    if close.read().count() > 0 {
+        quit |= state.files.request(files::Action::Quit, doc, &mut state.view);
     }
     doc.rebuild(ctx.input(|i| i.pointer.any_down()));
 
@@ -173,7 +212,10 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
         egui::Frame::new().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| views::toolbar(ui, &mut state.view, doc));
         views::show(ui, &mut state.view, doc);
     });
-    dialog(ctx, doc, state);
+    quit |= state.files.show(ctx, doc, &mut state.view);
+    if quit {
+        exit.write(AppExit::Success);
+    }
 
     // An undo step per gesture, not per frame of a drag.
     let busy = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
@@ -182,7 +224,7 @@ fn ui(mut contexts: EguiContexts, mut doc: ResMut<Doc>, mut state: ResMut<Ui>, s
     }
 }
 
-fn shortcuts(ctx: &egui::Context, doc: &mut Doc) {
+fn shortcuts(ctx: &egui::Context, doc: &mut Doc, state: &mut Ui) {
     use egui::{Key, KeyboardShortcut, Modifiers};
     let typing = ctx.memory(|m| m.focused().is_some());
     let redo = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
@@ -190,11 +232,9 @@ fn shortcuts(ctx: &egui::Context, doc: &mut Doc) {
     let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
     ctx.input_mut(|i| {
         if i.consume_shortcut(&save) {
-            if let Err(e) = doc.save() {
-                doc.notice = Some(e);
-            }
+            state.files.save(doc);
         }
-        if typing {
+        if typing || state.files.busy() {
             return;
         }
         if i.consume_shortcut(&redo) {
@@ -208,25 +248,24 @@ fn shortcuts(ctx: &egui::Context, doc: &mut Doc) {
 fn menu(ui: &mut egui::Ui, doc: &mut Doc, state: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if ui.button("New").clicked() {
-                *doc = Doc::new(Timeline::new(1), None);
-                state.view.forget_document();
-                ui.close();
-            }
-            if ui.button("Open…").clicked() {
-                state.dialog = Some(Dialog::Open(doc.path.as_ref().map_or(String::new(), |p| p.display().to_string())));
-                ui.close();
-            }
-            if ui.add_enabled(doc.path.is_some(), egui::Button::new("Save")).clicked() {
-                if let Err(e) = doc.save() {
-                    doc.notice = Some(e);
+            ui.add_enabled_ui(!state.files.busy(), |ui| {
+                if ui.button("New").clicked() {
+                    state.files.request(files::Action::New, doc, &mut state.view);
+                    ui.close();
                 }
-                ui.close();
-            }
-            if ui.button("Save as…").clicked() {
-                state.dialog = Some(Dialog::SaveAs(doc.path.as_ref().map_or(String::new(), |p| p.display().to_string())));
-                ui.close();
-            }
+                if ui.button("Open…").clicked() {
+                    state.files.request(files::Action::Open, doc, &mut state.view);
+                    ui.close();
+                }
+                if ui.button("Save").clicked() {
+                    state.files.save(doc);
+                    ui.close();
+                }
+                if ui.button("Save as…").clicked() {
+                    state.files.save_as(doc);
+                    ui.close();
+                }
+            });
         });
         ui.menu_button("Edit", |ui| {
             if ui.add_enabled(doc.can_undo(), egui::Button::new("Undo")).clicked() {
@@ -266,48 +305,6 @@ fn status(ui: &mut egui::Ui, doc: &Doc) {
             ui.label(n);
         }
     });
-}
-
-fn dialog(ctx: &egui::Context, doc: &mut Doc, state: &mut Ui) {
-    let Some(d) = &mut state.dialog else { return };
-    let (title, path) = match d {
-        Dialog::Open(p) => ("Open", p),
-        Dialog::SaveAs(p) => ("Save as", p),
-    };
-    let mut close = false;
-    let mut go = false;
-    egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-        let r = ui.add(egui::TextEdit::singleline(path).desired_width(520.0));
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            go = true;
-        }
-        ui.horizontal(|ui| {
-            go |= ui.button(title).clicked();
-            close |= ui.button("Cancel").clicked();
-        });
-    });
-    if go {
-        let path = PathBuf::from(path.trim());
-        match d {
-            Dialog::Open(_) => match Doc::open(path) {
-                Ok(new) => {
-                    *doc = new;
-                    state.view.forget_document();
-                }
-                Err(e) => doc.notice = Some(e),
-            },
-            Dialog::SaveAs(_) => {
-                doc.path = Some(path);
-                if let Err(e) = doc.save() {
-                    doc.notice = Some(e);
-                }
-            }
-        }
-        close = true;
-    }
-    if close {
-        state.dialog = None;
-    }
 }
 
 /// `--shot`: photograph the window after `frames` frames and quit.
