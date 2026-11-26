@@ -74,6 +74,7 @@ impl StarRecord {
             metallicity: metallicity::from_speed(self.velocity.length(), id.get()),
             component: Component { index: self.component_index, group: self.group },
             system: None,
+            shell_ly: 0.0,
         })
     }
 }
@@ -113,6 +114,7 @@ pub fn assemble_all(source: &str, records: &[StarRecord]) -> (Vec<CatalogStar>, 
         }
     }
     prune_singleton_groups(&mut stars);
+    super::shells::assign(&mut stars);
     (stars, skipped)
 }
 

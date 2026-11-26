@@ -269,6 +269,7 @@ pub fn catalog_star(r: &GalaxyRecord, kinematics: &Kinematics, profile: SystemPr
         metallicity: r.feh(),
         component: Component { index: 1, group: None },
         system: (!profile.is_default()).then_some(profile),
+        shell_ly: 0.0,
     })
 }
 
@@ -414,6 +415,7 @@ impl GalaxyProvider {
         stars.sort_by(|a: &CatalogStar, b: &CatalogStar| {
             a.position_ly.length().total_cmp(&b.position_ly.length()).then(a.id.cmp(&b.id))
         });
+        crate::sky::shells::assign(&mut stars);
         let mut cells: HashMap<[i32; 3], Vec<usize>> = HashMap::new();
         for (i, s) in stars.iter().enumerate() {
             cells.entry(cell_containing(s.position_ly)).or_default().push(i);

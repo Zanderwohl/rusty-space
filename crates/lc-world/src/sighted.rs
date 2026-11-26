@@ -29,7 +29,7 @@ use crate::coast::{self, Coast};
 use crate::consort;
 use crate::flight::JULIAN_YEAR_S;
 use crate::pursuit::Sighting;
-use crate::system::{LOCAL_SHELL_LY, LocalSystem};
+use crate::system::LocalSystem;
 
 /// Fixed-point steps for the emission time along a conic. Each shrinks the error by `beta`,
 /// which [`consort::GALILEAN_BETA`] bounds at a thousandth.
@@ -80,7 +80,7 @@ impl Reckoning {
     /// conic about that system's bodies. `thrusting` is whether it was as its light left.
     pub fn new(system: Option<&LocalSystem>, seen: Sighting, thrusting: bool, receiver: Receiver) -> Self {
         let frame = system
-            .filter(|s| seen.position_ly.distance(s.origin_ly) < LOCAL_SHELL_LY)
+            .filter(|s| seen.position_ly.distance(s.origin_ly) < s.shell_ly)
             .and_then(|s| consort::frame_for(s, &seen));
         let alongside = (thrusting
             && boost::velocity_to_frame(seen.beta, receiver.beta).length() < ALONGSIDE_BETA)

@@ -350,10 +350,11 @@ mod tests {
             metallicity: 0.0,
             component: StarComponent { index: 1, group: None },
             system: None,
+            shell_ly: 0.0,
         }
     }
 
-    /// Spread far enough apart that no shell overlaps another — `LOCAL_SHELL_LY` is 1.6, so
+    /// Spread far enough apart that no shell overlaps another — a solar-mass shell is 1.6 ly, so
     /// ten light-years between them leaves no ambiguity about which system a craft is in.
     fn catalog() -> Vec<CatalogStar> {
         (0..10)

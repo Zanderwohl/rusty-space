@@ -46,9 +46,9 @@ pub const HEIGHT_PER_LENGTH: f64 = 1.0 / 5.0;
 ///
 /// The longest light delay anyone can solve across. [`crate::pursuit`] and the contact channel
 /// both only look at craft inside the same shell, so two of them are at most `2 *
-/// LOCAL_SHELL_LY` apart — and a light-year is a year of travel by definition, so that span in
+/// MAX_SHELL_LY` apart — and a light-year is a year of travel by definition, so that span in
 /// years is that span in seconds of delay.
-pub const HISTORY_S: f64 = 2.0 * crate::system::LOCAL_SHELL_LY * crate::flight::JULIAN_YEAR_S;
+pub const HISTORY_S: f64 = 2.0 * crate::sky::shells::MAX_SHELL_LY * crate::flight::JULIAN_YEAR_S;
 
 /// How many stretches of worldline a craft keeps at once.
 ///

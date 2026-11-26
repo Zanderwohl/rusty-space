@@ -192,9 +192,6 @@ pub fn corona_flow_phase(now_s: f64, style: &PointStyle) -> f32 {
     (now_s * radii_per_s / cycle_radii).rem_euclid(1.0) as f32
 }
 
-/// Where the local shell is, re-exported so the drawing code reads the same as the world code.
-pub use lc_world::system::LOCAL_SHELL_LY;
-
 /// Radians per pixel, vertically, for a perspective camera.
 pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {
     if viewport_height <= 0.0 {
@@ -268,7 +265,7 @@ pub struct SkyMesh;
 /// seed and draws a swarm apiece, and [`update_sky`] wants the number on every frame and the
 /// points on almost none.
 pub fn local_count(session: &Session) -> usize {
-    session.stars.iter().filter(|s| session.distance_to(s) < LOCAL_SHELL_LY).count()
+    session.stars.iter().filter(|s| session.distance_to(s) < s.shell_radius_ly()).count()
 }
 
 /// Split the sky into the background and the system the ship is in.
@@ -276,7 +273,7 @@ pub fn partition(session: &Session) -> (Vec<Point>, Vec<Point>) {
     let mut distant = Vec::with_capacity(session.stars.len());
     let mut local = Vec::new();
     for star in &session.stars {
-        let target = if session.distance_to(star) < LOCAL_SHELL_LY { &mut local } else { &mut distant };
+        let target = if session.distance_to(star) < star.shell_radius_ly() { &mut local } else { &mut distant };
         target.push(Point::star(star));
     }
     (distant, local)
