@@ -50,27 +50,17 @@ pub fn statistics(ui: &mut egui::Ui, doc: &Doc) {
     ui.label(format!("min {min:.2} ly, mean {mean:.2} ly, hard-core floor {:.2} ly", floor.unwrap_or(0.0)));
 
     let Some(b) = bake else { return };
-    let shells: Vec<(f64, f64)> = r
-        .shells
-        .iter()
-        .zip(&b.stars)
-        .filter(|(r, _)| r.is_finite())
-        .map(|(r, s)| (*r, shells::nominal_ly(s.attributes.mass_solar)))
-        .collect();
-    if shells.is_empty() {
-        return;
-    }
+    let Some(sh) = lc_galaxy::stats::shell_summary(&b.stars, &r.shells) else { return };
     ui.add_space(6.0);
     ui.label(RichText::new("shell radius").strong());
-    let radii: Vec<f64> = shells.iter().map(|(r, _)| *r).collect();
+    let radii: Vec<f64> = r.shells.iter().copied().filter(|r| r.is_finite()).collect();
     histogram(ui, &radii, Some(shells::SOLAR_SHELL_LY));
-    // A clamped shell is the proportional share of a gap, never more than its nominal radius.
-    let clamped = shells.iter().filter(|(r, nominal)| *r < nominal * (1.0 - 1e-9)).count();
-    let mean = radii.iter().sum::<f64>() / radii.len() as f64;
     ui.label(format!(
-        "clamped {clamped} of {} ({:.0}%), mean {mean:.2} ly, solar nominal {:.2} ly",
-        shells.len(),
-        100.0 * clamped as f64 / shells.len() as f64,
+        "clamped {} of {} ({:.0}%), mean {:.2} ly, solar nominal {:.2} ly",
+        sh.clamped,
+        sh.kept,
+        100.0 * sh.clamped as f64 / sh.kept as f64,
+        sh.mean_ly,
         shells::SOLAR_SHELL_LY
     ));
 }
@@ -105,24 +95,7 @@ pub fn systems(ui: &mut egui::Ui, census: &CensusJob, doc: &Doc) {
     let mut columns: Vec<(String, Vec<&Census>)> = r.compiled.populations.keys().map(|id| (doc.feature_name(*id), of(Some(*id)))).collect();
     columns.push(("total".into(), of(None)));
 
-    type Measure = fn(&[&Census]) -> String;
-    fn per_star(cs: &[&Census], f: fn(&Census) -> u32) -> String {
-        if cs.is_empty() { "–".into() } else { format!("{:.2}", cs.iter().map(|c| f(c) as f64).sum::<f64>() / cs.len() as f64) }
-    }
-    fn share(cs: &[&Census], f: fn(&Census) -> bool) -> String {
-        if cs.is_empty() { "–".into() } else { format!("{:.0}%", 100.0 * cs.iter().filter(|c| f(c)).count() as f64 / cs.len() as f64) }
-    }
-    let rows: [(&str, Measure); 9] = [
-        ("systems", |cs| cs.len().to_string()),
-        ("planets / star", |cs| per_star(cs, |c| c.planets)),
-        ("giants / star", |cs| per_star(cs, |c| c.giants)),
-        ("with a belt", |cs| share(cs, |c| c.belt)),
-        ("with an Oort cloud", |cs| share(cs, |c| c.oort_cloud)),
-        ("habitable / star", |cs| per_star(cs, |c| c.habitable)),
-        ("ocean worlds", |cs| cs.iter().map(|c| c.ocean_worlds).sum::<u32>().to_string()),
-        ("eligible", |cs| cs.iter().filter(|c| c.eligible).count().to_string()),
-        ("ocean-first", |cs| cs.iter().filter(|c| c.ocean_first).count().to_string()),
-    ];
+    let rows = lc_galaxy::stats::system_rows();
     egui::Grid::new("systems").num_columns(columns.len() + 1).striped(true).show(ui, |ui| {
         ui.label("");
         for (name, _) in &columns {

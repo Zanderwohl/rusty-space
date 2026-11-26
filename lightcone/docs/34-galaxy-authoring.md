@@ -13,7 +13,7 @@ Galaxy Forge's Charts panel (an HR diagram over the zero-age main sequence, and 
 Phase II, with a draft Phase II galaxy in `crates/lc-galaxy/galaxies/phase-2.ron`. Phase I is under way: since 2026-11-24 the dev shard and the promoted browser build run the
 Phase I galaxy (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, solo and
 difference in both views, per-star shells with their histogram, and authored system contents
-([35-system-contents.md](35-system-contents.md)) are built; `lc-galaxy stats` and the
+([35-system-contents.md](35-system-contents.md)) and `lc-galaxy stats` are built; the
 separate-process determinism tests are not. Tier A and the CDN path of
 Phase III are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
@@ -703,9 +703,13 @@ lc-galaxy diff   galaxy/ --against <manifest>
 lc-galaxy publish chunks/           # CDN upload and manifest rows; see 15-runbook.md
 ```
 
-As built in E3, only `check` and a local `publish` exist:
+As built, `check`, `stats` and a local `publish` exist. `stats` prints what Galaxy Forge's
+Statistics panel shows for the stars inside `--box` (the whole graph without it): counts against
+the field, the nearest-neighbor and shell-radius summaries, and the systems table. Stars just
+outside the box still count as neighbors.
 
 ```bash
+cargo run -p lc-galaxy --bin lc-galaxy -- stats crates/lc-galaxy/galaxies/phase-2.ron --box -8,-8,-8:0,8,8
 cargo run -p lc-galaxy --bin lc-galaxy -- publish crates/lc-galaxy/galaxies/phase-1.ron --out crates/lc-client/assets/galaxies/phase-1
 cargo run -p lc-server --bin lightcone-server -- --open --sky crates/lc-client/assets/galaxies/phase-1/manifest.galaxy
 cargo run -p lc-client --bin lightcone -- galaxies/phase-1/manifest.galaxy --local

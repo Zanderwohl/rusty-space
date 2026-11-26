@@ -1,20 +1,22 @@
 //! ```text
 //! lc-galaxy check   <timeline.ron>
+//! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>]
 //! ```
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use lc_galaxy::{Registry, Row, codec, publish};
+use lc_galaxy::sample::default_threads;
+use lc_galaxy::{Aabb, Registry, Row, codec, publish, stats};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
-        eprintln!("usage: lc-galaxy check|publish <timeline.ron> [--out <dir>] [--name <name>]");
+        eprintln!("usage: lc-galaxy check|stats|publish <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <dir>] [--name <name>]");
         return ExitCode::FAILURE;
     };
     let text = match std::fs::read_to_string(path) {
@@ -42,6 +44,26 @@ fn main() -> ExitCode {
             println!("graph {:016x}", publish::graph_version(&timeline));
             if unread == 0 && compiled.problems.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
         }
+        "stats" => {
+            let region = match after("--box").map(|b| parse_box(&b)) {
+                Some(Ok(region)) => region,
+                Some(Err(e)) => {
+                    eprintln!("--box: {e}");
+                    return ExitCode::FAILURE;
+                }
+                None => timeline.compile(timeline.len(), None).bounds(),
+            };
+            match stats::report(&timeline, region, default_threads()) {
+                Ok(text) => {
+                    print!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "publish" => {
             let Some(out) = after("--out") else {
                 eprintln!("publish needs --out <dir>");
@@ -67,4 +89,18 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `x0,y0,z0:x1,y1,z1` in ly, the corners in either order.
+fn parse_box(text: &str) -> Result<Aabb, String> {
+    let corner = |s: &str| -> Result<glam::DVec3, String> {
+        let v: Vec<f64> = s.split(',').map(|c| c.trim().parse::<f64>().map_err(|e| format!("{c:?}: {e}"))).collect::<Result<_, _>>()?;
+        match v.as_slice() {
+            [x, y, z] => Ok(glam::DVec3::new(*x, *y, *z)),
+            _ => Err(format!("{s:?} is not three numbers")),
+        }
+    };
+    let (a, b) = text.split_once(':').ok_or("needs two corners separated by ':'")?;
+    let (a, b) = (corner(a)?, corner(b)?);
+    Ok(Aabb { min: a.min(b), max: a.max(b) })
 }
