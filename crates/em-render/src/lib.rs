@@ -21,6 +21,7 @@ pub mod hull_material;
 pub mod local_starfield_material;
 pub mod population_material;
 pub mod relativistic_starfield_material;
+pub mod ring_material;
 pub mod render_space;
 pub mod wire_mesh;
 

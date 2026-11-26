@@ -560,7 +560,7 @@ pub fn subjects<'a>(
 
     for body in drawn {
         let Some(rings) = &body.rings else { continue };
-        if crate::envelope::ring_opacity(&rings.system) < MIN_RING_OPACITY {
+        if crate::rings::ring_opacity(&rings.system) < MIN_RING_OPACITY {
             continue;
         }
         let outer = rings.system.outer_m();

@@ -27,6 +27,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use em_render::body_surface_material::BodySurfaceMaterial;
 use em_render::population_material::PopulationMaterial;
+use em_render::ring_material::RingMaterial;
 use em_render::relativistic_starfield_material::RelativisticStarfieldMaterial;
 use texture_graph_core::{CUBE_FACES, EvalCtx, Graph, LoadError, ParamValue, load_from_str};
 use texture_graph_gpu::{
@@ -384,6 +385,7 @@ fn run_bakes(
     adapter: Option<Res<RenderAdapter>>,
     mut images: ResMut<Assets<Image>>,
     mut populations: ResMut<Assets<PopulationMaterial>>,
+    mut rings: ResMut<Assets<RingMaterial>>,
     mut surfaces: ResMut<Assets<BodySurfaceMaterial>>,
     mut skies: ResMut<Assets<RelativisticStarfieldMaterial>>,
 ) {
@@ -458,6 +460,7 @@ fn run_bakes(
         // uniform buffer and bind group, for every body, whenever any bake landed.
         let landed: Vec<AssetId<Image>> = landed.iter().map(Handle::id).collect();
         touch(&mut populations, &landed);
+        touch(&mut rings, &landed);
         touch(&mut surfaces, &landed);
         touch(&mut skies, &landed);
     }
@@ -497,6 +500,13 @@ impl Binds for PopulationMaterial {
     fn images(&self) -> Vec<AssetId<Image>> {
         let Self { uniforms: _, profile, grain } = self;
         vec![profile.id(), grain.id()]
+    }
+}
+
+impl Binds for RingMaterial {
+    fn images(&self) -> Vec<AssetId<Image>> {
+        let Self { uniforms: _, grain } = self;
+        vec![grain.id()]
     }
 }
 

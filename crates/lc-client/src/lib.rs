@@ -80,6 +80,7 @@ pub mod procedural;
 pub mod radio_panel;
 pub mod range;
 pub mod reader;
+pub mod rings;
 pub mod refit_hull;
 pub mod refit_panel;
 pub mod resolved;

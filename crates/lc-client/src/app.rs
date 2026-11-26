@@ -165,6 +165,8 @@ impl Plugin for ClientPlugin {
             .init_resource::<Looking>()
             .init_resource::<Bodies>()
             .init_resource::<crate::envelope::Envelopes>()
+            .init_resource::<crate::rings::Rings>()
+            .add_plugins(em_render::ring_material::RingMaterialPlugin)
             .init_resource::<crate::hull::Eye>()
             .init_resource::<crate::hull::Hulls>()
             .init_resource::<crate::parts::OwnForm>()
@@ -273,6 +275,7 @@ impl Plugin for ClientPlugin {
                     crate::resolved::sample_scene,
                     crate::resolved::update_resolved,
                     crate::envelope::update_envelopes,
+                    crate::rings::update_rings,
                     // Last, because a hull is metered as part of the scene the exposure was
                     // just placed for.
                     crate::hull::update_hulls,
@@ -454,12 +457,14 @@ pub const fn in_game_only() -> InGameOnly {
 /// run only in game and would otherwise be left drawn behind the Unreachable screen.
 fn leave_scene(
     mut envelopes: ResMut<crate::envelope::Envelopes>,
+    mut rings: ResMut<crate::rings::Rings>,
     mut surfaces: ResMut<crate::surfaces::Surfaces>,
     mut bakes: ResMut<crate::procedural::Bakes>,
 ) {
     // It respawns only on a change of star.
     envelopes.star = None;
     envelopes.shells.clear();
+    rings.star = None;
     surfaces.keep(None, [], &mut bakes);
 }
 
@@ -788,11 +793,12 @@ mod tests {
                 star: Some(lc_world::sky::StarId::synthesize("test", 1)),
                 ..default()
             })
+            .insert_resource(crate::rings::Rings { star: Some(lc_world::sky::StarId::synthesize("test", 1)), drawn: 1 })
             .add_systems(OnExit(AppState::InGame), leave_scene);
         let world = app.world_mut();
         world.spawn(crate::resolved::ResolvedBody("Earth".into()));
         world.spawn(crate::envelope::EnvelopeMesh(0));
-        world.spawn(crate::envelope::RingMesh { body: 0, radius: 1.0 });
+        world.spawn(crate::rings::RingMesh { body: 0, radius: 1.0 });
         world.spawn(crate::hull::Hull(None));
         world.spawn(crate::plume::Cone(None, crate::plume::Jet::Drive));
         let mesh = world.spawn(Name::new("a hull's mesh")).id();
@@ -810,10 +816,11 @@ mod tests {
         assert_eq!(world.query::<&crate::ship_hull::ShipHull>().iter(world).count(), 0);
         assert!(!left.contains(&mesh), "a hull's mesh outlived its root");
         assert_eq!(world.query::<&crate::resolved::ResolvedBody>().iter(world).count(), 0);
-        assert_eq!(world.query::<&crate::envelope::RingMesh>().iter(world).count(), 0);
+        assert_eq!(world.query::<&crate::rings::RingMesh>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::envelope::EnvelopeMesh>().iter(world).count(), 0);
         assert_eq!(world.query::<&crate::plume::Cone>().iter(world).count(), 0);
         assert_eq!(world.resource::<crate::envelope::Envelopes>().star, None, "they would not respawn");
+        assert_eq!(world.resource::<crate::rings::Rings>().star, None, "nor would the rings");
     }
 
     /// The invariant of 13-client-shell.md, asserted rather than assumed.
