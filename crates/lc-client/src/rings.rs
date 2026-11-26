@@ -4,7 +4,7 @@
 //! A ring is shaded as its planet is: starlight its particles reflect and heat they radiate, per
 //! band, through the current band mapping, and tone-mapped per fragment in the planet's exposure
 //! (`ring.wgsl`). On top of that is a display floor, so a ring too thin to see is still faintly
-//! there.
+//! there. What the particles cover is the alpha, so a ring hides what is behind it.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -143,6 +143,15 @@ pub fn depth_over(bands: &[Vec4], count: usize, radius: f32, width: f32) -> f32 
     let half = 0.5 * width;
     let within = |edge: f32| (edge - radius).clamp(-half, half);
     bands.iter().take(count.min(RING_BANDS)).map(|b| b.z * (within(b.y) - within(b.x))).sum::<f32>() / width
+}
+
+/// The alpha `ring.wgsl` draws a pixel at: the share of what is behind it the particles stop,
+/// seen at `mu`, averaged over the radii `radius +- width / 2`.
+pub fn coverage_over(bands: &[Vec4], count: usize, radius: f32, width: f32, mu: f32) -> f32 {
+    let half = 0.5 * width;
+    let within = |edge: f32| (edge - radius).clamp(-half, half);
+    let sum: f32 = bands.iter().take(count.min(RING_BANDS)).map(|b| (within(b.y) - within(b.x)) * (1.0 - (-b.z / mu).exp())).sum();
+    (sum / width).clamp(0.0, 1.0)
 }
 
 /// `lit_face` in `ring.wgsl`: the sunlit face of a sheet at optical depth `tau`, seen at `mu` and
@@ -576,5 +585,21 @@ mod tests {
         assert!(floor_of(0.1, 1.0) > 0.05, "a generated ring at 0.1: {}", floor_of(0.1, 1.0));
         assert!(floor_of(100.0, 0.01) <= RING_FLOOR);
         assert_eq!(floor_of(0.0, 1.0), 0.0);
+    }
+
+    /// A ring hides what is behind it by what its particles cover: Saturn's B ring most of it, its
+    /// Cassini Division little, Jupiter's rings nothing to speak of; and obliquely, more.
+    #[test]
+    fn a_ring_hides_what_is_behind_it_by_its_coverage() {
+        let (count, bands) = packed("Saturn");
+        let r_saturn = 5.8232e7 / 1.36775e8;
+        let at = |r: f32, mu: f32| coverage_over(&bands, count, r * r_saturn, PIXEL, mu);
+        assert!((at(1.8, 1.0) - (1.0 - (-1.5f32).exp())).abs() < 1e-3, "B ring face-on: {}", at(1.8, 1.0));
+        assert!(at(2.06, 1.0) < 0.1, "the division: {}", at(2.06, 1.0));
+        assert!(at(2.06, 0.1) > at(2.06, 1.0) * 5.0, "obliquely the division closes");
+        assert_eq!(at(3.0, 1.0), 0.0);
+        let (count, bands) = packed("Jupiter");
+        let main = bands[1];
+        assert!(coverage_over(&bands, count, 0.5 * (main.x + main.y), PIXEL, 1.0) < 1.0e-5);
     }
 }
