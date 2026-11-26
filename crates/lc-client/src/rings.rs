@@ -36,11 +36,21 @@ const GRAIN_STRENGTH: f32 = 0.35;
 /// What a band is drawn at, at least, for its coverage `c` before lighting: `RING_FLOOR c^(1/4)`.
 ///
 /// A display decision, as `envelope::DISPLAY_LEVEL` is for a population: the planet's exposure
-/// window is two and a half stops, so by its true brightness a ring under an optical depth of a
-/// few hundredths is black beside its planet. Tuned on the reference shots so Jupiter's rings
-/// (optical depth 3e-6) are barely there and a generated ring at 0.1 is plain, while Saturn's B
-/// ring, where the true brightness is higher, is unchanged.
-pub const RING_FLOOR: f32 = 0.25;
+/// window is five stops, so by its true brightness a ring under an optical depth of about 0.01 is
+/// black beside its planet. The value is linear and the screen's sRGB encoding lifts it, so 0.01
+/// shows as about 25 of 255. Tuned on the reference shots: Jupiter's rings (optical depth 3e-6)
+/// at about 13 of 255, a generated ring at 4e-5 seen obliquely at about 27, and from about 0.1 up
+/// the true brightness is higher and the floor does nothing.
+pub const RING_FLOOR: f32 = 0.1;
+
+/// Ring ice in [`Band`] order, as a share of its V reflectance: water ice reddened by the dust
+/// mixed through it, which is why Saturn's rings are tan where snow is blue-white, and dark by
+/// 2 µm where ice absorbs. Nothing reflects in the emissive bands.
+const RING_ICE: [f32; BANDS] = [0.75, 1.0, 1.1, 1.12, 0.25, 0.0, 0.0];
+
+/// Ring ice's emissivity at 10 µm and at 21 cm. Ice is nearly lossless in the radio, so a ring of
+/// it radiates a few kelvin there however warm it is; Saturn's do.
+const RING_ICE_EMISSIVE: (f32, f32) = (0.97, 0.05);
 
 /// Particles at least this bright are ice. The generator draws rocky rings from 0.03 to 0.1 and
 /// icy ones from 0.1 to 0.6, and the measured systems split the same way.
@@ -160,6 +170,13 @@ pub fn floor_of(tau: f32, mu: f32) -> f32 {
     RING_FLOOR * opacity_of(f64::from(1.0 - (-tau / mu).exp()))
 }
 
+/// What a ring's particles are made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Material {
+    Ice,
+    Rock,
+}
+
 /// What a ring's particles are, band by band: reflectance scaled so V is the ring's albedo, and
 /// emissivity by Kirchhoff where they reflect.
 pub struct Particles {
@@ -167,13 +184,19 @@ pub struct Particles {
     pub emissivity: [f32; BANDS],
 }
 
-pub fn particles(ground: Ground, albedo: f64) -> Particles {
-    let shape = ground.reflectance();
+pub fn particles(material: Material, albedo: f64) -> Particles {
+    let (shape, (thermal, radio)) = match material {
+        Material::Ice => (RING_ICE, RING_ICE_EMISSIVE),
+        Material::Rock => {
+            let e = Ground::Basalt.emissivity();
+            (Ground::Basalt.reflectance(), (e[Band::ThermalIr.index()], e[Band::Radio.index()]))
+        }
+    };
     let scale = albedo as f32 / shape[Band::V.index()].max(f32::MIN_POSITIVE);
     let reflectance = shape.map(|r| (r * scale).clamp(0.0, 1.0));
-    let measured = ground.emissivity();
     let emissivity = std::array::from_fn(|k| match Band::ALL[k] {
-        Band::ThermalIr | Band::Radio => measured[k],
+        Band::ThermalIr => thermal,
+        Band::Radio => radio,
         _ => 1.0 - reflectance[k],
     });
     Particles { reflectance, emissivity }
@@ -208,8 +231,8 @@ pub fn light_of(particles: &Particles, albedo: f64, star: Starlight, mapping: &B
 pub fn uniform(rings: &lc_world::system::Rings, star: Starlight, to_star: DVec3, mapping: &BandMapping, tone: &crate::tonemap::ToneMap, seed: f32) -> RingUniform {
     let (count, bands) = pack(&rings.system);
     let albedo = rings.system.albedo;
-    let (reflected_rocky, emitted_rocky) = light_of(&particles(Ground::Basalt, albedo), albedo, star, mapping);
-    let (reflected_icy, emitted_icy) = light_of(&particles(Ground::Ice, albedo), albedo, star, mapping);
+    let (reflected_rocky, emitted_rocky) = light_of(&particles(Material::Rock, albedo), albedo, star, mapping);
+    let (reflected_icy, emitted_icy) = light_of(&particles(Material::Ice, albedo), albedo, star, mapping);
     RingUniform {
         bands,
         params: Vec4::new(count as f32, RING_FLOOR, 0.0, 0.0),
@@ -464,9 +487,9 @@ mod tests {
 
     /// Display light of a sheet through `mapping`, against a gray sheet of the same albedo, per
     /// channel: what the particles' spectrum does to the color, with the star's taken out.
-    fn against_gray(ground: Ground, mapping: &BandMapping) -> Vec3 {
+    fn against_gray(material: Material, mapping: &BandMapping) -> Vec3 {
         let star = sun_at(9.5);
-        let (ice, _) = light_of(&particles(ground, 0.5), 0.5, star, mapping);
+        let (ice, _) = light_of(&particles(material, 0.5), 0.5, star, mapping);
         let gray = Particles { reflectance: [0.5; BANDS], emissivity: [0.5; BANDS] };
         let (flat, _) = light_of(&gray, 0.5, star, mapping);
         Vec3::select(flat.cmpgt(Vec3::ZERO), ice / flat, Vec3::ZERO)
@@ -474,9 +497,9 @@ mod tests {
 
     #[test]
     fn particles_are_as_bright_in_v_as_the_albedo_says() {
-        for ground in [Ground::Ice, Ground::Basalt] {
+        for material in [Material::Ice, Material::Rock] {
             for albedo in [0.03, 0.1, 0.5] {
-                let p = particles(ground, albedo);
+                let p = particles(material, albedo);
                 assert!((p.reflectance[Band::V.index()] - albedo as f32).abs() < 1e-6);
                 assert!(p.emissivity.iter().all(|e| (0.0..=1.0).contains(e)));
             }
@@ -488,19 +511,22 @@ mod tests {
     #[test]
     fn an_icy_ring_is_dark_in_k_and_bright_in_v() {
         let thermal = em_spectra::presets::thermal();
-        let (ice, rock) = (against_gray(Ground::Ice, &thermal), against_gray(Ground::Basalt, &thermal));
+        let (ice, rock) = (against_gray(Material::Ice, &thermal), against_gray(Material::Rock, &thermal));
         assert!(ice.y < ice.z * 0.3, "ice in K against V: {ice}");
         assert!(rock.y > rock.z * 0.8, "rock in K against V: {rock}");
     }
 
     /// Dust penetration maps 21 cm, 10 µm and K. Nothing reflects at the first two, so all a ring
-    /// sends there is its own glow; K is all its reflection.
+    /// sends there is its own glow; K is all its reflection. Ice barely radiates at 21 cm, so an
+    /// icy ring is far fainter there than a rocky one at the same temperature.
     #[test]
     fn under_dust_penetration_a_ring_reflects_only_in_k() {
         let dust = em_spectra::presets::dust_penetration();
-        let (reflected, emitted) = light_of(&particles(Ground::Ice, 0.5), 0.5, sun_at(9.5), &dust);
+        let (reflected, emitted) = light_of(&particles(Material::Ice, 0.5), 0.5, sun_at(9.5), &dust);
         assert_eq!((reflected.x, reflected.y), (0.0, 0.0), "{reflected}");
         assert!(reflected.z > 0.0 && emitted.y > 0.0, "{reflected} {emitted}");
+        let (_, rock) = light_of(&particles(Material::Rock, 0.5), 0.5, sun_at(9.5), &dust);
+        assert!(emitted.x < rock.x * 0.1, "21 cm, ice against rock: {} {}", emitted.x, rock.x);
     }
 
     /// A rocky ring at 0.03 AU is hundreds of kelvin and glows at 10 µm; an icy one at 10 AU is
@@ -508,8 +534,8 @@ mod tests {
     #[test]
     fn a_hot_rocky_ring_glows_and_a_cold_icy_one_barely_does() {
         let thermal = em_spectra::presets::thermal();
-        let (_, hot) = light_of(&particles(Ground::Basalt, 0.06), 0.06, sun_at(0.03), &thermal);
-        let (_, cold) = light_of(&particles(Ground::Ice, 0.5), 0.5, sun_at(10.0), &thermal);
+        let (_, hot) = light_of(&particles(Material::Rock, 0.06), 0.06, sun_at(0.03), &thermal);
+        let (_, cold) = light_of(&particles(Material::Ice, 0.5), 0.5, sun_at(10.0), &thermal);
         assert!(hot.x > cold.x * 1.0e3, "10 µm: {} against {}", hot.x, cold.x);
         assert!(particle_k(3.828e26, 0.03 * AU, 0.06) > 1000.0);
     }
@@ -540,14 +566,14 @@ mod tests {
     }
 
     /// The floor keeps the measured systems in order by their densest band, and sits where the
-    /// tuning says: Jupiter's barely, a generated ring at 0.1 plainly.
+    /// tuning says, in linear light: Jupiter's barely, a generated ring at 0.1 plainly.
     #[test]
     fn the_floor_keeps_the_order_and_its_targets() {
         let densest = |id: &str| for_body(id).unwrap().bands.iter().map(|b| b.optical_depth as f32).fold(0.0, f32::max);
         let floor = |id: &str| floor_of(densest(id), 1.0);
         assert!(floor("Saturn") > floor("Uranus") && floor("Uranus") > floor("Neptune") && floor("Neptune") > floor("Jupiter"));
-        assert!(floor_of(3.0e-6, 1.0) < 0.015, "Jupiter's main ring: {}", floor_of(3.0e-6, 1.0));
-        assert!(floor_of(0.1, 1.0) > 0.1, "a generated ring at 0.1: {}", floor_of(0.1, 1.0));
+        assert!(floor_of(3.0e-6, 1.0) < 0.005, "Jupiter's main ring: {}", floor_of(3.0e-6, 1.0));
+        assert!(floor_of(0.1, 1.0) > 0.05, "a generated ring at 0.1: {}", floor_of(0.1, 1.0));
         assert!(floor_of(100.0, 0.01) <= RING_FLOOR);
         assert_eq!(floor_of(0.0, 1.0), 0.0);
     }
