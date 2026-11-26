@@ -191,8 +191,12 @@ impl Plugin for ClientPlugin {
                     // system does nothing unless a path was asked for.
                     crate::dev::photograph,
                     crate::dev::run_dev_actions.run_if(in_state(AppState::InGame)),
-                    crate::dev::place_at_body.run_if(in_state(AppState::InGame)),
-                    crate::dev::place_on_station.run_if(in_state(AppState::InGame)),
+                    (
+                        crate::dev::place_at_star,
+                        crate::dev::place_at_body.after(crate::dev::place_at_star),
+                        crate::dev::place_on_station.after(crate::dev::place_at_star),
+                    )
+                        .run_if(in_state(AppState::InGame)),
                     (
                         // Before the bindings, which would take Escape to close a window.
                         crate::form_carry::cancel_on_escape,
