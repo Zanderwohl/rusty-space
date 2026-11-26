@@ -326,7 +326,7 @@ fn generated_paint(stars: &[lc_world::sky::CatalogStar], name: &str) -> Option<W
             };
             let bare = (p.atmosphere, p.top) == (lc_world::worlds::Atmosphere::None, lc_world::worlds::Top::Rock);
             let surface = lc_world::surface::Surface::classify(p.radius_m, p.mass_kg, p.equilibrium_k);
-            let airless = bare.then(|| lc_world::airless::derived(surface, p.radius_m, variety(&p.name)));
+            let airless = bare.then(|| lc_world::airless::molten(lc_world::airless::derived(surface, p.radius_m, variety(&p.name)), p.equilibrium_k));
             Some(Worn { climate: derived(&inputs, variety(&p.name)), giant: p.giant(s), airless, world: p.world(s) })
         })
 }

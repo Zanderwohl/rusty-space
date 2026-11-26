@@ -327,7 +327,7 @@ impl LocalSystem {
                         .flatten(),
                     giant,
                     airless: painted
-                        .then(|| crate::airless::of(self.sim.name(i), &world, surface, radius_m, tags))
+                        .then(|| crate::airless::of(self.sim.name(i), &world, surface, radius_m, equilibrium_k, tags))
                         .flatten(),
                     icy: painted
                         .then(|| {

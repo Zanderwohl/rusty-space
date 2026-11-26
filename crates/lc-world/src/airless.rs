@@ -26,7 +26,7 @@ pub struct Airless {
 }
 
 /// `None` for anything with air or with ice on top.
-pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64, tags: &[String]) -> Option<Airless> {
+pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64, equilibrium_k: f64, tags: &[String]) -> Option<Airless> {
     if world.atmosphere != Atmosphere::None || world.top != Top::Rock {
         return None;
     }
@@ -37,7 +37,33 @@ pub fn of(id: &str, world: &World, surface: Surface, radius_m: f64, tags: &[Stri
     if crate::worlds::Stated::captured(tags) {
         return measured(id).or(Some(rubble(variety)));
     }
-    measured(id).or_else(|| Some(derived(surface, radius_m, variety)))
+    measured(id).or_else(|| Some(molten(derived(surface, radius_m, variety), equilibrium_k)))
+}
+
+/// Where rock starts to melt at the surface, kelvin: basalt's solidus, a little over 1,000 K,
+/// reached across the day side somewhat below it.
+const MELT_K: f64 = 900.0;
+/// Where the day side is all melt.
+const MOLTEN_K: f64 = 1500.0;
+
+/// The same world close enough to its star that its surface melts: lava spreads over the
+/// craters until, past [`MOLTEN_K`], nothing is left but dark glassy rock and melt. Its glow is
+/// the body's own blackbody light, which the client already draws.
+pub fn molten(a: Airless, equilibrium_k: f64) -> Airless {
+    let melt = ((equilibrium_k - MELT_K) / (MOLTEN_K - MELT_K)).clamp(0.0, 1.0) as f32;
+    if melt <= 0.0 {
+        return a;
+    }
+    let [ancient, later, fresh] = a.craters;
+    let keep = 1.0 - 0.85 * melt;
+    let mix = |x: f32, y: f32| x + (y - x) * melt;
+    Airless {
+        craters: [ancient, later * keep, fresh * keep],
+        maria: mix(a.maria, 1.0),
+        rays: a.rays * keep,
+        mare: [mix(a.mare[0], 0.30), mix(a.mare[1], 0.012), mix(a.mare[2], 35.0)],
+        ..a
+    }
 }
 
 /// What a planet catches: carbon-rich rubble, cratered at every scale and never flooded.
@@ -128,12 +154,12 @@ mod tests {
 
     #[test]
     fn only_bare_rock_is_airless() {
-        assert!(of("Luna", world("Luna"), Surface::Weathered, 1.737e6, &[]).is_some());
-        assert!(of("Mercury", world("Mercury"), Surface::Scorched, 2.44e6, &[]).is_some());
-        assert!(of("Mars", world("Mars"), Surface::Weathered, 3.39e6, &[]).is_none(), "Mars has air");
-        assert!(of("Europa", world("Europa"), Surface::Ice, 1.56e6, &[]).is_none(), "Europa is ice");
+        assert!(of("Luna", world("Luna"), Surface::Weathered, 1.737e6, 250.0, &[]).is_some());
+        assert!(of("Mercury", world("Mercury"), Surface::Scorched, 2.44e6, 250.0, &[]).is_some());
+        assert!(of("Mars", world("Mars"), Surface::Weathered, 3.39e6, 250.0, &[]).is_none(), "Mars has air");
+        assert!(of("Europa", world("Europa"), Surface::Ice, 1.56e6, 250.0, &[]).is_none(), "Europa is ice");
         let generated = crate::worlds::of("Kettle b", Surface::Rock, &[], None);
-        assert!(of("Kettle b", &generated, Surface::Rock, 5.0e5, &[]).is_some());
+        assert!(of("Kettle b", &generated, Surface::Rock, 5.0e5, 250.0, &[]).is_some());
     }
 
     #[test]
@@ -148,7 +174,7 @@ mod tests {
     #[test]
     fn maria_are_darker_than_highland_and_ejecta_brighter() {
         for id in ["a", "b", "c", "d", "e", "Luna", "Mercury"] {
-            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[], None), Surface::Rock, 2.0e6, &[]).unwrap();
+            let p = of(id, &crate::worlds::of(id, Surface::Rock, &[], None), Surface::Rock, 2.0e6, 250.0, &[]).unwrap();
             assert!(p.mare[0] < p.highland[0] && p.highland[0] < p.ejecta[0], "{id}: {p:?}");
             assert!(p.craters.windows(2).all(|w| w[1] <= w[0]), "{id}: the old series is the densest");
         }
@@ -159,17 +185,33 @@ mod tests {
         use crate::worlds::{Atmosphere, Stated, Top};
         let mut tags = Stated::tags(Atmosphere::None, Top::Rock, false);
         tags.push(Stated::CAPTURED.to_string());
-        let luna = of("Luna", world("Luna"), Surface::Weathered, 1.737e6, &[]).unwrap();
+        let luna = of("Luna", world("Luna"), Surface::Weathered, 1.737e6, 250.0, &[]).unwrap();
         for id in ["a", "b", "c", "d", "e"] {
             let caught = crate::worlds::of(id, Surface::Ice, &tags, None);
             let grown = crate::worlds::of(id, Surface::Ice, &tags[..2], None);
             assert!(caught.gray_albedo() < 0.08, "{id}: {}", caught.gray_albedo());
             assert!(caught.gray_albedo() < 0.6 * grown.gray_albedo(), "{id}");
-            let rubble = of(id, &caught, Surface::Ice, 3.0e4, &tags).expect("caught moons are airless");
+            let rubble = of(id, &caught, Surface::Ice, 3.0e4, 80.0, &tags).expect("caught moons are airless");
             assert_eq!(rubble.maria, 0.0);
             assert!(rubble.highland[0] < luna.highland[0] - 0.1, "{id}: {rubble:?}");
             assert!(rubble.mare[0] < rubble.highland[0] && rubble.highland[0] < rubble.ejecta[0]);
         }
+    }
+
+    #[test]
+    fn heat_floods_the_craters_with_dark_lava() {
+        for id in ["a", "b", "c", "d", "e"] {
+            let rock = crate::worlds::of(id, Surface::Scorched, &[], None);
+            let at = |k| of(id, &rock, Surface::Scorched, 6.0e6, k, &[]).unwrap();
+            let (cool, warm, hot) = (at(600.0), at(1200.0), at(1600.0));
+            assert_eq!(cool, derived(Surface::Scorched, 6.0e6, crate::climate::variety(id)), "{id}: under the melt");
+            assert!(cool.maria < warm.maria && warm.maria < hot.maria, "{id}");
+            assert_eq!(hot.maria, 1.0, "{id}: all melt");
+            assert!(hot.craters[2] < 0.3 * cool.craters[2], "{id}");
+            assert!(hot.mare[0] < hot.highland[0], "{id}");
+        }
+        let io = crate::worlds::for_body("Io").unwrap();
+        assert_eq!(of("Io", io, Surface::Rock, 1.82e6, 1600.0, &[]), measured("Io"), "measured wins");
     }
 
     #[test]
