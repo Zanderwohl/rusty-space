@@ -69,6 +69,11 @@ pub struct BodySurfaceUniform {
     /// Each ground's emissivity, two to a ground: `(B, V, R, I)` then `(K, 10um, radio,
     /// inertia)`, in [`Self::ground`]'s order.
     pub emissivity: [Vec4; 2 * GROUNDS],
+    /// The body's rings, for their shadow: per band `(inner, outer, optical depth, 0)` in the
+    /// body's radii, inside out. Bands past `ring.w` are ignored.
+    pub ring_bands: [Vec4; crate::ring_material::RING_BANDS],
+    /// The rings' pole, world, and in `w` how many bands they have: zero for a body without.
+    pub ring: Vec4,
 }
 
 /// em_spectra's band count, which this crate does not depend on for one number.
@@ -101,6 +106,8 @@ impl Default for BodySurfaceUniform {
             bands: [Vec4::ZERO; BANDS],
             thermal: Vec4::ZERO,
             emissivity: [Vec4::ONE; 2 * GROUNDS],
+            ring_bands: [Vec4::ZERO; crate::ring_material::RING_BANDS],
+            ring: Vec4::ZERO,
         }
     }
 }

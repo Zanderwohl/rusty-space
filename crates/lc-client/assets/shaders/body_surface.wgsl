@@ -79,6 +79,44 @@ struct BodySurfaceUniform {
     thermal: vec4<f32>,
     /// Per ground: `(B, V, R, I)`, then `(K, 10um, radio, inertia)`.
     emissivity: array<vec4<f32>, 12>,
+    /// The body's rings: per band `(inner, outer, optical depth, 0)` in the body's radii.
+    ring_bands: array<vec4<f32>, RING_BANDS>,
+    /// `(pole, world; band count)`.
+    ring: vec4<f32>,
+}
+
+/// Must match `em_render::ring_material::RING_BANDS`.
+const RING_BANDS: u32 = 16u;
+
+/// How much starlight the rings let through to the point `n` on the unit sphere, on its way from
+/// the star along `to_star`.
+///
+/// The ray toward the star crosses the ring plane once, if it is headed that way, at a radius in
+/// the body's radii; the bands there take `exp(-tau / mu0)` of it, `mu0` the angle it crosses
+/// at. Box-filtered over a pixel's worth of that radius, so a narrow gap's shadow is a dimmed
+/// line on the planet rather than a line that comes and goes.
+fn ring_transmission(n: vec3<f32>, to_star: vec3<f32>) -> f32 {
+    let pole = material.ring.xyz;
+    let crossing = dot(to_star, pole);
+    // Computed whatever the branches below decide, because a derivative needs every neighbor.
+    let t = -dot(n, pole) / select(crossing, 1.0e-6, abs(crossing) < 1.0e-6);
+    let radius = length(n + t * to_star);
+    let width = max(fwidth(radius), 1.0e-6);
+    let count = min(u32(material.ring.w), RING_BANDS);
+    // Toward the star the ray never meets the plane, or meets it edge-on, where a sheet meters
+    // thick casts nothing.
+    if (count == 0u || t <= 0.0 || abs(crossing) < 1.0e-3) {
+        return 1.0;
+    }
+    let half_width = 0.5 * width;
+    let mu0 = abs(crossing);
+    var stopped = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let band = material.ring_bands[i];
+        let share = (clamp(band.y - radius, -half_width, half_width) - clamp(band.x - radius, -half_width, half_width)) / width;
+        stopped = stopped + max(share, 0.0) * (1.0 - exp(-band.z / mu0));
+    }
+    return 1.0 - clamp(stopped, 0.0, 1.0);
 }
 
 /// Share of what the air scatters out of the beam that reaches the ground anyway.
@@ -337,7 +375,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let to_star = normalize(material.to_star.xyz);
     let lambert = dot(relief_normal(in), to_star);
     let lit = smoothstep(-0.12, 0.25, lambert);
-    var light = vec3<f32>(max(lit, material.to_star.w));
+    // The rings' shadow takes direct starlight and what the air scatters of it, not the ambient
+    // floor: that stands in for light from everywhere else.
+    let shade = ring_transmission(normalize(in.world_position - in.center), to_star);
+    var light = vec3<f32>(max(lit * shade, material.to_star.w));
 
     // The air between the eye and the ground: it reddens the light reaching the ground near
     // the terminator, dims what leaves it, and adds what it scatters, which is the blue of a
@@ -359,7 +400,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         // scattering alone would lose it.
         let beam = exp(-star_depth(n, to_star, air, false));
         light *= beam + (1.0 - beam) * SKYLIGHT;
-        scattered = s.light * material.starlight.rgb;
+        scattered = s.light * material.starlight.rgb * shade;
         through = s.through;
         column = s.column;
     }

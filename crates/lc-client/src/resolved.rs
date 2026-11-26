@@ -496,6 +496,7 @@ fn uniforms(
     let deck = body.climate.map(|c| c.clouds);
     let (dark, light, contrast) = body.surface.palette();
     let to_star = sim_to_render((star_ly - body.position_ly).normalize_or_zero()).as_vec3();
+    let rings = body.rings.as_ref().map_or((flat.ring_bands, flat.ring), |r| crate::rings::shadow_bands(r, body.radius_m));
     BodySurfaceUniform {
         dark: Vec4::new(dark[0], dark[1], dark[2], 1.0),
         light: Vec4::new(light[0], light[1], light[2], 1.0),
@@ -528,6 +529,8 @@ fn uniforms(
         bands: grounds.map_or(flat.bands, |g| g.bands),
         thermal: grounds.map_or(flat.thermal, |g| g.thermal),
         emissivity: grounds.map_or(flat.emissivity, |g| g.emissivity),
+        ring_bands: rings.0,
+        ring: rings.1,
     }
 }
 

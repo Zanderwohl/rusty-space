@@ -121,6 +121,39 @@ pub fn pack(rings: &RingSystem) -> (usize, [Vec4; RING_BANDS]) {
     (spans.len(), packed)
 }
 
+/// The bands as the planet's shader takes them for the rings' shadow: `(inner, outer, optical
+/// depth, 0)` in the planet's radii, the rings' pole in render axes, and the count, as
+/// `BodySurfaceUniform::ring_bands` and `ring`.
+pub fn shadow_bands(rings: &lc_world::system::Rings, planet_m: f64) -> ([Vec4; RING_BANDS], Vec4) {
+    let (count, mut bands) = pack(&rings.system);
+    let scale = (rings.system.outer_m() / planet_m.max(f64::MIN_POSITIVE)) as f32;
+    for band in &mut bands[..count] {
+        *band = Vec4::new(band.x * scale, band.y * scale, band.z, 0.0);
+    }
+    let pole = sim_to_render(rings.pole.normalize_or_zero()).as_vec3();
+    (bands, pole.extend(count as f32))
+}
+
+/// `ring_transmission` in `body_surface.wgsl`, unfiltered: what share of starlight reaches the
+/// point `n` on a unit-radius planet past its rings, in the frame `shadow_bands` packs them in.
+pub fn transmission(bands: &[Vec4; RING_BANDS], ring: Vec4, n: Vec3, to_star: Vec3) -> f32 {
+    let pole = ring.truncate();
+    let crossing = to_star.dot(pole);
+    if ring.w <= 0.0 || crossing.abs() < 1.0e-3 {
+        return 1.0;
+    }
+    let t = -n.dot(pole) / crossing;
+    if t <= 0.0 {
+        return 1.0;
+    }
+    let radius = (n + t * to_star).length();
+    bands
+        .iter()
+        .take(ring.w as usize)
+        .find(|b| radius >= b.x && radius < b.y)
+        .map_or(1.0, |b| (-b.z / crossing.abs()).exp())
+}
+
 /// `spans`, sorted, with the narrowest gap closed until they fit. A closed gap's band carries the
 /// two bands' cross-section over the whole merged area, so the material is kept.
 fn fitted(mut spans: Vec<Span>) -> Vec<Span> {
@@ -625,5 +658,45 @@ mod tests {
         // radius: the ray toward the star leaves the plane before it reaches the planet.
         let high = Vec3::new(1.0, 0.0, 2.0).normalize();
         assert!(sunlit(Vec3::new(-0.8, 0.0, 0.0), high, planet));
+    }
+
+    fn saturns_shadow() -> ([Vec4; RING_BANDS], Vec4) {
+        let rings = lc_world::system::Rings { system: std::sync::Arc::new(for_body("Saturn").unwrap().clone()), pole: DVec3::Z };
+        shadow_bands(&rings, 5.8232e7)
+    }
+
+    /// Saturn's bands in its own radii: the C ring from 1.28, the A ring out to 2.35.
+    #[test]
+    fn shadow_bands_are_in_the_planets_radii() {
+        let (bands, ring) = saturns_shadow();
+        assert_eq!(ring.w, 4.0);
+        assert!((bands[0].x - 1.282).abs() < 0.01 && (bands[3].y - 2.349).abs() < 0.01, "{:?}", &bands[..4]);
+        assert!((ring.truncate() - sim_to_render(DVec3::Z).as_vec3()).length() < 1e-6, "the pole in render axes");
+    }
+
+    /// With the star below the rings, the southern hemisphere is in the open and a band of the
+    /// northern one is under them: darkest under the B ring, lighter under the division and the
+    /// C ring, and in full light past the A ring's shadow.
+    #[test]
+    fn the_rings_shadow_falls_on_the_far_hemisphere_by_their_depth() {
+        let (bands, ring) = saturns_shadow();
+        let pole = ring.truncate();
+        let equator = pole.any_orthonormal_vector();
+        let to_star = (equator - 0.45 * pole).normalize();
+        let mu0 = to_star.dot(pole).abs();
+        let point = |degrees: i32| {
+            let latitude = (degrees as f32).to_radians();
+            equator * latitude.cos() + pole * latitude.sin()
+        };
+        let along = |degrees: i32| transmission(&bands, ring, point(degrees), to_star);
+        let south: Vec<f32> = (1..60).map(|d| along(-d)).collect();
+        assert!(south.iter().all(|t| *t == 1.0), "the hemisphere facing the star is in the open");
+        // Only where the star is up: past that it is night, and the shadow does not matter.
+        let north: Vec<f32> = (1..90).filter(|d| point(*d).dot(to_star) > 0.0).map(along).collect();
+        let darkest = north.iter().cloned().fold(1.0, f32::min);
+        assert!((darkest - (-1.5 / mu0).exp()).abs() < 1e-4, "under the B ring: {darkest}");
+        assert!(north.iter().any(|t| *t > darkest * 2.0 && *t < 0.99), "under the division or the C ring");
+        assert_eq!(north.last().copied(), Some(1.0), "toward the terminator, past the A ring's shadow");
+        assert_eq!(transmission(&bands, ring, equator, (equator + pole * 1.0e-5).normalize()), 1.0, "the star in the ring's plane");
     }
 }
