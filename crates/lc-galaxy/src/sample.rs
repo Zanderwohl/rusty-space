@@ -187,7 +187,7 @@ fn poisson_small(h: u64, mean: f64) -> u64 {
     k
 }
 
-fn bound_for(compiled: &Compiled, cell: Cell) -> f64 {
+fn bound_for(compiled: &Compiled, cell: Cell, active: &[bool]) -> f64 {
     let min = cell.min_corner();
     let step = CELL_LY / (BOUND_LATTICE - 1) as f64;
     let mut best = 0.0f64;
@@ -195,7 +195,7 @@ fn bound_for(compiled: &Compiled, cell: Cell) -> f64 {
         for j in 0..BOUND_LATTICE {
             for k in 0..BOUND_LATTICE {
                 let p = min + DVec3::new(i as f64, j as f64, k as f64) * step;
-                let s = compiled.sample(p);
+                let s = compiled.sample_among(p, active);
                 best = best.max(intensity(s.total(), s.packing));
             }
         }
@@ -209,7 +209,8 @@ pub fn candidates(compiled: &Compiled, seed: u64, cell: Cell) -> Result<Vec<Cand
     if !compiled.may_reach(cell.bounds().center(), half_diagonal) {
         return Ok(Vec::new());
     }
-    let mut bound = bound_for(compiled, cell);
+    let active = compiled.reaching(cell.bounds().center(), half_diagonal);
+    let mut bound = bound_for(compiled, cell, &active);
     if bound == 0.0 {
         return Ok(Vec::new());
     }
@@ -226,7 +227,7 @@ pub fn candidates(compiled: &Compiled, seed: u64, cell: Cell) -> Result<Vec<Cand
             let h = key.hash(seed, SALT_CANDIDATE);
             let u = |n: u64| rng::uniform(rng::mix(h ^ n));
             let position = cell.min_corner() + DVec3::new(u(1), u(2), u(3)) * CELL_LY;
-            let s = compiled.sample(position);
+            let s = compiled.sample_among(position, &active);
             let lambda = intensity(s.total(), s.packing);
             if lambda > bound {
                 bound *= 2.0;

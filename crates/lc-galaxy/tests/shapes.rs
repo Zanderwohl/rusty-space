@@ -109,6 +109,8 @@ fn distances_respect_their_bounds_and_supports_their_boxes() {
                 // Pairs close together as well as far apart: a bound broken locally shows only there.
                 let q = if i % 2 == 0 { p + (q - p) * 0.01 } else { q };
                 let (dp, dq) = (shape.distance(p), shape.distance(q));
+                let (wp, dp2) = shape.weight_and_distance(p);
+                assert!(wp.to_bits() == shape.weight(p).to_bits() && dp2.to_bits() == dp.to_bits(), "{kind}: the pair disagrees at {p}");
                 assert!((dp - dq).abs() <= shape.lipschitz() * p.distance(q) * (1.0 + 1e-9) + 1e-9, "{kind}: {dp} at {p}, {dq} at {q}");
                 if shape.weight(p) > 0.0 {
                     inside += 1;

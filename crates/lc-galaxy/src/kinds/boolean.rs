@@ -102,6 +102,14 @@ struct Combined {
 }
 
 impl Combined {
+    fn join(&self, a: f64, b: f64) -> f64 {
+        match self.op {
+            BoolOp::Union => smin(a, b, self.blend),
+            BoolOp::Intersect => smax(a, b, self.blend),
+            BoolOp::Difference => smax(a, -b, self.blend),
+        }
+    }
+
     /// 1 inside the smoothed support by more than the blend width, 0 outside it.
     fn mask(&self, d: f64) -> f64 {
         if self.blend > 0.0 { smoothstep(-d / self.blend) } else if d < 0.0 { 1.0 } else { 0.0 }
@@ -110,28 +118,45 @@ impl Combined {
 
 impl Shape for Combined {
     fn distance(&self, p: DVec3) -> f64 {
-        let mut d = self.operands.iter().map(|s| s.distance(p));
-        let first = d.next().unwrap_or(f64::INFINITY);
-        match self.op {
-            BoolOp::Union => d.fold(first, |a, b| smin(a, b, self.blend)),
-            BoolOp::Intersect => d.fold(first, |a, b| smax(a, b, self.blend)),
-            BoolOp::Difference => d.fold(first, |a, b| smax(a, -b, self.blend)),
-        }
+        self.operands.iter().map(|s| s.distance(p)).reduce(|a, b| self.join(a, b)).unwrap_or(f64::INFINITY)
     }
 
+    /// Stops at the first operand that rules `p` out, and reads distances only inside every
+    /// operand, where few points are.
     fn weight(&self, p: DVec3) -> f64 {
         if !self.bounds.contains(p) {
             return 0.0;
         }
-        let mut w = self.operands.iter().map(|s| s.weight(p));
-        let first = w.next().unwrap_or(0.0);
-        match self.op {
-            BoolOp::Union => w.fold(first, f64::max),
-            BoolOp::Intersect | BoolOp::Difference => {
-                let w = if self.op == BoolOp::Intersect { w.fold(first, f64::min) } else { first };
-                if w == 0.0 { 0.0 } else { w * self.mask(self.distance(p)) }
+        let w = match self.op {
+            BoolOp::Union => return self.operands.iter().map(|s| s.weight(p)).fold(0.0, f64::max),
+            BoolOp::Intersect => {
+                let mut w = 1.0f64;
+                for s in &self.operands {
+                    w = w.min(s.weight(p));
+                    if w == 0.0 {
+                        return 0.0;
+                    }
+                }
+                w
             }
+            // A difference's weight is its first operand's; the rest only cut by distance.
+            BoolOp::Difference => self.operands.first().map_or(0.0, |s| s.weight(p)),
+        };
+        if w == 0.0 { 0.0 } else { w * self.mask(self.distance(p)) }
+    }
+
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        let pairs: Vec<(f64, f64)> = self.operands.iter().map(|s| s.weight_and_distance(p)).collect();
+        let d = pairs.iter().map(|x| x.1).reduce(|a, b| self.join(a, b)).unwrap_or(f64::INFINITY);
+        if !self.bounds.contains(p) {
+            return (0.0, d);
         }
+        let w = match self.op {
+            BoolOp::Union => pairs.iter().map(|x| x.0).fold(0.0, f64::max),
+            BoolOp::Intersect => pairs.iter().map(|x| x.0).fold(1.0, f64::min) * self.mask(d),
+            BoolOp::Difference => pairs.first().map_or(0.0, |x| x.0) * self.mask(d),
+        };
+        (w, d)
     }
 
     fn lipschitz(&self) -> f64 {

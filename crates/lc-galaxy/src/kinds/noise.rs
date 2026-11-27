@@ -92,8 +92,22 @@ impl Shape for Noisy {
                 let w = self.operand.weight(p);
                 if w == 0.0 { 0.0 } else { w * (1.0 - depth * (1.0 - self.fbm.at(p)) * 0.5) }
             }
+            // No point moves farther than `reach · √3`, so where the shape is farther than
+            // that, scaled by its bound, nothing lands inside it and the noise need not be read.
+            Mode::Warp(reach) if self.operand.distance(p) > reach * 3f64.sqrt() * self.operand.lipschitz() => 0.0,
             Mode::Warp(_) => self.operand.weight(self.read_at(p)),
         }
+    }
+
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        let q = self.read_at(p);
+        let (w, d) = self.operand.weight_and_distance(q);
+        let w = match self.mode {
+            _ if !self.bounds.contains(p) || w == 0.0 => 0.0,
+            Mode::Modulate(depth) => w * (1.0 - depth * (1.0 - self.fbm.at(p)) * 0.5),
+            Mode::Warp(_) => w,
+        };
+        (w, d)
     }
 
     fn lipschitz(&self) -> f64 {

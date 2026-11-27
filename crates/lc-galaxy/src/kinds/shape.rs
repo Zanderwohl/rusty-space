@@ -16,6 +16,9 @@ pub(crate) trait Local: Debug + Send + Sync + 'static {
     /// Signed distance in ly, as [`Shape::distance`].
     fn distance(&self, p: DVec3) -> f64;
     fn weight(&self, p: DVec3) -> f64;
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        (self.weight(p), self.distance(p))
+    }
     fn lipschitz(&self) -> f64 {
         1.0
     }
@@ -52,6 +55,10 @@ impl<S: Local> Shape for Placed<S> {
 
     fn weight(&self, p: DVec3) -> f64 {
         self.local.weight(self.to_local * (p - self.origin))
+    }
+
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        self.local.weight_and_distance(self.to_local * (p - self.origin))
     }
 
     fn lipschitz(&self) -> f64 {

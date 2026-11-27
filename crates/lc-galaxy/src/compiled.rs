@@ -74,6 +74,11 @@ pub trait Shape: Debug + Send + Sync {
     fn distance(&self, p: DVec3) -> f64;
     /// 1 at the profile's peak, falling to 0 at the edge of the support.
     fn weight(&self, p: DVec3) -> f64;
+    /// Both at once, for a caller that needs both: a shape whose two share costly work, such as a
+    /// warp's noise, computes it once.
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        (self.weight(p), self.distance(p))
+    }
     /// Bound on `|∇ distance|`: 1 for an exact distance.
     fn lipschitz(&self) -> f64;
     fn bounds(&self) -> Aabb;
@@ -334,10 +339,24 @@ impl Compiled {
     }
 
     pub fn sample(&self, p: DVec3) -> Sample {
-        self.sample_with(p, |_, _, _| {})
+        self.sample_with(p, None, |_, _, _| {})
     }
 
-    fn sample_with(&self, p: DVec3, mut seen: impl FnMut(&Term, f64, f64)) -> Sample {
+    /// Which terms' shapes can be nonzero within `radius` of `p`, in term order. A term left out
+    /// weighs zero throughout that ball, so sampling inside it without the term changes nothing.
+    pub fn reaching(&self, p: DVec3, radius: f64) -> Vec<bool> {
+        self.terms
+            .iter()
+            .map(|t| self.shapes.get(&t.shape).is_some_and(|s| s.distance(p) <= radius * s.lipschitz()))
+            .collect()
+    }
+
+    /// [`Compiled::sample`] over only the terms `active` marks, from [`Compiled::reaching`].
+    pub fn sample_among(&self, p: DVec3, active: &[bool]) -> Sample {
+        self.sample_with(p, Some(active), |_, _, _| {})
+    }
+
+    fn sample_with(&self, p: DVec3, active: Option<&[bool]>, mut seen: impl FnMut(&Term, f64, f64)) -> Sample {
         let n = self.populations.len();
         let mut s = Sample {
             density: vec![0.0; n],
@@ -345,7 +364,12 @@ impl Compiled {
             feh_offset: vec![0.0; n],
             system: SystemField::ALL.map(SystemField::neutral),
         };
-        for term in &self.terms {
+        // A feature's terms are adjacent and share its shape, so one read serves them all.
+        let mut last: Option<(Output, f64)> = None;
+        for (i, term) in self.terms.iter().enumerate() {
+            if active.is_some_and(|a| !a[i]) {
+                continue;
+            }
             let Some(shape) = self.shapes.get(&term.shape) else { continue };
             let slot = match term.target {
                 Target::Density(pop) => self.population_index(pop).map(|i| &mut s.density[i]),
@@ -354,7 +378,11 @@ impl Compiled {
                 Target::System(f) => Some(&mut s.system[f as usize]),
             };
             let Some(slot) = slot else { continue };
-            let w = shape.weight(p);
+            let w = match last {
+                Some((o, w)) if o == term.shape => w,
+                _ => shape.weight(p),
+            };
+            last = Some((term.shape, w));
             if w == 0.0 {
                 continue;
             }
@@ -375,7 +403,7 @@ impl Compiled {
 
     pub fn contributions(&self, p: DVec3) -> Vec<Contribution> {
         let mut out = Vec::new();
-        self.sample_with(p, |t, before, after| {
+        self.sample_with(p, None, |t, before, after| {
             out.push(Contribution { source: t.source, target: t.target, before, after })
         });
         out

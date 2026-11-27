@@ -40,6 +40,9 @@ struct Arm {
     /// `tan(pitch)`.
     rise: f64,
     pitch: f64,
+    cos_pitch: f64,
+    /// How much farther out each winding is than the last, `exp(2π tan(pitch))`.
+    turn: f64,
     inner: f64,
     outer: f64,
     tube: DVec2,
@@ -56,8 +59,8 @@ impl Arm {
         // The winding `j` crosses this direction at `inner · exp((phi - start + 2πj) · rise)`.
         let base = phi - self.start;
         let j = ((libm::log(r / self.inner) / self.rise - base) / TAU).floor();
-        let at = |j: f64| self.inner * libm::exp((base + TAU * j) * self.rise);
-        (r - at(j)).abs().min((at(j + 1.0) - r).abs()) * libm::cos(self.pitch)
+        let inside = self.inner * libm::exp((base + TAU * j) * self.rise);
+        (r - inside).abs().min((inside * self.turn - r).abs()) * self.cos_pitch
     }
 
     fn section(&self, p: DVec3) -> f64 {
@@ -83,6 +86,13 @@ impl Local for Arm {
     fn weight(&self, p: DVec3) -> f64 {
         let ends = self.ends(p.truncate().length());
         if ends == 0.0 { 0.0 } else { ends * taper(self.section(p), self.width) }
+    }
+
+    fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
+        let (r, section) = (p.truncate().length(), self.section(p));
+        let distance = ((section - 1.0) * self.tube.min_element()).max(self.inner - r).max(r - self.outer);
+        let ends = self.ends(r);
+        (if ends == 0.0 { 0.0 } else { ends * taper(section, self.width) }, distance)
     }
 
     /// The tangential part of the gradient of `across` is `(R_j / R) sin(pitch)`, and the
@@ -159,6 +169,8 @@ impl FeatureKind for LogSpiral {
                     start: phase.to_radians() + TAU * f64::from(k) / f64::from(self.arms),
                     rise: libm::tan(pitch.to_radians()),
                     pitch: pitch.to_radians(),
+                    cos_pitch: libm::cos(pitch.to_radians()),
+                    turn: libm::exp(TAU * libm::tan(pitch.to_radians())),
                     inner,
                     outer,
                     tube,
