@@ -1,7 +1,7 @@
 //! Galaxy Forge: the editor for the Lightcone galaxy. See `lightcone/docs/34-galaxy-authoring.md`.
 //!
 //! ```text
-//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--camera face-on|edge-on] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh|ocean-feh|ocean-mass]
+//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--camera +x|-x|+y|-y|+z|-z] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh|ocean-feh|ocean-mass]
 //!                  [--shot <png> [--frames <n>]]
 //! ```
 
@@ -34,7 +34,7 @@ const TITLE: &str = "Galaxy Forge";
 struct Args {
     path: Option<PathBuf>,
     view: Option<View>,
-    camera: Option<views::Preset>,
+    camera: Option<views::Side>,
     select: Option<usize>,
     pick: Option<usize>,
     chart: Option<charts::Plot>,
@@ -54,7 +54,7 @@ fn args() -> Args {
                     _ => View::Region,
                 })
             }
-            "--camera" => a.camera = views::Preset::named(&value()),
+            "--camera" => a.camera = views::Side::named(&value()),
             "--select" => a.select = value().parse().ok(),
             "--pick" => a.pick = value().parse().ok(),
             "--chart" => a.chart = charts::Plot::named(&value()),
@@ -101,7 +101,7 @@ fn main() {
         view.view = v;
     }
     if let Some(p) = a.camera {
-        view.camera.preset(p);
+        view.camera.look_from(p);
     }
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {

@@ -76,30 +76,45 @@ pub struct Camera {
     pub ortho: bool,
 }
 
-/// A camera direction that shows a galaxy's shape: from above its north pole, or from its plane.
+/// The side of the galaxy's axes the camera looks from: `+Z` is face-on from galactic north,
+/// `-Y` edge-on with +X to the right.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Preset {
-    FaceOn,
-    EdgeOn,
+pub struct Side {
+    /// 0, 1, 2 for X, Y, Z.
+    pub axis: usize,
+    pub positive: bool,
 }
 
-impl Preset {
+impl Side {
+    pub const ALL: [Side; 6] = [
+        Side { axis: 0, positive: true },
+        Side { axis: 1, positive: true },
+        Side { axis: 2, positive: true },
+        Side { axis: 0, positive: false },
+        Side { axis: 1, positive: false },
+        Side { axis: 2, positive: false },
+    ];
+
+    pub fn label(self) -> String {
+        format!("{}{}", if self.positive { '+' } else { '-' }, ["X", "Y", "Z"][self.axis])
+    }
+
     pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "face-on" => Some(Preset::FaceOn),
-            "edge-on" => Some(Preset::EdgeOn),
-            _ => None,
-        }
+        Side::ALL.into_iter().find(|s| s.label().eq_ignore_ascii_case(name))
     }
 }
 
 impl Camera {
-    /// Looks along the galaxy's axes, orthographic. Face-on puts +X right and +Y up; edge-on
-    /// looks along +Y with +X right and +Z up.
-    pub fn preset(&mut self, preset: Preset) {
-        (self.yaw, self.pitch) = match preset {
-            Preset::FaceOn => (0.0, std::f64::consts::FRAC_PI_2),
-            Preset::EdgeOn => (-std::f64::consts::FRAC_PI_2, 0.0),
+    /// Looks at the target from `side`, orthographic. The side views keep +Z up; the views from
+    /// ±Z keep +X to the right.
+    pub fn look_from(&mut self, side: Side) {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        (self.yaw, self.pitch) = match (side.axis, side.positive) {
+            (0, true) => (0.0, 0.0),
+            (0, false) => (PI, 0.0),
+            (1, true) => (FRAC_PI_2, 0.0),
+            (1, false) => (-FRAC_PI_2, 0.0),
+            (_, positive) => (0.0, if positive { FRAC_PI_2 } else { -FRAC_PI_2 }),
         };
         self.ortho = true;
     }
@@ -141,7 +156,10 @@ struct Projector {
 impl Projector {
     fn new(eye: DVec3, forward: DVec3, fov: f64, rect: Rect) -> Self {
         let forward = forward.normalize();
-        let right = forward.cross(DVec3::Z).try_normalize().unwrap_or(DVec3::X);
+        // Looking along ±Z, `cos(π/2)` leaves a remainder near 1e-17 that would pick the screen's
+        // right at random; there it is +X.
+        let across = forward.cross(DVec3::Z);
+        let right = if across.length() < 1e-9 { DVec3::X } else { across.normalize() };
         let up = right.cross(forward);
         let focal = rect.height() as f64 * 0.5 / (fov * 0.5).tan();
         Self { eye, forward, right, up, focal, center: rect.center(), ortho: None }
@@ -224,7 +242,7 @@ impl Default for ViewState {
 }
 
 pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.selectable_value(&mut state.view, View::Region, "Region");
         ui.selectable_value(&mut state.view, View::Sky, "Sky");
         ui.separator();
@@ -272,11 +290,10 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
                 state.fitted = false;
             }
             ui.separator();
-            if ui.button("face-on").clicked() {
-                state.camera.preset(Preset::FaceOn);
-            }
-            if ui.button("edge-on").clicked() {
-                state.camera.preset(Preset::EdgeOn);
+            for side in Side::ALL {
+                if ui.button(side.label()).clicked() {
+                    state.camera.look_from(side);
+                }
             }
             ui.toggle_value(&mut state.camera.ortho, "ortho");
         } else {
@@ -629,5 +646,34 @@ fn sky(
                 painter.circle_stroke(p, 3.0, Stroke::new(1.5, palette::DIFF_GONE));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// From each side, the axes land where `look_from` says: the side views with +Z up, the
+    /// views along Z with +X to the right.
+    #[test]
+    fn each_side_puts_the_axes_where_it_says() {
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
+        // Screen offset of a unit step along `axis` from the target: x right, y up.
+        let seen = |side: Side, axis: DVec3| {
+            let mut cam = Camera { target: DVec3::ZERO, yaw: 0.0, pitch: 0.0, distance: 50.0, fov: 0.8, ortho: false };
+            cam.look_from(side);
+            let proj = cam.projector(rect);
+            let (p, _) = proj.project(axis).unwrap();
+            let c = rect.center();
+            (((p.x - c.x).signum()) as i32 * i32::from((p.x - c.x).abs() > 1.0), ((c.y - p.y).signum()) as i32 * i32::from((c.y - p.y).abs() > 1.0))
+        };
+        let (x, y, z) = (DVec3::X, DVec3::Y, DVec3::Z);
+        let side = |s: &str| Side::named(s).unwrap();
+        assert_eq!((seen(side("+z"), x), seen(side("+z"), y)), ((1, 0), (0, 1)));
+        assert_eq!((seen(side("-z"), x), seen(side("-z"), y)), ((1, 0), (0, -1)));
+        assert_eq!((seen(side("-y"), x), seen(side("-y"), z)), ((1, 0), (0, 1)));
+        assert_eq!((seen(side("+y"), x), seen(side("+y"), z)), ((-1, 0), (0, 1)));
+        assert_eq!((seen(side("+x"), y), seen(side("+x"), z)), ((1, 0), (0, 1)));
+        assert_eq!((seen(side("-x"), y), seen(side("-x"), z)), ((-1, 0), (0, 1)));
     }
 }
