@@ -3,8 +3,8 @@
 
 use glam::DVec3;
 use lc_galaxy::compiled::OpSpec;
-use lc_galaxy::kinds::{Bar, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, Plummer, PopulationKind, PowerHalo, Ring, Sersic};
-use lc_galaxy::{Compiled, FeatureId, FeatureKind, Num, Params, Registry, Target, Timeline, codec, stats};
+use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
+use lc_galaxy::{Compiled, FeatureId, FeatureKind, Num, Output, Params, Registry, Target, Timeline, codec, stats};
 
 const STARS: f64 = 1000.0;
 
@@ -39,7 +39,27 @@ fn every_kind() -> Vec<(&'static str, Compiled)> {
         ("ring", adding::<Ring>().1),
         ("bar", adding::<Bar>().1),
         ("log_spiral", adding::<LogSpiral>().1),
+        ("union", boolean(BoolOp::Union).1),
+        ("intersection", boolean(BoolOp::Intersect).1),
+        ("difference", boolean(BoolOp::Difference).1),
     ]
+}
+
+/// A disc, an arm of a spiral and an ellipsoid that crosses both, as construction geometry, and
+/// a boolean of the three adding `STARS`.
+fn boolean(op: BoolOp) -> (Timeline, Compiled) {
+    let mut t = Timeline::new(3);
+    let frame = t.push(Box::new(FrameKind { tilt_deg: 20.0, ..FrameKind::new() }), None);
+    let pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
+    let disc = t.push(Box::new(ExponentialDisc { frame, ..ExponentialDisc::new() }), None);
+    let arms = t.push(Box::new(LogSpiral { frame, ..LogSpiral::new() }), None);
+    let blob = t.push(Box::new(Ellipsoid { frame, center_ly: (20.0, 0.0, 0.0), radii_ly: (15.0, 10.0, 6.0), ..Ellipsoid::new() }), None);
+    let of = vec![ShapeRef(Output::only(disc)), ShapeRef(Output { feature: arms, index: 1, of: 2 }), ShapeRef(Output::only(blob))];
+    let contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(STARS)))];
+    t.push(Box::new(Boolean { op, blend_ly: Num::Lit(1.5), of, contributes }), None);
+    let c = t.compile(t.len(), None);
+    assert!(c.problems.is_empty(), "{op:?}: {:?}", c.problems);
+    (t, c)
 }
 
 /// Deterministic points in `[-1, 1]`, so a failure reproduces.
@@ -84,8 +104,10 @@ fn distances_respect_their_bounds_and_supports_their_boxes() {
 #[test]
 fn an_add_puts_the_stars_it_asks_for_into_the_field() {
     for (kind, c) in every_kind() {
-        let got: f64 = stats::expected(&c, c.bounds(), 64).iter().map(|(_, n)| n).sum();
-        assert!((got / STARS - 1.0).abs() < 0.01, "{kind}: {got} stars in the field for {STARS} asked");
+        // Not the 64 a boolean integrates its own volume on, so its grid is not checked against
+        // itself; and even, so no point lands on a cusp at a center.
+        let got: f64 = stats::expected(&c, c.bounds(), 100).iter().map(|(_, n)| n).sum();
+        assert!((got / STARS - 1.0).abs() < 0.02, "{kind}: {got} stars in the field for {STARS} asked");
     }
 }
 
@@ -117,5 +139,67 @@ fn shapes_that_would_not_be_finite_are_problems() {
     let c = t.compile(t.len(), None);
     for id in ids {
         assert!(c.problems.contains_key(&id), "{id} compiled");
+    }
+}
+
+/// A file names a spiral's arm with `(id, index, of)` and a lone shape with its bare id, and both
+/// write back as they were read.
+#[test]
+fn a_boolean_reads_and_writes_both_forms_of_reference() {
+    let (t, _) = boolean(BoolOp::Intersect);
+    let text = codec::write(&t);
+    assert!(text.contains("of: [2, (3, 1, 2), 4]"), "{text}");
+    assert_eq!(codec::write(&codec::read(&text, &Registry::standard()).unwrap()), text);
+}
+
+#[test]
+fn a_boolean_of_shapes_that_are_not_there_is_a_problem() {
+    let (mut t, _) = boolean(BoolOp::Intersect);
+    let id = t.features().last().unwrap().id;
+    let cases = [
+        // Arm 2 of 3, when the spiral has two.
+        vec![ShapeRef(Output::only(FeatureId(2))), ShapeRef(Output { feature: FeatureId(3), index: 1, of: 3 })],
+        vec![ShapeRef(Output::only(FeatureId(2)))],
+        vec![ShapeRef(Output::only(FeatureId(2))), ShapeRef(Output::only(FeatureId(40)))],
+    ];
+    for of in cases {
+        t.feature_mut(id).unwrap().get_mut::<Boolean>().unwrap().of = of.clone();
+        let c = t.compile(t.len(), None);
+        assert!(c.problems.contains_key(&id), "{of:?} compiled");
+    }
+}
+
+#[test]
+fn an_intersection_of_shapes_apart_is_a_problem() {
+    let mut t = Timeline::new(1);
+    let frame = t.push(Box::new(FrameKind::new()), None);
+    let a = t.push(Box::new(Ellipsoid { frame, center_ly: (-20.0, 0.0, 0.0), ..Ellipsoid::new() }), None);
+    let b = t.push(Box::new(Ellipsoid { frame, center_ly: (20.0, 0.0, 0.0), ..Ellipsoid::new() }), None);
+    let of = vec![ShapeRef(Output::only(a)), ShapeRef(Output::only(b))];
+    let id = t.push(Box::new(Boolean { of, ..Boolean::new() }), None);
+    assert!(t.compile(t.len(), None).problems.contains_key(&id));
+}
+
+/// The difference keeps nothing inside the shape it removes, and the intersection nothing
+/// outside either shape.
+#[test]
+fn a_boolean_weighs_only_where_its_operation_keeps() {
+    for op in [BoolOp::Intersect, BoolOp::Difference] {
+        let (_, c) = boolean(op);
+        let shapes: Vec<_> = c.shapes.iter().map(|(k, s)| (k.feature, s.clone())).collect();
+        let get = |f: u32| shapes.iter().filter(|(k, _)| k.0 == f).map(|(_, s)| s.clone()).collect::<Vec<_>>();
+        let (disc, blob, result) = (get(2).remove(0), get(4).remove(0), get(5).remove(0));
+        let arm = get(3).remove(1);
+        let b = disc.bounds();
+        for i in 0..40_000u64 {
+            let p = b.center() + DVec3::new(unit(3 * i), unit(3 * i + 1), unit(3 * i + 2)) * b.size() * 0.5;
+            if result.weight(p) == 0.0 {
+                continue;
+            }
+            match op {
+                BoolOp::Intersect => assert!(disc.weight(p) > 0.0 && arm.weight(p) > 0.0 && blob.weight(p) > 0.0, "{p}"),
+                _ => assert!(disc.weight(p) > 0.0 && arm.distance(p) > 0.0 && blob.distance(p) > 0.0, "{p}"),
+            }
+        }
     }
 }

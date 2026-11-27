@@ -3,6 +3,7 @@
 use crate::compiled::{Compiled, Frame, Population, Target};
 use crate::feature::{FeatureId, Params, Problem, Registry};
 
+mod boolean;
 mod frame;
 mod plummer;
 mod population;
@@ -12,6 +13,7 @@ mod shape;
 mod spiral;
 mod variable;
 
+pub use boolean::{BoolOp, Boolean, ShapeRef};
 pub use frame::FrameKind;
 pub use plummer::{Contribution, Plummer, PlummerShape};
 pub use population::{MAX_AGE_GYR, MAX_POPULATIONS, PopulationKind};
@@ -34,6 +36,7 @@ pub fn register(r: &mut Registry) {
     r.register::<Ring>();
     r.register::<Bar>();
     r.register::<LogSpiral>();
+    r.register::<Boolean>();
 }
 
 /// The shape-kind face of `params`, if its kind places a shape.

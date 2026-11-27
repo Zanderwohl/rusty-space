@@ -2,8 +2,8 @@
 
 use bevy_egui::egui::{self, DragValue, RichText};
 use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
-use lc_galaxy::kinds::{self, Contribution, Field, FrameKind, PopulationKind, ShapeKind, Unit, Variable};
-use lc_galaxy::{FeatureId, Num, Params, Row, Target, Timeline, Unread, codec};
+use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
+use lc_galaxy::{Compiled, FeatureId, Num, Output, Params, Row, Target, Timeline, Unread, codec};
 
 use crate::doc::Doc;
 use crate::palette;
@@ -12,7 +12,7 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Doc) {
     ui.heading("Parameters");
     ui.separator();
     let Some(index) = doc.selected.filter(|&i| i < doc.timeline.len()) else { return };
-    let refs = Refs::before(&doc.timeline, index);
+    let refs = Refs::before(&doc.timeline, index, doc.result.as_ref().map(|r| &r.compiled));
     let problem = doc.timeline.rows()[index]
         .id()
         .and_then(|id| doc.result.as_ref()?.compiled.problems.get(&id).cloned());
@@ -82,12 +82,18 @@ struct Refs {
     frames: Vec<(FeatureId, String)>,
     populations: Vec<(FeatureId, String)>,
     variables: Vec<String>,
+    /// Every output of an earlier feature that compiled to a shape.
+    shapes: Vec<(Output, String)>,
 }
 
 impl Refs {
-    fn before(t: &Timeline, index: usize) -> Self {
-        let mut r = Refs { frames: Vec::new(), populations: Vec::new(), variables: Vec::new() };
+    fn before(t: &Timeline, index: usize, compiled: Option<&Compiled>) -> Self {
+        let mut r = Refs { frames: Vec::new(), populations: Vec::new(), variables: Vec::new(), shapes: Vec::new() };
         for f in t.rows()[..index].iter().filter_map(Row::feature) {
+            for o in compiled.into_iter().flat_map(|c| c.shapes.keys()).filter(|o| o.feature == f.id) {
+                let name = if o.of == 1 { f.label() } else { format!("{} {} of {}", f.label(), o.index + 1, o.of) };
+                r.shapes.push((*o, name));
+            }
             match f.params.kind() {
                 "frame" => r.frames.push((f.id, f.label())),
                 "population" => r.populations.push((f.id, f.label())),
@@ -101,13 +107,15 @@ impl Refs {
     }
 }
 
-/// Points a new feature's references at the nearest frame and population before `at`.
-pub fn seed_references(params: &mut dyn Params, t: &Timeline, at: usize) {
-    let refs = Refs::before(t, at.min(t.len()));
+/// Points a new feature's references at the nearest frame, population and shapes before `at`.
+pub fn seed_references(params: &mut dyn Params, t: &Timeline, at: usize, compiled: Option<&Compiled>) {
+    let refs = Refs::before(t, at.min(t.len()), compiled);
     let frame = refs.frames.last().map(|f| f.0);
     let pop = refs.populations.last().map(|p| p.0);
     if let Some(p) = params.as_any_mut().downcast_mut::<PopulationKind>() {
         p.frame = frame.unwrap_or(p.frame);
+    } else if let Some(b) = params.as_any_mut().downcast_mut::<Boolean>() {
+        b.of = refs.shapes.iter().rev().take(2).rev().map(|s| ShapeRef(s.0)).collect();
     } else if let Some(s) = kinds::as_shape(params) {
         *s.frame_mut() = frame.unwrap_or(*s.frame_mut());
         if let Some(pop) = pop {
@@ -125,8 +133,60 @@ fn kind_fields(ui: &mut egui::Ui, params: &mut dyn Params, refs: &Refs) {
         frame(ui, f);
     } else if let Some(p) = any.downcast_mut::<PopulationKind>() {
         population(ui, p, refs);
+    } else if let Some(b) = any.downcast_mut::<Boolean>() {
+        boolean(ui, b, refs);
     } else if let Some(s) = kinds::as_shape(params) {
         shape(ui, kind, s, refs);
+    }
+}
+
+fn boolean(ui: &mut egui::Ui, b: &mut Boolean, refs: &Refs) {
+    grid(ui, "boolean", |ui| {
+        ui.label("operation");
+        egui::ComboBox::from_id_salt("bool op").selected_text(op_name(b.op)).show_ui(ui, |ui| {
+            for op in [BoolOp::Union, BoolOp::Intersect, BoolOp::Difference] {
+                ui.selectable_value(&mut b.op, op, op_name(op));
+            }
+        });
+        ui.end_row();
+        ui.label("blend");
+        num(ui, "blend", &mut b.blend_ly, &refs.variables, " ly");
+        ui.end_row();
+    });
+    ui.label(RichText::new("of").strong());
+    let name = |o: Output| refs.shapes.iter().find(|s| s.0 == o).map_or_else(|| format!("{} (not before this)", o.feature), |s| s.1.clone());
+    let mut remove = None;
+    for (i, r) in b.of.iter_mut().enumerate() {
+        ui.push_id(("operand", i), |ui| {
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("operand").selected_text(name(r.0)).show_ui(ui, |ui| {
+                    for (o, n) in &refs.shapes {
+                        ui.selectable_value(r, ShapeRef(*o), n);
+                    }
+                });
+                if ui.small_button("remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        b.of.remove(i);
+    }
+    if let Some((o, _)) = refs.shapes.last()
+        && ui.button("+").clicked()
+    {
+        b.of.push(ShapeRef(*o));
+    }
+    ui.separator();
+    contributions(ui, &mut b.contributes, refs);
+}
+
+fn op_name(op: BoolOp) -> &'static str {
+    match op {
+        BoolOp::Union => "union",
+        BoolOp::Intersect => "intersection",
+        BoolOp::Difference => "difference",
     }
 }
 

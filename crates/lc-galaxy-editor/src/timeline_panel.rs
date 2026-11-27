@@ -265,7 +265,7 @@ pub fn delete(doc: &mut Doc, index: usize) {
 fn add(doc: &mut Doc, kind: &str) {
     let Some(mut params) = doc.registry.create(kind) else { return };
     let at = doc.selected.map_or(doc.timeline.len(), |i| i + 1);
-    params_panel::seed_references(params.as_mut(), &doc.timeline, at);
+    params_panel::seed_references(params.as_mut(), &doc.timeline, at, doc.result.as_ref().map(|r| &r.compiled));
     doc.timeline.insert(at, params, None);
     doc.selected = Some(at);
     if let Some(c) = doc.cut

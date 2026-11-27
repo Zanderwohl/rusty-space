@@ -46,6 +46,11 @@ impl Aabb {
         Aabb { min: self.min.min(other.min), max: self.max.max(other.max) }
     }
 
+    /// Empty when they do not overlap.
+    pub fn intersection(self, other: Aabb) -> Aabb {
+        Aabb { min: self.min.max(other.min), max: self.max.min(other.max) }
+    }
+
     pub fn intersects(&self, other: &Aabb) -> bool {
         !(self.min.cmpgt(other.max).any() || other.min.cmpgt(self.max).any())
     }

@@ -18,9 +18,9 @@ difference in both views, per-star shells with their histogram, and authored sys
 determinism test (`crates/lc-galaxy/tests/cli.rs`, publishing with one thread and with seven) are
 built. Of Phase III, the shape kinds are built (`crates/lc-galaxy/src/kinds/{profiles,regions,spiral}.rs`):
 `exponential_disc`, `sersic`, `power_halo`, `king`, `ellipsoid`, `ring`, `bar` and `log_spiral`,
-each with a distance whose Lipschitz bound a test checks, and a draft Phase III galaxy in
-`crates/lc-galaxy/galaxies/phase-3.ron`. `path`, `boolean`, `noise`, the ray marcher, tier A and
-the CDN path are not started. The shipped sky is still the
+each with a distance whose Lipschitz bound a test checks, then `boolean`
+(`kinds/boolean.rs`), and a draft Phase III galaxy in `crates/lc-galaxy/galaxies/phase-3.ron`.
+`path`, `noise`, masks, the ray marcher, tier A and the CDN path are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -359,7 +359,7 @@ list is construction geometry, drawn grayed, that only booleans and masks read.
 | `log_spiral` | one shape per arm | `Output { index, of }` names an arm |
 | `bar`, `ring`, `ellipsoid`, `path` | one shape | a bar is a Ferrers ellipsoid, `(1 - m²)²`; an `edge_ly` on a ring or ellipsoid is measured along its shortest semi-axis |
 | `noise` | one shape | warps or modulates another shape's weight; raises its `lipschitz` |
-| `boolean` | one shape | union, intersection or difference of shapes, with a blend width in ly |
+| `boolean` | one shape | union, intersection or difference of shapes, with a blend width in ly. Distances combine by a smooth minimum or maximum over the blend; an intersection or difference weighs the operands' weights by how far inside the combined distance a point is, fading over the blend, so the blend is the soft edge. A difference is the first shape less all the others, and "arms in a disc" is a union of the arms and then an intersection with the disc |
 | `object` | a point object | a black hole, a pulsar, a hand-placed star; inserted before thinning |
 
 Angles are stored in degrees and lengths in light-years, with the unit in the field name. That is
@@ -371,13 +371,14 @@ One timeline per frame — the main galaxy, and one per companion — so designe
 different galaxies do not touch the same file:
 
 ```ron
-Timeline(format: 1, next_id: 7, seed: 1)
+Timeline(format: 1, next_id: 8, seed: 1)
 Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0, 0, 0), tilt_deg: 0, azimuth_deg: 0, rotation: Flat(speed_km_s: 220, core_ly: 3000)))
 Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Thin disc", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 0, max_gyr: 10), feh: (zero_age: 0.1, per_gyr: -0.05, per_kly: -0.018, scatter: 0.15), binaries: Standard, dispersion: (zero_age_km_s: 10, exponent: 0.5)))
 Feature(id: 2, kind: "variable", version: 1, enabled: true, params: (name: "h_R", value: 3300))
 Feature(id: 3, kind: "exponential_disc", version: 1, enabled: true, name: "Disc", params: (frame: 0, scale_length_ly: Var("h_R"), scale_height_ly: 350, radius_ly: 18250, edge_ly: 1500, contributes: [(Density(1), Add(1.83))]))
 Feature(id: 4, kind: "log_spiral", version: 1, enabled: true, name: "Arms", params: (frame: 0, arms: 2, pitch_deg: 12, inner_ly: 2000, outer_ly: 17000, width_ly: 600, contributes: []))
-Feature(id: 5, kind: "boolean", version: 1, enabled: true, name: "Arms in disc", params: (op: Intersect, blend_ly: 300, of: [(4, 0, 2), (4, 1, 2), 3], contributes: [(Density(1), Scale(1.5))]))
+Feature(id: 5, kind: "boolean", version: 1, enabled: true, name: "Both arms", params: (op: Union, blend_ly: 100, of: [(4, 0, 2), (4, 1, 2)], contributes: []))
+Feature(id: 7, kind: "boolean", version: 1, enabled: true, name: "Arms in disc", params: (op: Intersect, blend_ly: 300, of: [5, 3], contributes: [(Density(1), Scale(1.5))]))
 Feature(id: 6, kind: "ellipsoid", version: 1, enabled: true, name: "Void", params: (frame: 0, center_ly: (6000, 2500, 0), radii_ly: (400, 300, 200), edge_ly: 150, contributes: [(Density(1), Subtract)]))
 ```
 
