@@ -13,7 +13,6 @@ use crate::num::Num;
 
 /// A shape in its own axes, before it is placed.
 pub(crate) trait Local: Debug + Send + Sync + 'static {
-    /// Signed distance in ly, as [`Shape::distance`].
     fn distance(&self, p: DVec3) -> f64;
     fn weight(&self, p: DVec3) -> f64;
     fn weight_and_distance(&self, p: DVec3) -> (f64, f64) {
@@ -143,8 +142,7 @@ pub(crate) fn volume_if_counted(shape: &dyn Shape, contributes: &[Contribution])
     sum * step.element_product()
 }
 
-/// The shape a feature reads, with a problem that says whether the feature or only that output
-/// is missing.
+/// The problem says whether the feature or only that output is missing.
 pub(crate) fn operand(out: &Compiled, o: Output) -> Result<Arc<dyn Shape>, Problem> {
     out.shapes.get(&o).cloned().ok_or_else(|| {
         if out.shapes.keys().any(|k| k.feature == o.feature) {
@@ -179,10 +177,8 @@ pub(crate) fn variables(nums: &[&Num], contributes: &[Contribution]) -> Vec<Stri
         .collect()
 }
 
-/// Inserts `shapes` as the outputs of feature `id` with a term per contribution on each.
-///
-/// **`Add` on a density counts stars** across all of the feature's outputs: the total is what a
-/// designer knows, and the peak density follows from it and the volumes.
+/// Inserts `shapes` as feature `id`'s outputs, with a term per contribution on each. `Add` on a
+/// density counts stars across all the outputs, since the total is what a designer knows.
 pub(crate) fn contribute(
     id: FeatureId,
     out: &mut Compiled,
@@ -217,7 +213,6 @@ pub(crate) fn contribute(
     Ok(())
 }
 
-/// How a shape field is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Ly,

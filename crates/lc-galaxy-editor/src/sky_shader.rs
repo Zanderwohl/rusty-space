@@ -1,10 +1,8 @@
 //! The sky view drawn with the game's starfield material: a camera at the sky's eye renders the
-//! baked stars through `shaders/starfield.wgsl` into an image, and the view shows the image. The
-//! dot view stays for coloring by attribute.
+//! baked stars through `shaders/starfield.wgsl` into an image the view shows.
 //!
-//! The view asks for a frame by filling [`SkyRequest`] during the egui pass; [`drive`] then
-//! sizes the image, points the camera and rebuilds the stars for the next frame. The image the
-//! view shows is therefore a frame behind, which a sky that moves only when dragged hides.
+//! The view fills [`SkyRequest`] during the egui pass and [`drive`] readies the next frame, so the
+//! image shown is a frame behind.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -25,7 +23,6 @@ use glam::DVec3;
 
 use crate::doc::Doc;
 
-/// What the view wants drawn this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkyRequest {
     /// Physical pixels.
@@ -33,8 +30,7 @@ pub struct SkyRequest {
     /// Physical pixels per logical one: the style's sizes are logical, as the game's are.
     pub scale: f32,
     pub eye_ly: DVec3,
-    /// The star the sky is seen from, left out of it: from inside its system it would fill the
-    /// screen.
+    /// The star the sky is seen from, left out: from inside its system it would fill the screen.
     pub own: Option<usize>,
     /// Radians: about +Z from +X, and above the XY plane.
     pub yaw: f64,
@@ -62,8 +58,7 @@ pub struct SkyScene {
     reference: f32,
 }
 
-/// Spawns the camera, the image it renders into and the star mesh, and returns the egui id the
-/// view draws the image with.
+/// Returns the egui id the view draws the image with.
 pub fn setup(
     commands: &mut Commands,
     images: &mut Assets<Image>,
@@ -167,8 +162,7 @@ pub fn drive(
     if let Projection::Perspective(p) = projection {
         p.fov = r.fov as f32;
     }
-    // The style's sizes are logical pixels and the shader rescales by physical ones, as the
-    // game's sky does, so a star is the same size here as there on any display.
+    // Sizes in logical pixels, rescaled by physical ones in the shader, as the game's sky does.
     let rad_per_px = 2.0 * (r.fov as f32 * 0.5).tan() / size[1] as f32;
     let rad_per_logical_px = rad_per_px * r.scale.max(1.0);
     if let Some(mut material) = materials.get_mut(&scene.material) {

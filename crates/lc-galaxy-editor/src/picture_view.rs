@@ -1,11 +1,9 @@
 //! The Picture view: the galaxy's light marched through a coarse volume, from any direction.
 //!
-//! Both halves refine. The volume rebuilds on a worker after each edit at [`VOLUME_LEVELS`]'s
-//! first resolution, then at each finer one in turn. The picture is marched on a worker at a
-//! resolution chosen from the last march's cost so a moving view updates within
-//! [`MOVING_BUDGET_S`], and once the view rests it halves the downsampling each march until it
-//! reaches the screen's. Last, with the finest volume in, it marches the graph itself, whose edges
-//! no voxel blurs. Work that a newer edit or a move makes stale is stopped.
+//! Both halves refine on workers. After an edit the volume builds at each of [`VOLUME_LEVELS`] in
+//! turn. While the view moves, the picture's resolution comes from the last march's cost so it
+//! lands within [`MOVING_BUDGET_S`]; at rest it halves the downsampling each march, then marches
+//! the graph itself once the finest volume is in. A newer edit or a move stops stale work.
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
@@ -61,8 +59,7 @@ impl<K: Clone, T: Send + Sync + 'static> Job<K, T> {
         }
     }
 
-    /// Stops any run in progress and starts `work`, which should count into its [`Progress`] and
-    /// return `None` once the stop flag is set.
+    /// Stops any run in progress. `work` should return `None` once its stop flag is set.
     fn start(&mut self, key: K, work: impl FnOnce(&Progress) -> Option<T> + Send + 'static) {
         if let Some(r) = self.running.take() {
             r.progress.stop.store(true, Ordering::Relaxed);
@@ -278,7 +275,6 @@ impl PictureView {
         if let Some(t) = &self.texture {
             painter.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        // The volume on screen, and the finer one being sampled.
         let shown = self.shown.as_ref().map(|k| if k.exact { "exact".to_string() } else { format!("{} voxels", VOLUME_LEVELS[k.volume.1]) });
         let building = self.volume.running.as_ref().map(|r| {
             let (done, total) = r.progress.read();

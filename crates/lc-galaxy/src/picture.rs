@@ -22,7 +22,6 @@ pub struct Progress {
 }
 
 impl Progress {
-    /// `(done, total)`.
     pub fn read(&self) -> (u32, u32) {
         (self.done.load(Ordering::Relaxed), self.total.load(Ordering::Relaxed))
     }
@@ -43,16 +42,13 @@ pub struct Volume {
 }
 
 impl Volume {
-    /// Samples `compiled` over its bounds with `resolution` voxels along the longest side.
-    ///
-    /// A point sample per voxel misses structure thinner than a voxel; at full galaxy scale a
-    /// disc is, and the volume will want to average over each voxel then.
+    /// `resolution` voxels along the longest side of `compiled`'s bounds. A point sample per
+    /// voxel misses structure thinner than a voxel.
     pub fn of(compiled: &Compiled, resolution: usize, threads: usize) -> Self {
         Self::of_until(compiled, resolution, threads, &Progress::default()).expect("never stopped")
     }
 
-    /// [`Volume::of`], counting slabs into `progress` and giving up with `None` once its flag is
-    /// set.
+    /// Counts slabs into `progress`, and gives `None` once its stop flag is set.
     pub fn of_until(compiled: &Compiled, resolution: usize, threads: usize, progress: &Progress) -> Option<Self> {
         let bounds = compiled.bounds();
         if bounds.is_empty() || resolution == 0 {
@@ -113,7 +109,6 @@ impl Volume {
         out
     }
 
-    /// `∫ emission dV` over the voxels.
     pub fn total(&self) -> Rgb {
         let dv = self.voxel_ly.powi(3);
         let mut out = [0.0; 3];
@@ -141,10 +136,8 @@ fn emission(compiled: &Compiled, lights: &[Rgb], p: DVec3) -> Rgb {
     e
 }
 
-/// [`march`] straight through the graph instead of a volume: each step samples the field
-/// itself, so edges are as sharp as the shapes make them rather than blurred over a voxel.
-/// Outside every density-raising support it skips ahead by [`Compiled::reach`]. `step_ly` sets
-/// the resolution along the ray only; across it, each pixel is exact.
+/// [`march`] through the graph itself rather than a volume, so no voxel blurs an edge. Skips
+/// ahead by [`Compiled::reach`] outside every density-raising support.
 #[allow(clippy::too_many_arguments)]
 pub fn march_exact(compiled: &Compiled, lights: &[Rgb], view: &View, width: u32, height: u32, step_ly: f64, threads: usize, progress: &Progress) -> Option<Picture> {
     let (forward, right, up) = view.basis();
@@ -212,8 +205,8 @@ impl Side {
         Side::ALL.into_iter().find(|s| s.label().eq_ignore_ascii_case(name))
     }
 
-    /// Yaw about +Z from +X and pitch above the XY plane of the direction toward the camera. The
-    /// side views keep +Z up; the views from ±Z keep +X to the right.
+    /// Yaw about +Z from +X and pitch above the XY plane, toward the camera. The side views keep
+    /// +Z up; the views from ±Z keep +X to the right.
     pub fn angles(self) -> (f64, f64) {
         use std::f64::consts::{FRAC_PI_2, PI};
         match (self.axis, self.positive) {
@@ -236,8 +229,8 @@ pub struct View {
 }
 
 impl View {
-    /// `forward`, `right` and `up`. The right comes from the yaw alone, so straight down or up is
-    /// still defined.
+    /// `forward`, `right` and `up`. The right comes from the yaw alone, so it is defined looking
+    /// straight down or up.
     pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
@@ -246,7 +239,6 @@ impl View {
         (forward, right, right.cross(forward))
     }
 
-    /// From `side`, with all of `bounds` in a `width` × `height` picture.
     pub fn fitting(side: Side, bounds: Aabb, width: u32, height: u32) -> Self {
         let (yaw, pitch) = side.angles();
         let mut v = View { target: bounds.center(), yaw, pitch, ly_per_px: 1.0 };
@@ -254,7 +246,6 @@ impl View {
         v
     }
 
-    /// Centers on `bounds` and scales so all of it fits, keeping the direction.
     pub fn fit(&mut self, bounds: Aabb, width: u32, height: u32) {
         let (_, right, up) = self.basis();
         let half = bounds.size() * 0.5;
@@ -272,12 +263,12 @@ pub struct Picture {
     pub pixels: Vec<[f32; 3]>,
 }
 
-/// Integrates `volume` along each pixel's ray, in steps of half a voxel.
+/// Steps of half a voxel along each pixel's ray.
 pub fn march(volume: &Volume, view: &View, width: u32, height: u32, threads: usize) -> Picture {
     march_until(volume, view, width, height, threads, &Progress::default()).expect("never stopped")
 }
 
-/// [`march`], counting rows into `progress` and giving up with `None` once its flag is set.
+/// Counts rows into `progress`, and gives `None` once its stop flag is set.
 pub fn march_until(volume: &Volume, view: &View, width: u32, height: u32, threads: usize, progress: &Progress) -> Option<Picture> {
     let (forward, right, up) = view.basis();
     let b = volume.bounds();
@@ -330,7 +321,6 @@ fn through(b: Aabb, origin: DVec3, dir: DVec3) -> Option<(f64, f64)> {
 }
 
 impl Picture {
-    /// `∫ brightness dA`: the light the picture caught.
     pub fn total(&self, ly_per_px: f64) -> Rgb {
         let da = ly_per_px * ly_per_px;
         let mut out = [0.0; 3];
@@ -342,17 +332,14 @@ impl Picture {
         out
     }
 
-    /// RGBA, sRGB-encoded, mapped in OKLCh. A pixel's lightness is the square root of a level
-    /// logarithmic in its luminance over `decades` below the brightest pixels (the 99.9th percentile, so a lone hot pixel does
-    /// not darken the rest); its hue is its light's; and its chroma keeps the ratio to lightness
-    /// its light has at full brightness, times `saturation`. Mapped in sRGB, a dim warm pixel
-    /// came out brown and a dim pale one gray; in OKLCh it stays the color it is, only darker.
+    /// RGBA, sRGB-encoded, mapped in OKLCh so a dim pixel keeps its color: lightness from
+    /// luminance on a log scale over `decades` below the 99.9th percentile, hue from the light,
+    /// and chroma in proportion to lightness, times `saturation`.
     pub fn to_rgba8(&self, decades: f64, saturation: f64) -> Vec<u8> {
         encode(&self.display(decades, saturation).0)
     }
 
-    /// [`Picture::to_rgba8`] before encoding: linear display colors, for drawing stars over, and
-    /// the luminance at the top of the window.
+    /// [`Picture::to_rgba8`] before encoding, and the luminance at the top of the window.
     pub fn display(&self, decades: f64, saturation: f64) -> (Vec<[f64; 3]>, f64) {
         use em_spectra::oklab;
         let luminance = |p: &[f32; 3]| 0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2]);
@@ -362,8 +349,8 @@ impl Picture {
         let mut out = Vec::with_capacity(self.pixels.len());
         for p in &self.pixels {
             let y = luminance(p);
-            // The square root lifts the middle of the range as sRGB's encoding lifted it before,
-            // so a disc an order of magnitude below the arms is not drawn near black.
+            // The square root lifts the middle of the range, so a disc a decade below the arms is
+            // not near black.
             let level = if y > 0.0 { (1.0 + (y / peak).log10() / decades).clamp(0.0, 1.0) } else { 0.0 };
             let lightness = level.sqrt();
             let top = f64::from(p.iter().copied().fold(0.0f32, f32::max));
@@ -392,11 +379,9 @@ pub fn encode(display: &[[f64; 3]]) -> Vec<u8> {
     out
 }
 
-/// Doc 34's `L_A`, L☉: stars brighter than this are tier A, seen from across the galaxy, so a
-/// picture draws them as points over the light of the rest.
+/// Stars this bright are drawn as points: tier A.
 pub const BRIGHT_LUMINOSITY: f64 = crate::attributes::L_A;
 
-/// A star a picture draws as a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bright {
     pub position_ly: DVec3,
@@ -404,15 +389,10 @@ pub struct Bright {
     pub teff_k: f64,
 }
 
-/// Draws `stars` over `display`, a `width` × `height` picture seen through `view`, as the game's
-/// sky draws distant stars ([`em_spectra::point::DISTANT`]), in the game's colors
-/// ([`em_spectra::presets::natural`]).
-///
-/// Exposed as the picture is: a star's light falls into one pixel, so it reads as its
-/// luminosity over the pixel's area against `peak`, the luminance at the top of the picture's
-/// window, shifted by `exposure` stops. The brightest stars are then many stops over and glare,
-/// as they do in the sky. `screen_px` is screen pixels per picture pixel, since a sprite's size
-/// is in screen pixels.
+/// Draws `stars` as the game's sky draws distant stars ([`em_spectra::point::DISTANT`]), in
+/// its colors. A star's light falls in one pixel, so it is exposed as its luminosity over the
+/// pixel's area against `peak`, shifted by `exposure` stops. `screen_px` is screen pixels per
+/// picture pixel; a sprite's size is in screen pixels.
 #[allow(clippy::too_many_arguments)]
 pub fn sprinkle(display: &mut [[f64; 3]], width: u32, height: u32, view: &View, stars: &[Bright], peak: f64, exposure: f64, screen_px: f64) {
     use em_spectra::point::DISTANT;
@@ -422,7 +402,6 @@ pub fn sprinkle(display: &mut [[f64; 3]], width: u32, height: u32, view: &View, 
         .iter()
         .filter(|s| s.luminosity_solar >= BRIGHT_LUMINOSITY && s.teff_k > 0.0)
         .map(|s| {
-            // Band light per unit of output, times the output: a star's light at any one distance.
             let per_band = em_spectra::blackbody::per_band(s.teff_k);
             let total = em_spectra::blackbody::radiant_exitance(s.teff_k) / std::f64::consts::PI;
             (s, mapping.apply_f64(&per_band).map(|c| (c / total * s.luminosity_solar / area) as f32))
@@ -493,8 +472,7 @@ mod tests {
         }
     }
 
-    /// A bright star lands at its projected pixel, brighter with exposure, and a star under
-    /// [`BRIGHT_LUMINOSITY`] is not drawn.
+    /// A star lands at its projected pixel, and one under [`BRIGHT_LUMINOSITY`] is not drawn.
     #[test]
     fn bright_stars_land_where_they_project() {
         let view = View { target: DVec3::ZERO, yaw: -std::f64::consts::FRAC_PI_2, pitch: std::f64::consts::FRAC_PI_2, ly_per_px: 1.0 };

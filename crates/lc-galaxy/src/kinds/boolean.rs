@@ -1,10 +1,9 @@
 //! Union, intersection and difference of earlier shapes, with a blend width in ly.
 //!
-//! The distance combines the operands' by the quadratic smooth minimum (Quílez), whose gradient
-//! is a convex combination of the operands', so the result keeps the largest of their Lipschitz
-//! bounds. A smooth maximum can exceed the true distance near a crease, so the weight is cut to
-//! where the combined distance is negative, over the blend width: the support is the smoothed
-//! one, and the blend is what makes the edge soft.
+//! Distances combine by Quílez's quadratic smooth minimum, whose gradient is a convex
+//! combination of the operands', so the largest Lipschitz bound holds. A smooth maximum can
+//! exceed the true distance near a crease, so an intersection's or difference's weight fades to
+//! zero where the combined distance reaches zero, over the blend width.
 
 use std::fmt;
 use std::sync::Arc;

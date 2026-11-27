@@ -1,11 +1,8 @@
 //! How a distant star is drawn: brightness in stops against a reference, a size and glare that
 //! grow with it, and a core with a power-law halo. The client's starfield shader
-//! (`lc-client/assets/shaders/starfield.wgsl`) evaluates the same laws per vertex and per
-//! fragment, from [`DISTANT`] and [`POINT_STOPS`]; Galaxy Forge's pictures evaluate them here, so
-//! a bright star in a picture looks as it would in the game's sky.
-//!
-//! The corona and the ship's motion are left out: a distant star has no visible corona, and a
-//! picture has no ship.
+//! (`lc-client/assets/shaders/starfield.wgsl`) evaluates the same laws from [`DISTANT`] and
+//! [`POINT_STOPS`], so a star in a Galaxy Forge picture looks as it does in the game's sky. The
+//! corona and the ship's motion are left out.
 
 /// Stops of brightness a star field spreads over, beyond the tone map's own window.
 pub const POINT_STOPS: f32 = 14.0;
@@ -42,12 +39,11 @@ pub const DISTANT: Look = Look {
     halo_falloff: 1.9,
 };
 
-/// One star, shaded and sized.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     /// Linear display color at the center, HDR: above 1 where the star overflows the window.
     pub color: [f32; 3],
-    /// Drawn radius, px.
+    /// Px.
     pub radius_px: f32,
     /// Where the source ends and the glare begins, as a fraction of the radius.
     pub core: f32,

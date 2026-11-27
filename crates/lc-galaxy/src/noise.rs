@@ -2,9 +2,8 @@
 //! instead of his permutation table, summed into fractal Brownian motion.
 //!
 //! A published star's existence depends on these values, so they must never change and must
-//! agree on every machine. Only `+`, `*` and `floor` are used, no transcendental and no fused
-//! multiply-add, and the tests pin outputs. Not texture-graph's noise: that is `f32` and lives in
-//! another repository that changes for its own reasons.
+//! agree on every machine. Only `+`, `*` and `floor` are used, and the tests pin outputs.
+//! texture-graph's noise is `f32`, in a repository that changes for its own reasons.
 
 use glam::DVec3;
 
@@ -13,8 +12,7 @@ const LACUNARITY: f64 = 2.0;
 /// Each octave's amplitude over the last's.
 const GAIN: f64 = 0.5;
 
-/// Bound on `|∇ gradient(p)|` for unit frequency, measured over a dense sample with a margin;
-/// the test that measured it keeps it honest.
+/// Bound on `|∇ gradient(p)|` at unit frequency, measured over a dense sample, with a margin.
 pub const GRADIENT_LIPSCHITZ: f64 = 4.0;
 
 /// The twelve edge directions of a cube, as Perlin's improved noise uses.
@@ -32,8 +30,7 @@ fn mix(mut h: u64) -> u64 {
     h ^ (h >> 33)
 }
 
-/// One mix per corner: the three odd multipliers spread neighboring lattice points across the
-/// word before it. Eight corners per sample made the nested form the noise's main cost.
+/// One mix per corner; the three odd multipliers spread neighboring lattice points apart first.
 fn corner_hash(i: i64, j: i64, k: i64, seed: u64) -> u64 {
     mix(seed
         ^ (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
@@ -45,9 +42,8 @@ fn corner(i: i64, j: i64, k: i64, seed: u64) -> [f64; 3] {
     GRADIENTS[(corner_hash(i, j, k, seed) % 12) as usize]
 }
 
-/// Three independent gradient noises at `p`, one per axis, from one lattice walk: each corner's
-/// hash picks the three gradients from separate bits, so a warp pays for one hash per corner
-/// rather than three.
+/// Three independent gradient noises at `p` from one lattice walk: each corner's hash picks the
+/// three gradients from separate bits.
 pub fn gradient3(p: DVec3, seed: u64) -> DVec3 {
     let base = p.floor();
     let f = p - base;

@@ -1,9 +1,9 @@
 //! What a population's stars shine with on average, so pictures of the galaxy integrate light
 //! without drawing a star. See `34-galaxy-authoring.md`, "Signed distances and ray marching".
 //!
-//! Light is visible light as linear sRGB: each star's blackbody through the CIE 1931 observer,
-//! in solar luminosities times the share of a star's output the eye weighs. Not the starfield's
-//! B, V, R mapping, which oversaturates near white and turns a Sun-like disc pink.
+//! Light is linear sRGB: each star's blackbody through the CIE 1931 observer, in solar
+//! luminosities times the share of its output the eye weighs. The starfield's B, V, R mapping
+//! oversaturates near white.
 
 use std::f64::consts::PI;
 use std::sync::OnceLock;
@@ -16,8 +16,7 @@ use crate::attributes::{mass, tracks};
 use crate::compiled::{Age, Population};
 use crate::kinds::MAX_AGE_GYR;
 
-/// Stars drawn per population for its mean. The mean light of a young population is dominated
-/// by its rare massive stars, so this is large.
+/// Stars drawn per population. A young population's light comes from its rare massive stars.
 const DRAWS: u64 = 20_000;
 
 /// Linear sRGB red, green, blue.

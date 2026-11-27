@@ -126,8 +126,7 @@ impl Torus {
 }
 
 impl Local for Torus {
-    /// The ellipse bound of [`ellipsoid_bound`] in the meridian plane, where the nearest point
-    /// on the torus lies.
+    /// [`ellipsoid_bound`] in the meridian plane, which holds the nearest point on the torus.
     fn distance(&self, p: DVec3) -> f64 {
         (self.section(p).length() - 1.0) * self.tube.min_element()
     }

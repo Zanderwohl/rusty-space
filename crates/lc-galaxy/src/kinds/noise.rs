@@ -18,11 +18,9 @@ pub const MAX_OCTAVES: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NoiseMode {
-    /// The weight times `1 - depth · (1 - n) / 2`, for noise `n` in `[-1, 1]`: unchanged where
-    /// the noise peaks, down to `1 - depth` where it is lowest. Clumps without moving the edge.
+    /// The weight times `1 - depth · (1 - n) / 2`, for noise `n` in `[-1, 1]`. Keeps the edge.
     Modulate { depth: Num },
-    /// The shape read at `p + reach · N(p)`, for a vector of noise `N` with each component in
-    /// `[-1, 1]`. Ragged edges and arms that wander.
+    /// The shape read at `p + reach · N(p)`, each component of the noise `N` in `[-1, 1]`.
     Warp { reach_ly: Num },
 }
 
@@ -77,8 +75,8 @@ impl Noisy {
 }
 
 impl Shape for Noisy {
-    /// Not a distance to the warped support, but zero or less on it and changing no faster than
-    /// `lipschitz`, which is what the bake's cell test and the marcher need.
+    /// Not the distance to the warped support, but zero or less on it and changing no faster
+    /// than `lipschitz`, which is all the bake's cell test and the marcher need.
     fn distance(&self, p: DVec3) -> f64 {
         self.operand.distance(self.read_at(p))
     }

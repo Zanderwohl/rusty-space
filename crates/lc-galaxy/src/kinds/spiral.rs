@@ -12,7 +12,6 @@ use crate::compiled::{Compiled, Shape};
 use crate::feature::{FeatureId, FeatureKind, Problem};
 use crate::num::Num;
 
-/// The most arms one feature makes.
 pub const MAX_ARMS: u32 = 8;
 
 /// Arm `k` of `arms` runs `R = inner · exp((θ - θ_k) tan(pitch))` from `inner_ly` to `outer_ly`,

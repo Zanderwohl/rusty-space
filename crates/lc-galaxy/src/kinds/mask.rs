@@ -16,12 +16,10 @@ use crate::compiled::{Aabb, Compiled, Op, Shape, Target};
 use crate::feature::{FeatureId, FeatureKind, Problem};
 use crate::num::Num;
 
-/// What a mask reads.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MaskField {
-    /// A population's stars per ly³, from every term before the mask. At least one of them must
-    /// raise it, or the mask is a problem: moving or suppressing the rows that feed a density
-    /// would otherwise empty the mask without a word.
+    /// A population's stars per ly³, from every term before the mask. One of them must raise it,
+    /// or the mask is a problem rather than silently empty.
     Density(FeatureId),
     /// Another shape's weight, 0 to 1.
     Weight(ShapeRef),
@@ -75,8 +73,7 @@ struct Masked {
 }
 
 impl Shape for Masked {
-    /// The operand's: the mask only lowers its weight, so its support stays inside the
-    /// operand's.
+    /// The mask only lowers the operand's weight, so the operand's distance holds.
     fn distance(&self, p: DVec3) -> f64 {
         self.operand.distance(p)
     }

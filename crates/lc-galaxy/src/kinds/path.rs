@@ -34,10 +34,9 @@ pub struct PathKind {
     pub contributes: Vec<Contribution>,
 }
 
-/// The curve through `points` as straight pieces, with the radius at each node: uniform
-/// Catmull-Rom for the position, so it passes through every point, and the radius linear in
-/// length along each span, so a span's taper is the same on every piece of it.
-/// The ends are extended by reflection, so the curve leaves an end toward its neighbor.
+/// The curve through `points` as straight pieces with a radius at each node: uniform
+/// Catmull-Rom for position, so it passes through every point, and the radius linear in length
+/// along each span, so a span's taper is even. The ends are extended by reflection.
 pub fn curve(points: &[(DVec3, f64)]) -> Vec<(DVec3, f64)> {
     let n = points.len();
     if n < 2 {
@@ -89,7 +88,7 @@ impl Tube {
         Self { nodes, edge, bounds, lipschitz: 1.0 + slope }
     }
 
-    /// For each piece: the distance from `p` to it and the tube's radius at the nearest point.
+    /// Per piece: the distance from `p`, and the radius at the nearest point.
     fn pieces(&self, p: DVec3) -> impl Iterator<Item = (f64, f64)> + '_ {
         self.nodes.windows(2).map(move |w| {
             let ((a, ra), (b, rb)) = (w[0], w[1]);
