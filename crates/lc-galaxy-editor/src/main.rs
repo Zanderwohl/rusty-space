@@ -54,7 +54,10 @@ fn args() -> Args {
                     _ => View::Region,
                 })
             }
-            "--camera" => a.camera = views::Side::named(&value()),
+            "--camera" => {
+                let name = value();
+                a.camera = Some(views::Side::named(&name).unwrap_or_else(|| panic!("--camera {name}: not one of +x, -x, +y, -y, +z, -z")));
+            }
             "--select" => a.select = value().parse().ok(),
             "--pick" => a.pick = value().parse().ok(),
             "--chart" => a.chart = charts::Plot::named(&value()),

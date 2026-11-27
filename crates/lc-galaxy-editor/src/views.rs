@@ -114,14 +114,17 @@ impl Camera {
             (0, false) => (PI, 0.0),
             (1, true) => (FRAC_PI_2, 0.0),
             (1, false) => (-FRAC_PI_2, 0.0),
-            (_, positive) => (0.0, if positive { FRAC_PI_2 } else { -FRAC_PI_2 }),
+            (_, positive) => (-FRAC_PI_2, if positive { FRAC_PI_2 } else { -FRAC_PI_2 }),
         };
         self.ortho = true;
     }
 
+    /// The screen's right comes from the yaw alone, so looking straight down or up still turns
+    /// with the yaw, and the pitch may reach ±π/2.
     fn projector(&self, rect: Rect) -> Projector {
         let eye = self.eye();
-        let mut proj = Projector::new(eye, self.target - eye, self.fov, rect);
+        let (sy, cy) = self.yaw.sin_cos();
+        let mut proj = Projector::with_right(eye, self.target - eye, DVec3::new(-sy, cy, 0.0), self.fov, rect);
         proj.ortho = self.ortho.then_some(self.distance);
         proj
     }
@@ -160,6 +163,12 @@ impl Projector {
         // right at random; there it is +X.
         let across = forward.cross(DVec3::Z);
         let right = if across.length() < 1e-9 { DVec3::X } else { across.normalize() };
+        Self::with_right(eye, forward, right, fov, rect)
+    }
+
+    /// `right` must be a unit vector perpendicular to `forward`.
+    fn with_right(eye: DVec3, forward: DVec3, right: DVec3, fov: f64, rect: Rect) -> Self {
+        let forward = forward.normalize();
         let up = right.cross(forward);
         let focal = rect.height() as f64 * 0.5 / (fov * 0.5).tan();
         Self { eye, forward, right, up, focal, center: rect.center(), ortho: None }
@@ -375,7 +384,7 @@ fn region(
             drag_point(doc, &before, *id, frame, points, i, d);
         } else {
             cam.yaw -= d.x as f64 * 0.008;
-            cam.pitch = (cam.pitch + d.y as f64 * 0.008).clamp(-1.55, 1.55);
+            cam.pitch = (cam.pitch + d.y as f64 * 0.008).clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
         }
     }
     if response.drag_stopped() {
