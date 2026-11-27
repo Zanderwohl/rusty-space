@@ -10,6 +10,8 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 lc-galaxy = { path = "../lc-galaxy" }
 lc-world = { path = "../lc-world", default-features = false }
 em-spectra = { path = "../em-spectra" }
+# The sky view draws with the game's starfield material.
+em-render = { path = "../em-render" }
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
 glam = "0.32"

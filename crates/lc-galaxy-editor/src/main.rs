@@ -13,6 +13,7 @@ mod files;
 mod palette;
 mod params_panel;
 mod picture_view;
+mod sky_shader;
 mod stats_panel;
 mod system_panel;
 mod timeline_panel;
@@ -109,26 +110,59 @@ fn main() {
         view.camera.look_from(p);
     }
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: TITLE.into(), resolution: WindowResolution::new(1600, 1000), ..default() }),
-            // Closing, by the button or ⌘Q, asks first when there is unsaved work.
-            close_when_requested: false,
-            ..default()
-        }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window { title: TITLE.into(), resolution: WindowResolution::new(1600, 1000), ..default() }),
+                // Closing, by the button or ⌘Q, asks first when there is unsaved work.
+                close_when_requested: false,
+                ..default()
+            })
+            // The sky view draws with the game's starfield shader, which is the client's file.
+            .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../lc-client/assets").into(), ..default() }),
+    )
+    .add_plugins(em_render::relativistic_starfield_material::RelativisticStarfieldMaterialPlugin)
         .add_plugins(EguiPlugin::default())
         .add_plugins(lc_icon::AppIconPlugin(lc_icon::GALAXY))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
         .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), files: default(), system: default(), census: default() })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
-        .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(Camera2d);
-        })
+        // The window's camera is egui's, named outright: left to choose, bevy_egui takes the first
+        // camera it sees, which may be the sky's, and the panels then draw into the sky's image.
+        .insert_resource(bevy_egui::EguiGlobalSettings { auto_create_primary_context: false, ..default() })
+        .add_systems(Startup, (|mut commands: Commands| {
+            commands.spawn((Camera2d, bevy_egui::PrimaryEguiContext));
+        }, setup_sky))
         .add_systems(EguiPrimaryContextPass, ui)
-        .add_systems(Update, (title, shoot));
+        .add_systems(Update, (title, shoot, drive_sky));
     #[cfg(target_os = "macos")]
     app.add_systems(Update, quit_asks_first);
     app.run();
+}
+
+fn setup_sky(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<em_render::relativistic_starfield_material::RelativisticStarfieldMaterial>>,
+    mut egui_textures: ResMut<bevy_egui::EguiUserTextures>,
+    mut state: ResMut<Ui>,
+) {
+    state.view.sky_texture = Some(sky_shader::setup(&mut commands, &mut images, &mut meshes, &mut materials, &mut egui_textures));
+}
+
+fn drive_sky(
+    state: Res<Ui>,
+    doc: Res<Doc>,
+    mut scene: ResMut<sky_shader::SkyScene>,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<em_render::relativistic_starfield_material::RelativisticStarfieldMaterial>>,
+    mut camera: Query<(&mut Camera, &mut Transform, &mut Projection), With<sky_shader::SkyCamera>>,
+) {
+    let Ok((mut c, mut t, mut p)) = camera.single_mut() else { return };
+    sky_shader::drive(state.view.sky_request.as_ref(), &doc, &mut scene, &mut images, &mut meshes, &mut materials, (&mut c, &mut t, &mut p));
 }
 
 /// winit's app menu sends `terminate:`, which exits with no close request. Sent as

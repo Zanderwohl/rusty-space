@@ -6,36 +6,18 @@
 //! A fourth pass holds the craft and collapses too far to resolve, in the lit bodies' style and
 //! this pass's exposure: its mesh is [`crate::distant`]'s, which moves and changes as they do.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy_mesh::{Indices, PrimitiveTopology};
 use em_render::craft_point_material::CraftPointMaterial;
-use em_render::relativistic_starfield_material::{
-    ATTRIBUTE_STAR_CORNER, ATTRIBUTE_STAR_PARAMS, ATTRIBUTE_STAR_WARM, BANDS,
-    RelativisticStarfieldMaterial, RelativisticStarfieldUniform,
-};
+use em_render::relativistic_starfield_material::{RelativisticStarfieldMaterial, RelativisticStarfieldUniform, StarPoint};
 use em_render::render_space::sim_to_render;
-use em_spectra::{Band, BandMapping, blackbody};
 use glam::DVec3;
 use lc_world::rng;
 use lc_world::sky::{CatalogStar, generate};
 
 use crate::session::{POINT_STOPS, Session};
 
-/// Temperature samples in the band table, over [`LOG_T_MIN`] to [`LOG_T_MAX`].
-pub const LUT_SAMPLES: usize = 2048;
-
-/// The table's domain, as `log2` of kelvin: 16 K to about 4 million K.
-///
-/// Far wider than any star, because the shader looks the table up at the *Doppler-shifted*
-/// temperature. At the drive's 0.999c cap the shift factor is 44.7 either way, so a 2000 K red
-/// dwarf astern arrives at 45 K and a 50 000 K O star ahead arrives at 2.2 million. Both ends
-/// have to be in the table or the sky clips to a flat color at speed.
-pub const LOG_T_MIN: f32 = 4.0;
-pub const LOG_T_MAX: f32 = 22.0;
+pub use em_render::relativistic_starfield_material::{LOG_T_MAX, LOG_T_MIN, LUT_SAMPLES, band_columns, band_lut, lut_scale};
 
 /// How far the ship travels before the mesh is rebuilt about its new position, light-years.
 ///
@@ -201,9 +183,6 @@ pub fn radians_per_pixel(fov_y: f32, viewport_height: f32) -> f32 {
     2.0 * (fov_y * 0.5).tan() / viewport_height
 }
 
-/// Quad corners, counter-clockwise.
-const QUAD: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
-
 /// One of the two passes: its mesh, its material, and which stars are in it.
 /// Which of the three passes, and therefore which style and which mesh contents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -285,37 +264,6 @@ pub fn local_star(session: &Session) -> Option<&CatalogStar> {
     session.local_star()
 }
 
-/// `log2` of band radiance against temperature: one column per sample, one row per band.
-///
-/// Generated from `em_spectra::blackbody`, which is the integral the telescope samples. The
-/// starfield and the instrument agreeing is not a convention to maintain — there is one
-/// Planck integral and this is a tabulation of it.
-///
-/// Stored as `log2` because the raw value moves by decades between adjacent samples on the
-/// Wien side, where a linear blend of the numbers themselves would be wrong by most of the
-/// interval. `R32Float` because a 32-bit float texture is not filterable under WebGPU, so the
-/// shader interpolates it itself.
-pub fn band_lut() -> Image {
-    let mut data: Vec<u8> = Vec::with_capacity(LUT_SAMPLES * BANDS * 4);
-    for band in Band::ALL {
-        for i in 0..LUT_SAMPLES {
-            let log_t = LOG_T_MIN + (LOG_T_MAX - LOG_T_MIN) * i as f32 / (LUT_SAMPLES - 1) as f32;
-            let radiance = blackbody::band_radiance(band, 2f64.powf(log_t as f64));
-            // Far enough below anything representable to read as dark, and finite.
-            let value = if radiance > 0.0 { radiance.log2() as f32 } else { -300.0 };
-            data.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    let mut image = Image::new(
-        Extent3d { width: LUT_SAMPLES as u32, height: BANDS as u32, depth_or_array_layers: 1 },
-        TextureDimension::D2,
-        data,
-        TextureFormat::R32Float,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
-    image
-}
 
 /// One thing drawn as a point source: where it is, and what the shader needs to shade it.
 ///
@@ -367,44 +315,11 @@ impl Point {
 
 /// Four vertices per point, positions relative to `origin_ly`, in render axes.
 pub fn build_mesh(points: &[Point], origin_ly: DVec3) -> Mesh {
-    let n = points.len();
-    let mut positions = Vec::with_capacity(n * 4);
-    let mut corners = Vec::with_capacity(n * 4);
-    let mut params = Vec::with_capacity(n * 4);
-    let mut warm = Vec::with_capacity(n * 4);
-    let mut indices = Vec::with_capacity(n * 6);
-
-    for point in points {
-        // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
-        let at = sim_to_render(point.position_ly - origin_ly).as_vec3().to_array();
-        let physics = [point.teff_k, point.radius_m, point.seed, 0.0];
-        let base = positions.len() as u32;
-        for corner in QUAD {
-            positions.push(at);
-            corners.push(corner);
-            params.push(physics);
-            warm.push(point.warm);
-        }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-    // Bevy's mesh allocator skips a mesh with no vertices but still copies it, logging a
-    // use-after-free each frame it is extracted. One vertex three times is a triangle of no area
-    // whatever the shader makes of it.
-    if points.is_empty() {
-        positions.push([0.0; 3]);
-        corners.push([0.0; 2]);
-        params.push([0.0; 4]);
-        warm.push([0.0; 4]);
-        indices.extend_from_slice(&[0, 0, 0]);
-    }
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(ATTRIBUTE_STAR_CORNER, corners);
-    mesh.insert_attribute(ATTRIBUTE_STAR_PARAMS, params);
-    mesh.insert_attribute(ATTRIBUTE_STAR_WARM, warm);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
+    let shared: Vec<StarPoint> = points
+        .iter()
+        .map(|p| StarPoint { position_ly: p.position_ly, teff_k: p.teff_k, radius_m: p.radius_m, seed: p.seed, warm: p.warm })
+        .collect();
+    em_render::relativistic_starfield_material::build_mesh(&shared, origin_ly)
 }
 
 /// A star's swarm, as the shader wants it: temperature, radiance against the stellar disc, and
@@ -467,24 +382,7 @@ pub fn uniforms(
     }
 }
 
-/// The mapping by column: entry `b` is band `b`'s contribution to red, green and blue.
-///
-/// Unavailable bands are zeroed here rather than in the shader, matching `BandMapping::apply`:
-/// an instrument that cannot sense a band contributes nothing through it.
-pub fn band_columns(mapping: &BandMapping) -> [Vec4; BANDS] {
-    std::array::from_fn(|b| {
-        let band = Band::ALL[b];
-        if !mapping.available.contains(band) {
-            return Vec4::ZERO;
-        }
-        Vec4::new(mapping.matrix[0][b], mapping.matrix[1][b], mapping.matrix[2][b], 0.0)
-    })
-}
 
-/// Samples of the table per stop of temperature.
-pub fn lut_scale() -> f32 {
-    (LUT_SAMPLES - 1) as f32 / (LOG_T_MAX - LOG_T_MIN)
-}
 
 /// Radians per pixel for the camera the sky is drawn for.
 pub fn camera_scale(camera: &Query<(&Projection, &Camera), With<crate::app::SkyCamera>>) -> f32 {
@@ -681,7 +579,8 @@ pub fn update_sky(
 
 #[cfg(test)]
 mod tests {
-    use em_spectra::presets;
+    use em_render::relativistic_starfield_material::{ATTRIBUTE_STAR_PARAMS, BANDS};
+    use em_spectra::{Band, blackbody, presets};
     use lc_world::sky::{AuthoredStars, StarProvider};
 
     use super::*;

@@ -186,6 +186,21 @@ pub struct ViewState {
     /// The control point of the selected path being dragged in the region view.
     handle: Option<usize>,
     pub picture: crate::picture_view::PictureView,
+    pub sky_style: SkyStyle,
+    /// Stops above the shaded sky's automatic exposure.
+    pub sky_exposure: f64,
+    /// The shaded sky's image, from [`crate::sky_shader::setup`].
+    pub sky_texture: Option<egui::TextureId>,
+    /// What the shaded sky should draw next frame; `None` stops its camera.
+    pub sky_request: Option<crate::sky_shader::SkyRequest>,
+}
+
+/// How the sky view draws: through the game's starfield shader, or as dots colored by any
+/// attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkyStyle {
+    Shader,
+    Dots,
 }
 
 impl ViewState {
@@ -216,6 +231,10 @@ impl Default for ViewState {
             marks: None,
             handle: None,
             picture: Default::default(),
+            sky_style: SkyStyle::Shader,
+            sky_exposure: 0.0,
+            sky_texture: None,
+            sky_request: None,
         }
     }
 }
@@ -281,11 +300,19 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
         } else {
             let from = doc.picked_star().map_or("from the center".to_string(), |(i, _)| format!("from star {i}"));
             ui.label(from);
+            ui.separator();
+            ui.selectable_value(&mut state.sky_style, SkyStyle::Shader, "shader");
+            ui.selectable_value(&mut state.sky_style, SkyStyle::Dots, "dots");
+            if state.sky_style == SkyStyle::Shader {
+                ui.label("exposure");
+                ui.add(egui::DragValue::new(&mut state.sky_exposure).range(-12.0..=12.0).speed(0.05).suffix(" stops"));
+            }
         }
     });
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut ViewState, doc: &mut Doc) {
+    state.sky_request = None;
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette::VIEW_BACKGROUND);
@@ -300,6 +327,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ViewState, doc: &mut Doc) {
     }
     match state.view {
         View::Region => region(ui, &painter, rect, &response, state, doc, bounds),
+        View::Sky if state.sky_style == SkyStyle::Shader => sky_shaded(ui, &painter, rect, &response, state, doc, bounds),
         View::Sky => sky(ui, &painter, rect, &response, state, doc, bounds),
         View::Picture => state.picture.show(ui, &painter, rect, &response, doc),
     }
@@ -561,15 +589,9 @@ fn scale_bar(painter: &egui::Painter, rect: Rect, px_per_ly: f64) {
     painter.text(start + vec2(len + 6.0, 0.0), egui::Align2::LEFT_CENTER, format!("{ly} ly"), egui::FontId::proportional(12.0), color);
 }
 
-fn sky(
-    ui: &egui::Ui,
-    painter: &egui::Painter,
-    rect: Rect,
-    response: &egui::Response,
-    state: &mut ViewState,
-    doc: &Doc,
-    bounds: Aabb,
-) {
+/// Look on the drag and zoom on the wheel, shared by both sky styles; the eye is the picked star,
+/// or the middle of the galaxy.
+fn steer_sky(ui: &egui::Ui, rect: Rect, response: &egui::Response, state: &mut ViewState, doc: &Doc, bounds: Aabb) -> (DVec3, Option<usize>, Projector) {
     if response.dragged() {
         let d = response.drag_delta();
         let per_px = state.sky_fov / rect.height() as f64;
@@ -586,9 +608,11 @@ fn sky(
     };
     let (sy, cy) = state.look_yaw.sin_cos();
     let (sp, cp) = state.look_pitch.sin_cos();
-    let proj = Projector::new(eye, DVec3::new(cp * cy, cp * sy, sp), state.sky_fov, rect);
+    (eye, own, Projector::new(eye, DVec3::new(cp * cy, cp * sy, sp), state.sky_fov, rect))
+}
 
-    // The frame plane as a horizon.
+/// The frame plane as a horizon.
+fn horizon(painter: &egui::Painter, rect: Rect, proj: &Projector, eye: DVec3) {
     let horizon: Vec<Pos2> = (0..=360)
         .filter_map(|deg| {
             let a = (deg as f64).to_radians();
@@ -600,6 +624,40 @@ fn sky(
             painter.line_segment([w[0], w[1]], Stroke::new(1.0, palette::GRID));
         }
     }
+}
+
+/// The sky through the game's starfield shader, drawn by [`crate::sky_shader`] into an image.
+fn sky_shaded(ui: &egui::Ui, painter: &egui::Painter, rect: Rect, response: &egui::Response, state: &mut ViewState, doc: &Doc, bounds: Aabb) {
+    let (eye, own, proj) = steer_sky(ui, rect, response, state, doc, bounds);
+    let scale = ui.ctx().pixels_per_point();
+    state.sky_request = Some(crate::sky_shader::SkyRequest {
+        size: [(rect.width() * scale) as u32, (rect.height() * scale) as u32],
+        eye_ly: eye,
+        own,
+        yaw: state.look_yaw,
+        pitch: state.look_pitch,
+        fov: state.sky_fov,
+        exposure: state.sky_exposure,
+        generation: doc.generation,
+    });
+    if let Some(texture) = state.sky_texture {
+        painter.image(texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    horizon(painter, rect, &proj, eye);
+    ui.ctx().request_repaint();
+}
+
+fn sky(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    response: &egui::Response,
+    state: &mut ViewState,
+    doc: &Doc,
+    bounds: Aabb,
+) {
+    let (eye, own, proj) = steer_sky(ui, rect, response, state, doc, bounds);
+    horizon(painter, rect, &proj, eye);
 
     let reference = state.reference.as_ref().filter(|_| state.difference);
     let marks = compare::marks(&mut state.marks, doc, state.solo, reference);

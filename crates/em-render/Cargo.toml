@@ -9,6 +9,9 @@ authors = ["Alexander Lowry <zander@zanderlowry.com>"]
 [dependencies]
 em-foundations = { path = "../em-foundations" }
 em-sim = { path = "../em-sim", features = ["bevy"] }
+# The starfield's band table is a tabulation of its Planck integral.
+em-spectra = { path = "../em-spectra" }
+glam = "0.32"
 # What this crate uses and nothing more; the app decides the rest. See AGENTS.md, "Bevy features".
 bevy = { version = "0.19.1", default-features = false, features = ["std", "bevy_pbr", "bevy_post_process"] }
 bevy_mesh = "0.19"

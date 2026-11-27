@@ -220,6 +220,127 @@ impl Material for RelativisticStarfieldMaterial {
     }
 }
 
+/// Temperature samples in the band table, over [`LOG_T_MIN`] to [`LOG_T_MAX`].
+pub const LUT_SAMPLES: usize = 2048;
+
+/// The table's domain, as `log2` of kelvin: 16 K to about 4 million K.
+///
+/// Far wider than any star, because the shader looks the table up at the *Doppler-shifted*
+/// temperature. At the drive's 0.999c cap the shift factor is 44.7 either way, so a 2000 K red
+/// dwarf astern arrives at 45 K and a 50 000 K O star ahead arrives at 2.2 million. Both ends
+/// have to be in the table or the sky clips to a flat color at speed.
+pub const LOG_T_MIN: f32 = 4.0;
+pub const LOG_T_MAX: f32 = 22.0;
+
+/// Samples of the table per stop of temperature.
+pub fn lut_scale() -> f32 {
+    (LUT_SAMPLES - 1) as f32 / (LOG_T_MAX - LOG_T_MIN)
+}
+
+/// The band table [`RelativisticStarfieldMaterial::band_lut`] reads, from
+/// `em_spectra::blackbody`, which is the integral the telescope samples.
+///
+/// Stored as `log2` because the raw value moves by decades between adjacent samples on the
+/// Wien side, where a linear blend of the numbers themselves would be wrong by most of the
+/// interval. `R32Float` because a 32-bit float texture is not filterable under WebGPU, so the
+/// shader interpolates it itself.
+pub fn band_lut() -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::image::ImageSampler;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut data: Vec<u8> = Vec::with_capacity(LUT_SAMPLES * BANDS * 4);
+    for band in em_spectra::Band::ALL {
+        for i in 0..LUT_SAMPLES {
+            let log_t = LOG_T_MIN + (LOG_T_MAX - LOG_T_MIN) * i as f32 / (LUT_SAMPLES - 1) as f32;
+            let radiance = em_spectra::blackbody::band_radiance(band, 2f64.powf(log_t as f64));
+            // Far enough below anything representable to read as dark, and finite.
+            let value = if radiance > 0.0 { radiance.log2() as f32 } else { -300.0 };
+            data.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    let mut image = Image::new(
+        Extent3d { width: LUT_SAMPLES as u32, height: BANDS as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        data,
+        TextureFormat::R32Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = ImageSampler::nearest();
+    image
+}
+
+/// One point source as the shader shades it.
+#[derive(Clone, Copy, Debug)]
+pub struct StarPoint {
+    /// Simulation axes, light-years.
+    pub position_ly: glam::DVec3,
+    pub teff_k: f32,
+    /// What the shader treats as the source's radius.
+    pub radius_m: f32,
+    /// Turns the star's corona.
+    pub seed: f32,
+    /// `(temperature K, radiance over the source's disc, gray deficit, unused)`.
+    pub warm: [f32; 4],
+}
+
+/// Quad corners, counter-clockwise.
+const QUAD: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+
+/// Four vertices per point, positions relative to `origin_ly` in render axes.
+pub fn build_mesh(points: &[StarPoint], origin_ly: glam::DVec3) -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy_mesh::{Indices, PrimitiveTopology};
+    let n = points.len();
+    let mut positions = Vec::with_capacity(n * 4);
+    let mut corners = Vec::with_capacity(n * 4);
+    let mut params = Vec::with_capacity(n * 4);
+    let mut warm = Vec::with_capacity(n * 4);
+    let mut indices = Vec::with_capacity(n * 6);
+    for point in points {
+        // Differenced in f64 and narrowed after, which is the whole point of the bake origin.
+        let at = crate::render_space::sim_to_render(point.position_ly - origin_ly).as_vec3().to_array();
+        let physics = [point.teff_k, point.radius_m, point.seed, 0.0];
+        let base = positions.len() as u32;
+        for corner in QUAD {
+            positions.push(at);
+            corners.push(corner);
+            params.push(physics);
+            warm.push(point.warm);
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    // Bevy's mesh allocator skips a mesh with no vertices but still copies it, logging a
+    // use-after-free each frame it is extracted. One vertex three times is a triangle of no area
+    // whatever the shader makes of it.
+    if points.is_empty() {
+        positions.push([0.0; 3]);
+        corners.push([0.0; 2]);
+        params.push([0.0; 4]);
+        warm.push([0.0; 4]);
+        indices.extend_from_slice(&[0, 0, 0]);
+    }
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(ATTRIBUTE_STAR_CORNER, corners);
+    mesh.insert_attribute(ATTRIBUTE_STAR_PARAMS, params);
+    mesh.insert_attribute(ATTRIBUTE_STAR_WARM, warm);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+/// A band mapping by column, as [`RelativisticStarfieldUniform::band_to_display`] holds it:
+/// entry `b` is band `b`'s contribution to red, green and blue. Unavailable bands are zeroed
+/// here rather than in the shader, matching `BandMapping::apply`.
+pub fn band_columns(mapping: &em_spectra::BandMapping) -> [Vec4; BANDS] {
+    std::array::from_fn(|b| {
+        let band = em_spectra::Band::ALL[b];
+        if !mapping.available.contains(band) {
+            return Vec4::ZERO;
+        }
+        Vec4::new(mapping.matrix[0][b], mapping.matrix[1][b], mapping.matrix[2][b], 0.0)
+    })
+}
+
 pub struct RelativisticStarfieldMaterialPlugin;
 
 impl Plugin for RelativisticStarfieldMaterialPlugin {

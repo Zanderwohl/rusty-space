@@ -3256,6 +3256,8 @@ dependencies = [
  "bevy_mesh",
  "em-foundations",
  "em-sim",
+ "em-spectra",
+ "glam",
 ]
 
 [[package]]
@@ -5089,6 +5091,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "em-plot",
+ "em-render",
  "em-spectra",
  "em-ui",
  "glam",
