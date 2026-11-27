@@ -3,7 +3,7 @@
 
 use glam::DVec3;
 use lc_galaxy::compiled::OpSpec;
-use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, PathKind, PathPoint, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
+use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, NoiseKind, NoiseMode, PathKind, PathPoint, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
 use lc_galaxy::{Compiled, FeatureId, FeatureKind, Num, Output, Params, Registry, Target, Timeline, codec, stats};
 
 const STARS: f64 = 1000.0;
@@ -46,10 +46,25 @@ fn every_kind() -> Vec<(&'static str, Compiled)> {
             k.contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(STARS)))];
         })
         .1),
+        ("modulate", noisy(NoiseMode::Modulate { depth: Num::Lit(0.8) }).1),
+        ("warp", noisy(NoiseMode::Warp { reach_ly: Num::Lit(3.0) }).1),
         ("union", boolean(BoolOp::Union).1),
         ("intersection", boolean(BoolOp::Intersect).1),
         ("difference", boolean(BoolOp::Difference).1),
     ]
+}
+
+/// An ellipsoid as construction geometry, and noise over it adding `STARS`.
+fn noisy(mode: NoiseMode) -> (Timeline, Compiled) {
+    let mut t = Timeline::new(3);
+    let frame = t.push(Box::new(FrameKind { tilt_deg: 20.0, ..FrameKind::new() }), None);
+    let pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
+    let blob = t.push(Box::new(Ellipsoid { frame, radii_ly: (15.0, 10.0, 6.0), edge_ly: Num::Lit(3.0), ..Ellipsoid::new() }), None);
+    let contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(STARS)))];
+    t.push(Box::new(NoiseKind { of: ShapeRef(Output::only(blob)), mode, contributes, ..NoiseKind::new() }), None);
+    let c = t.compile(t.len(), None);
+    assert!(c.problems.is_empty(), "{:?}", c.problems);
+    (t, c)
 }
 
 /// A disc, an arm of a spiral and an ellipsoid that crosses both, as construction geometry, and
@@ -223,4 +238,27 @@ fn a_path_passes_through_its_points_and_two_in_one_place_are_a_problem() {
     let path = t.feature_mut(id).unwrap().get_mut::<PathKind>().unwrap();
     path.points[1].at_ly = path.points[0].at_ly;
     assert!(t.compile(t.len(), None).problems.contains_key(&id));
+}
+
+/// Modulating keeps the shape's support and only lowers its weight, by no more than the depth;
+/// warping moves the support.
+#[test]
+fn modulation_keeps_the_edge_and_a_warp_moves_it() {
+    let shapes = |c: &Compiled| -> (std::sync::Arc<dyn lc_galaxy::Shape>, std::sync::Arc<dyn lc_galaxy::Shape>) {
+        let mut v = c.shapes.values().cloned();
+        (v.next().unwrap(), v.next().unwrap())
+    };
+    let (_, m) = noisy(NoiseMode::Modulate { depth: Num::Lit(0.8) });
+    let (_, w) = noisy(NoiseMode::Warp { reach_ly: Num::Lit(3.0) });
+    let ((blob, modulated), (_, warped)) = (shapes(&m), shapes(&w));
+    let (mut lowered, mut moved) = (0, 0);
+    for i in 0..20_000u64 {
+        let p = DVec3::new(unit(3 * i), unit(3 * i + 1), unit(3 * i + 2)) * 20.0;
+        let (b, mw) = (blob.weight(p), modulated.weight(p));
+        assert_eq!(b > 0.0, mw > 0.0, "modulation changed the support at {p}");
+        assert!(mw <= b + 1e-12 && mw >= b * 0.2 - 1e-12, "{mw} against {b} at {p}");
+        lowered += usize::from(mw < b * 0.9);
+        moved += usize::from((b > 0.0) != (warped.weight(p) > 0.0));
+    }
+    assert!(lowered > 1000 && moved > 100, "lowered {lowered}, moved {moved}");
 }

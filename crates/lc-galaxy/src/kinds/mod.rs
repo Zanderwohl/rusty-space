@@ -5,6 +5,7 @@ use crate::feature::{FeatureId, Params, Problem, Registry};
 
 mod boolean;
 mod frame;
+mod noise;
 mod path;
 mod plummer;
 mod population;
@@ -16,6 +17,7 @@ mod variable;
 
 pub use boolean::{BoolOp, Boolean, ShapeRef};
 pub use frame::FrameKind;
+pub use noise::{MAX_OCTAVES, NoiseKind, NoiseMode};
 pub use path::{PathKind, PathPoint, curve};
 pub use plummer::{Contribution, Plummer, PlummerShape};
 pub use population::{MAX_AGE_GYR, MAX_POPULATIONS, PopulationKind};
@@ -40,6 +42,7 @@ pub fn register(r: &mut Registry) {
     r.register::<LogSpiral>();
     r.register::<PathKind>();
     r.register::<Boolean>();
+    r.register::<NoiseKind>();
 }
 
 /// The shape-kind face of `params`, if its kind places a shape.

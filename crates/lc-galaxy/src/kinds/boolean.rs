@@ -16,13 +16,9 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use super::plummer::Contribution;
 use super::shape::{self, require, resolve, smoothstep};
-use crate::compiled::{Aabb, Compiled, OpSpec, Shape, Target};
+use crate::compiled::{Aabb, Compiled, Shape};
 use crate::feature::{FeatureId, FeatureKind, Output, Problem};
 use crate::num::Num;
-
-/// Points per axis of the midpoint sum that gives a boolean its volume, which no profile
-/// integral does.
-const VOLUME_RESOLUTION: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoolOp {
@@ -110,24 +106,6 @@ impl Combined {
     fn mask(&self, d: f64) -> f64 {
         if self.blend > 0.0 { smoothstep(-d / self.blend) } else if d < 0.0 { 1.0 } else { 0.0 }
     }
-
-    fn volume(&self) -> f64 {
-        let n = VOLUME_RESOLUTION;
-        let b = self.bounds;
-        if b.is_empty() {
-            return 0.0;
-        }
-        let step = b.size() / n as f64;
-        let mut sum = 0.0;
-        for i in 0..n {
-            for j in 0..n {
-                for k in 0..n {
-                    sum += self.weight(b.min + (DVec3::new(i as f64, j as f64, k as f64) + 0.5) * step);
-                }
-            }
-        }
-        sum * step.element_product()
-    }
 }
 
 impl Shape for Combined {
@@ -202,16 +180,7 @@ impl FeatureKind for Boolean {
         let operands = self
             .of
             .iter()
-            .map(|r| {
-                out.shapes.get(&r.0).cloned().ok_or_else(|| {
-                    let o = r.0;
-                    if out.shapes.keys().any(|k| k.feature == o.feature) {
-                        Problem::Invalid(format!("{} has no shape {} of {}", o.feature, o.index + 1, o.of))
-                    } else {
-                        Problem::Missing(o.feature)
-                    }
-                })
-            })
+            .map(|r| shape::operand(out, r.0))
             .collect::<Result<Vec<_>, _>>()?;
         let bounds = match self.op {
             BoolOp::Union => operands.iter().fold(Aabb::EMPTY, |b, s| b.union(s.bounds())),
@@ -220,9 +189,7 @@ impl FeatureKind for Boolean {
         };
         require(!bounds.is_empty(), "the shapes do not overlap")?;
         let shape = Combined { op: self.op, blend, operands, bounds };
-        // The sum is the costly part of a compile, and only an `Add` on a density reads it.
-        let counts = self.contributes.iter().any(|c| matches!((c.0, &c.1), (Target::Density(_), OpSpec::Add(_))));
-        let volume = if counts { shape.volume() } else { 0.0 };
+        let volume = shape::volume_if_counted(&shape, &self.contributes);
         shape::contribute(id, out, &self.contributes, vec![(Arc::new(shape), volume)])
     }
 }

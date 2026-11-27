@@ -20,8 +20,10 @@ built. Of Phase III, the shape kinds are built (`crates/lc-galaxy/src/kinds/{pro
 `exponential_disc`, `sersic`, `power_halo`, `king`, `ellipsoid`, `ring`, `bar` and `log_spiral`,
 each with a distance whose Lipschitz bound a test checks, then `boolean` (`kinds/boolean.rs`)
 and `path` (`kinds/path.rs`), whose control points Galaxy Forge lists in the Parameters panel and
-drags in the region view, and a draft Phase III galaxy in `crates/lc-galaxy/galaxies/phase-3.ron`.
-`noise`, masks, the ray marcher, tier A and the CDN path are not started. The shipped sky is still the
+drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise in
+`crates/lc-galaxy/src/noise.rs` whose values a test pins), and a draft Phase III galaxy in
+`crates/lc-galaxy/galaxies/phase-3.ron`. Masks, the ray marcher, tier A and the CDN path are not
+started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -359,7 +361,7 @@ list is construction geometry, drawn grayed, that only booleans and masks read.
 | `plummer`, `king` | one shape | clusters |
 | `log_spiral` | one shape per arm | `Output { index, of }` names an arm |
 | `bar`, `ring`, `ellipsoid`, `path` | one shape | a bar is a Ferrers ellipsoid, `(1 - m²)²`; an `edge_ly` on a ring or ellipsoid is measured along its shortest semi-axis; a path is a tube along a Catmull-Rom spline through its points, each with a radius, which may change by at most 0.3 ly per ly along it |
-| `noise` | one shape | warps or modulates another shape's weight; raises its `lipschitz` |
+| `noise` | one shape | warps or modulates another shape's weight; raises its `lipschitz`. Fractal Brownian motion of Perlin's improved noise, in `f64` with integer hashing rather than texture-graph's `f32` GPU port, since published stars depend on its values. Modulating multiplies the weight by between `1 - depth` and 1 and keeps the support; warping reads the shape at `p + reach · N(p)` |
 | `boolean` | one shape | union, intersection or difference of shapes, with a blend width in ly. Distances combine by a smooth minimum or maximum over the blend; an intersection or difference weighs the operands' weights by how far inside the combined distance a point is, fading over the blend, so the blend is the soft edge. A difference is the first shape less all the others, and "arms in a disc" is a union of the arms and then an intersection with the disc |
 | `object` | a point object | a black hole, a pulsar, a hand-placed star; inserted before thinning |
 

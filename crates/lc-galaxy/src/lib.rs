@@ -13,6 +13,7 @@ pub mod codec;
 pub mod compiled;
 pub mod feature;
 pub mod kinds;
+pub mod noise;
 pub mod num;
 pub mod publish;
 pub mod sample;

@@ -2,7 +2,7 @@
 
 use bevy_egui::egui::{self, DragValue, RichText};
 use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
-use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, PathPoint, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
+use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, NoiseKind, NoiseMode, PathPoint, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
 use lc_galaxy::{Compiled, FeatureId, Num, Output, Params, Row, Target, Timeline, Unread, codec};
 
 use crate::doc::Doc;
@@ -116,6 +116,8 @@ pub fn seed_references(params: &mut dyn Params, t: &Timeline, at: usize, compile
         p.frame = frame.unwrap_or(p.frame);
     } else if let Some(b) = params.as_any_mut().downcast_mut::<Boolean>() {
         b.of = refs.shapes.iter().rev().take(2).rev().map(|s| ShapeRef(s.0)).collect();
+    } else if let Some(n) = params.as_any_mut().downcast_mut::<NoiseKind>() {
+        n.of = refs.shapes.last().map_or(n.of, |s| ShapeRef(s.0));
     } else if let Some(s) = kinds::as_shape(params) {
         *s.frame_mut() = frame.unwrap_or(*s.frame_mut());
         if let Some(pop) = pop {
@@ -135,6 +137,8 @@ fn kind_fields(ui: &mut egui::Ui, params: &mut dyn Params, refs: &Refs) {
         population(ui, p, refs);
     } else if let Some(b) = any.downcast_mut::<Boolean>() {
         boolean(ui, b, refs);
+    } else if let Some(n) = any.downcast_mut::<NoiseKind>() {
+        noise(ui, n, refs);
     } else if let Some(s) = kinds::as_shape(params) {
         shape(ui, kind, s, refs);
     }
@@ -154,16 +158,11 @@ fn boolean(ui: &mut egui::Ui, b: &mut Boolean, refs: &Refs) {
         ui.end_row();
     });
     ui.label(RichText::new("of").strong());
-    let name = |o: Output| refs.shapes.iter().find(|s| s.0 == o).map_or_else(|| format!("{} (not before this)", o.feature), |s| s.1.clone());
     let mut remove = None;
     for (i, r) in b.of.iter_mut().enumerate() {
         ui.push_id(("operand", i), |ui| {
             ui.horizontal(|ui| {
-                egui::ComboBox::from_id_salt("operand").selected_text(name(r.0)).show_ui(ui, |ui| {
-                    for (o, n) in &refs.shapes {
-                        ui.selectable_value(r, ShapeRef(*o), n);
-                    }
-                });
+                operand_picker(ui, r, refs);
                 if ui.small_button("remove").clicked() {
                     remove = Some(i);
                 }
@@ -180,6 +179,56 @@ fn boolean(ui: &mut egui::Ui, b: &mut Boolean, refs: &Refs) {
     }
     ui.separator();
     contributions(ui, &mut b.contributes, refs);
+}
+
+fn operand_picker(ui: &mut egui::Ui, r: &mut ShapeRef, refs: &Refs) {
+    let name = |o: Output| refs.shapes.iter().find(|s| s.0 == o).map_or_else(|| format!("{} (not before this)", o.feature), |s| s.1.clone());
+    egui::ComboBox::from_id_salt("operand").selected_text(name(r.0)).show_ui(ui, |ui| {
+        for (o, n) in &refs.shapes {
+            ui.selectable_value(r, ShapeRef(*o), n);
+        }
+    });
+}
+
+fn noise(ui: &mut egui::Ui, n: &mut NoiseKind, refs: &Refs) {
+    grid(ui, "noise", |ui| {
+        ui.label("of");
+        operand_picker(ui, &mut n.of, refs);
+        ui.end_row();
+        ui.label("mode");
+        let warp = matches!(n.mode, NoiseMode::Warp { .. });
+        egui::ComboBox::from_id_salt("noise mode").selected_text(if warp { "warp" } else { "modulate" }).show_ui(ui, |ui| {
+            if ui.selectable_label(!warp, "modulate").clicked() && warp {
+                n.mode = NoiseMode::Modulate { depth: Num::Lit(0.6) };
+            }
+            if ui.selectable_label(warp, "warp").clicked() && !warp {
+                n.mode = NoiseMode::Warp { reach_ly: Num::Lit(2.0) };
+            }
+        });
+        ui.end_row();
+        match &mut n.mode {
+            NoiseMode::Modulate { depth } => {
+                ui.label("depth");
+                num(ui, "depth", depth, &refs.variables, "");
+            }
+            NoiseMode::Warp { reach_ly } => {
+                ui.label("reach");
+                num(ui, "reach", reach_ly, &refs.variables, " ly");
+            }
+        }
+        ui.end_row();
+        ui.label("scale");
+        num(ui, "scale", &mut n.scale_ly, &refs.variables, " ly");
+        ui.end_row();
+        ui.label("octaves");
+        ui.add(DragValue::new(&mut n.octaves).range(1..=kinds::MAX_OCTAVES).clamp_existing_to_range(false));
+        ui.end_row();
+        ui.label("seed");
+        ui.add(DragValue::new(&mut n.seed));
+        ui.end_row();
+    });
+    ui.separator();
+    contributions(ui, &mut n.contributes, refs);
 }
 
 fn op_name(op: BoolOp) -> &'static str {

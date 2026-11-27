@@ -7,7 +7,7 @@ use std::sync::Arc;
 use glam::{DMat3, DVec3};
 
 use super::plummer::Contribution;
-use crate::compiled::{Aabb, BOX_HALF_LY, Compiled, Op, Shape, Target, Term, in_box};
+use crate::compiled::{Aabb, BOX_HALF_LY, Compiled, Op, OpSpec, Shape, Target, Term, in_box};
 use crate::feature::{FeatureId, Output, Problem};
 use crate::num::Num;
 
@@ -109,6 +109,43 @@ pub(crate) fn ball_volume(width: f64) -> f64 {
 /// `∫ taper(m) · 2πm dm` over the unit disc: a tube's cross-section per unit `wh`.
 pub(crate) fn disc_area(width: f64) -> f64 {
     simpson(|m| 2.0 * std::f64::consts::PI * m * taper(m, width), 0.0, 1.0, 256)
+}
+
+/// Points per axis of the midpoint sum that gives a shape its volume when no profile integral
+/// does: a boolean's, or a noise's.
+const VOLUME_RESOLUTION: usize = 64;
+
+/// `∫ weight dV` by the midpoint rule over the shape's box, when a contribution counts stars
+/// and so reads it; 0 otherwise. The sum is the costly part of a compile.
+pub(crate) fn volume_if_counted(shape: &dyn Shape, contributes: &[Contribution]) -> f64 {
+    let counts = contributes.iter().any(|c| matches!((c.0, &c.1), (Target::Density(_), OpSpec::Add(_))));
+    let b = shape.bounds();
+    if !counts || b.is_empty() {
+        return 0.0;
+    }
+    let n = VOLUME_RESOLUTION;
+    let step = b.size() / n as f64;
+    let mut sum = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            for k in 0..n {
+                sum += shape.weight(b.min + (DVec3::new(i as f64, j as f64, k as f64) + 0.5) * step);
+            }
+        }
+    }
+    sum * step.element_product()
+}
+
+/// The shape a feature reads, with a problem that says whether the feature or only that output
+/// is missing.
+pub(crate) fn operand(out: &Compiled, o: Output) -> Result<Arc<dyn Shape>, Problem> {
+    out.shapes.get(&o).cloned().ok_or_else(|| {
+        if out.shapes.keys().any(|k| k.feature == o.feature) {
+            Problem::Invalid(format!("{} has no shape {} of {}", o.feature, o.index + 1, o.of))
+        } else {
+            Problem::Missing(o.feature)
+        }
+    })
 }
 
 pub(crate) fn resolve(n: &Num, out: &Compiled) -> Result<f64, Problem> {
