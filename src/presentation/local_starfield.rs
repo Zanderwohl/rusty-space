@@ -21,7 +21,7 @@ use crate::presentation::local_starfield_material::{
 /// Minimum billboard radius in screen pixels for local star quads.
 const LOCAL_STAR_MIN_RADIUS_PX: f32 = 3.0;
 /// One lightyear in meters.
-const LIGHT_YEAR_M: f32 = 9.460_730_5e15;
+const LIGHT_YEAR_M: f32 = 9.460_731e15;
 
 const QUAD_CORNERS: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
 

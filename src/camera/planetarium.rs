@@ -61,6 +61,12 @@ impl PlanetariumCamera {
     }
 }
 
+impl Default for PlanetariumCamera {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone)]
 pub enum CameraAction {
     Free,
@@ -289,109 +295,106 @@ fn run_goto (
     let mut next_action = None;
 
     if let Ok((mut cam_t, mut pcam, mut fcam)) = camera.single_mut() {
-        match &mut pcam.action {
-            CameraAction::Goto(goto) => {
-                let resolved = bodies.get(goto.entity).ok()
-                    .and_then(|(entity, body_ref, transform)| {
-                        system.0.index_of(body_ref.0).map(|i| (entity, i, transform))
-                    });
-                if let Some((entity, index, transform)) = resolved {
-                    let motive = system.0.motive(index);
-                    let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
-                    let frac = ease::f64::circ(frac);
-                    let frame = resolve_frame_or_fallback(goto.end_frame, motive, sim_time.time, entity);
-                    if frame != goto.end_frame {
-                        info!(
-                            "cam.goto.frame_fallback entity={:?} from={:?} to={:?}",
-                            entity,
-                            goto.end_frame,
-                            frame
-                        );
-                        goto.end_frame = frame;
-                    }
-
-                    let start_pos = match &goto.origin {
-                        GoToOrigin::Position { position, velocity, sample_time } => {
-                            let dt = (now - *sample_time).max(0.0);
-                            let evaluated = *position + *velocity * dt;
-                            debug!(
-                                "cam.goto.origin_kinematic entity={:?} dt={} position={:?} velocity={:?} evaluated={:?}",
-                                entity,
-                                dt,
-                                position,
-                                velocity,
-                                evaluated
-                            );
-                            evaluated
-                        }
-                        GoToOrigin::Revolving(revolving) => {
-                            let origin_resolved = bodies.get(revolving.entity).ok()
-                                .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
-                            if let Some((origin_entity, origin_index, origin_transform)) = origin_resolved {
-                                let origin_motive = system.0.motive(origin_index);
-                                let origin_pos = system.0.position(origin_index).to_render_scaled(view_settings.distance_factor());
-                                let (origin_offset, _) = offset_in_frame(
-                                    revolving.frame,
-                                    revolving.altitude,
-                                    revolving.azimuth,
-                                    revolving.bevy_distance,
-                                    origin_motive,
-                                    sim_time.time,
-                                    origin_transform,
-                                    origin_entity,
-                                );
-                                origin_pos + origin_offset
-                            } else {
-                                fcam.bevy_pos
-                            }
-                        }
-                    };
-
-                    let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
-
-                    let (offset, _) = offset_in_frame(
-                        goto.end_frame,
-                        goto.end_altitude,
-                        goto.end_azimuth,
-                        goto.end_distance,
-                        motive,
-                        sim_time.time,
-                        transform,
+        if let CameraAction::Goto(goto) = &mut pcam.action {
+            let resolved = bodies.get(goto.entity).ok()
+                .and_then(|(entity, body_ref, transform)| {
+                    system.0.index_of(body_ref.0).map(|i| (entity, i, transform))
+                });
+            if let Some((entity, index, transform)) = resolved {
+                let motive = system.0.motive(index);
+                let frac = f64::min(1.0, (now - goto.start_time) / animation_time);
+                let frac = ease::f64::circ(frac);
+                let frame = resolve_frame_or_fallback(goto.end_frame, motive, sim_time.time, entity);
+                if frame != goto.end_frame {
+                    info!(
+                        "cam.goto.frame_fallback entity={:?} from={:?} to={:?}",
                         entity,
+                        goto.end_frame,
+                        frame
                     );
-                    let final_pos = body_pos_in_bevy + offset;
-
-                    let up = up_vector_for_frame(goto.end_frame, motive, sim_time.time, transform, entity);
-                    let look_at_rot = look_at(final_pos, body_pos_in_bevy, up);
-
-                    let mid_pos = start_pos.lerp(final_pos, frac);
-                    let mid_rot = goto.start_rot.slerp(look_at_rot.as_quat(), frac as f32);
-                    fcam.bevy_pos = mid_pos;
-                    cam_t.rotation = mid_rot;
-
-                    if (frac - 1.0).abs() <= f64::epsilon() {
-                        next_action = Some(CameraAction::RevolveAround(RevolveAround {
-                            entity: goto.entity,
-                            bevy_distance: goto.end_distance,
-                            altitude: goto.end_altitude,
-                            azimuth: goto.end_azimuth,
-                            frame: goto.end_frame,
-                        }));
-                        info!(
-                            "cam.goto.complete entity={:?} frame={:?} distance={} altitude={} azimuth={}",
-                            goto.entity,
-                            goto.end_frame,
-                            goto.end_distance,
-                            goto.end_altitude,
-                            goto.end_azimuth
-                        );
-                    }
-                } else {
-                    info!("cam.goto.target_lost entity={:?}", goto.entity);
-                    next_action = Some(CameraAction::Free);
+                    goto.end_frame = frame;
                 }
+
+                let start_pos = match &goto.origin {
+                    GoToOrigin::Position { position, velocity, sample_time } => {
+                        let dt = (now - *sample_time).max(0.0);
+                        let evaluated = *position + *velocity * dt;
+                        debug!(
+                            "cam.goto.origin_kinematic entity={:?} dt={} position={:?} velocity={:?} evaluated={:?}",
+                            entity,
+                            dt,
+                            position,
+                            velocity,
+                            evaluated
+                        );
+                        evaluated
+                    }
+                    GoToOrigin::Revolving(revolving) => {
+                        let origin_resolved = bodies.get(revolving.entity).ok()
+                            .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
+                        if let Some((origin_entity, origin_index, origin_transform)) = origin_resolved {
+                            let origin_motive = system.0.motive(origin_index);
+                            let origin_pos = system.0.position(origin_index).to_render_scaled(view_settings.distance_factor());
+                            let (origin_offset, _) = offset_in_frame(
+                                revolving.frame,
+                                revolving.altitude,
+                                revolving.azimuth,
+                                revolving.bevy_distance,
+                                origin_motive,
+                                sim_time.time,
+                                origin_transform,
+                                origin_entity,
+                            );
+                            origin_pos + origin_offset
+                        } else {
+                            fcam.bevy_pos
+                        }
+                    }
+                };
+
+                let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
+
+                let (offset, _) = offset_in_frame(
+                    goto.end_frame,
+                    goto.end_altitude,
+                    goto.end_azimuth,
+                    goto.end_distance,
+                    motive,
+                    sim_time.time,
+                    transform,
+                    entity,
+                );
+                let final_pos = body_pos_in_bevy + offset;
+
+                let up = up_vector_for_frame(goto.end_frame, motive, sim_time.time, transform, entity);
+                let look_at_rot = look_at(final_pos, body_pos_in_bevy, up);
+
+                let mid_pos = start_pos.lerp(final_pos, frac);
+                let mid_rot = goto.start_rot.slerp(look_at_rot.as_quat(), frac as f32);
+                fcam.bevy_pos = mid_pos;
+                cam_t.rotation = mid_rot;
+
+                if (frac - 1.0).abs() <= f64::epsilon() {
+                    next_action = Some(CameraAction::RevolveAround(RevolveAround {
+                        entity: goto.entity,
+                        bevy_distance: goto.end_distance,
+                        altitude: goto.end_altitude,
+                        azimuth: goto.end_azimuth,
+                        frame: goto.end_frame,
+                    }));
+                    info!(
+                        "cam.goto.complete entity={:?} frame={:?} distance={} altitude={} azimuth={}",
+                        goto.entity,
+                        goto.end_frame,
+                        goto.end_distance,
+                        goto.end_altitude,
+                        goto.end_azimuth
+                    );
+                }
+            } else {
+                info!("cam.goto.target_lost entity={:?}", goto.entity);
+                next_action = Some(CameraAction::Free);
             }
-            _ => {}
         }
 
         if let Some(next_action) = next_action {
@@ -416,111 +419,108 @@ fn revolve_around(
     if let Ok((window, mut cursor_options)) = primary_window.single_mut() {
         for (mut cam_t, mut pcam, mut fcam) in camera.iter_mut() {
 
-            match &mut pcam.action {
-                CameraAction::RevolveAround(revolve) => {
+            if let CameraAction::RevolveAround(revolve) = &mut pcam.action {
 
-                    let resolved = entities.get(revolve.entity).ok()
-                        .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
-                    match resolved {
-                        Some((entity, index, transform)) => {
-                            let appearance = system.0.appearance(index);
-                            let motive = system.0.motive(index);
-                            let frame = resolve_frame_or_fallback(revolve.frame, motive, sim_time.time, entity);
-                            if frame != revolve.frame {
-                                revolve.frame = frame;
+                let resolved = entities.get(revolve.entity).ok()
+                    .and_then(|(e, r, t)| system.0.index_of(r.0).map(|i| (e, i, t)));
+                match resolved {
+                    Some((entity, index, transform)) => {
+                        let appearance = system.0.appearance(index);
+                        let motive = system.0.motive(index);
+                        let frame = resolve_frame_or_fallback(revolve.frame, motive, sim_time.time, entity);
+                        if frame != revolve.frame {
+                            revolve.frame = frame;
+                        }
+                        let window_scale = window.height().min(window.width());
+                        let scaled_radius = if matches!(appearance, Appearance::Empty) {
+                            view_settings.distance_factor()
+                        } else {
+                            view_settings.body_scale_factor(appearance.radius()) as f64
+                        };
+
+                        let egui_wants_pointer = egui_ctx.ctx_mut()
+                            .is_ok_and(|ctx| ctx.egui_wants_pointer_input());
+
+                        let min_distance = ORBIT_ZOOM_MIN_RADIUS_MULT * scaled_radius;
+                        let max_distance = ORBIT_ZOOM_MAX_LY * LIGHT_YEAR_M * view_settings.distance_factor();
+                        let mut view_changed = false;
+
+                        for ev in scroll.read() {
+                            if !egui_wants_pointer {
+                                let prev_distance = revolve.bevy_distance;
+                                let u = (revolve.bevy_distance / min_distance).ln();
+                                let a = ORBIT_ZOOM_BASE_SPEED;
+                                let k = ORBIT_ZOOM_ACCELERATION / 10.0_f64.ln();
+                                let t = ev.y as f64;
+
+                                let u_new = if k.abs() > f64::EPSILON {
+                                    (u + a / k) * (-k * t).exp() - a / k
+                                } else {
+                                    u - a * t
+                                };
+
+                                revolve.bevy_distance = min_distance * u_new.exp();
+                                revolve.bevy_distance = revolve.bevy_distance
+                                    .clamp(min_distance, max_distance);
+                                if (revolve.bevy_distance - prev_distance).abs() > f64::EPSILON {
+                                    view_changed = true;
+                                }
                             }
-                            let window_scale = window.height().min(window.width());
-                            let scaled_radius = if matches!(appearance, Appearance::Empty) {
-                                view_settings.distance_factor()
+                        }
+
+                        if mouse_buttons.pressed(MouseButton::Right) {
+                            if egui_wants_pointer {
+                                cursor_options.grab_mode = CursorGrabMode::None;
+                                cursor_options.visible = true;
                             } else {
-                                view_settings.body_scale_factor(appearance.radius()) as f64
-                            };
-
-                            let egui_wants_pointer = egui_ctx.ctx_mut()
-                                .map_or(false, |ctx| ctx.egui_wants_pointer_input());
-
-                            let min_distance = ORBIT_ZOOM_MIN_RADIUS_MULT * scaled_radius;
-                            let max_distance = ORBIT_ZOOM_MAX_LY * LIGHT_YEAR_M * view_settings.distance_factor();
-                            let mut view_changed = false;
-
-                            for ev in scroll.read() {
-                                if !egui_wants_pointer {
-                                    let prev_distance = revolve.bevy_distance;
-                                    let u = (revolve.bevy_distance / min_distance).ln();
-                                    let a = ORBIT_ZOOM_BASE_SPEED;
-                                    let k = ORBIT_ZOOM_ACCELERATION / 10.0_f64.ln();
-                                    let t = ev.y as f64;
-
-                                    let u_new = if k.abs() > f64::EPSILON {
-                                        (u + a / k) * (-k * t).exp() - a / k
-                                    } else {
-                                        u - a * t
-                                    };
-
-                                    revolve.bevy_distance = min_distance * u_new.exp();
-                                    revolve.bevy_distance = revolve.bevy_distance
-                                        .clamp(min_distance, max_distance);
-                                    if (revolve.bevy_distance - prev_distance).abs() > f64::EPSILON {
+                                cursor_options.grab_mode = CursorGrabMode::Confined;
+                                cursor_options.visible = false;
+                                for ev in mouse.read() {
+                                    let prev_altitude = revolve.altitude;
+                                    let prev_azimuth = revolve.azimuth;
+                                    revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
+                                    revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
+                                    revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
+                                    const ALT_LIMIT: f64 = PI / 2.0 - 0.001;
+                                    revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
+                                    if (revolve.altitude - prev_altitude).abs() > f64::EPSILON
+                                        || (revolve.azimuth - prev_azimuth).abs() > f64::EPSILON
+                                    {
                                         view_changed = true;
                                     }
                                 }
                             }
-
-                            if mouse_buttons.pressed(MouseButton::Right) {
-                                if egui_wants_pointer {
-                                    cursor_options.grab_mode = CursorGrabMode::None;
-                                    cursor_options.visible = true;
-                                } else {
-                                    cursor_options.grab_mode = CursorGrabMode::Confined;
-                                    cursor_options.visible = false;
-                                    for ev in mouse.read() {
-                                        let prev_altitude = revolve.altitude;
-                                        let prev_azimuth = revolve.azimuth;
-                                        revolve.azimuth -= (ev.delta.x.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
-                                        revolve.azimuth = revolve.azimuth.rem_euclid(TAU);
-                                        revolve.altitude += (ev.delta.y.clamp(-1000.0, 1000.0) * window_scale * settings.sensitivity) as f64;
-                                        const ALT_LIMIT: f64 = PI / 2.0 - 0.001;
-                                        revolve.altitude = revolve.altitude.clamp(-ALT_LIMIT, ALT_LIMIT);
-                                        if (revolve.altitude - prev_altitude).abs() > f64::EPSILON
-                                            || (revolve.azimuth - prev_azimuth).abs() > f64::EPSILON
-                                        {
-                                            view_changed = true;
-                                        }
-                                    }
-                                }
-                            } else {
-                                cursor_options.grab_mode = CursorGrabMode::None;
-                                cursor_options.visible = true;
-                            }
-
-                            let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
-                            let (offset, _) = offset_in_frame(
-                                revolve.frame,
-                                revolve.altitude,
-                                revolve.azimuth,
-                                revolve.bevy_distance,
-                                motive,
-                                sim_time.time,
-                                transform,
-                                entity,
-                            );
-                            let camera_pos_in_bevy = body_pos_in_bevy + offset;
-
-                            fcam.bevy_pos = camera_pos_in_bevy;
-                            if offset.is_finite() && body_pos_in_bevy.is_finite() && body_pos_in_bevy != camera_pos_in_bevy {
-                                let up = up_vector_for_frame(revolve.frame, motive, sim_time.time, transform, entity);
-                                let look_at_rot = look_at(fcam.bevy_pos, body_pos_in_bevy, up);
-                                cam_t.rotation = look_at_rot.as_quat();
-                                if view_changed {
-                                }
-                            }
+                        } else {
+                            cursor_options.grab_mode = CursorGrabMode::None;
+                            cursor_options.visible = true;
                         }
-                        None => {
-                            pcam.action = CameraAction::Free;
+
+                        let body_pos_in_bevy = system.0.position(index).to_render_scaled(view_settings.distance_factor());
+                        let (offset, _) = offset_in_frame(
+                            revolve.frame,
+                            revolve.altitude,
+                            revolve.azimuth,
+                            revolve.bevy_distance,
+                            motive,
+                            sim_time.time,
+                            transform,
+                            entity,
+                        );
+                        let camera_pos_in_bevy = body_pos_in_bevy + offset;
+
+                        fcam.bevy_pos = camera_pos_in_bevy;
+                        if offset.is_finite() && body_pos_in_bevy.is_finite() && body_pos_in_bevy != camera_pos_in_bevy {
+                            let up = up_vector_for_frame(revolve.frame, motive, sim_time.time, transform, entity);
+                            let look_at_rot = look_at(fcam.bevy_pos, body_pos_in_bevy, up);
+                            cam_t.rotation = look_at_rot.as_quat();
+                            if view_changed {
+                            }
                         }
                     }
+                    None => {
+                        pcam.action = CameraAction::Free;
+                    }
                 }
-                _ => {}
             }
         }
     }
@@ -536,11 +536,10 @@ fn find_max_child_sma(
     system.indices()
         .filter_map(|i| {
             let (_, ms) = system.motive(i).motive_at(time);
-            if let MotiveSelection::Keplerian(k) = ms {
-                if k.primary_id == target_id {
+            if let MotiveSelection::Keplerian(k) = ms
+                && k.primary_id == target_id {
                     return Some(k.semi_major_axis());
                 }
-            }
             None
         })
         .fold(0.0f64, f64::max)

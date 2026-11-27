@@ -61,15 +61,12 @@ impl Request {
                 _ => {}
             }
 
-            if let Some(center) = eph.center() {
-                if let Some(cmd_id) = self.command.body_id_string() {
-                    if let Some(center_id) = center.body_id_string() {
-                        if cmd_id == center_id {
+            if let Some(center) = eph.center()
+                && let Some(cmd_id) = self.command.body_id_string()
+                    && let Some(center_id) = center.body_id_string()
+                        && cmd_id == center_id {
                             errors.push("Observer (CENTER) cannot be the same as the target (COMMAND).".into());
                         }
-                    }
-                }
-            }
         }
 
         errors
@@ -301,21 +298,13 @@ impl TimeList {
 }
 
 #[derive(Clone, Serialize)]
+#[derive(Default)]
 pub struct TimeConfig {
     pub spec: TimeSpec,
     pub span: TimeSpan,
     pub list: TimeList,
 }
 
-impl Default for TimeConfig {
-    fn default() -> Self {
-        Self {
-            spec: TimeSpec::default(),
-            span: TimeSpan::default(),
-            list: TimeList::default(),
-        }
-    }
-}
 
 impl TimeConfig {
     fn append_params(&self, params: &mut Vec<(&str, String)>) {
@@ -897,19 +886,12 @@ impl ElementsParams {
 }
 
 #[derive(Clone, Serialize)]
+#[derive(Default)]
 pub struct CloseApproachParams {
     pub ca_table_type: CaTableType,
     pub cal_type: CalType,
 }
 
-impl Default for CloseApproachParams {
-    fn default() -> Self {
-        Self {
-            ca_table_type: CaTableType::default(),
-            cal_type: CalType::default(),
-        }
-    }
-}
 
 impl CloseApproachParams {
     fn append_params(&self, params: &mut Vec<(&str, String)>) {

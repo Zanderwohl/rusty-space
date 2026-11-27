@@ -217,11 +217,10 @@ pub fn update_chain_leg_thickness(
     for (transform, handle) in legs.iter() {
         let wanted = calculate_tube_radius(transform.translation.length());
         let Some(current) = materials.get(handle.id()) else { continue };
-        if (current.target_tube_radius - wanted).abs() > 1.0e-9 {
-            if let Some(mut material) = materials.get_mut(handle.id()) {
+        if (current.target_tube_radius - wanted).abs() > 1.0e-9
+            && let Some(mut material) = materials.get_mut(handle.id()) {
                 material.target_tube_radius = wanted;
             }
-        }
     }
 }
 

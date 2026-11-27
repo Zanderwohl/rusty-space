@@ -181,7 +181,7 @@ fn generate_icosphere_wireframe_mesh(subdivisions: u32, tube_radius: f32, tube_s
     }
 
     let mut unique_edges: HashSet<(u32, u32)> = HashSet::new();
-    for tri in tri_indices.chunks_exact(3) {
+    for tri in tri_indices.as_chunks::<3>().0 {
         let edges = [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])];
         for (a, b) in edges {
             let edge = if a < b { (a, b) } else { (b, a) };

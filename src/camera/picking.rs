@@ -162,7 +162,7 @@ fn pick_hover_target(
     egui_ctx: &mut EguiContexts,
 ) -> HoverPickResult {
     let egui_wants_pointer = egui_ctx.ctx_mut()
-        .map_or(false, |ctx| ctx.egui_wants_pointer_input());
+        .is_ok_and(|ctx| ctx.egui_wants_pointer_input());
     if egui_wants_pointer {
         return HoverPickResult::default();
     }
@@ -376,14 +376,13 @@ fn pick_trajectory_segment(
         let (seg_t_screen, screen_dist) = closest_point_on_screen_segment(cursor_pos, screen_a, screen_b);
         let seg_t = ray_hit.map(|(t, _)| t).unwrap_or(seg_t_screen);
 
-        if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
-            if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
+        if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS
+            && (best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0) {
                 // Interpolate local position
                 let local_hit = (rotation_delta * local_a).lerp(rotation_delta * local_b, seg_t);
                 let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
                 best_hit = Some((screen_dist, i, seg_t, time_a, time_b, local_hit, bevy_hit));
             }
-        }
     }
     
     // Handle closed orbit: check segment from last point back to first
@@ -406,8 +405,8 @@ fn pick_trajectory_segment(
             let (seg_t_screen, screen_dist) = closest_point_on_screen_segment(cursor_pos, screen_a, screen_b);
             let seg_t = ray_hit.map(|(t, _)| t).unwrap_or(seg_t_screen);
 
-            if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS {
-                if best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0 {
+            if screen_dist <= TRAJECTORY_PICK_PIXEL_RADIUS
+                && (best_hit.is_none() || screen_dist < best_hit.as_ref().unwrap().0) {
                     let local_hit = (rotation_delta * local_a).lerp(rotation_delta * local_b, seg_t);
                     let bevy_hit = bevy_a.lerp(bevy_b, seg_t as f32);
                     // For wrapped segment, time_b is actually the start of the period (0)
@@ -419,7 +418,6 @@ fn pick_trajectory_segment(
                     };
                     best_hit = Some((screen_dist, points.len() - 1, seg_t, time_a, adjusted_time_b, local_hit, bevy_hit));
                 }
-            }
         }
     }
     

@@ -100,11 +100,10 @@ async fn serve(
         Ok(None) => {}
         Err(why) => bevy::log::warn!("no shelf for the local shard: {why}"),
     }
-    if let Some(scene) = demo.as_deref().and_then(Scenario::named) {
-        if let Err(why) = server.stage(scene) {
+    if let Some(scene) = demo.as_deref().and_then(Scenario::named)
+        && let Err(why) = server.stage(scene) {
             bevy::log::error!("could not stage {}: {why:?}", scene.name);
         }
-    }
 
     let nominal = std::time::Duration::from_millis(TICK_MS as u64);
     let mut ticker = tokio::time::interval(nominal);

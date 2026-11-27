@@ -89,12 +89,11 @@ impl Horizons {
         };
 
         let dir = Path::new("./horizons");
-        if !dir.exists() {
-            if let Err(e) = fs::create_dir_all(dir) {
+        if !dir.exists()
+            && let Err(e) = fs::create_dir_all(dir) {
                 self.dump_status = Some(format!("Failed to create directory: {}", e));
                 return;
             }
-        }
 
         let filename = self.request.dump_filename();
         let path = dir.join(&filename);

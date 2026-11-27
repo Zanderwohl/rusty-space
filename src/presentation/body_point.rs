@@ -244,39 +244,34 @@ pub fn update_body_points(
             // Update material brightness (phase brightness * fade factor)
             // Only update if value changed to avoid spurious asset change detection
             let new_brightness = total_brightness * fade_factor * aa_energy_compensation;
-            if let Some(material) = materials.get(point_material_handle.id()) {
-                if (material.brightness - new_brightness).abs() > 0.001 {
-                    if let Some(mut material) = materials.get_mut(point_material_handle.id()) {
+            if let Some(material) = materials.get(point_material_handle.id())
+                && (material.brightness - new_brightness).abs() > 0.001
+                    && let Some(mut material) = materials.get_mut(point_material_handle.id()) {
                         material.brightness = new_brightness;
                     }
-                }
-            }
 
             // Crossfade model->dot over the configured fade range.
             let model_fade = 1.0 - fade_factor;
 
             // Fade wireframe emissive strength smoothly, then hide once negligible.
-            if let Some(wireframe_link) = wireframe_link {
-                if let Ok((mut wf_vis, wf_material_handle)) = wireframes.get_mut(wireframe_link.0) {
+            if let Some(wireframe_link) = wireframe_link
+                && let Ok((mut wf_vis, wf_material_handle)) = wireframes.get_mut(wireframe_link.0) {
                     *wf_vis = if model_fade > 0.001 {
                         Visibility::Visible
                     } else {
                         Visibility::Hidden
                     };
                     let new_emission = WIREFRAME_EMISSION_STRENGTH * model_fade;
-                    if let Some(material) = wireframe_materials.get(wf_material_handle.id()) {
-                        if (material.emission_strength - new_emission).abs() > 0.001 {
-                            if let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
+                    if let Some(material) = wireframe_materials.get(wf_material_handle.id())
+                        && (material.emission_strength - new_emission).abs() > 0.001
+                            && let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
                                 material.emission_strength = new_emission;
                             }
-                        }
-                    }
                 }
-            }
 
             // Fade occluder alpha smoothly to avoid hard model popping.
-            if let Some(occluder_link) = occluder_link {
-                if let Ok((mut occ_vis, occ_material_handle)) = occluders.get_mut(occluder_link.0) {
+            if let Some(occluder_link) = occluder_link
+                && let Ok((mut occ_vis, occ_material_handle)) = occluders.get_mut(occluder_link.0) {
                     *occ_vis = if model_fade > 0.001 {
                         Visibility::Visible
                     } else {
@@ -284,44 +279,36 @@ pub fn update_body_points(
                     };
                     if let Some(material) = occluder_materials.get(occ_material_handle.id()) {
                         let new_alpha = model_fade;
-                        if (material.base_color.alpha - new_alpha).abs() > 0.001 {
-                            if let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
+                        if (material.base_color.alpha - new_alpha).abs() > 0.001
+                            && let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
                                 material.base_color.alpha = new_alpha;
                             }
-                        }
                     }
                 }
-            }
         } else {
             // Hide point, ensure wireframe and occluder visible
             *point_visibility = Visibility::Hidden;
 
-            if let Some(wireframe_link) = wireframe_link {
-                if let Ok((mut wf_vis, wf_material_handle)) = wireframes.get_mut(wireframe_link.0) {
+            if let Some(wireframe_link) = wireframe_link
+                && let Ok((mut wf_vis, wf_material_handle)) = wireframes.get_mut(wireframe_link.0) {
                     *wf_vis = Visibility::Visible;
-                    if let Some(material) = wireframe_materials.get(wf_material_handle.id()) {
-                        if (material.emission_strength - WIREFRAME_EMISSION_STRENGTH).abs() > 0.001 {
-                            if let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
+                    if let Some(material) = wireframe_materials.get(wf_material_handle.id())
+                        && (material.emission_strength - WIREFRAME_EMISSION_STRENGTH).abs() > 0.001
+                            && let Some(mut material) = wireframe_materials.get_mut(wf_material_handle.id()) {
                                 material.emission_strength = WIREFRAME_EMISSION_STRENGTH;
                             }
-                        }
-                    }
                 }
-            }
 
             // Show occluder when point is hidden
-            if let Some(occluder_link) = occluder_link {
-                if let Ok((mut occ_vis, occ_material_handle)) = occluders.get_mut(occluder_link.0) {
+            if let Some(occluder_link) = occluder_link
+                && let Ok((mut occ_vis, occ_material_handle)) = occluders.get_mut(occluder_link.0) {
                     *occ_vis = Visibility::Visible;
-                    if let Some(material) = occluder_materials.get(occ_material_handle.id()) {
-                        if (material.base_color.alpha - 1.0).abs() > 0.001 {
-                            if let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
+                    if let Some(material) = occluder_materials.get(occ_material_handle.id())
+                        && (material.base_color.alpha - 1.0).abs() > 0.001
+                            && let Some(mut material) = occluder_materials.get_mut(occ_material_handle.id()) {
                                 material.base_color.alpha = 1.0;
                             }
-                        }
-                    }
                 }
-            }
         }
     }
 }

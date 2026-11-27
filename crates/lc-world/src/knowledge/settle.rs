@@ -163,11 +163,11 @@ impl About {
         for j in self.free() {
             let place = |sign: f64| {
                 let mut step = [0.0; PARAMETERS];
-                step[j] = sign * STEP;
+                *step.get_mut(j)? = sign * STEP;
                 Some(self.moved(&step)?.at(self.pivot_s))
             };
-            let (Some(plus), Some(minus)) = (place(1.0), place(-1.0)) else { continue };
-            out[j] = (plus - minus).dot(pace) / (2.0 * STEP * pace.length_squared());
+            let (Some(plus), Some(minus), Some(out)) = (place(1.0), place(-1.0), out.get_mut(j)) else { continue };
+            *out = (plus - minus).dot(pace) / (2.0 * STEP * pace.length_squared());
         }
         Some(out)
     }
@@ -180,7 +180,7 @@ impl About {
                 let h = self.step(j, looks);
                 let side = |sign: f64| {
                     let mut step = [0.0; PARAMETERS];
-                    step[j] = sign * h;
+                    *step.get_mut(j)? = sign * h;
                     arc::terms(&self.moved(&step)?, looks)
                 };
                 match (side(1.0), side(-1.0)) {
@@ -219,7 +219,8 @@ fn orthogonalize(a: &mut [Vec<f64>]) -> Vec<Vec<f64>> {
         for j in 1..p {
             for i in 0..j {
                 let dot = |x: &[f64], y: &[f64]| x.iter().zip(y).map(|(x, y)| x * y).sum::<f64>();
-                let (alpha, beta, gamma) = (dot(&a[i], &a[i]), dot(&a[j], &a[j]), dot(&a[i], &a[j]));
+                let (Some(ai), Some(aj)) = (a.get(i), a.get(j)) else { continue };
+                let (alpha, beta, gamma) = (dot(ai, ai), dot(aj, aj), dot(ai, aj));
                 if gamma.abs() <= f64::EPSILON * (alpha * beta).sqrt() {
                     continue;
                 }
@@ -286,9 +287,11 @@ impl Linear {
                 .v
                 .iter()
                 .zip(self.singular2.iter().zip(&self.projected))
-                .map(|(v, (s2, p))| v[row] * p / (s2 + damping * largest))
+                .map(|(v, (s2, p))| v.get(row).copied().unwrap_or(0.0) * p / (s2 + damping * largest))
                 .sum();
-            out[j] = -scaled / scale;
+            if let Some(out) = out.get_mut(j) {
+                *out = -scaled / scale;
+            }
         }
         out
     }
@@ -298,8 +301,11 @@ impl Linear {
         let mut out = [[0.0; PARAMETERS]; PARAMETERS];
         for (a, (&i, si)) in self.free.iter().zip(&self.scales).enumerate() {
             for (b, (&j, sj)) in self.free.iter().zip(&self.scales).enumerate() {
-                let scaled: f64 = self.v.iter().zip(&self.singular2).map(|(v, s2)| v[a] * v[b] / s2).sum();
-                out[i][j] = scaled / (si * sj);
+                let at = |v: &[f64], k: usize| v.get(k).copied().unwrap_or(0.0);
+                let scaled: f64 = self.v.iter().zip(&self.singular2).map(|(v, s2)| at(v, a) * at(v, b) / s2).sum();
+                if let Some(out) = out.get_mut(i).and_then(|row| row.get_mut(j)) {
+                    *out = scaled / (si * sj);
+                }
             }
         }
         out
@@ -401,7 +407,7 @@ pub fn spread(fitted: &Fitted, looks: &[Look]) -> Spread {
         only[LONGITUDE] = 1.0;
         only
     });
-    let along: f64 = (0..PARAMETERS).map(|i| (0..PARAMETERS).map(|j| g[i] * c[i][j] * g[j]).sum::<f64>()).sum();
+    let along: f64 = g.iter().zip(&c).map(|(gi, row)| row.iter().zip(&g).map(|(cij, gj)| gi * cij * gj).sum::<f64>()).sum();
     let (phase, period) = (sigma(along), sigma(c[PERIOD][PERIOD]));
     Spread {
         period_s: period * fitted.period_s,
@@ -454,12 +460,8 @@ pub(super) fn origin_covariance(fitted: &Fitted, looks: &[Look], shift: DVec3) -
     };
     let (plus, minus) = (moved(1.0), moved(-1.0));
     let mut d = [0.0; PARAMETERS];
-    for (j, x) in d.iter_mut().enumerate() {
-        *x = if j == LONGITUDE {
-            em_foundations::kepler::anomaly::wrap_pi(plus[j] - minus[j])
-        } else {
-            plus[j] - minus[j]
-        } * 0.5;
+    for (j, (x, (p, m))) in d.iter_mut().zip(plus.iter().zip(&minus)).enumerate() {
+        *x = if j == LONGITUDE { em_foundations::kepler::anomaly::wrap_pi(p - m) } else { p - m } * 0.5;
     }
     d.iter().all(|x| x.is_finite()).then(|| d.map(|a| d.map(|b| a * b)))
 }
@@ -481,7 +483,7 @@ pub(super) fn place_covariance(fitted: &Fitted, pivot_s: f64, c: &Covariance, t:
     for (j, moved) in moves.iter_mut().enumerate() {
         let place = |sign: f64| {
             let mut step = [0.0; PARAMETERS];
-            step[j] = sign * STEP;
+            *step.get_mut(j)? = sign * STEP;
             Some(about.moved(&step)?.at(t))
         };
         *moved = (place(1.0)? - place(-1.0)?) / (2.0 * STEP);

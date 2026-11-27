@@ -148,11 +148,11 @@ pub fn step_for(from_s: f64, to_s: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{Balance, SOLAR_ANCHOR_AU, STARTING_BROADSIDE_M2};
+    use crate::fitting::Balance;
     use crate::flight::JULIAN_YEAR_S;
     use crate::form::capacity::Capacities;
     use crate::form::grid::FormGrid;
-    use crate::form::presets::{named, Builtin};
+    use crate::form::presets::Builtin;
     use crate::form::{Form, Kind, Mount, Part, PartId, Placement, Primitive};
     use crate::star::Star;
     use glam::DVec2;

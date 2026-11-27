@@ -210,7 +210,7 @@ mod tests {
             })))
             .await
             .unwrap();
-        client.send(Message::Binary(lc_proto::encode(&crate::testing::launch()).into())).await.unwrap();
+        client.send(Message::Binary(lc_proto::encode(&crate::testing::launch()))).await.unwrap();
 
         // Tick until the hello has come through and been answered.
         for _ in 0..200 {

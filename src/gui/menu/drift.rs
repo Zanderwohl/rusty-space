@@ -69,11 +69,10 @@ fn stop_drift(
     drift: Option<Res<MenuDrift>>,
     mut camera: Query<&mut Transform, With<PlanetariumCamera>>,
 ) {
-    if let Some(drift) = drift {
-        if let Ok(mut transform) = camera.single_mut() {
+    if let Some(drift) = drift
+        && let Ok(mut transform) = camera.single_mut() {
             transform.rotation = drift.resting;
         }
-    }
     commands.remove_resource::<MenuDrift>();
 }
 

@@ -95,5 +95,5 @@ pub fn handle_revolve_frame_shortcut(
 fn egui_wants_keyboard(contexts: &mut EguiContexts) -> bool {
     contexts
         .ctx_mut()
-        .map_or(false, |ctx| ctx.egui_wants_keyboard_input())
+        .is_ok_and(|ctx| ctx.egui_wants_keyboard_input())
 }

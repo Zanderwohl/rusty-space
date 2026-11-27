@@ -54,7 +54,7 @@ fn main() {
     let distance = session.distance_to(session.star(target).unwrap());
 
     session.fly_to(target);
-    let cruise = session.cruise().clone().expect("a crossing");
+    let cruise = session.cruise().expect("a crossing");
     println!(
         "{name}: {distance:.2} ly, {:.2} coordinate years, {:.2} aboard, peak {:.4}c",
         cruise.duration_s() / 31_557_600.0,

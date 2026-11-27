@@ -100,8 +100,7 @@ impl UniverseFile {
     /// Save to the file (format auto-detected from extension)
     pub fn save(&self) -> Result<(), UniverseWriteError> {
         let path = self.file.as_ref()
-            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::new(
-                std::io::ErrorKind::Other, 
+            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::other(
                 "No file path set"
             )))?;
         
@@ -117,8 +116,7 @@ impl UniverseFile {
     /// Save to TOML format
     pub fn save_toml(&self) -> Result<(), UniverseWriteError> {
         let path = self.file.as_ref()
-            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::new(
-                std::io::ErrorKind::Other, 
+            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::other(
                 "No file path set"
             )))?;
         
@@ -134,8 +132,7 @@ impl UniverseFile {
     /// Save to SQLite (.em) format
     pub fn save_sqlite(&self) -> Result<(), UniverseWriteError> {
         let path = self.file.as_ref()
-            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::new(
-                std::io::ErrorKind::Other, 
+            .ok_or_else(|| UniverseWriteError::IO(std::io::Error::other(
                 "No file path set"
             )))?;
         

@@ -59,7 +59,7 @@ pub struct Shell {
     data: Vec<f32>,
 }
 
-const PHI: f64 = 1.618_033_988_749_895;
+const PHI: f64 = std::f64::consts::GOLDEN_RATIO;
 
 fn icosahedron() -> ([DVec3; 12], [[usize; 3]; 20]) {
     let v = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).normalize();

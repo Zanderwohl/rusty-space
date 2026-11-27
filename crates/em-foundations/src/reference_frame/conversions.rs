@@ -16,9 +16,9 @@ impl From<DMat4> for ReferenceFrame {
     }
 }
 
-impl Into<DMat4> for ReferenceFrame {
-    fn into(self) -> DMat4 {
-        self.mat.clone()
+impl From<ReferenceFrame> for DMat4 {
+    fn from(val: ReferenceFrame) -> Self {
+        val.mat
     }
 }
 

@@ -92,11 +92,10 @@ pub fn sample_segment(
     let mut points = TimeMap::with_capacity(resolution + 1);
     for step in 0..=resolution {
         let offset = from + (to - from) * (step as f64 / resolution as f64);
-        if let Some(displacement) = kepler.displacement(periapsis + offset, mu) {
-            if displacement.is_finite() {
+        if let Some(displacement) = kepler.displacement(periapsis + offset, mu)
+            && displacement.is_finite() {
                 points.insert_unordered(offset, displacement);
             }
-        }
     }
     points.finalize_unordered();
     if points.is_empty() {

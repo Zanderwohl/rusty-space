@@ -458,9 +458,6 @@ pub fn may_keep<'a>(name: &str, form: &lc_proto::Form, mut kept: impl ExactSizeI
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{ONBOARD_DATA_BYTES, STARTING_DRY_KG};
-    use crate::flight::{C_M_S, G0};
-    use crate::form::capacity::{areal_density_for, dry_mass_kg, Capacities};
     use crate::form::place::{Poses, Side};
 
     const MIN: f64 = Balance::DEFAULT.min_part_m3;

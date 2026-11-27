@@ -23,18 +23,14 @@ pub fn adjust_lights(
     
     for (body, mut light) in lights.iter_mut() {
         let Some(i) = system.0.index_of(body.0) else { continue };
-        match system.0.appearance(i) {
-            Appearance::Star(star_ball) => {
-                // Set range to reach the scaled solar system edge
-                light.range = scaled_solar_system_edge as f32;
-                
-                // Scale intensity to maintain consistent illumination at the solar system edge
-                // Using inverse square law: to maintain same illumination when distance scales by factor S,
-                // intensity must scale by S^2
-                let intensity_scale_factor = distance_scale * distance_scale;
-                light.intensity = star_ball.intensity() * (intensity_scale_factor as f32);
-            }
-            _ => {}
+        if let Appearance::Star(star_ball) = system.0.appearance(i) {
+            // Set range to reach the scaled solar system edge
+            light.range = scaled_solar_system_edge as f32;
+            // Scale intensity to maintain consistent illumination at the solar system edge
+            // Using inverse square law: to maintain same illumination when distance scales by factor S,
+            // intensity must scale by S^2
+            let intensity_scale_factor = distance_scale * distance_scale;
+            light.intensity = star_ball.intensity() * (intensity_scale_factor as f32);
         }
     }
 }

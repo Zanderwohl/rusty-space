@@ -1912,7 +1912,7 @@ pub(super) mod tests {
         for i in 0..LOOKS_NEEDED as u64 {
             k.sighted(subject(2), sighting(1000.0 + i as f64));
         }
-        assert!(matches!(k.unfitted(star), Some(_)), "one of them is due");
+        assert!(k.unfitted(star).is_some(), "one of them is due");
 
         // An orbit stated after the newest bearing settles that body.
         let orbit = crate::knowledge::Orbit {

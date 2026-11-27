@@ -242,7 +242,6 @@ mod tests {
     use glam::{DVec2, DVec3};
 
     use super::*;
-    use crate::fitting::STARTING_DRY_KG;
     use crate::form::presets::SLOT_M3;
     use crate::form::{Mount, PartId, Placement, Primitive, SparMode};
 

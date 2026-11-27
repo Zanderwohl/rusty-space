@@ -85,9 +85,8 @@ impl KeplerMotive {
 
     pub fn periapsis_vec(&self, time: Instant) -> DVec3 {
         let perifocal_displacement = self.periapsis_vec_pqw();
-        let rotated = self.perifocal_to_reference(perifocal_displacement, time);
 
-        rotated
+        self.perifocal_to_reference(perifocal_displacement, time)
     }
 
     pub fn apoapsis_vec(&self, time: Instant) -> Option<DVec3> {
@@ -421,8 +420,7 @@ impl KeplerRotation {
             KeplerRotation::FlatAngles(_) => 0.0,
             KeplerRotation::PrecessingEulerAngles(pea) => {
                 let deg = pea.nodal_precession_deg(time_since_epoch);
-                let long = mappings::bound_circle(pea.longitude_of_ascending_node + deg, 360.0);
-                long
+                mappings::bound_circle(pea.longitude_of_ascending_node + deg, 360.0)
             }
         }
     }

@@ -739,7 +739,7 @@ mod tests {
         let two = tube_curves(&[square.clone(), square], 0.01, 4, 1.0);
         assert_eq!(positions(&two).len(), 2 * positions(&one).len());
         assert!(
-            two.indices().unwrap().iter().all(|i| (i as usize) < positions(&two).len()),
+            two.indices().unwrap().iter().all(|i| i < positions(&two).len()),
             "the second curve's indices were not offset",
         );
 

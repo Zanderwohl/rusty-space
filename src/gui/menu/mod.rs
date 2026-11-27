@@ -18,6 +18,7 @@ use crate::gui::menu::home::HomeMenuPlugin;
 use crate::gui::settings::{Settings, UiTheme};
 
 #[derive(Resource)]
+#[derive(Default)]
 pub struct UiState {
     pub quit_requested: bool,
     pub current_save: Option<SaveFileMeta>,
@@ -26,14 +27,6 @@ pub struct UiState {
 // Re-export TagState from body::universe::save for backwards compatibility
 pub use crate::body::universe::save::TagState;
 
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            quit_requested: false,
-            current_save: None,
-        }
-    }
-}
 
 pub struct MenuPlugin;
 
@@ -63,19 +56,12 @@ impl Plugin for MenuPlugin {
 }
 
 #[derive(Resource)]
+#[derive(Default)]
 pub struct PlanetariumFiles {
     templates: Vec<SaveFileMeta>,
     saves: Vec<SaveFileMeta>,
 }
 
-impl Default for PlanetariumFiles {
-    fn default() -> Self {
-        Self {
-            templates: vec![],
-            saves: vec![],
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct SaveFileMeta {

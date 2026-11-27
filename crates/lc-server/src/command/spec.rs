@@ -271,8 +271,9 @@ pub fn bind(spec: &Spec, parsed: &Parsed, level: Level) -> Result<Bound, BindErr
                 usage: spec.usage(level),
             })?,
         };
-        if typed[at].replace(&given.value).is_some() {
-            return Err(BindError::Repeated(args[at].name));
+        let (Some(slot), Some(arg)) = (typed.get_mut(at), args.get(at)) else { continue };
+        if slot.replace(&given.value).is_some() {
+            return Err(BindError::Repeated(arg.name));
         }
     }
 

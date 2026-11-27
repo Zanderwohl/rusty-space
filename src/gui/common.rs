@@ -25,7 +25,7 @@ pub fn stepper<S: AsRef<str>>(ui: &mut egui::Ui, label: S, value: &mut f64) {
             .range(f64::MIN..=f64::MAX)
             .fixed_decimals(1)
             .custom_formatter(|n, _range| format::sci_not(n))
-            .custom_parser(|s| format::sci_not_parser(s))
+            .custom_parser(format::sci_not_parser)
         );
         if ui.button(">").clicked() { *value = bump_decimal(*value, 1.0); }
         if ui.button(">>").clicked() { if *value > 0.0 { *value *= 10.0; } else { *value /= 10.0; } }

@@ -214,7 +214,7 @@ impl Meridian {
         let toward_nose = match self.halves {
             Halves::TowardNose => true,
             Halves::TowardTail => false,
-            Halves::Both => (k / working.outer.len()) % 2 == 0,
+            Halves::Both => (k / working.outer.len()).is_multiple_of(2),
         };
         let path: Vec<usize> = if toward_nose {
             (0..=self.nearest).rev().collect()

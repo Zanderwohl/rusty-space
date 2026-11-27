@@ -105,7 +105,7 @@ pub const SOLAR_SYSTEM_PATH: &str = "data/templates/solar_system.toml";
 /// most asteroids, every comet — the entry states how the value was arrived at. Same for
 /// radii.
 pub fn solar_system() -> UniverseFileContents {
-    let solar_system = UniverseFileContents {
+    UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
                 time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
@@ -131,7 +131,7 @@ pub fn solar_system() -> UniverseFileContents {
                         radius: 695700000.0,
                         color: AppearanceColor { r: 219, g: 222, b: 35 },
                         light: AppearanceColor { r: 3570, g: 3570, b: 3570 },
-                        absolute_magnitude: 4.829999923706055,
+                        absolute_magnitude: 4.83,
                     }),
                     rotation: Some(BodyRotation::spinning(
                         DQuat::from_xyzw(0.05262721038, 0.03506855909, 0.6689295119, 0.7406307318),
@@ -8504,15 +8504,14 @@ pub fn solar_system() -> UniverseFileContents {
                     rotation: None,
                 }),
             ],
-    };
-    solar_system
+    }
 }
 
 /// Canonical on-disk location for this preset, used by the app when writing it out.
 pub const EARTH_MOON_PATH: &str = "data/templates/earth_moon.toml";
 
 pub fn earth_moon() -> UniverseFileContents {
-    let earth_moon = UniverseFileContents {
+    UniverseFileContents {
             version: "0.0".into(),
             time: UniverseFileTime {
                 time_julian_days: 2451544.500000, // Midnight 2000 January 1 00:00
@@ -8658,8 +8657,7 @@ pub fn earth_moon() -> UniverseFileContents {
                     rotation: None,
                 }), // Test Newtonian Body B
             ]
-    };
-    earth_moon
+    }
 }
 
 pub const SOI_TEST_PATH: &str = "data/templates/soi_test.toml";

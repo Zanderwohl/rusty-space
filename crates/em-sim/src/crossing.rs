@@ -214,14 +214,13 @@ pub fn crossings_of(
         if let Some((previous_time, previous_distance)) = previous {
             // Strictly opposite signs. A sample sitting exactly on the boundary is picked
             // up by the neighboring interval instead of counting twice.
-            if (previous_distance < 0.0) != (distance < 0.0) {
-                if let Some(crossing) = refine(
+            if (previous_distance < 0.0) != (distance < 0.0)
+                && let Some(crossing) = refine(
                     system, traveler, target,
                     (previous_time, previous_distance), (time, distance),
                 ) {
                     found.push(crossing);
                 }
-            }
         }
         previous = Some((time, distance));
     }

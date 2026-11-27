@@ -13,21 +13,13 @@ pub mod migrations;
 pub mod solar_system;
 
 #[derive(Resource)]
+#[derive(Default)]
 pub struct Universe {
     pub path: Option<PathBuf>,
     id_to_name: HashMap<String, String>,
     name_to_id: HashMap<String, String>,
 }
 
-impl Default for Universe {
-    fn default() -> Self {
-        Self {
-            path: None,
-            id_to_name: HashMap::new(),
-            name_to_id: HashMap::new(),
-        }
-    }
-}
 
 impl Universe {
     pub fn from_file(

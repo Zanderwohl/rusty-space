@@ -88,8 +88,8 @@ impl Fronts {
         }
     }
 
-    pub fn get(&self, index: usize) -> &Front {
-        &self.live[index]
+    pub fn get(&self, index: usize) -> Option<&Front> {
+        self.live.get(index)
     }
 
     pub fn len(&self) -> usize {
@@ -133,10 +133,10 @@ impl Fronts {
             for run in &self.runs {
                 let from = match jumped {
                     true => 0,
-                    false => run.partition_point(|&i| lands(&self.live[i]) <= after_t as f64 - width),
+                    false => run.partition_point(|&i| self.live.get(i).is_some_and(|f| lands(f) <= after_t as f64 - width)),
                 };
-                for &index in &run[from..] {
-                    let front = &self.live[index];
+                for &index in run.get(from..).unwrap_or_default() {
+                    let Some(front) = self.live.get(index) else { continue };
                     if !jumped && lands(front) > now_t as f64 + width {
                         break;
                     }
@@ -169,7 +169,7 @@ impl Fronts {
             front.found_t = now_t;
             let index = self.insert(front);
             for craft in fleet.iter() {
-                if let Some(landing) = self.live[index].landing(craft).filter(|l| l.arrive_t > opens && l.arrive_t <= now_t) {
+                if let Some(landing) = self.live.get(index).and_then(|f| f.landing(craft)).filter(|l| l.arrive_t > opens && l.arrive_t <= now_t) {
                     found.push((index, landing));
                 }
             }
@@ -180,24 +180,28 @@ impl Fronts {
 
     fn insert(&mut self, front: Front) -> usize {
         let index = self.live.len();
+        let (source, emitted_t) = (front.event.source.0, front.event.t);
         self.live.push(front);
         let live = &self.live;
-        let front = &live[index];
         // No faster than light between neighbors, which is what keeps a run in arrival order.
-        let keeps_order = |a: usize, b: usize| {
-            let (a, b) = (&live[a].event, &live[b].event);
-            (b.at - a.at).length() <= (b.t - a.t) as f64
+        let keeps_order = |a: usize, b: usize| match (live.get(a), live.get(b)) {
+            (Some(a), Some(b)) => (b.event.at - a.event.at).length() <= (b.event.t - a.event.t) as f64,
+            _ => false,
         };
-        let runs = self.by_source.entry(front.event.source.0).or_default();
+        let runs = self.by_source.entry(source).or_default();
         let fits = runs.iter().copied().find_map(|run| {
-            let members = &self.runs[run];
-            let place = members.partition_point(|&i| live[i].event.t <= front.event.t);
-            let after_previous = place == 0 || keeps_order(members[place - 1], index);
-            let before_next = place == members.len() || keeps_order(index, members[place]);
+            let members = self.runs.get(run)?;
+            let place = members.partition_point(|&i| live.get(i).is_some_and(|f| f.event.t <= emitted_t));
+            let after_previous = place == 0 || members.get(place - 1).is_some_and(|&p| keeps_order(p, index));
+            let before_next = place == members.len() || members.get(place).is_some_and(|&n| keeps_order(index, n));
             (after_previous && before_next).then_some((run, place))
         });
         match fits {
-            Some((run, place)) => self.runs[run].insert(place, index),
+            Some((run, place)) => {
+                if let Some(members) = self.runs.get_mut(run) {
+                    members.insert(place, index);
+                }
+            }
             None => {
                 runs.push(self.runs.len());
                 self.runs.push(vec![index]);
@@ -215,10 +219,13 @@ impl Fronts {
         for (old, front) in live.into_iter().enumerate() {
             let needed = found.iter().any(|(i, _)| *i == old);
             if front.until_t >= now_t || needed {
-                moved[old] = self.insert(front);
+                let new = self.insert(front);
+                if let Some(slot) = moved.get_mut(old) {
+                    *slot = new;
+                }
             }
         }
-        found.into_iter().map(|(i, landing)| (moved[i], landing)).collect()
+        found.into_iter().map(|(i, landing)| (moved.get(i).copied().unwrap_or(usize::MAX), landing)).collect()
     }
 }
 
@@ -307,7 +314,7 @@ impl<J: Journal> Server<J> {
     /// Everything a landing does, on any craft, connected or not.
     fn landed(&mut self, found: Vec<Crossing>) {
         for (index, landing) in found {
-            let front = self.fronts.get(index).clone();
+            let Some(front) = self.fronts.get(index).cloned() else { continue };
             let observer = CraftId(landing.observer.0);
             let event = &front.event;
             match &event.payload {

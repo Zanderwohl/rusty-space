@@ -144,13 +144,13 @@ impl World {
     ///
     /// `None` between the stars, which is most of the volume and most of the flying.
     pub fn system_at(&mut self, position_ly: DVec3, now_s: f64) -> Option<Arc<LocalSystem>> {
-        let id = self.stars[self.containing(position_ly)?].id;
+        let id = self.stars.get(self.containing(position_ly)?)?.id;
         self.system_for(id, now_s)
     }
 
     /// The star whose system holds `position_ly`, without loading it.
     pub fn star_containing(&self, position_ly: DVec3) -> Option<StarId> {
-        Some(self.stars[self.containing(position_ly)?].id)
+        Some(self.stars.get(self.containing(position_ly)?)?.id)
     }
 
     /// The star whose system holds `position_ly`, by [`lc_world::system::holding`]. Cells are the
@@ -160,7 +160,7 @@ impl World {
         let candidates = (-1..=1).flat_map(|dx| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dz| [dx, dy, dz])))
             .filter_map(|[dx, dy, dz]| self.cells.get(&[x.saturating_add(dx), y.saturating_add(dy), z.saturating_add(dz)]))
             .flatten()
-            .map(|&k| &self.stars[k]);
+            .filter_map(|&k| self.stars.get(k));
         let star = lc_world::system::holding(position_ly, candidates)?;
         self.index.get(&star.id).copied()
     }

@@ -71,7 +71,7 @@ fn mass_at(radius_m: f64) -> f64 {
 fn density_at(radius_earths: f64) -> f64 {
     let x = radius_earths.max(f64::MIN_POSITIVE).ln();
     let points = DENSITY.map(|(r, rho)| (r.ln(), rho.ln()));
-    let (first, last) = (points[0], points[points.len() - 1]);
+    let [first, .., last] = points;
     if x <= first.0 {
         return first.1.exp();
     }
@@ -79,9 +79,9 @@ fn density_at(radius_earths: f64) -> f64 {
         return last.1.exp();
     }
     points
-        .windows(2)
-        .find_map(|pair| {
-            let (a, b) = (pair[0], pair[1]);
+        .iter()
+        .zip(points.iter().skip(1))
+        .find_map(|(&a, &b)| {
             (x <= b.0).then(|| (a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0)).exp())
         })
         .unwrap_or(last.1.exp())

@@ -273,12 +273,11 @@ fn focused(
     ui.separator();
     ui.horizontal(|ui| {
         let ready = state.course.is_some();
-        if ui.add_enabled(ready, egui::Button::new("Go")).clicked() {
-            if let Some(course) = state.course.clone() {
+        if ui.add_enabled(ready, egui::Button::new("Go")).clicked()
+            && let Some(course) = state.course.clone() {
                 let parking = offered.as_ref().is_some_and(|(_, p)| *p == course);
                 ask(out, if parking { Action::Park(course) } else { Action::SetCourse(course) });
             }
-        }
         ui.weak(format!("brachistochrone at {:.0} g", game.ship.motion.drive.accel_g));
     });
     if let Some(subject) = noted {

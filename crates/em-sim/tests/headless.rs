@@ -322,12 +322,11 @@ mod unresolved_primary {
         let mut contents = em_sim::presets::solar_system();
         // Repoint one moon at a body that is not in the file.
         for body in contents.bodies.iter_mut() {
-            if let em_sim::universe::SomeBody::KeplerEntry(e) = body {
-                if e.info.id == "Luna" {
+            if let em_sim::universe::SomeBody::KeplerEntry(e) = body
+                && e.info.id == "Luna" {
                     e.params.primary_id = "Vulcan".into();
                     break;
                 }
-            }
         }
         match System::from_contents(&contents) {
             Err(SystemError::UnresolvedPrimary { body, primary }) => {

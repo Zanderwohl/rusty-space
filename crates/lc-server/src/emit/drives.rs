@@ -132,8 +132,8 @@ impl<J: Journal> Server<J> {
                     let lighting = lit.remove(k);
                     self.light_event(id, &lighting, t, 0.0, events);
                 }
-                (Some(k), Some(jet)) if stepped(lit[k].power_w, jet.power_w) || turned(&lit[k], jet) => {
-                    let lighting = &mut lit[k];
+                (Some(k), Some(jet)) if lit.get(k).is_some_and(|l| stepped(l.power_w, jet.power_w) || turned(l, jet)) => {
+                    let Some(lighting) = lit.get_mut(k) else { continue };
                     lighting.axis = jet.axis.to_array();
                     lighting.power_w = jet.power_w;
                     lighting.spectrum = spectrum(jet.power_w);
@@ -160,13 +160,12 @@ impl<J: Journal> Server<J> {
             }
         }
         let boost = lit.iter_mut().find(|l| boosting(l, t));
-        if let (Some(lighting), Some(power_w)) = (boost, wanted.boost_w) {
-            if stepped(lighting.power_w, power_w) {
+        if let (Some(lighting), Some(power_w)) = (boost, wanted.boost_w)
+            && stepped(lighting.power_w, power_w) {
                 lighting.power_w = power_w;
                 let lighting = *lighting;
                 self.light_event(id, &lighting, t, power_w, events);
             }
-        }
         if !lit.is_empty() {
             self.emissions.emitting.insert(id, lit);
         }

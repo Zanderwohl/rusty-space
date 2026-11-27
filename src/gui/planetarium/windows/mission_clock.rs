@@ -375,15 +375,14 @@ fn draw_play_pause_sidecar(
     );
 
     let mut clicked_level = None;
-    if throttle_response.clicked() {
-        if let Some(pos) = throttle_response.interact_pointer_pos() {
+    if throttle_response.clicked()
+        && let Some(pos) = throttle_response.interact_pointer_pos() {
             let rel_x = (pos.x - throttle_arrows_rect.left()).clamp(0.0, throttle_arrows_rect.width());
             let idx = ((rel_x / throttle_arrows_rect.width()) * THROTTLE_ARROW_COUNT as f32)
                 .floor()
                 .clamp(0.0, (THROTTLE_ARROW_COUNT - 1) as f32) as usize;
             clicked_level = Some(TimeThrottleLevel::from_arrow_index(idx));
         }
-    }
 
     (play_response, clicked_level)
 }

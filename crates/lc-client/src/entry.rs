@@ -68,12 +68,11 @@ pub fn parse(args: &[String]) -> Entry {
     }
     // A scene says where to stand, so there is nothing to pass in. The identifiers are the
     // scene's own, which is why this needs no shard to have answered first.
-    if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named) {
-        if let Some(watch) = crate::demos::watching(scene) {
+    if let Some(scene) = after("--demo").as_deref().and_then(scenario::Scenario::named)
+        && let Some(watch) = crate::demos::watching(scene) {
             let crate::ui::CameraPerspective::Pov(ship_id) = watch;
             actions.push(Action::WatchFrom(Some(ship_id)));
         }
-    }
     // Behind another craft by its id, so two clients can photograph each other.
     if let Some(id) = value::<i64>(args, "--watch-from") {
         actions.push(Action::WatchFrom(Some(lc_proto::ShipId(id))));
