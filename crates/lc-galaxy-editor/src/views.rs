@@ -193,6 +193,8 @@ pub struct ViewState {
     pub sky_texture: Option<egui::TextureId>,
     /// What the shaded sky should draw next frame; `None` stops its camera.
     pub sky_request: Option<crate::sky_shader::SkyRequest>,
+    /// Published chunks to outline in the region view, from the Published panel.
+    pub chunks: Vec<(Aabb, Color32)>,
 }
 
 /// How the sky view draws: through the game's starfield shader, or as dots colored by any
@@ -235,6 +237,7 @@ impl Default for ViewState {
             sky_exposure: 0.0,
             sky_texture: None,
             sky_request: None,
+            chunks: Vec::new(),
         }
     }
 }
@@ -430,6 +433,9 @@ fn region(
         for shape in r.compiled.shapes.values() {
             boxed(painter, &proj, shape.bounds(), Stroke::new(1.0, palette::SUPPORT));
         }
+    }
+    for (b, color) in &state.chunks {
+        boxed(painter, &proj, *b, Stroke::new(1.5, *color));
     }
     selected_gizmo(painter, &proj, doc, cam.distance);
 

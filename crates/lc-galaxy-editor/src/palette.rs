@@ -27,6 +27,12 @@ pub const DIFF_CHANGED: Color32 = Color32::from_rgb(230, 180, 70);
 pub const DIFF_SAME: Color32 = Color32::from_gray(85);
 pub const DIFF_GONE: Color32 = Color32::from_rgb(235, 90, 80);
 
+/// A published chunk's status against the current bake.
+pub const PUBLISHED_SAME: Color32 = Color32::from_rgb(90, 170, 110);
+pub const PUBLISHED_CLOSE: Color32 = Color32::from_rgb(220, 190, 80);
+pub const PUBLISHED_DIFFERS: Color32 = Color32::from_rgb(235, 100, 80);
+pub const PUBLISHED_NONE: Color32 = Color32::from_gray(110);
+
 /// Distinct hues for populations, in timeline order.
 pub const POPULATIONS: [Color32; 6] = [
     Color32::from_rgb(120, 180, 255),

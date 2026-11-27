@@ -11,6 +11,7 @@
 pub mod attributes;
 pub mod codec;
 pub mod compiled;
+pub mod diff;
 pub mod feature;
 pub mod kinds;
 pub mod light;

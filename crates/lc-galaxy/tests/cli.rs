@@ -75,3 +75,24 @@ fn stats_refuses_a_malformed_box() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--box"));
 }
+
+/// `diff` against the graph's own publish finds every chunk the same and exits zero; against a
+/// different seed's publish it exits nonzero.
+#[test]
+fn diff_against_its_own_publish_is_all_same() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("diff-cli");
+    let _ = std::fs::remove_dir_all(&root);
+    let galaxy = format!("{}/galaxies/phase-2.ron", env!("CARGO_MANIFEST_DIR"));
+    let out = root.join("own");
+    assert!(lc_galaxy(&["publish", &galaxy, "--out", out.to_str().unwrap()]).status.success());
+    let manifest = out.join("manifest.galaxy");
+    let run = lc_galaxy(&["diff", &galaxy, "--against", manifest.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&run.stdout);
+    assert!(run.status.success(), "{text}{}", String::from_utf8_lossy(&run.stderr));
+    assert!(text.contains(" 0 close, 0 differ, 0 unpublished"), "{text}");
+
+    let reseeded = root.join("reseeded.ron");
+    std::fs::write(&reseeded, std::fs::read_to_string(&galaxy).unwrap().replacen("seed: ", "seed: 9", 1)).unwrap();
+    let run = lc_galaxy(&["diff", reseeded.to_str().unwrap(), "--against", manifest.to_str().unwrap()]);
+    assert!(!run.status.success(), "{}", String::from_utf8_lossy(&run.stdout));
+}

@@ -13,6 +13,7 @@ mod files;
 mod palette;
 mod params_panel;
 mod picture_view;
+mod published_panel;
 mod sky_shader;
 mod stats_panel;
 mod system_panel;
@@ -40,6 +41,7 @@ struct Args {
     select: Option<usize>,
     pick: Option<usize>,
     chart: Option<charts::Plot>,
+    published: Option<PathBuf>,
     shot: Option<PathBuf>,
     frames: u32,
 }
@@ -64,6 +66,7 @@ fn args() -> Args {
             "--select" => a.select = value().parse().ok(),
             "--pick" => a.pick = value().parse().ok(),
             "--chart" => a.chart = charts::Plot::named(&value()),
+            "--published" => a.published = Some(value().into()),
             "--shot" => a.shot = Some(value().into()),
             "--frames" => a.frames = value().parse().unwrap_or(30),
             _ => a.path = Some(arg.into()),
@@ -84,6 +87,7 @@ struct Ui {
     files: files::Files,
     system: system_panel::SystemView,
     census: census::CensusJob,
+    published: published_panel::Published,
 }
 
 #[derive(Resource)]
@@ -126,7 +130,7 @@ fn main() {
         .add_plugins(lc_icon::AppIconPlugin(lc_icon::GALAXY))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.04)))
         .insert_resource(doc)
-        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), files: default(), system: default(), census: default() })
+        .insert_resource(Ui { view, charts: charts::Charts::showing(a.chart.unwrap_or_default()), files: default(), system: default(), census: default(), published: a.published.map(published_panel::Published::opening).unwrap_or_default() })
         .insert_resource(Shot { path: a.shot, frames: a.frames, pick: a.pick })
         // The window's camera is egui's, named outright: left to choose, bevy_egui takes the first
         // camera it sees, which may be the sky's, and the panels then draw into the sky's image.
@@ -251,8 +255,10 @@ fn ui(
             });
             egui::CollapsingHeader::new("Inspector").default_open(true).show(ui, |ui| stats_panel::inspector(ui, doc));
             egui::CollapsingHeader::new("System").default_open(true).show(ui, |ui| system_panel::show(ui, &mut state.system, doc));
+            egui::CollapsingHeader::new("Published").default_open(state.published.is_open()).show(ui, |ui| state.published.show(ui, doc, state.files.parent.as_ref()));
         });
     });
+    state.view.chunks = if state.published.in_views { state.published.boxes() } else { Vec::new() };
     egui::CentralPanel::no_frame().show(&mut root, |ui| {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| views::toolbar(ui, &mut state.view, doc));
         views::show(ui, &mut state.view, doc);

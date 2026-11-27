@@ -2,6 +2,7 @@
 //! lc-galaxy check   <timeline.ron>
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
+//! lc-galaxy diff    <timeline.ron> --against <manifest.galaxy> [--threads <n>]
 //! lc-galaxy picture <timeline.ron> --out <png> [--side +x|-x|+y|-y|+z|-z] [--size <w>x<h>]
 //!                   [--resolution <voxels>] [--decades <n>] [--saturation <k>] [--star-exposure <stops>|off]
 //! ```
@@ -16,9 +17,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation" | "--star-exposure")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--against" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation" | "--star-exposure")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
-        eprintln!("usage: lc-galaxy check|stats|publish|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
+        eprintln!("usage: lc-galaxy check|stats|publish|diff|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--against <manifest>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
         return ExitCode::FAILURE;
     };
     let text = match std::fs::read_to_string(path) {
@@ -95,6 +96,23 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "diff" => {
+            let Some(against) = after("--against") else {
+                eprintln!("diff needs --against <manifest.galaxy>");
+                return ExitCode::FAILURE;
+            };
+            let threads = after("--threads").and_then(|t| t.parse().ok()).filter(|&n| n > 0).unwrap_or_else(default_threads);
+            match diff(&timeline, &PathBuf::from(&against), threads) {
+                Ok((text, differs)) => {
+                    print!("{text}");
+                    if differs { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "picture" => match picture(&timeline, &after) {
             Ok(line) => {
                 println!("{line}");
@@ -164,4 +182,47 @@ fn parse_box(text: &str) -> Result<Aabb, String> {
     let (a, b) = text.split_once(':').ok_or("needs two corners separated by ':'")?;
     let (a, b) = (corner(a)?, corner(b)?);
     Ok(Aabb { min: a.min(b), max: a.max(b) })
+}
+
+/// One line per chunk and tier, and whether any published chunk differs beyond tolerance.
+fn diff(timeline: &lc_galaxy::Timeline, against: &std::path::Path, threads: usize) -> Result<(String, bool), String> {
+    use lc_galaxy::diff::{Status, Tolerance};
+    use std::fmt::Write;
+    let (manifest, chunks) = lc_world::sky::galaxy::Manifest::read_from_disk(against)?;
+    let compiled = timeline.compile(timeline.len(), None);
+    let refused = publish::refusals(timeline, &compiled);
+    if !refused.is_empty() {
+        return Err(format!("not comparable:\n  {}", refused.join("\n  ")));
+    }
+    let bake = lc_galaxy::bake(&compiled, timeline.seed, compiled.bounds(), threads).map_err(|e| e.to_string())?;
+    let published: Vec<_> = manifest.chunks.into_iter().zip(chunks).collect();
+    let rows = lc_galaxy::diff::diff(&compiled, &bake, publish::graph_version(timeline), &published, Tolerance::default())?;
+    let mut out = String::new();
+    let _ = writeln!(out, "{:<16} {:<4} {:<11} {:>9} {:>6} {:>6} {:>7} {:>8} {:>7}", "chunk", "tier", "status", "published", "now", "kept", "changed", "Δ[Fe/H]", "Δshare");
+    for r in &rows {
+        let [x, y, z] = r.chunk;
+        let _ = writeln!(
+            out,
+            "{:<16} {:<4} {:<11} {:>9} {:>6} {:>6} {:>7} {:>+8.3} {:>7.3}",
+            format!("{x},{y},{z}"),
+            format!("{:?}", r.tier),
+            r.status.label(),
+            r.published,
+            r.now,
+            r.kept,
+            r.changed,
+            r.feh_shift,
+            r.share_shift
+        );
+    }
+    let count = |s: Status| rows.iter().filter(|r| r.status == s).count();
+    let _ = writeln!(
+        out,
+        "{} same, {} close, {} differ, {} unpublished",
+        count(Status::Same),
+        count(Status::Close),
+        count(Status::Differs),
+        count(Status::Unpublished)
+    );
+    Ok((out, count(Status::Differs) > 0))
 }

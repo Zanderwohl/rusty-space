@@ -26,8 +26,10 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 `picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
-graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. The CDN path and the console's Galaxy section are planned in
-[Publishing and freezing](#publishing-and-freezing) and not started. The shipped sky is still the
+graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. Galaxies on the CDN, the shard naming its galaxy to clients, `diff` and the Published
+panel are built; publishing onto a manifest, baking around published stars and the console's
+Galaxy section are planned in [Publishing and freezing](#publishing-and-freezing) and not
+started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -689,10 +691,15 @@ Phase III, and republishing everything stays the default until launch.
   shard's `--sky-url`) when it connects, and the client fetches
   it from the CDN. The client and the shard then cannot load different galaxies, a galaxy changes
   without a new build, and switching galaxies is a change to the shard's `--sky`.
-- **`lc-galaxy diff <timeline> --against <manifest>`** bakes the current graph over each published
-  chunk's cells and compares it with the stored stars: ids and positions exactly, then count,
-  population mix and metallicity against a tolerance. One line per chunk. The Published panel
-  shows the same comparison.
+- **`lc-galaxy diff <timeline> --against <manifest>`** (built, `crates/lc-galaxy/src/diff.rs`)
+  bakes the current graph and compares each published chunk and tier with the same chunk of the
+  bake, matching stars by id. A chunk is *same* when every record matches, shell included;
+  *close* when the count is within 5% (at least 2 stars), mean `[Fe/H]` within 0.05 dex and every
+  population's share within 5 points; otherwise it *differs*. Chunks the bake has and the
+  manifest lacks are *unpublished*. One line per chunk and tier; the command exits nonzero when
+  any chunk differs. The Published panel shows the same table and outlines each chunk in the
+  region view in the color of its worse tier. Comparing star by star against the published
+  records in the difference view is not built.
 - **`publish --region <box>`** becomes safe once a bake treats published stars as fixed, since a
   region's edge stars are then clamped against what is stored beside them.
 
@@ -766,7 +773,8 @@ versions.
 - **Inspector**: for a picked star, its attributes, its population, and which features contributed
   to the density at its position.
 - **Published**: which regions are published, under which versions, and where the current graph
-  disagrees with them.
+  disagrees with them. Built: it opens a manifest from disk (or `--published <manifest>` at
+  startup) and shows `diff`'s table.
 
 ### Toolkit
 
@@ -788,7 +796,7 @@ lc-galaxy diff   galaxy/ --against <manifest>
 lc-galaxy publish chunks/           # CDN upload and manifest rows; see 15-runbook.md
 ```
 
-As built, `check`, `stats` and a local `publish` exist. `stats` prints what Galaxy Forge's
+As built, `check`, `stats`, a local `publish` and `diff` exist. `stats` prints what Galaxy Forge's
 Statistics panel shows for the stars inside `--box` (the whole graph without it): counts against
 the field, the nearest-neighbor and shell-radius summaries, and the systems table. Stars just
 outside the box still count as neighbors.

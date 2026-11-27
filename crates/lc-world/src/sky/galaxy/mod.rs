@@ -393,6 +393,13 @@ impl Manifest {
 
     /// Reads a manifest and the chunks beside it from a filesystem.
     pub fn load_from_disk(path: &std::path::Path) -> Result<GalaxyProvider, String> {
+        let (manifest, chunks) = Self::read_from_disk(path)?;
+        Ok(GalaxyProvider::new(manifest.name, &chunks))
+    }
+
+    /// The manifest at `path` and its chunks decoded, in manifest order, each checked as
+    /// [`Manifest::decode`] does.
+    pub fn read_from_disk(path: &std::path::Path) -> Result<(Self, Vec<GalaxyChunk>), String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let manifest = Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let dir = path.parent().unwrap_or(std::path::Path::new("."));
@@ -404,11 +411,18 @@ impl Manifest {
                 std::fs::read(dir.join(file)).map_err(|e| format!("{file}: {e}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        manifest.load(&bytes).map_err(|e| e.to_string())
+        let chunks = manifest.decode(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok((manifest, chunks))
     }
 
     /// Decodes each chunk's bytes, given in manifest order, after checking its hash.
     pub fn load(&self, bytes: &[Vec<u8>]) -> Result<GalaxyProvider, GalaxyError> {
+        Ok(GalaxyProvider::new(self.name.clone(), &self.decode(bytes)?))
+    }
+
+    /// Each chunk's bytes, given in manifest order, decoded after checking its hash, coordinates
+    /// and tier against its entry.
+    pub fn decode(&self, bytes: &[Vec<u8>]) -> Result<Vec<GalaxyChunk>, GalaxyError> {
         if bytes.len() != self.chunks.len() {
             return Err(GalaxyError::Manifest(format!("{} chunks listed, {} given", self.chunks.len(), bytes.len())));
         }
@@ -424,7 +438,7 @@ impl Manifest {
             }
             chunks.push(chunk);
         }
-        Ok(GalaxyProvider::new(self.name.clone(), &chunks))
+        Ok(chunks)
     }
 }
 
