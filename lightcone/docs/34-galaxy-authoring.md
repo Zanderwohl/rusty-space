@@ -26,7 +26,7 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 `picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
-graph has no dust field yet. Masks, the GPU marcher, tier A and the CDN path are not started. The shipped sky is still the
+graph has no dust field yet. Masks are built (`kinds/mask.rs`). The GPU marcher, tier A and the CDN path are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -161,7 +161,7 @@ Each feature applies an operation to one or more fields within its support:
 | scale | `n *= 1 + a·f` | an arm as density contrast over the disc |
 | subtract | `n *= 1 - f` | a void, a gap between arms |
 | smooth union, intersection, difference | smooth `max` / `min` with a blend width | "this arm, but only inside the disc", "this void, but not through the bulge" |
-| mask | restrict another feature to where a field exceeds a threshold | young stars only where gas is dense |
+| mask | restrict another feature to where a field exceeds a threshold | young stars only where gas is dense. A `mask` row keeps an earlier shape where a population's density, or another shape's weight, reaches a threshold across an edge width, or stays below it when inverted; it reads the density as the timeline stands at the mask, so later rows cannot change what it keeps |
 | set | replace an attribute field | metallicity of a stream that came from a satellite |
 
 Every edge is soft. A feature's support is where its profile exceeds a cutoff, and booleans take

@@ -1,4 +1,4 @@
-Timeline(format: 1, next_id: 19, seed: 3)
+Timeline(format: 1, next_id: 20, seed: 3)
 Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0.0, 0.0, 0.0), tilt_deg: 0.0, azimuth_deg: 0.0, rotation: Static))
 Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Thin disc", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 0.5, max_gyr: 10.0), feh: (zero_age: 0.1, per_gyr: -0.05, per_kly: 0.0, scatter: 0.15), dispersion: (zero_age_km_s: 10.0, exponent: 0.5)))
 Feature(id: 2, kind: "population", version: 1, enabled: true, name: "Young arm", params: (frame: 0, imf: Kroupa, age: Burst(gyr: 0.1, spread_gyr: 0.08), feh: (zero_age: 0.1, per_gyr: 0.0, per_kly: 0.0, scatter: 0.05), dispersion: (zero_age_km_s: 5.0, exponent: 0.0)))
@@ -13,6 +13,7 @@ Feature(id: 9, kind: "log_spiral", version: 1, enabled: true, name: "Arms", para
 Feature(id: 14, kind: "boolean", version: 1, enabled: true, name: "Both arms", params: (op: Union, blend_ly: 1.0, of: [(9, 0, 2), (9, 1, 2)], contributes: []))
 Feature(id: 17, kind: "noise", version: 1, enabled: true, name: "Ragged arms", params: (of: 14, mode: Warp(reach_ly: 2.5), scale_ly: 10.0, octaves: 3, seed: 0, contributes: []))
 Feature(id: 15, kind: "boolean", version: 1, enabled: true, name: "Arms in disc", params: (op: Intersect, blend_ly: 2.0, of: [17, 6], contributes: [(Density(2), Add(1400.0)), (Density(1), Scale(0.6))]))
+Feature(id: 19, kind: "mask", version: 1, enabled: true, name: "Arm knots", params: (of: 18, field: Density(2), above: 0.15, width: 0.1, invert: false, contributes: [(Density(2), Add(300.0))]))
 Feature(id: 10, kind: "ring", version: 1, enabled: true, name: "Inner ring", params: (frame: 0, radius_ly: 16.0, half_width_ly: 2.0, half_height_ly: 2.0, edge_ly: 1.5, contributes: [(Density(2), Add(250.0))]))
 Feature(id: 11, kind: "power_halo", version: 1, enabled: true, name: "Halo", params: (frame: 0, core_ly: 6.0, slope: 3.5, axis_ratio: 0.8, radius_ly: 48.0, edge_ly: 8.0, contributes: [(Density(4), Add(300.0))]))
 Feature(id: 12, kind: "ellipsoid", version: 1, enabled: true, name: "Void", params: (frame: 0, center_ly: (30.0, -12.0, 0.0), radii_ly: (7.0, 5.0, 4.0), edge_ly: 2.0, contributes: [(Density(1), Subtract), (Density(2), Subtract)]))

@@ -2,7 +2,7 @@
 
 use bevy_egui::egui::{self, DragValue, RichText};
 use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
-use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, NoiseKind, NoiseMode, PathPoint, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
+use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, MaskField, MaskKind, NoiseKind, NoiseMode, PathPoint, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
 use lc_galaxy::{Compiled, FeatureId, Num, Output, Params, Row, Target, Timeline, Unread, codec};
 
 use crate::doc::Doc;
@@ -118,6 +118,11 @@ pub fn seed_references(params: &mut dyn Params, t: &Timeline, at: usize, compile
         b.of = refs.shapes.iter().rev().take(2).rev().map(|s| ShapeRef(s.0)).collect();
     } else if let Some(n) = params.as_any_mut().downcast_mut::<NoiseKind>() {
         n.of = refs.shapes.last().map_or(n.of, |s| ShapeRef(s.0));
+    } else if let Some(m) = params.as_any_mut().downcast_mut::<MaskKind>() {
+        m.of = refs.shapes.last().map_or(m.of, |s| ShapeRef(s.0));
+        if let Some(pop) = pop {
+            m.field = MaskField::Density(pop);
+        }
     } else if let Some(s) = kinds::as_shape(params) {
         *s.frame_mut() = frame.unwrap_or(*s.frame_mut());
         if let Some(pop) = pop {
@@ -139,6 +144,8 @@ fn kind_fields(ui: &mut egui::Ui, params: &mut dyn Params, refs: &Refs) {
         boolean(ui, b, refs);
     } else if let Some(n) = any.downcast_mut::<NoiseKind>() {
         noise(ui, n, refs);
+    } else if let Some(m) = any.downcast_mut::<MaskKind>() {
+        mask(ui, m, refs);
     } else if let Some(s) = kinds::as_shape(params) {
         shape(ui, kind, s, refs);
     }
@@ -188,6 +195,52 @@ fn operand_picker(ui: &mut egui::Ui, r: &mut ShapeRef, refs: &Refs) {
             ui.selectable_value(r, ShapeRef(*o), n);
         }
     });
+}
+
+fn mask(ui: &mut egui::Ui, m: &mut MaskKind, refs: &Refs) {
+    grid(ui, "mask", |ui| {
+        ui.label("of");
+        operand_picker(ui, &mut m.of, refs);
+        ui.end_row();
+        ui.label("where");
+        let weight = matches!(m.field, MaskField::Weight(_));
+        egui::ComboBox::from_id_salt("mask field").selected_text(if weight { "weight of" } else { "density of" }).show_ui(ui, |ui| {
+            if ui.selectable_label(!weight, "density of").clicked() && weight {
+                m.field = MaskField::Density(refs.populations.last().map_or(FeatureId(0), |p| p.0));
+            }
+            if ui.selectable_label(weight, "weight of").clicked() && !weight {
+                m.field = MaskField::Weight(m.of);
+            }
+        });
+        ui.end_row();
+        ui.label("");
+        match &mut m.field {
+            MaskField::Density(pop) => {
+                let name = refs.populations.iter().find(|p| p.0 == *pop).map_or_else(|| format!("{pop}"), |p| p.1.clone());
+                egui::ComboBox::from_id_salt("mask population").selected_text(name).show_ui(ui, |ui| {
+                    for (id, n) in &refs.populations {
+                        ui.selectable_value(pop, *id, n);
+                    }
+                });
+            }
+            MaskField::Weight(r) => {
+                ui.push_id("mask weight", |ui| operand_picker(ui, r, refs));
+            }
+        }
+        ui.end_row();
+        let unit = if matches!(m.field, MaskField::Density(_)) { " /ly³" } else { "" };
+        ui.label(if m.invert { "below" } else { "at least" });
+        num(ui, "above", &mut m.above, &refs.variables, unit);
+        ui.end_row();
+        ui.label("edge");
+        num(ui, "width", &mut m.width, &refs.variables, unit);
+        ui.end_row();
+        ui.label("invert");
+        ui.checkbox(&mut m.invert, "");
+        ui.end_row();
+    });
+    ui.separator();
+    contributions(ui, &mut m.contributes, refs);
 }
 
 fn noise(ui: &mut egui::Ui, n: &mut NoiseKind, refs: &Refs) {

@@ -5,6 +5,7 @@ use crate::feature::{FeatureId, Params, Problem, Registry};
 
 mod boolean;
 mod frame;
+mod mask;
 mod noise;
 mod path;
 mod plummer;
@@ -17,6 +18,7 @@ mod variable;
 
 pub use boolean::{BoolOp, Boolean, ShapeRef};
 pub use frame::FrameKind;
+pub use mask::{MaskField, MaskKind};
 pub use noise::{MAX_OCTAVES, NoiseKind, NoiseMode};
 pub use path::{PathKind, PathPoint, curve};
 pub use plummer::{Contribution, Plummer, PlummerShape};
@@ -43,6 +45,7 @@ pub fn register(r: &mut Registry) {
     r.register::<PathKind>();
     r.register::<Boolean>();
     r.register::<NoiseKind>();
+    r.register::<MaskKind>();
 }
 
 /// The shape-kind face of `params`, if its kind places a shape.

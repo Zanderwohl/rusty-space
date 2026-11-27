@@ -3,7 +3,7 @@
 
 use glam::DVec3;
 use lc_galaxy::compiled::OpSpec;
-use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, NoiseKind, NoiseMode, PathKind, PathPoint, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
+use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, MaskField, MaskKind, NoiseKind, NoiseMode, PathKind, PathPoint, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
 use lc_galaxy::{Compiled, FeatureId, FeatureKind, Num, Output, Params, Registry, Target, Timeline, codec, stats};
 
 const STARS: f64 = 1000.0;
@@ -48,10 +48,31 @@ fn every_kind() -> Vec<(&'static str, Compiled)> {
         .1),
         ("modulate", noisy(NoiseMode::Modulate { depth: Num::Lit(0.8) }).1),
         ("warp", noisy(NoiseMode::Warp { reach_ly: Num::Lit(3.0) }).1),
+        ("mask", masked(false).1),
+        ("inverted mask", masked(true).1),
         ("union", boolean(BoolOp::Union).1),
         ("intersection", boolean(BoolOp::Intersect).1),
         ("difference", boolean(BoolOp::Difference).1),
     ]
+}
+
+/// A disc of one population, an ellipsoid as construction geometry, and a mask keeping the
+/// ellipsoid where the disc is dense (or, inverted, sparse), adding `STARS` to a second
+/// population.
+fn masked(invert: bool) -> (Timeline, Compiled) {
+    let mut t = Timeline::new(3);
+    let frame = t.push(Box::new(FrameKind { tilt_deg: 20.0, ..FrameKind::new() }), None);
+    let disc_pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
+    let pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
+    let disc = vec![Contribution(Target::Density(disc_pop), OpSpec::Add(Num::Lit(5000.0)))];
+    t.push(Box::new(ExponentialDisc { frame, contributes: disc, ..ExponentialDisc::new() }), None);
+    let blob = t.push(Box::new(Ellipsoid { frame, center_ly: (15.0, 0.0, 0.0), radii_ly: (20.0, 14.0, 6.0), edge_ly: Num::Lit(3.0), ..Ellipsoid::new() }), None);
+    let contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(STARS)))];
+    let mask = MaskKind { of: ShapeRef(Output::only(blob)), field: MaskField::Density(disc_pop), above: Num::Lit(0.2), width: Num::Lit(0.1), invert, contributes };
+    t.push(Box::new(mask), None);
+    let c = t.compile(t.len(), None);
+    assert!(c.problems.is_empty(), "{:?}", c.problems);
+    (t, c)
 }
 
 /// An ellipsoid as construction geometry, and noise over it adding `STARS`.
@@ -130,7 +151,8 @@ fn an_add_puts_the_stars_it_asks_for_into_the_field() {
     for (kind, c) in every_kind() {
         // Not the 64 a boolean integrates its own volume on, so its grid is not checked against
         // itself; and even, so no point lands on a cusp at a center.
-        let got: f64 = stats::expected(&c, c.bounds(), 100).iter().map(|(_, n)| n).sum();
+        // The last population is the one the feature under test adds to.
+        let got = stats::expected(&c, c.bounds(), 100).last().unwrap().1;
         assert!((got / STARS - 1.0).abs() < 0.02, "{kind}: {got} stars in the field for {STARS} asked");
     }
 }
@@ -263,4 +285,35 @@ fn modulation_keeps_the_edge_and_a_warp_moves_it() {
         moved += usize::from((b > 0.0) != (warped.weight(p) > 0.0));
     }
     assert!(lowered > 1000 && moved > 100, "lowered {lowered}, moved {moved}");
+}
+
+/// A mask keeps its shape where the field passes the threshold and drops it where it does not,
+/// and a feature after the mask does not change what it keeps.
+#[test]
+fn a_mask_keeps_its_shape_only_where_the_field_passes() {
+    let (mut t, c) = masked(false);
+    let mask_id = t.features().last().unwrap().id;
+    let weights = |c: &Compiled| -> Vec<f64> {
+        let mask = c.shapes.iter().find(|(k, _)| k.feature == mask_id).unwrap().1.clone();
+        (0..400).map(|i| mask.weight(DVec3::new(-5.0 + i as f64 * 0.1, 0.0, 0.0))).collect()
+    };
+    let disc_pop = *c.populations.keys().next().unwrap();
+    let blob = c.shapes.iter().find(|(k, _)| k.feature.0 == 4).unwrap().1.clone();
+    let mut kept = 0;
+    for i in 0..400 {
+        let p = DVec3::new(-5.0 + i as f64 * 0.1, 0.0, 0.0);
+        let (w, b, n) = (weights(&c)[i], blob.weight(p), c.sample(p).density[c.population_index(disc_pop).unwrap()]);
+        if n >= 0.2 {
+            assert!((w - b).abs() < 1e-12, "dense at {p}: mask {w}, shape {b}");
+            kept += usize::from(w > 0.0);
+        } else if n <= 0.1 {
+            assert_eq!(w, 0.0, "sparse at {p}");
+        }
+    }
+    assert!(kept > 20, "only {kept} points kept");
+    // A second disc after the mask doubles the density but changes nothing the mask keeps.
+    let frame = c.frames.keys().next().copied().unwrap();
+    let more = vec![Contribution(Target::Density(disc_pop), OpSpec::Add(Num::Lit(5000.0)))];
+    t.push(Box::new(ExponentialDisc { frame, contributes: more, ..ExponentialDisc::new() }), None);
+    assert_eq!(weights(&c), weights(&t.compile(t.len(), None)));
 }
