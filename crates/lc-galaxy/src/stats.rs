@@ -35,6 +35,26 @@ pub fn expected(compiled: &Compiled, region: Aabb, resolution: usize) -> Vec<(Fe
     compiled.populations.keys().copied().zip(sums).collect()
 }
 
+/// The expected number of tier-A stars in `region`: the density times each population's
+/// luminous share, by the midpoint rule as [`expected`] integrates.
+pub fn expected_luminous(compiled: &Compiled, region: Aabb, resolution: usize) -> f64 {
+    let shares: Vec<f64> = compiled.populations.iter().map(|(id, p)| crate::attributes::luminous_share(p, u64::from(id.0))).collect();
+    let mut sum = 0.0;
+    if !region.is_empty() && resolution > 0 {
+        let step = region.size() / resolution as f64;
+        let dv = step.x * step.y * step.z;
+        for i in 0..resolution {
+            for j in 0..resolution {
+                for k in 0..resolution {
+                    let p = region.min + (DVec3::new(i as f64, j as f64, k as f64) + 0.5) * step;
+                    sum += compiled.sample(p).density.iter().zip(&shares).map(|(n, f)| n * f).sum::<f64>() * dv;
+                }
+            }
+        }
+    }
+    sum
+}
+
 /// Each star's distance to its nearest neighbor, ly, in `stars` order; infinite for a lone star.
 pub fn nearest_neighbors(stars: &[BakedStar]) -> Vec<f64> {
     const BUCKET_LY: f64 = 4.0;
@@ -183,6 +203,8 @@ pub fn report(timeline: &Timeline, region: Aabb, threads: usize) -> Result<Strin
         baked.stars.len(),
         took.as_secs_f64() * 1e3
     );
+    let luminous = stars.iter().filter(|s| s.tier == crate::sample::Tier::A).count();
+    let _ = writeln!(out, "tier A, over {} L☉: {:.1} expected, {luminous} baked", crate::attributes::L_A, expected_luminous(&compiled, region, 32));
 
     let nearest: Vec<f64> = inside.iter().map(|&i| nearest_all[i]).filter(|d| d.is_finite()).collect();
     if !nearest.is_empty() {

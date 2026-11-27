@@ -392,9 +392,9 @@ pub fn encode(display: &[[f64; 3]]) -> Vec<u8> {
     out
 }
 
-/// Doc 34's `L_A`, L☉: stars brighter than this are seen from across the galaxy, so a picture
-/// draws them as points over the light of the rest.
-pub const BRIGHT_LUMINOSITY: f64 = 100.0;
+/// Doc 34's `L_A`, L☉: stars brighter than this are tier A, seen from across the galaxy, so a
+/// picture draws them as points over the light of the rest.
+pub const BRIGHT_LUMINOSITY: f64 = crate::attributes::L_A;
 
 /// A star a picture draws as a point.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -26,7 +26,7 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 `picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
-graph has no dust field yet. Masks are built (`kinds/mask.rs`). The GPU marcher, tier A and the CDN path are not started. The shipped sky is still the
+graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher and the CDN path are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -532,6 +532,15 @@ Tier A's intensity is `n(x)·P(L > L_A | populations at x)`, and its stars draw 
 their population conditioned on being luminous; tier B draws the complement. The union has the
 populations' statistics. Tier A is placed first, and a tier-B candidate within exclusion distance
 of a tier-A star does not survive.
+
+As built, tier B is the single-tier bake unchanged, less any survivor that comes out luminous and
+any within exclusion distance of a tier-A star, so every tier-B star that stays keeps the id,
+place and attributes it had before tiers existed. Tier A's candidates are thinned among
+themselves with the same exclusion radius as every star, the one the total density sets, so
+bright stars clump as the populations do rather than spreading to their own spacing. A tier-A
+star is filed under the 8 ly cell it falls in, with its index among its 64 ly cell's candidates,
+and the id's tier bit keeps it apart from tier B. Each population's luminous share comes from
+50 000 stratified draws through the tracks, cached by the population's statistics.
 
 The split exists so the two can be published at different times. Tier A is small enough —
 about 2 GB at 14 bytes a star — to bake and publish for the whole galaxy at once, which fixes

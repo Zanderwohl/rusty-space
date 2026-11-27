@@ -11,12 +11,21 @@ use lc_world::sky::generate::SystemProfile;
 pub use lc_world::sky::galaxy::tracks;
 pub use lc_world::sky::galaxy::tracks::State;
 
-use crate::compiled::{Age, Compiled, Imf};
+use crate::compiled::{Age, Compiled, Imf, Population};
 use crate::feature::FeatureId;
 use crate::kinds::MAX_AGE_GYR;
 use crate::sample::{StarKey, Tier};
 
 const SALT_ATTRIBUTES: u64 = 0x6174_7472;
+/// A tier-A star's draws, apart from tier B's so the two never share a stream.
+const SALT_LUMINOUS: u64 = 0x6c75_6d69;
+
+/// Doc 34's `L_A`, L☉: brighter than this, a star is seen from across the galaxy and is tier A.
+pub const L_A: f64 = 100.0;
+
+/// Mass and age draws a tier-A star may take to come out luminous before it is dropped. A
+/// population's luminous share is under a percent, so a hundred times its inverse.
+const LUMINOUS_ATTEMPTS: u64 = 100_000;
 
 /// The IMF's mass range, M☉.
 pub const MIN_MASS: f64 = 0.08;
@@ -55,15 +64,25 @@ impl Draws {
 }
 
 /// `None` where no population has density, which a surviving candidate never is.
-pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Option<Attributes> {
-    let d = Draws(rng::hash(&[seed, key.cell.packed(), key.index as u64, SALT_ATTRIBUTES]));
+///
+/// A tier-B star draws its population in proportion to density and its mass and age once; one
+/// that comes out luminous belongs to tier A, and the bake drops it. A tier-A star draws its
+/// population in proportion to density times `shares`, each population's chance of a star above
+/// [`L_A`], then redraws mass and age until it is luminous, or gives `None` after
+/// [`LUMINOUS_ATTEMPTS`].
+pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3, tier: Tier, shares: &[f64]) -> Option<Attributes> {
+    let salt = if tier == Tier::A { SALT_LUMINOUS } else { SALT_ATTRIBUTES };
+    let d = Draws(rng::hash(&[seed, key.cell.packed(), key.index as u64, salt]));
     let sample = compiled.sample(position);
-    let pick = d.u(0) * sample.total();
+    let weight = |slot: usize, n: f64| if tier == Tier::A { n * shares.get(slot).copied().unwrap_or(0.0) } else { n };
+    let total: f64 = sample.density.iter().enumerate().map(|(i, n)| weight(i, *n)).sum();
+    let pick = d.u(0) * total;
     let mut acc = 0.0;
     let mut found = None;
     for (slot, (((id, p), n), off)) in
         compiled.populations.iter().zip(&sample.density).zip(&sample.feh_offset).enumerate()
     {
+        let n = &weight(slot, *n);
         if *n <= 0.0 {
             continue;
         }
@@ -75,21 +94,27 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Op
         }
     }
     let (slot, population, pop, offset) = found?;
-    let initial = mass(&pop.imf, d.u(1));
-    let age = match pop.age {
-        Age::Uniform { min_gyr, max_gyr } => min_gyr + d.u(2) * (max_gyr - min_gyr),
-        Age::Burst { gyr, spread_gyr } => (gyr + spread_gyr * d.gaussian(2)).clamp(0.0, MAX_AGE_GYR),
-    };
     // A held population can outlive its frame; its stars then sit in a static frame at the
     // origin rather than vanish after surviving thinning.
     let radius_kly = compiled.frames.get(&pop.frame).map_or(0.0, |f| {
         let local = f.to_local(position);
         libm::hypot(local.x, local.y) / 1000.0
     });
-    let feh = pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly + pop.feh.scatter * d.gaussian(3) + offset;
-    let record = GalaxyRecord::quantize(key.cell.0.to_array(), key.index, position, initial, age, feh, slot as u8, false);
+    let attempts = if tier == Tier::A { LUMINOUS_ATTEMPTS } else { 1 };
+    let (record, e) = (0..attempts).find_map(|attempt| {
+        // Tier B's first attempt reads draws 1 to 3, as every star did before tiers.
+        let n = |k: u64| k + attempt * 4;
+        let initial = mass(&pop.imf, d.u(n(1)));
+        let age = match pop.age {
+            Age::Uniform { min_gyr, max_gyr } => min_gyr + d.u(n(2)) * (max_gyr - min_gyr),
+            Age::Burst { gyr, spread_gyr } => (gyr + spread_gyr * d.gaussian(n(2))).clamp(0.0, MAX_AGE_GYR),
+        };
+        let feh = pop.feh.zero_age + pop.feh.per_gyr * age + pop.feh.per_kly * radius_kly + pop.feh.scatter * d.gaussian(n(3)) + offset;
+        let record = GalaxyRecord::quantize(key.cell.0.to_array(), key.index, position, initial, age, feh, slot as u8, tier == Tier::A);
+        let e = tracks::evolve_step(record.initial_mass_solar(), record.age_gyr(), record.feh);
+        (tier == Tier::B || e.luminosity_solar >= L_A).then_some((record, e))
+    })?;
     let (initial, age) = (record.initial_mass_solar(), record.age_gyr());
-    let e = tracks::evolve_step(initial, age, record.feh);
     let kin = kinematics(compiled, population).unwrap_or_else(|| Kinematics {
         origin: DVec3::ZERO,
         axes: glam::DMat3::IDENTITY,
@@ -98,7 +123,7 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3) -> Op
         dispersion_exponent: pop.dispersion.exponent,
     });
     // From the stored position, as the loader computes it.
-    let velocity = kin.velocity_km_s(record.position_ly(), age, key.star_id(Tier::B));
+    let velocity = kin.velocity_km_s(record.position_ly(), age, key.star_id(tier));
     Some(Attributes {
         population: Some(population),
         initial_mass_solar: initial,
@@ -211,3 +236,41 @@ fn power_integral(lo: f64, hi: f64, alpha: f64) -> f64 {
     (libm::pow(hi, k) - libm::pow(lo, k)) / k
 }
 
+
+/// The share of `population`'s stars brighter than [`L_A`]: masses stratified over the IMF and
+/// ages hashed, through the tracks at the population's zero-age `[Fe/H]` trend. Ignores the
+/// radial gradient and offsets, which move a luminosity far less than mass and age do.
+pub fn luminous_share(population: &Population, salt: u64) -> f64 {
+    // A function of the population's statistics and the salt alone, and costly: every bake and
+    // every edit asks for it. Keyed by the statistics' debug text, since they hold floats.
+    static SHARES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, f64>>> = std::sync::OnceLock::new();
+    let key = format!("{salt} {:?} {:?} {:?}", population.imf, population.age, population.feh);
+    let shares = SHARES.get_or_init(Default::default);
+    if let Some(&share) = shares.lock().unwrap().get(&key) {
+        return share;
+    }
+    let share = compute_luminous_share(population, salt);
+    shares.lock().unwrap().insert(key, share);
+    share
+}
+
+fn compute_luminous_share(population: &Population, salt: u64) -> f64 {
+    const DRAWS: u64 = 50_000;
+    let lit = (0..DRAWS)
+        .filter(|&i| {
+            let h = |n: u64| rng::uniform(rng::hash(&[salt, i, n, SALT_LUMINOUS]));
+            let initial = mass(&population.imf, (i as f64 + 0.5) / DRAWS as f64);
+            let age = match population.age {
+                Age::Uniform { min_gyr, max_gyr } => min_gyr + h(1) * (max_gyr - min_gyr),
+                Age::Burst { gyr, spread_gyr } => {
+                    let g = libm::sqrt(-2.0 * libm::log(h(2).max(f64::MIN_POSITIVE))) * libm::cos(std::f64::consts::TAU * h(3));
+                    (gyr + spread_gyr * g).clamp(0.0, MAX_AGE_GYR)
+                }
+            };
+            let feh = population.feh.zero_age + population.feh.per_gyr * age;
+            let step = (feh / lc_world::sky::galaxy::FEH_STEP).round().clamp(-128.0, 127.0) as i8;
+            tracks::evolve_step(initial, age, step).luminosity_solar >= L_A
+        })
+        .count();
+    lit as f64 / DRAWS as f64
+}

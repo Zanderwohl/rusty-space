@@ -140,7 +140,7 @@ fn picture(timeline: &lc_galaxy::Timeline, after: &dyn Fn(&str) -> Option<String
     if after("--star-exposure").as_deref() != Some("off") {
         let exposure = number("--star-exposure", 0.0)?;
         let baked = lc_galaxy::bake(&compiled, timeline.seed, compiled.bounds(), default_threads()).map_err(|e| e.to_string())?;
-        let stars: Vec<Bright> = baked.stars.iter().map(|s| Bright { position_ly: s.position_ly, luminosity_solar: s.attributes.luminosity_solar, teff_k: s.attributes.teff_k }).collect();
+        let stars: Vec<Bright> = baked.stars.iter().filter(|s| s.tier == lc_galaxy::sample::Tier::A).map(|s| Bright { position_ly: s.position_ly, luminosity_solar: s.attributes.luminosity_solar, teff_k: s.attributes.teff_k }).collect();
         sprinkle(&mut display, width, height, &view, &stars, peak, exposure, 1.0);
     }
     let rgba = lc_galaxy::picture::encode(&display);

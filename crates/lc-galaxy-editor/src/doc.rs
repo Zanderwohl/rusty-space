@@ -29,6 +29,8 @@ pub struct Result {
     pub compiled: Compiled,
     pub bake: std::result::Result<Bake, String>,
     pub expected: Vec<(FeatureId, f64)>,
+    /// Tier-A stars the field expects.
+    pub expected_luminous: f64,
     pub nearest: Vec<f64>,
     /// Each star's shell radius as the game assigns it, ly; NaN for a star the sky leaves out.
     pub shells: Vec<f64>,
@@ -160,6 +162,7 @@ impl Doc {
         let compiled = self.timeline.compile(key.1, held);
         let bounds = compiled.bounds();
         let expected = stats::expected(&compiled, bounds, EXPECTED_RESOLUTION);
+        let expected_luminous = stats::expected_luminous(&compiled, bounds, EXPECTED_RESOLUTION);
         let total: f64 = expected.iter().map(|(_, n)| n).sum();
         let cells = if bounds.is_empty() {
             0.0
@@ -176,7 +179,7 @@ impl Doc {
         };
         let nearest = bake.as_ref().map(|b| stats::nearest_neighbors(&b.stars)).unwrap_or_default();
         let shells = bake.as_ref().map(|b| lc_galaxy::publish::shells(&b.stars)).unwrap_or_default();
-        self.result = Some(Result { compiled, bake, expected, nearest, shells, took: start.elapsed() });
+        self.result = Some(Result { compiled, bake, expected, expected_luminous, nearest, shells, took: start.elapsed() });
         self.built_from = Some(key);
         self.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.built_at = Some(Instant::now());

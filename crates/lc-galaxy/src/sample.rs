@@ -8,6 +8,11 @@
 //! distances are capped at one cell, so a cell's stars depend only on its own candidates and its
 //! 26 neighbors': any region bakes alone, in any order, on any number of threads, and gives
 //! the stars a whole-galaxy bake would. See `34-galaxy-authoring.md`, "Placing stars".
+//!
+//! Two tiers ("Two tiers" there). Tier A, the stars brighter than [`L_A`], is drawn first on
+//! cells [`TIER_A_SPAN`] tier-B cells wide, at the luminous share of the density. Tier B is the
+//! single-tier bake as it was, less any survivor that comes out luminous and any within exclusion
+//! distance of a tier-A star, so a tier-B star that stays keeps its id, place and attributes.
 
 use std::f64::consts::PI;
 
@@ -16,8 +21,8 @@ use lc_world::rng;
 use lc_world::sky::StarId;
 use lc_world::sky::galaxy::{cell_in_grid, pack_cell, star_id};
 
-use crate::attributes::{self, Attributes};
-use crate::compiled::{Aabb, Compiled};
+use crate::attributes::{self, Attributes, L_A};
+use crate::compiled::{Aabb, Compiled, Sample};
 
 pub use lc_world::sky::galaxy::CELL_LY;
 
@@ -31,6 +36,14 @@ const BOUND_LATTICE: usize = 9;
 
 const SALT_COUNT: u64 = 0x636f_756e_74;
 const SALT_CANDIDATE: u64 = 0x6361_6e64;
+const SALT_A_COUNT: u64 = 0x4163_6f75_6e74;
+const SALT_A_CANDIDATE: u64 = 0x4163_616e_64;
+
+/// A tier-A cell's side, in tier-B cells: 64 ly.
+pub const TIER_A_SPAN: i32 = 8;
+
+/// Lattice points per axis when sampling a tier-A cell for its bound: 4 ly apart.
+const TIER_A_LATTICE: usize = 17;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Cell(pub IVec3);
@@ -108,6 +121,7 @@ pub struct Candidate {
 #[derive(Clone, Debug)]
 pub struct BakedStar {
     pub key: StarKey,
+    pub tier: Tier,
     pub id: StarId,
     pub position_ly: DVec3,
     pub exclusion_ly: f64,
@@ -242,6 +256,136 @@ pub fn candidates(compiled: &Compiled, seed: u64, cell: Cell) -> Result<Vec<Cand
     Err(BakeError::Unbounded { cell })
 }
 
+/// A tier-A cell, [`TIER_A_SPAN`] tier-B cells on a side, on the same grid's origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ACell(IVec3);
+
+impl ACell {
+    const SIDE: f64 = CELL_LY * TIER_A_SPAN as f64;
+
+    fn containing(p: DVec3) -> Self {
+        ACell((p / Self::SIDE).floor().as_ivec3())
+    }
+
+    fn min_corner(self) -> DVec3 {
+        self.0.as_dvec3() * Self::SIDE
+    }
+
+    /// Its first tier-B cell, which names it in hashes and errors.
+    fn first(self) -> Cell {
+        Cell(self.0 * TIER_A_SPAN)
+    }
+
+    fn in_grid(self) -> bool {
+        self.first().in_grid() && Cell(self.0 * TIER_A_SPAN + IVec3::splat(TIER_A_SPAN - 1)).in_grid()
+    }
+
+    fn neighborhood(self) -> impl Iterator<Item = ACell> {
+        (-1..=1).flat_map(move |x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| ACell(self.0 + IVec3::new(x, y, z)))))
+    }
+}
+
+fn acells_in(region: Aabb) -> Vec<ACell> {
+    let (lo, hi) = (ACell::containing(region.min).0, ACell::containing(region.max).0);
+    (lo.x..=hi.x).flat_map(|x| (lo.y..=hi.y).flat_map(move |y| (lo.z..=hi.z).map(move |z| ACell(IVec3::new(x, y, z))))).collect()
+}
+
+/// Tier A's candidates per ly³: the luminous density `n_A` among all `n`, thinned with the
+/// exclusion radius every star shares, `-ln(1 - p·n_A/n)·n/p`.
+fn intensity_a(s: &Sample, shares: &[f64]) -> f64 {
+    let n = s.total();
+    let n_a: f64 = s.density.iter().zip(shares).map(|(d, f)| d * f).sum();
+    if n <= 0.0 || n_a <= 0.0 {
+        return 0.0;
+    }
+    if s.packing <= 0.0 {
+        return n_a;
+    }
+    n * -libm::log1p(-s.packing * n_a / n) / s.packing
+}
+
+/// The tier-A candidates of one tier-A cell, filed under the tier-B cell each falls in with its
+/// index in the tier-A cell, which no other tier-A candidate in that tier-B cell shares.
+fn candidates_a(compiled: &Compiled, seed: u64, cell: ACell, shares: &[f64]) -> Result<Vec<Candidate>, BakeError> {
+    let half_diagonal = ACell::SIDE * 3f64.sqrt() / 2.0;
+    let center = cell.min_corner() + DVec3::splat(ACell::SIDE * 0.5);
+    if !compiled.may_reach(center, half_diagonal) {
+        return Ok(Vec::new());
+    }
+    let active = compiled.reaching(center, half_diagonal);
+    let step = ACell::SIDE / (TIER_A_LATTICE - 1) as f64;
+    let mut bound = 0.0f64;
+    for i in 0..TIER_A_LATTICE {
+        for j in 0..TIER_A_LATTICE {
+            for k in 0..TIER_A_LATTICE {
+                let p = cell.min_corner() + DVec3::new(i as f64, j as f64, k as f64) * step;
+                bound = bound.max(intensity_a(&compiled.sample_among(p, &active), shares));
+            }
+        }
+    }
+    bound *= BOUND_MARGIN;
+    if bound == 0.0 {
+        return Ok(Vec::new());
+    }
+    let named = cell.first().packed();
+    let count_hash = rng::hash(&[seed, named, SALT_A_COUNT]);
+    'retry: for _ in 0..BOUND_RETRIES {
+        let count = poisson(count_hash, bound * ACell::SIDE.powi(3));
+        if count > u16::MAX as u64 {
+            return Err(BakeError::Overfull { cell: cell.first(), candidates: count });
+        }
+        let mut out = Vec::new();
+        for index in 0..count as u16 {
+            let h = rng::hash(&[seed, named, index as u64, SALT_A_CANDIDATE]);
+            let u = |n: u64| rng::uniform(rng::mix(h ^ n));
+            let position = cell.min_corner() + DVec3::new(u(1), u(2), u(3)) * ACell::SIDE;
+            let s = compiled.sample_among(position, &active);
+            let lambda = intensity_a(&s, shares);
+            if lambda > bound {
+                bound *= 2.0;
+                continue 'retry;
+            }
+            if u(4) * bound < lambda {
+                let key = StarKey { cell: Cell::containing(position), index };
+                out.push(Candidate { key, position, mark: u(5), exclusion_ly: exclusion_radius(s.total(), s.packing) });
+            }
+        }
+        return Ok(out);
+    }
+    Err(BakeError::Unbounded { cell: cell.first() })
+}
+
+/// Tier A's survivors within one tier-B cell of `region`, which is as far as any exclusion
+/// reaches into it.
+fn tier_a(compiled: &Compiled, seed: u64, region: Aabb, shares: &[f64], threads: usize) -> Result<(Vec<Candidate>, usize), BakeError> {
+    let near = Aabb { min: region.min - DVec3::splat(CELL_LY), max: region.max + DVec3::splat(CELL_LY) };
+    let owned = acells_in(near);
+    let drawn_cells = acells_in(Aabb { min: near.min - DVec3::splat(ACell::SIDE), max: near.max + DVec3::splat(ACell::SIDE) });
+    if let Some(c) = drawn_cells.iter().find(|c| !c.in_grid()) {
+        return Err(BakeError::OutsideGrid { cell: c.first() });
+    }
+    let drawn = par_map(&drawn_cells, threads, |&c| candidates_a(compiled, seed, c, shares).map(|v| (c, v)));
+    let mut by_cell = std::collections::HashMap::with_capacity(drawn.len());
+    for d in drawn {
+        let (c, v) = d?;
+        by_cell.insert(c, v);
+    }
+    let candidates = owned.iter().filter_map(|c| by_cell.get(c)).map(Vec::len).sum();
+    let survivors = owned
+        .iter()
+        .flat_map(|cell| {
+            let neighbors: Vec<&Candidate> = cell.neighborhood().filter_map(|c| by_cell.get(&c)).flatten().collect();
+            by_cell.get(cell).into_iter().flatten().filter(move |a| {
+                !neighbors.iter().any(|b| {
+                    b.key != a.key && (b.mark, b.key) < (a.mark, a.key) && a.position.distance_squared(b.position) < pair_radius(a, b).powi(2)
+                })
+            })
+        })
+        .cloned()
+        .collect();
+    Ok((survivors, candidates))
+}
+
 pub fn cells_in(region: Aabb) -> Vec<Cell> {
     if region.is_empty() {
         return Vec::new();
@@ -279,6 +423,12 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
     if let Some(&cell) = ring.iter().find(|c| !c.in_grid()) {
         return Err(BakeError::OutsideGrid { cell });
     }
+    let shares: Vec<f64> = compiled.populations.iter().map(|(id, p)| attributes::luminous_share(p, u64::from(id.0))).collect();
+    let (luminous, luminous_candidates) = tier_a(compiled, seed, region, &shares, threads)?;
+    let mut luminous_near: std::collections::HashMap<Cell, Vec<&Candidate>> = std::collections::HashMap::new();
+    for a in &luminous {
+        luminous_near.entry(a.key.cell).or_default().push(a);
+    }
     let drawn = par_map(&ring, threads, |&c| candidates(compiled, seed, c).map(|v| (c, v)));
     let mut by_cell = std::collections::HashMap::with_capacity(drawn.len());
     for d in drawn {
@@ -296,10 +446,22 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
                         && a.position.distance_squared(b.position) < pair_radius(a, b).powi(2)
                 })
             })
+            // A tier-A star clears its exclusion distance of tier B.
+            .filter(|b| {
+                !neighborhood(cell)
+                    .filter_map(|c| luminous_near.get(&c))
+                    .flatten()
+                    .any(|a| a.position.distance_squared(b.position) < pair_radius(a, b).powi(2))
+            })
             .filter_map(|c| {
-                let attributes = attributes::draw(compiled, seed, c.key, c.position)?;
+                let attributes = attributes::draw(compiled, seed, c.key, c.position, Tier::B, &shares)?;
+                // A luminous star is tier A's to place.
+                if attributes.luminosity_solar >= L_A {
+                    return None;
+                }
                 Some(BakedStar {
                     key: c.key,
+                    tier: Tier::B,
                     id: c.key.star_id(Tier::B),
                     // Where the game will put it: the center of its stored position's step.
                     position_ly: attributes.record.position_ly(),
@@ -309,8 +471,16 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
             })
             .collect::<Vec<_>>()
     });
-    let candidates = cells.iter().filter_map(|c| by_cell.get(c)).map(Vec::len).sum();
-    Ok(Bake { stars: survivors.into_iter().flatten().collect(), cells: cells.len(), candidates })
+    let in_region: std::collections::HashSet<Cell> = cells.iter().copied().collect();
+    let mut luminous: Vec<&Candidate> = luminous.iter().filter(|a| in_region.contains(&a.key.cell)).collect();
+    luminous.sort_by_key(|a| a.key);
+    let bright = par_map(&luminous, threads, |a| {
+        let attributes = attributes::draw(compiled, seed, a.key, a.position, Tier::A, &shares)?;
+        Some(BakedStar { key: a.key, tier: Tier::A, id: a.key.star_id(Tier::A), position_ly: attributes.record.position_ly(), exclusion_ly: a.exclusion_ly, attributes })
+    });
+    let candidates = cells.iter().filter_map(|c| by_cell.get(c)).map(Vec::len).sum::<usize>() + luminous_candidates;
+    let stars = survivors.into_iter().flatten().chain(bright.into_iter().flatten()).collect();
+    Ok(Bake { stars, cells: cells.len(), candidates })
 }
 
 /// How close two candidates may be before the one with the larger mark goes.

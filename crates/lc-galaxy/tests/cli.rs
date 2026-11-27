@@ -59,7 +59,7 @@ fn stats_reports_a_whole_galaxy() {
     let out = lc_galaxy(&["stats", &phase_one()]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
-    for wanted in ["population", "total", "nearest neighbor:", "shell radius:", "planets / star", "ocean-first", "moons / star", "planets with a moon"] {
+    for wanted in ["population", "total", "tier A, over", "nearest neighbor:", "shell radius:", "planets / star", "ocean-first", "moons / star", "planets with a moon"] {
         assert!(text.contains(wanted), "no {wanted:?} in\n{text}");
     }
     let baked = |line: &str| line.split_whitespace().last().and_then(|n| n.parse::<usize>().ok());

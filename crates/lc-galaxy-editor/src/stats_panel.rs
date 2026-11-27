@@ -33,6 +33,10 @@ pub fn statistics(ui: &mut egui::Ui, doc: &Doc) {
         ui.label(format!("{:.1}", totals.0));
         ui.label(totals.1.to_string());
         ui.end_row();
+        ui.label(format!("tier A, over {} L☉", lc_galaxy::attributes::L_A));
+        ui.label(format!("{:.1}", r.expected_luminous));
+        ui.label(bake.map_or(0, |b| b.stars.iter().filter(|s| s.tier == lc_galaxy::sample::Tier::A).count()).to_string());
+        ui.end_row();
     });
     if let Some(b) = bake {
         ui.label(format!("{} cells, {} candidates, {:.1} ms", b.cells, b.candidates, r.took.as_secs_f64() * 1e3));

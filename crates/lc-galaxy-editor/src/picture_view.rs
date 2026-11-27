@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 use bevy_egui::egui::{self, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use glam::DVec3;
 use lc_galaxy::Compiled;
-use lc_galaxy::picture::{BRIGHT_LUMINOSITY, Bright, Progress, Side, View, Volume, encode, lights, march_exact, march_until, sprinkle};
+use lc_galaxy::sample::Tier;
+use lc_galaxy::picture::{Bright, Progress, Side, View, Volume, encode, lights, march_exact, march_until, sprinkle};
 use lc_galaxy::sample::default_threads;
 
 use crate::doc::Doc;
@@ -237,7 +238,7 @@ impl PictureView {
             let bright: Vec<Bright> = doc
                 .stars()
                 .iter()
-                .filter(|s| s.attributes.luminosity_solar >= BRIGHT_LUMINOSITY)
+                .filter(|s| s.tier == Tier::A)
                 .map(|s| Bright { position_ly: s.position_ly, luminosity_solar: s.attributes.luminosity_solar, teff_k: s.attributes.teff_k })
                 .collect();
             self.image.start(key.clone(), move |stop| march(&volume, &compiled, &bright, &key, stop));
