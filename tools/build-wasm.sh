@@ -30,10 +30,6 @@ done
 BUILD_ID="$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty)"
 OUT="target/web/$BUILD_ID"
 CATALOG=assets/catalogs/hygdata_v42.csv
-# An authored galaxy's timeline, published into the build in place of CATALOG when set. The
-# playtest phases of lightcone/docs/34-galaxy-authoring.md set it; committed, so the build id
-# names the galaxy as well as the code.
-GALAXY=crates/lc-galaxy/galaxies/phase-2.ron
 
 for tool in wasm-bindgen wasm-opt; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
@@ -43,18 +39,14 @@ echo "==> build $BUILD_ID"
 rm -rf "$OUT"; mkdir -p "$OUT/assets"
 
 # The sky, packed. The browser never sees a CSV: there is no filesystem to read one from and
-# no reason to send 34 MB when 0.3 will do.
+# no reason to send 34 MB when 0.3 will do. A shard running an authored galaxy names it on
+# connect (`--sky-url`), and the client loads that instead; tools/publish-galaxy.sh puts one on
+# the CDN.
 mkdir -p "$OUT/assets/sky"
-if [ -n "$GALAXY" ]; then
-  echo "==> galaxy $GALAXY"
-  cargo run -q -p lc-galaxy --bin lc-galaxy -- publish "$GALAXY" --out "$OUT/assets/sky/galaxy"
-  export LC_SKY=sky/galaxy/manifest.galaxy
-else
-  echo "==> sky chunk"
-  cargo run -q -p lc-world --bin skypack -- "$CATALOG" "$OUT/assets/sky/catalog.lcsky" \
-    --limit "$SKY_LIMIT"
-  export LC_SKY=sky/catalog.lcsky
-fi
+echo "==> sky chunk"
+cargo run -q -p lc-world --bin skypack -- "$CATALOG" "$OUT/assets/sky/catalog.lcsky" \
+  --limit "$SKY_LIMIT"
+export LC_SKY=sky/catalog.lcsky
 
 # `--no-default-features` turns off `hyg`, which is what keeps the CSV reader -- and the only
 # `std::fs` call in the client's tree -- out of the browser binary entirely.

@@ -38,8 +38,12 @@
 	header @wasm Content-Type "application/wasm"
 	@wgsl path *.wgsl
 	header @wgsl Content-Type "text/plain; charset=utf-8"
-	@sky path *.lcsky
+	@sky path *.lcsky *.lcg
 	header @sky Content-Type "application/octet-stream"
+	# An authored galaxy's manifest is RON. Under `galaxy/<name>/` rather than a build, so a
+	# galaxy changes without a new build: see lightcone/docs/34-galaxy-authoring.md.
+	@galaxy path *.galaxy
+	header @galaxy Content-Type "text/plain; charset=utf-8"
 	# The shelf. Under `library/` rather than `game/<build-id>/`, because a book is not part of
 	# a build: see lightcone/docs/21-library.md.
 	@epub path *.epub

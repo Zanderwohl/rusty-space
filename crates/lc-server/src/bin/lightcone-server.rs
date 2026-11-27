@@ -115,6 +115,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Where clients fetch the galaxy: the shard reads `--sky` from inside the docker network, by
+    // the CDN's container name, which a player's browser cannot reach.
+    server.sky_url = after("--sky-url").or_else(|| std::env::var("LC_SKY_URL").ok());
+    match (after("--sky"), &server.sky_url) {
+        (Some(sky), Some(url)) => {
+            let file = |s: &str| s.rsplit('/').next().unwrap_or(s).to_owned();
+            if !sky.ends_with(".galaxy") || file(&sky) != file(url) {
+                return Err(format!("--sky-url {url} must name the same manifest file as --sky {sky}").into());
+            }
+        }
+        (None, Some(_)) => return Err("--sky-url needs --sky, or the shard and its clients load different skies".into()),
+        (Some(sky), None) if sky.ends_with(".galaxy") => {
+            eprintln!("WARNING: --sky names a galaxy and there is no --sky-url, so clients load the sky packed");
+            eprintln!("         in their build, which may not be this one.");
+        }
+        _ => {}
+    }
+
     let stars = match after("--sky") {
         // An authored galaxy: a manifest and the chunks beside it, on disk or on the CDN.
         Some(source) if source.ends_with(".galaxy") => {

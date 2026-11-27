@@ -820,6 +820,11 @@ pub enum Outbound {
     /// one collapsed. Nothing else is sent until an [`Inbound::Launch`] is accepted.
     Unlaunched,
     LaunchRefused(LaunchRefusal),
+    /// The authored galaxy this shard runs, as the URL of its manifest on the CDN. Sent on
+    /// `Hello`, before [`Outbound::Welcome`] or [`Outbound::Unlaunched`], by a shard that has
+    /// one; a client that hears none loads the sky packed in its build. Not cleared, for the
+    /// reason [`Outbound::Library`] is not: the stars are the same for everyone.
+    Sky { manifest: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1625,6 +1630,11 @@ mod tests {
             encode(&shelf),
             golden::LIBRARY,
             "Outbound::Library changed shape at protocol version {PROTOCOL_VERSION}",
+        );
+        assert_eq!(
+            encode(&Outbound::Sky { manifest: "https://cdn.example/galaxy/a/0123456789abcdef.galaxy".to_owned() }),
+            golden::SKY,
+            "Outbound::Sky changed shape at protocol version {PROTOCOL_VERSION}",
         );
         let mark = Bookmark {
             book: "the-gilded-age".to_owned(),

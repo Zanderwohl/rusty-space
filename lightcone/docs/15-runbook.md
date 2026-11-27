@@ -699,12 +699,20 @@ process was down. The alternative asserts that things happened in the missing ti
 nothing was journalled and nobody was told.
 
 **Point `--sky` at the promoted build's own chunk**, by the CDN's *container* name —
-`http://lightcone-cdn:3101/game/<build>/assets/sky/catalog.lcsky`, or, for a build that packs an
-authored galaxy (`GALAXY` in `tools/build-wasm.sh`, set during the playtest phases of
-[34-galaxy-authoring.md](34-galaxy-authoring.md)),
-`http://lightcone-cdn:3101/game/<build>/assets/sky/galaxy/manifest.galaxy`. The build's
-`manifest.json` names which, under `sky`. Not the public
-`https://cdn.…` name: that resolves to the host's own address and hairpins, exactly as the
+`http://lightcone-cdn:3101/game/<build>/assets/sky/catalog.lcsky` — or at an authored galaxy
+([34-galaxy-authoring.md](34-galaxy-authoring.md)). A galaxy is published apart from builds:
+
+```bash
+cargo run -p lc-galaxy --bin lc-galaxy -- publish crates/lc-galaxy/galaxies/phase-3.ron --out target/galaxy/phase-3
+tools/publish-galaxy.sh target/galaxy/phase-3
+```
+
+The script prints the manifest's path, `galaxy/<name>/<hash>.galaxy`. Give the shard both
+`--sky http://lightcone-cdn:3101/galaxy/<name>/<hash>.galaxy` and
+`--sky-url https://cdn.dev.lightconefrontier.com/galaxy/<name>/<hash>.galaxy`: the shard reads
+the first, and sends the second to each client on connect, which loads it in place of the sky in
+its build. The shard refuses the pair unless both name the same manifest file. `--sky` takes the container
+name and not the public `https://cdn.…` one, because the public name resolves to the host's own address and hairpins, exactly as the
 site's call to the broker does. Same container, same bytes, different route. Both ends place craft into systems by position
 against the same shell radius, so two catalogs is two answers to which system a ship is in —
 and nothing anywhere reports the disagreement. Reading the same bytes the client downloads is

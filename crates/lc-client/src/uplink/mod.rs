@@ -90,6 +90,9 @@ pub struct Uplink {
     pub parked: bool,
     /// The shelf, as the shard last stated it: its base and its books. Taken once.
     pub shelf: Option<(String, Vec<lc_proto::Book>)>,
+    /// The manifest URL of the galaxy the shard runs, which the client loads in place of the sky
+    /// packed in its build.
+    pub sky: Option<String>,
     /// This account's places, most recently read first. Taken once.
     pub bookmarks: Option<Vec<lc_proto::Bookmark>>,
     /// What the server last said about an order, for the interface to show once and drop. The
@@ -303,6 +306,7 @@ pub(crate) fn fold(
         // about the world and a book is not part of it.
         Outbound::Library { base, books } => uplink.shelf = Some((base, books)),
         Outbound::Reading(marks) => uplink.bookmarks = Some(marks),
+        Outbound::Sky { manifest } => uplink.sky = Some(manifest),
         // A report from this craft itself: what it has learned since the last one, with no hop.
         Outbound::Learned { report } => match lc_proto::decode::<lc_world::knowledge::Report>(&report) {
             Ok(report) => game.0.knowledge.absorb(&report),

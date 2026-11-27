@@ -209,6 +209,9 @@ pub struct Server<J: Journal> {
     /// Public because the binary fills it from a file and drains its writes into the store; the
     /// server itself only ever reads it and records what a client says.
     pub library: crate::library::Library,
+    /// Where clients fetch this shard's authored galaxy: its manifest's URL on the CDN, which
+    /// the binary takes from `--sky-url`.
+    pub sky_url: Option<String>,
     /// Every account's presets. Public for the same reason as `library`.
     pub presets: crate::presets::Presets,
     /// Ticks since this server started.
@@ -305,6 +308,7 @@ impl<J: Journal> Server<J> {
             rate: 1.0,
             directs: false,
             library: crate::library::Library::default(),
+            sky_url: None,
             presets: crate::presets::Presets::default(),
             director: None,
             ticks: 0,
@@ -623,7 +627,13 @@ impl<J: Journal> Server<J> {
                     wire.send(from, Outbound::WrongProtocol { server: PROTOCOL_VERSION });
                     return;
                 }
-                match self.sign_in(from, &ticket) {
+                let signed_in = self.sign_in(from, &ticket);
+                if signed_in.is_some()
+                    && let Some(manifest) = &self.sky_url
+                {
+                    wire.send(from, Outbound::Sky { manifest: manifest.clone() });
+                }
+                match signed_in {
                     Some(SignedIn::Flying { ship, name, account }) => self.welcome(from, ship, name, &account, wire),
                     Some(SignedIn::Unlaunched) => wire.send(from, Outbound::Unlaunched),
                     None => wire.send(from, Outbound::Unauthenticated),
@@ -3965,6 +3975,21 @@ mod hello_tests {
         says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
         let said = wire.take(ClientId(1));
         assert!(!said.iter().any(|m| matches!(m, Outbound::Library { .. })), "{said:?}");
+    }
+
+    /// A shard with a galaxy names its manifest before anything else, and one without names none.
+    #[tokio::test]
+    async fn signing_in_names_the_galaxy_first() {
+        let broker = Broker::new([1u8; 32]);
+        let mut server = trusting(&broker);
+        let mut wire = Loopback::new();
+        says(&mut server, &mut wire, ClientId(1), broker.mint("acct-1", SHARD, 60, "j1")).await;
+        assert!(!wire.take(ClientId(1)).iter().any(|m| matches!(m, Outbound::Sky { .. })));
+
+        server.sky_url = Some("https://cdn/galaxy/a/0123456789abcdef.galaxy".into());
+        says(&mut server, &mut wire, ClientId(2), broker.mint("acct-2", SHARD, 60, "j2")).await;
+        let said = wire.take(ClientId(2));
+        assert!(matches!(said.first(), Some(Outbound::Sky { manifest }) if manifest.ends_with("0123456789abcdef.galaxy")), "{said:?}");
     }
 
     #[tokio::test]

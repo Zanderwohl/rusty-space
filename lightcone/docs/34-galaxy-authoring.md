@@ -681,11 +681,12 @@ Phase III, and republishing everything stays the default until launch.
   under, and a manifest is stored under its own content hash, like a chunk (both built). A
   manifest names the hash of the manifest it was built from in `parent`, and a publish onto it is
   that manifest's chunks plus new ones (not built: it needs the bake around published stars).
-- **Galaxies live on the CDN apart from builds**, at `galaxy/<name>/`. `tools/publish-galaxy.sh`
+- **Galaxies live on the CDN apart from builds** (built), at `galaxy/<name>/`. `tools/publish-galaxy.sh`
   copies a published directory there as `tools/publish-build.sh` copies a build. A file that is
   already there with the same bytes is skipped; one with different bytes under the same name is
   refused. `tools/build-wasm.sh` stops packing `GALAXY`.
-- **The shard tells the client which manifest to load** when it connects, and the client fetches
+- **The shard tells the client which manifest to load** (built: `Outbound::Sky`, from the
+  shard's `--sky-url`) when it connects, and the client fetches
   it from the CDN. The client and the shard then cannot load different galaxies, a galaxy changes
   without a new build, and switching galaxies is a change to the shard's `--sky`.
 - **`lc-galaxy diff <timeline> --against <manifest>`** bakes the current graph over each published

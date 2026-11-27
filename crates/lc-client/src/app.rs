@@ -110,6 +110,15 @@ pub struct Catalog(pub Option<String>);
 #[derive(Resource)]
 struct LoadingSky(Handle<crate::sky_asset::Sky>);
 
+/// Entering [`AppState::Loading`] with a shard named and no word from it yet: wait for it to name
+/// its galaxy before loading the packed sky. Real seconds, as `Time::elapsed_secs_f64` reads.
+#[derive(Resource)]
+struct AwaitingSky(f64);
+
+/// How long a shard that is named but not yet connecting is waited for. It covers the frames
+/// before `uplink::connect` runs; a desktop with no ticket yet can stay unconnected for good.
+const UNCONNECTED_GRACE_S: f64 = 2.0;
+
 /// How many stars the session keeps.
 pub const SKY_LIMIT: usize = 6000;
 
@@ -549,16 +558,43 @@ fn strand(
     }
 }
 
-/// Starts the sky loading, or finishes immediately when there is nothing to load.
+/// Starts the sky loading, or finishes immediately when there is nothing to load. A shard that
+/// names its galaxy decides the sky; see [`AwaitingSky`].
+#[allow(clippy::too_many_arguments)]
 fn begin_load(
     dev: Res<crate::dev::DevEntry>,
     catalog: Res<Catalog>,
     assets: Res<AssetServer>,
+    address: Res<crate::uplink::ServerAddress>,
+    time: Res<Time>,
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
     uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
+) {
+    if let Some(manifest) = &uplink.sky {
+        commands.insert_resource(LoadingSky(assets.load(manifest.clone())));
+        return;
+    }
+    if address.0.is_some() && matches!(uplink.state, crate::uplink::State::Offline | crate::uplink::State::Connecting) {
+        commands.insert_resource(AwaitingSky(time.elapsed_secs_f64()));
+        return;
+    }
+    load_packed(&dev, &catalog, &assets, &mut commands, &mut game, &mut ui, &uplink, &mut next);
+}
+
+/// The sky named by [`Catalog`]: the one packed in the build, or a file on the desktop.
+#[allow(clippy::too_many_arguments)]
+fn load_packed(
+    dev: &crate::dev::DevEntry,
+    catalog: &Catalog,
+    assets: &AssetServer,
+    commands: &mut Commands,
+    game: &mut Game,
+    ui: &mut Ui,
+    uplink: &crate::uplink::Uplink,
+    next: &mut NextState<AppState>,
 ) {
     match catalog.0.as_deref() {
         // Packing is native tooling and reads a file directly; see `skypack`. Absent from a
@@ -566,17 +602,17 @@ fn begin_load(
         #[cfg(feature = "hyg")]
         Some(path) if path.ends_with(".csv") => {
             match lc_world::sky::hyg::HygProvider::load(path) {
-                Ok(p) => enter_game(&mut game, &mut ui, &mut next, &p, &uplink, dev.charted),
+                Ok(p) => enter_game(game, ui, next, &p, uplink, dev.charted),
                 Err(e) => {
                     ui.notify(format!("catalog: {e}"), 0.0);
-                    enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted);
+                    enter_game(game, ui, next, &AuthoredStars::sample(), uplink, dev.charted);
                 }
             }
         }
         Some(path) => {
             commands.insert_resource(LoadingSky(assets.load(path.to_owned())));
         }
-        None => enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted),
+        None => enter_game(game, ui, next, &AuthoredStars::sample(), uplink, dev.charted),
     }
 }
 
@@ -584,17 +620,38 @@ fn begin_load(
 ///
 /// A frozen window is not a loading screen, so this is a polled system rather than a blocking
 /// read: the loading panel keeps drawing while the fetch is in flight.
+#[allow(clippy::too_many_arguments)]
 fn finish_load(
     dev: Res<crate::dev::DevEntry>,
+    catalog: Res<Catalog>,
     loading: Option<Res<LoadingSky>>,
+    awaiting: Option<Res<AwaitingSky>>,
     skies: Res<Assets<crate::sky_asset::Sky>>,
     assets: Res<AssetServer>,
+    time: Res<Time>,
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
     uplink: Res<crate::uplink::Uplink>,
     mut next: ResMut<NextState<AppState>>,
 ) {
+    if let Some(awaiting) = awaiting {
+        use crate::uplink::State;
+        let waiting = match uplink.state {
+            State::Connecting => true,
+            State::Offline => time.elapsed_secs_f64() - awaiting.0 < UNCONNECTED_GRACE_S,
+            _ => false,
+        };
+        if let Some(manifest) = &uplink.sky {
+            commands.insert_resource(LoadingSky(assets.load(manifest.clone())));
+        } else if waiting {
+            return;
+        } else {
+            load_packed(&dev, &catalog, &assets, &mut commands, &mut game, &mut ui, &uplink, &mut next);
+        }
+        commands.remove_resource::<AwaitingSky>();
+        return;
+    }
     let Some(loading) = loading else { return };
     if let Some(sky) = skies.get(&loading.0) {
         if sky.skipped > 0 {

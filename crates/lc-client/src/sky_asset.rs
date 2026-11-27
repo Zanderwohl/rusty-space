@@ -97,11 +97,12 @@ impl AssetLoader for GalaxyLoader {
         reader.read_to_end(&mut raw).await?;
         let text = String::from_utf8(raw).map_err(|e| SkyLoadError::Io(std::io::Error::other(e)))?;
         let manifest = Manifest::parse(&text).map_err(SkyLoadError::Galaxy)?;
-        let dir = load.path().path().parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let mut bytes = Vec::with_capacity(manifest.chunks.len());
         for c in &manifest.chunks {
             let file = c.checked_file().map_err(SkyLoadError::Galaxy)?;
-            let path = bevy::asset::AssetPath::from_path_buf(dir.join(file));
+            // Resolved against the manifest's own path, which keeps its source: a manifest the
+            // shard named is fetched over `https`, and its chunks must be too.
+            let path = load.path().resolve_embed(&bevy::asset::AssetPath::parse(file));
             bytes.push(load.read_asset_bytes(path).await.map_err(|e| SkyLoadError::Io(std::io::Error::other(e.to_string())))?);
         }
         let provider = manifest.load(&bytes).map_err(SkyLoadError::Galaxy)?;
@@ -118,5 +119,18 @@ pub struct SkyAssetPlugin;
 impl Plugin for SkyAssetPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<Sky>().init_asset_loader::<SkyLoader>().init_asset_loader::<GalaxyLoader>();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::asset::AssetPath;
+
+    /// A chunk named by a manifest on the CDN is fetched from the CDN, beside the manifest.
+    #[test]
+    fn a_chunk_resolves_beside_its_manifest_and_keeps_its_source() {
+        let manifest = AssetPath::parse("https://cdn.example/galaxy/a/0123456789abcdef.galaxy");
+        let chunk = manifest.resolve_embed(&AssetPath::parse("chunks/fedcba9876543210.lcg"));
+        assert_eq!(chunk, AssetPath::parse("https://cdn.example/galaxy/a/chunks/fedcba9876543210.lcg"));
     }
 }
