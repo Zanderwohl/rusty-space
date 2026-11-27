@@ -101,10 +101,12 @@ pub fn draw(compiled: &Compiled, seed: u64, key: StarKey, position: DVec3, tier:
         libm::hypot(local.x, local.y) / 1000.0
     });
     let attempts = if tier == Tier::A { LUMINOUS_ATTEMPTS } else { 1 };
+    // Tier A draws only from masses that can be luminous at some age the population has.
+    let floor = if tier == Tier::A { imf_fraction(&pop.imf, MIN_MASS, luminous_floor(pop, u64::from(population.0))) } else { 0.0 };
     let (record, e) = (0..attempts).find_map(|attempt| {
         // Tier B's first attempt reads draws 1 to 3, as every star did before tiers.
         let n = |k: u64| k + attempt * 4;
-        let initial = mass(&pop.imf, d.u(n(1)));
+        let initial = mass(&pop.imf, floor + d.u(n(1)) * (1.0 - floor));
         let age = match pop.age {
             Age::Uniform { min_gyr, max_gyr } => min_gyr + d.u(n(2)) * (max_gyr - min_gyr),
             Age::Burst { gyr, spread_gyr } => (gyr + spread_gyr * d.gaussian(n(2))).clamp(0.0, MAX_AGE_GYR),
@@ -252,6 +254,36 @@ pub fn luminous_share(population: &Population, salt: u64) -> f64 {
     let share = compute_luminous_share(population, salt);
     shares.lock().unwrap().insert(key, share);
     share
+}
+
+/// A mass under which no star of `population` reaches [`L_A`] at any age it has: one step of a
+/// 96-step logarithmic mass grid below the least mass that does, over 64 ages. One step of
+/// margin, because a luminous phase as brief as the AGB tip can fall between the ages sampled.
+fn luminous_floor(population: &Population, salt: u64) -> f64 {
+    static FLOORS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, f64>>> = std::sync::OnceLock::new();
+    let key = format!("{salt} {:?} {:?} {:?}", population.imf, population.age, population.feh);
+    let floors = FLOORS.get_or_init(Default::default);
+    if let Some(&m) = floors.lock().unwrap().get(&key) {
+        return m;
+    }
+    const MASSES: usize = 96;
+    const AGES: usize = 64;
+    let (young, old) = match population.age {
+        Age::Uniform { min_gyr, max_gyr } => (min_gyr, max_gyr),
+        Age::Burst { gyr, spread_gyr } => ((gyr - 4.0 * spread_gyr).max(0.0), (gyr + 4.0 * spread_gyr).min(MAX_AGE_GYR)),
+    };
+    let at = |i: usize| MIN_MASS * (MAX_MASS / MIN_MASS).powf(i as f64 / (MASSES - 1) as f64);
+    let lit = |m: f64| {
+        (0..AGES).any(|j| {
+            let age = young + (old - young) * j as f64 / (AGES - 1) as f64;
+            let feh = population.feh.zero_age + population.feh.per_gyr * age;
+            let step = (feh / lc_world::sky::galaxy::FEH_STEP).round().clamp(-128.0, 127.0) as i8;
+            tracks::evolve_step(m, age, step).luminosity_solar >= L_A
+        })
+    };
+    let floor = (0..MASSES).find(|&i| lit(at(i))).map_or(MAX_MASS, |i| at(i.saturating_sub(1)));
+    floors.lock().unwrap().insert(key, floor);
+    floor
 }
 
 fn compute_luminous_share(population: &Population, salt: u64) -> f64 {

@@ -13,6 +13,9 @@
 //! cells [`TIER_A_SPAN`] tier-B cells wide, at the luminous share of the density. Tier B is the
 //! single-tier bake as it was, less any survivor that comes out luminous and any within exclusion
 //! distance of a tier-A star, so a tier-B star that stays keeps its id, place and attributes.
+//! The price is a small shortfall in tier B: a luminous candidate takes part in tier B's thinning
+//! before it is dropped, so it leaves its exclusion ball empty, about `n·f·V` of a star each for
+//! luminous share `f`. Under a percent of the count while `f` is, as the tier tests hold.
 
 use std::f64::consts::PI;
 
@@ -315,11 +318,16 @@ fn candidates_a(compiled: &Compiled, seed: u64, cell: ACell, shares: &[f64]) -> 
     let active = compiled.reaching(center, half_diagonal);
     let step = ACell::SIDE / (TIER_A_LATTICE - 1) as f64;
     let mut bound = 0.0f64;
-    for i in 0..TIER_A_LATTICE {
-        for j in 0..TIER_A_LATTICE {
-            for k in 0..TIER_A_LATTICE {
-                let p = cell.min_corner() + DVec3::new(i as f64, j as f64, k as f64) * step;
-                bound = bound.max(intensity_a(&compiled.sample_among(p, &active), shares));
+    // The lattice, then the points halfway between its points, so a peak is never more than
+    // about 1.7 ly from a sample, at an eighth of the cost of halving the step.
+    for offset in [0.0, 0.5] {
+        let n = if offset == 0.0 { TIER_A_LATTICE } else { TIER_A_LATTICE - 1 };
+        for i in 0..n {
+            for j in 0..n {
+                for k in 0..n {
+                    let p = cell.min_corner() + (DVec3::new(i as f64, j as f64, k as f64) + offset) * step;
+                    bound = bound.max(intensity_a(&compiled.sample_among(p, &active), shares));
+                }
             }
         }
     }
@@ -355,10 +363,12 @@ fn candidates_a(compiled: &Compiled, seed: u64, cell: ACell, shares: &[f64]) -> 
     Err(BakeError::Unbounded { cell: cell.first() })
 }
 
-/// Tier A's survivors within one tier-B cell of `region`, which is as far as any exclusion
-/// reaches into it.
-fn tier_a(compiled: &Compiled, seed: u64, region: Aabb, shares: &[f64], threads: usize) -> Result<(Vec<Candidate>, usize), BakeError> {
-    let near = Aabb { min: region.min - DVec3::splat(CELL_LY), max: region.max + DVec3::splat(CELL_LY) };
+/// Tier A's survivors within one tier-B cell of `cells`, which is as far as any exclusion reaches
+/// into them, and how many tier-A candidates fell in `cells`.
+fn tier_a(compiled: &Compiled, seed: u64, cells: &[Cell], shares: &[f64], threads: usize) -> Result<(Vec<Candidate>, usize), BakeError> {
+    // From the cells' bounds, not the region's: a region cell's neighbors reach a cell past it.
+    let covered = cells.iter().fold(Aabb::EMPTY, |b, c| b.union(c.bounds()));
+    let near = Aabb { min: covered.min - DVec3::splat(CELL_LY), max: covered.max + DVec3::splat(CELL_LY) };
     let owned = acells_in(near);
     let drawn_cells = acells_in(Aabb { min: near.min - DVec3::splat(ACell::SIDE), max: near.max + DVec3::splat(ACell::SIDE) });
     if let Some(c) = drawn_cells.iter().find(|c| !c.in_grid()) {
@@ -370,7 +380,8 @@ fn tier_a(compiled: &Compiled, seed: u64, region: Aabb, shares: &[f64], threads:
         let (c, v) = d?;
         by_cell.insert(c, v);
     }
-    let candidates = owned.iter().filter_map(|c| by_cell.get(c)).map(Vec::len).sum();
+    let inside: std::collections::HashSet<Cell> = cells.iter().copied().collect();
+    let candidates = owned.iter().filter_map(|c| by_cell.get(c)).flatten().filter(|a| inside.contains(&a.key.cell)).count();
     let survivors = owned
         .iter()
         .flat_map(|cell| {
@@ -424,7 +435,7 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
         return Err(BakeError::OutsideGrid { cell });
     }
     let shares: Vec<f64> = compiled.populations.iter().map(|(id, p)| attributes::luminous_share(p, u64::from(id.0))).collect();
-    let (luminous, luminous_candidates) = tier_a(compiled, seed, region, &shares, threads)?;
+    let (luminous, luminous_candidates) = if cells.is_empty() { (Vec::new(), 0) } else { tier_a(compiled, seed, &cells, &shares, threads)? };
     let mut luminous_near: std::collections::HashMap<Cell, Vec<&Candidate>> = std::collections::HashMap::new();
     for a in &luminous {
         luminous_near.entry(a.key.cell).or_default().push(a);

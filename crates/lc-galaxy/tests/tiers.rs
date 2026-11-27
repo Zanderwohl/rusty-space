@@ -58,3 +58,22 @@ fn tier_a_has_the_luminous_share_of_the_field() {
     // About 30 a seed, so the Poisson scatter of the total is near 4%.
     assert!((got / want - 1.0).abs() < 0.15, "baked {got} tier-A stars against {want}");
 }
+
+/// A region whose edge sits just inside a cell's far face bakes, in its cells, the stars a whole
+/// bake puts there: its cells' neighbors reach a cell past the region, and tier A must reach as
+/// far.
+#[test]
+fn a_region_with_an_edge_near_a_face_bakes_what_a_whole_bake_does() {
+    let t = phase_three();
+    let c = t.compile(t.len(), None);
+    let whole = bake(&c, t.seed, c.bounds(), 4).unwrap();
+    for (lo, hi) in [(-40.9, 7.1), (0.1, 47.9), (-23.9, -0.1)] {
+        let region = lc_galaxy::Aabb { min: glam::DVec3::new(lo, lo, -8.0), max: glam::DVec3::new(hi, hi, 8.0) };
+        let cells: std::collections::HashSet<_> = lc_galaxy::sample::cells_in(region).into_iter().collect();
+        let mut got: Vec<_> = bake(&c, t.seed, region, 4).unwrap().stars.iter().map(|s| s.id).collect();
+        let mut want: Vec<_> = whole.stars.iter().filter(|s| cells.contains(&s.key.cell)).map(|s| s.id).collect();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want, "region {lo}..{hi}");
+    }
+}
