@@ -149,6 +149,10 @@ impl FeatureKind for LogSpiral {
         require(pitch > 0.0 && pitch < 90.0, "needs a pitch between 0° and 90°")?;
         require(inner > 0.0 && outer > inner, "needs 0 < inner < outer")?;
         require(tube.min_element() > 0.0 && (0.0..=tube.min_element()).contains(&edge), "needs positive half sizes and 0 ≤ edge ≤ the smaller")?;
+        // `across` sees only the nearest winding, so windings closer than the tube's width would
+        // cut it short and `volume` would overcount. The gap is narrowest at `inner`.
+        let gap = inner * libm::expm1(TAU * libm::tan(pitch.to_radians())) * libm::cos(pitch.to_radians());
+        require(gap >= 2.0 * tube.x, "winds so tightly that an arm overlaps its own next turn")?;
         let shapes = (0..self.arms)
             .map(|k| {
                 let arm = Arm {

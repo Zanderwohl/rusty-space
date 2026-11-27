@@ -275,7 +275,7 @@ fn shape(ui: &mut egui::Ui, kind: &str, s: &mut dyn ShapeKind, refs: &Refs) {
                 Field::Vec3(label, v) => vec3(ui, label, v, " ly"),
                 Field::Count(label, c) => {
                     ui.label(label);
-                    ui.add(DragValue::new(c).range(1..=kinds::MAX_ARMS));
+                    ui.add(DragValue::new(c).range(1..=kinds::MAX_ARMS).clamp_existing_to_range(false));
                     ui.end_row();
                 }
             }

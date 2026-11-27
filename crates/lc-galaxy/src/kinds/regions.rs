@@ -332,7 +332,9 @@ impl KingSphere {
         s
     }
 
-    /// `(arccos x / x - √(1 - x²)) / x²` with `x² = (1 + r²/r_c²) / (1 + r_t²/r_c²)`.
+    /// `(arccos x / x - √(1 - x²)) / x²` with `x² = (1 + r²/r_c²) / (1 + r_t²/r_c²)`. Both terms
+    /// approach `√(2(1 - x))` at the tidal radius, so digits cancel there; the weight is tiny by
+    /// then and the clamp at 0 catches a negative result.
     fn unnormalized(&self, r: f64) -> f64 {
         if r >= self.tidal {
             return 0.0;

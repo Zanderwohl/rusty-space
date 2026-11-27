@@ -90,7 +90,7 @@ fn an_add_puts_the_stars_it_asks_for_into_the_field() {
 }
 
 #[test]
-fn a_spiral_makes_one_shape_per_arm_and_the_disc_survives_a_round_trip() {
+fn a_spiral_makes_one_shape_per_arm_and_survives_a_round_trip() {
     let (t, c) = one::<LogSpiral>(|k, frame, _| {
         k.frame = frame;
         k.arms = 3;
@@ -108,6 +108,7 @@ fn shapes_that_would_not_be_finite_are_problems() {
     let bad: Vec<Box<dyn Params>> = vec![
         Box::new(Ring { frame, half_width_ly: Num::Lit(30.0), ..Ring::new() }),
         Box::new(LogSpiral { frame, arms: 0, ..LogSpiral::new() }),
+        Box::new(LogSpiral { frame, pitch_deg: Num::Lit(5.0), half_width_ly: Num::Lit(4.0), ..LogSpiral::new() }),
         Box::new(Sersic { frame, index: Num::Lit(0.1), ..Sersic::new() }),
         Box::new(King { frame, tidal_ly: Num::Lit(0.5), ..King::new() }),
         Box::new(ExponentialDisc { frame, radius_ly: Num::Lit(40_000.0), ..ExponentialDisc::new() }),

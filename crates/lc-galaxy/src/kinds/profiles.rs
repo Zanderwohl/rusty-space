@@ -185,8 +185,8 @@ impl<F: Fn(f64) -> f64 + Send + Sync + 'static> Local for Spheroid<F> {
 
 fn spheroid_checks(axis_ratio: f64, radius: f64, edge: f64) -> Result<(), Problem> {
     require(
-        axis_ratio > 0.0 && axis_ratio <= 1.0 && radius > 0.0 && (0.0..=radius * axis_ratio).contains(&edge),
-        "needs 0 < axis ratio ≤ 1, radius > 0 and 0 ≤ edge ≤ the short semi-axis",
+        axis_ratio > 0.0 && axis_ratio <= 1.0 && radius > 0.0 && (0.0..=radius).contains(&edge),
+        "needs 0 < axis ratio ≤ 1, radius > 0 and 0 ≤ edge ≤ radius",
     )
 }
 
