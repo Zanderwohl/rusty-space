@@ -8,11 +8,12 @@
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use glam::DVec3;
 use lc_galaxy::attributes::State;
-use lc_galaxy::compiled::SystemField;
+use lc_galaxy::compiled::{Frame, SystemField};
+use lc_galaxy::kinds::{PathKind, PathPoint};
 
 use crate::compare::{self, Marks, Reference, Solo};
 use lc_galaxy::sample::cells_in;
-use lc_galaxy::{Aabb, BakedStar};
+use lc_galaxy::{Aabb, BakedStar, FeatureId};
 
 use crate::doc::Doc;
 use crate::palette;
@@ -144,6 +145,8 @@ pub struct ViewState {
     pub difference: bool,
     pins: u64,
     marks: Option<Marks>,
+    /// The control point of the selected path being dragged in the region view.
+    handle: Option<usize>,
 }
 
 impl ViewState {
@@ -172,6 +175,7 @@ impl Default for ViewState {
             difference: false,
             pins: 0,
             marks: None,
+            handle: None,
         }
     }
 }
@@ -289,11 +293,25 @@ fn region(
     doc: &mut Doc,
     bounds: Aabb,
 ) {
+    let path = selected_path(doc);
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        let before = Projector::new(state.camera.eye(), state.camera.target - state.camera.eye(), state.camera.fov, rect);
+        let at = ui.input(|i| i.pointer.press_origin());
+        state.handle = path.as_ref().zip(at).and_then(|((_, frame, points), at)| nearest_handle(&before, frame, points, at));
+    }
     let cam = &mut state.camera;
     if response.dragged_by(egui::PointerButton::Primary) {
         let d = response.drag_delta();
-        cam.yaw -= d.x as f64 * 0.008;
-        cam.pitch = (cam.pitch + d.y as f64 * 0.008).clamp(-1.55, 1.55);
+        if let (Some(i), Some((id, frame, points))) = (state.handle, &path) {
+            let before = Projector::new(cam.eye(), cam.target - cam.eye(), cam.fov, rect);
+            drag_point(doc, &before, *id, frame, points, i, d);
+        } else {
+            cam.yaw -= d.x as f64 * 0.008;
+            cam.pitch = (cam.pitch + d.y as f64 * 0.008).clamp(-1.55, 1.55);
+        }
+    }
+    if response.drag_stopped() {
+        state.handle = None;
     }
     let eye = cam.eye();
     let proj = Projector::new(eye, cam.target - eye, cam.fov, rect);
@@ -371,6 +389,10 @@ fn region(
             }
         }
     }
+    // Over the stars, which a stream's own stars would otherwise hide.
+    if let Some((_, frame, points)) = &path {
+        path_gizmo(painter, &proj, frame, points, state.handle);
+    }
     scale_bar(painter, rect, proj.focal / state.camera.distance);
 
     if response.clicked()
@@ -382,6 +404,53 @@ fn region(
             .filter(|&(_, d)| d < 10.0)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         doc.picked = nearest.map(|(i, _)| stars[i].id);
+    }
+}
+
+/// Screen radius of a path's control point, px; a press this close to one drags it.
+const HANDLE_PX: f32 = 6.0;
+
+/// The selected feature when it is a path, with its frame and points.
+fn selected_path(doc: &Doc) -> Option<(FeatureId, Frame, Vec<PathPoint>)> {
+    let id = doc.selected.and_then(|i| doc.timeline.rows().get(i)?.id())?;
+    let path = doc.timeline.feature(id)?.get::<PathKind>()?;
+    let frame = doc.result.as_ref()?.compiled.frames.get(&path.frame)?.clone();
+    Some((id, frame, path.points.clone()))
+}
+
+fn nearest_handle(proj: &Projector, frame: &Frame, points: &[PathPoint], at: Pos2) -> Option<usize> {
+    points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| Some((i, proj.project(frame.to_galaxy(DVec3::from(p.at_ly)))?.0.distance(at))))
+        .filter(|&(_, d)| d <= HANDLE_PX * 2.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+}
+
+/// Moves point `i` by `d` px in the screen plane at its own depth.
+fn drag_point(doc: &mut Doc, proj: &Projector, id: FeatureId, frame: &Frame, points: &[PathPoint], i: usize, d: egui::Vec2) {
+    let Some(p) = points.get(i) else { return };
+    let Some((_, depth)) = proj.project(frame.to_galaxy(DVec3::from(p.at_ly))) else { return };
+    let world = (proj.right * d.x as f64 - proj.up * d.y as f64) * depth / proj.focal;
+    let local = frame.axes.transpose() * world;
+    if let Some(path) = doc.timeline.feature_mut(id).and_then(|f| f.get_mut::<PathKind>())
+        && let Some(point) = path.points.get_mut(i)
+    {
+        point.at_ly = (DVec3::from(point.at_ly) + local).into();
+    }
+}
+
+fn path_gizmo(painter: &egui::Painter, proj: &Projector, frame: &Frame, points: &[PathPoint], held: Option<usize>) {
+    let placed: Vec<(DVec3, f64)> = points.iter().map(|p| (frame.to_galaxy(DVec3::from(p.at_ly)), p.radius_ly)).collect();
+    for w in lc_galaxy::kinds::curve(&placed).windows(2) {
+        proj.line(painter, w[0].0, w[1].0, Stroke::new(2.0, palette::PICK));
+    }
+    for (i, (p, _)) in placed.iter().enumerate() {
+        if let Some((at, _)) = proj.project(*p) {
+            let fill = if held == Some(i) { palette::PICK } else { palette::VIEW_BACKGROUND };
+            painter.circle(at, HANDLE_PX, fill, Stroke::new(1.5, palette::PICK));
+        }
     }
 }
 

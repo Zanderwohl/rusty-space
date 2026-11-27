@@ -2,7 +2,7 @@
 
 use bevy_egui::egui::{self, DragValue, RichText};
 use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
-use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
+use lc_galaxy::kinds::{self, BoolOp, Boolean, Contribution, Field, FrameKind, PathPoint, PopulationKind, ShapeKind, ShapeRef, Unit, Variable};
 use lc_galaxy::{Compiled, FeatureId, Num, Output, Params, Row, Target, Timeline, Unread, codec};
 
 use crate::doc::Doc;
@@ -341,8 +341,52 @@ fn shape(ui: &mut egui::Ui, kind: &str, s: &mut dyn ShapeKind, refs: &Refs) {
             }
         }
     });
+    if let Some(points) = s.points_mut() {
+        ui.separator();
+        path_points(ui, points);
+    }
     ui.separator();
     contributions(ui, s.contributes_mut(), refs);
+}
+
+fn path_points(ui: &mut egui::Ui, points: &mut Vec<PathPoint>) {
+    ui.label(RichText::new("points").strong());
+    let mut insert = None;
+    let mut remove = None;
+    egui::Grid::new("path points").num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
+        for (i, p) in points.iter_mut().enumerate() {
+            ui.label(format!("{}", i + 1));
+            ui.horizontal(|ui| {
+                for c in [&mut p.at_ly.0, &mut p.at_ly.1, &mut p.at_ly.2] {
+                    ui.add(DragValue::new(c).speed(0.1).suffix(" ly"));
+                }
+                ui.label("r");
+                ui.add(DragValue::new(&mut p.radius_ly).speed(0.05).suffix(" ly"));
+            });
+            ui.horizontal(|ui| {
+                if ui.small_button("insert").clicked() {
+                    insert = Some(i);
+                }
+                if ui.small_button("remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+            ui.end_row();
+        }
+    });
+    if let Some(i) = insert {
+        // Halfway to the next point; after the last, one step on along the last span.
+        let (p, at) = (points[i], glam::DVec3::from(points[i].at_ly));
+        let point = match (points.get(i + 1), i.checked_sub(1).map(|k| points[k])) {
+            (Some(n), _) => PathPoint { at_ly: ((at + glam::DVec3::from(n.at_ly)) * 0.5).into(), radius_ly: 0.5 * (p.radius_ly + n.radius_ly) },
+            (None, Some(b)) => PathPoint { at_ly: (at * 2.0 - glam::DVec3::from(b.at_ly)).into(), ..p },
+            (None, None) => PathPoint { at_ly: (at + glam::DVec3::X * 5.0).into(), ..p },
+        };
+        points.insert(i + 1, point);
+    }
+    if let Some(i) = remove {
+        points.remove(i);
+    }
 }
 
 fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs) {

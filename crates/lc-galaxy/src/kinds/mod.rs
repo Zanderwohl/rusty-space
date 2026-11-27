@@ -5,6 +5,7 @@ use crate::feature::{FeatureId, Params, Problem, Registry};
 
 mod boolean;
 mod frame;
+mod path;
 mod plummer;
 mod population;
 mod profiles;
@@ -15,6 +16,7 @@ mod variable;
 
 pub use boolean::{BoolOp, Boolean, ShapeRef};
 pub use frame::FrameKind;
+pub use path::{PathKind, PathPoint, curve};
 pub use plummer::{Contribution, Plummer, PlummerShape};
 pub use population::{MAX_AGE_GYR, MAX_POPULATIONS, PopulationKind};
 pub use profiles::{ExponentialDisc, PowerHalo, Sersic};
@@ -36,6 +38,7 @@ pub fn register(r: &mut Registry) {
     r.register::<Ring>();
     r.register::<Bar>();
     r.register::<LogSpiral>();
+    r.register::<PathKind>();
     r.register::<Boolean>();
 }
 
@@ -49,7 +52,7 @@ pub fn as_shape(params: &mut dyn Params) -> Option<&mut dyn ShapeKind> {
         };
     }
     let any = params.as_any_mut();
-    first_of!(any: Plummer, King, ExponentialDisc, Sersic, PowerHalo, Ellipsoid, Ring, Bar, LogSpiral);
+    first_of!(any: Plummer, King, ExponentialDisc, Sersic, PowerHalo, Ellipsoid, Ring, Bar, LogSpiral, PathKind);
     None
 }
 

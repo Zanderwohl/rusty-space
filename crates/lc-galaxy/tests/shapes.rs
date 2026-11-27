@@ -3,7 +3,7 @@
 
 use glam::DVec3;
 use lc_galaxy::compiled::OpSpec;
-use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
+use lc_galaxy::kinds::{Bar, BoolOp, Boolean, Contribution, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, PathKind, PathPoint, Plummer, PopulationKind, PowerHalo, Ring, Sersic, ShapeRef};
 use lc_galaxy::{Compiled, FeatureId, FeatureKind, Num, Output, Params, Registry, Target, Timeline, codec, stats};
 
 const STARS: f64 = 1000.0;
@@ -39,6 +39,13 @@ fn every_kind() -> Vec<(&'static str, Compiled)> {
         ("ring", adding::<Ring>().1),
         ("bar", adding::<Bar>().1),
         ("log_spiral", adding::<LogSpiral>().1),
+        ("path", adding::<PathKind>().1),
+        ("tapering path", one::<PathKind>(|k, frame, pop| {
+            k.frame = frame;
+            k.points = vec![PathPoint { at_ly: (0.0, 0.0, 0.0), radius_ly: 3.2 }, PathPoint { at_ly: (5.0, 3.0, 1.0), radius_ly: 1.5 }];
+            k.contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(STARS)))];
+        })
+        .1),
         ("union", boolean(BoolOp::Union).1),
         ("intersection", boolean(BoolOp::Intersect).1),
         ("difference", boolean(BoolOp::Difference).1),
@@ -202,4 +209,18 @@ fn a_boolean_weighs_only_where_its_operation_keeps() {
             }
         }
     }
+}
+
+#[test]
+fn a_path_passes_through_its_points_and_two_in_one_place_are_a_problem() {
+    let points = [(DVec3::ZERO, 2.0), (DVec3::new(10.0, 4.0, 0.0), 3.0), (DVec3::new(15.0, -6.0, 2.0), 1.0)];
+    let nodes = lc_galaxy::kinds::curve(&points);
+    for (p, r) in points {
+        assert!(nodes.iter().any(|&(q, s)| q.distance(p) < 1e-12 && (s - r).abs() < 1e-12), "{p} is not on the curve");
+    }
+    let (mut t, _) = adding::<PathKind>();
+    let id = t.features().last().unwrap().id;
+    let path = t.feature_mut(id).unwrap().get_mut::<PathKind>().unwrap();
+    path.points[1].at_ly = path.points[0].at_ly;
+    assert!(t.compile(t.len(), None).problems.contains_key(&id));
 }

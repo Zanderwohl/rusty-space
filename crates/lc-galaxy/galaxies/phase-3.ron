@@ -1,4 +1,4 @@
-Timeline(format: 1, next_id: 16, seed: 3)
+Timeline(format: 1, next_id: 17, seed: 3)
 Feature(id: 0, kind: "frame", version: 1, enabled: true, name: "Main", params: (origin_ly: (0.0, 0.0, 0.0), tilt_deg: 0.0, azimuth_deg: 0.0, rotation: Static))
 Feature(id: 1, kind: "population", version: 1, enabled: true, name: "Thin disc", params: (frame: 0, imf: Kroupa, age: Uniform(min_gyr: 0.5, max_gyr: 10.0), feh: (zero_age: 0.1, per_gyr: -0.05, per_kly: 0.0, scatter: 0.15), dispersion: (zero_age_km_s: 10.0, exponent: 0.5)))
 Feature(id: 2, kind: "population", version: 1, enabled: true, name: "Young arm", params: (frame: 0, imf: Kroupa, age: Burst(gyr: 0.1, spread_gyr: 0.08), feh: (zero_age: 0.1, per_gyr: 0.0, per_kly: 0.0, scatter: 0.05), dispersion: (zero_age_km_s: 5.0, exponent: 0.0)))
@@ -15,3 +15,4 @@ Feature(id: 10, kind: "ring", version: 1, enabled: true, name: "Inner ring", par
 Feature(id: 11, kind: "power_halo", version: 1, enabled: true, name: "Halo", params: (frame: 0, core_ly: 6.0, slope: 3.5, axis_ratio: 0.8, radius_ly: 48.0, edge_ly: 8.0, contributes: [(Density(4), Add(300.0))]))
 Feature(id: 12, kind: "ellipsoid", version: 1, enabled: true, name: "Void", params: (frame: 0, center_ly: (30.0, -12.0, 0.0), radii_ly: (7.0, 5.0, 4.0), edge_ly: 2.0, contributes: [(Density(1), Subtract), (Density(2), Subtract)]))
 Feature(id: 13, kind: "king", version: 1, enabled: true, name: "Globular", params: (frame: 0, center_ly: (-22.0, 18.0, 9.0), core_ly: 0.8, tidal_ly: 5.0, contributes: [(Density(4), Add(150.0))]))
+Feature(id: 16, kind: "path", version: 1, enabled: true, name: "Stream", params: (frame: 0, points: [(at_ly: (-40.0, -20.0, 10.0), radius_ly: 2.5), (at_ly: (-10.0, -38.0, 16.0), radius_ly: 2.0), (at_ly: (25.0, -30.0, 14.0), radius_ly: 2.0), (at_ly: (42.0, 5.0, 8.0), radius_ly: 1.5)], edge_ly: 1.0, contributes: [(Density(4), Add(200.0)), (FeH(4), Set(0.8))]))

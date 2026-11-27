@@ -194,4 +194,8 @@ pub trait ShapeKind {
     fn contributes_mut(&mut self) -> &mut Vec<Contribution>;
     /// Everything else, in the order an editor lists it.
     fn fields(&mut self) -> Vec<Field<'_>>;
+    /// The control points of a kind drawn through them, in its frame.
+    fn points_mut(&mut self) -> Option<&mut Vec<super::path::PathPoint>> {
+        None
+    }
 }
