@@ -18,9 +18,9 @@ use lc_galaxy::sample::default_threads;
 use crate::doc::Doc;
 use crate::palette;
 
-/// Voxels along the volume's longest side, coarsest first. The last bounds memory: 192 is about
-/// 65 MB for a flattened galaxy.
-const VOLUME_LEVELS: [usize; 3] = [64, 128, 192];
+/// Voxels along the volume's longest side, coarsest first. The last bounds memory: 256 is about
+/// 155 MB for a galaxy as flat as Phase III's, with the level before it held until it lands.
+const VOLUME_LEVELS: [usize; 4] = [64, 128, 192, 256];
 /// How long a march may take while the view moves, s.
 const MOVING_BUDGET_S: f64 = 1.0 / 30.0;
 /// How long after the last move the view counts as moving, so a pause between drags does not
