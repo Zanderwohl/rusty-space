@@ -26,7 +26,8 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 `picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
-graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher and the CDN path are not started. The shipped sky is still the
+graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. The CDN path and the console's Galaxy section are planned in
+[Publishing and freezing](#publishing-and-freezing) and not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -645,8 +646,11 @@ by making **published files the truth** and the graph only the way unpublished s
   under their content hashes, and records them in the shard's manifest table. The CDN never
   overwrites ([14-hosting.md](14-hosting.md)), so a published chunk is immutable by construction.
 - **A published chunk is never rebaked.** A later graph version applies only to unpublished
-  cells. Where a new cell borders a published one, its thinning reads the published neighbor's
-  candidates from that neighbor's own pinned version, so both sides of the face still agree.
+  cells. Where a new cell borders a published one, the published stars are fixed: a new
+  candidate within the exclusion distance of a published star, or inside its shell, is dropped,
+  and new stars' shells are clamped against published neighbors. This needs only the stored
+  files, never the generator that baked them. A region baked alone still equals the same region
+  cut from a larger bake, except along a published face.
 - **Regenerating published stars from their pinned version is not the mechanism.** That would
   make every change to the generator code — an IMF bug fix, a different random stream — move
   stars players have already charted, which is the class of error `tests/ephemeris.rs` exists to
@@ -660,7 +664,58 @@ region, as a runbook step at first; publishing on demand as craft approach is po
 needs the shard to run the bake library as a job.
 
 Before launch there are no players, and the whole galaxy can be republished whenever the graph
-changes. The freeze rules matter from the first public shard on.
+changes. The freeze rules matter from the first public shard on. They are built and tested in
+Phase III, and republishing everything stays the default until launch.
+
+### As planned
+
+- **Manifests are layered.** Each chunk in a manifest carries the graph version it was baked
+  under, and a manifest names the hash of the manifest it was built from. A publish is the
+  previous manifest's chunks plus new ones. A manifest is stored under its own content hash, like
+  a chunk.
+- **Galaxies live on the CDN apart from builds**, at `galaxy/<name>/`. `tools/publish-galaxy.sh`
+  copies a published directory there as `tools/publish-build.sh` copies a build. A file that is
+  already there with the same bytes is skipped; one with different bytes under the same name is
+  refused. `tools/build-wasm.sh` stops packing `GALAXY`.
+- **The shard tells the client which manifest to load** when it connects, and the client fetches
+  it from the CDN. The client and the shard then cannot load different galaxies, a galaxy changes
+  without a new build, and switching galaxies is a change to the shard's `--sky`.
+- **`lc-galaxy diff <timeline> --against <manifest>`** bakes the current graph over each published
+  chunk's cells and compares it with the stored stars: ids and positions exactly, then count,
+  population mix and metallicity against a tolerance. One line per chunk. The Published panel
+  shows the same comparison.
+- **`publish --region <box>`** becomes safe once a bake treats published stars as fixed, since a
+  region's edge stars are then clamped against what is stored beside them.
+
+## In the administration console
+
+`lc-admin` gets a Galaxy section, read from the CDN and the shard's admin API as its systems and
+CDN views are.
+
+- **Manifests**: every manifest on the CDN, which one the shard has loaded, and each one's chunks
+  with key, graph version, hash, size, star count and tier counts.
+- **Chunks**: a chunk's stars with id, position, population, tier, mass, temperature, luminosity,
+  state and shell. A star links to the console's existing system page.
+- **Discovery**: per chunk, how much any craft knows about it. The shard answers this from the
+  knowledge store (`lc_store::knowledge`), where each craft holds a file per subject:
+
+  | level | meaning |
+  |---|---|
+  | unseen | no craft holds a file on any star in the chunk, and none has been within the client's load range of it |
+  | charted | some craft holds a `Subject::Star` file on a star in it |
+  | resolved | some craft holds a `Subject::Body` or `Subject::Population` file for a star in it |
+  | visited | some craft has been inside a star's shell in it |
+
+  Shown as a table and as a face-on map of chunk boxes colored by level, drawn as SVG on the
+  server, since the console runs no script.
+
+The discovery levels are what let game masters change a region after it is published. Authored
+system contents ([35-system-contents.md](35-system-contents.md)) and events can be added to a star
+whose chunk is below the level the change would contradict: new planets only where no craft has
+resolved or visited the system, an event anywhere its light has not yet reached a craft. The shard
+checks the level again when the change is written, since a craft may have arrived while the game
+master was working. Where these changes are stored and how they reach clients is
+[Open](#open).
 
 ## The editor
 
@@ -820,7 +875,7 @@ Cumulative, on top of E1–E3:
 |---|---|
 | I | whatever its iterations call for; expected to be the track table, the thinning parameters and the editor's panels |
 | II | the real IMF and tracks; the age–metallicity and age–velocity relations; the HR diagram and the metallicity and shell-radius histograms in Statistics; solo and difference in every view; determinism tests in separate processes and thread counts; `lc-galaxy check` and `stats` |
-| III | the shape kinds, `boolean` and `noise`; signed distances and the CPU ray marcher behind the face-on, edge-on and 3D views; coarse volumes; tier A; the manifest on the CDN, `publish` and `diff`; the Published panel; transform and falloff handles in the viewport |
+| III | the shape kinds, `boolean` and `noise`; signed distances and the CPU ray marcher behind the face-on, edge-on and 3D views; coarse volumes; tier A; layered manifests on the CDN, handed to the client by the shard; `publish --region` and `diff`; baking around published stars; the Published panel; the console's Galaxy section with discovery levels; transform and falloff handles in the viewport |
 | full | the luminosity volume in the client; the GPU marcher in the editor; the universe layout and skybox pictures |
 
 ### Live bake and scale
@@ -840,6 +895,8 @@ before the full galaxy forces it.
 | Cell side | 8 ly keeps a dense cell near a thousand candidates and a sparse one near four. Globular cores may want a finer grid, which would be a second grid level rather than a change to this one. |
 | Chunk delivery | Range requests on immutable CDN files are assumed to work through the CDN in [14-hosting.md](14-hosting.md); unverified. |
 | Shell overlap at 1 ly spacing | Shells overlap wherever stars are closer than 3.2 ly, which Phase I's 1.3–1.9 ly spacing already does. A position belongs to the *nearest* star within the shell (`lc_world::system::holding`), which the shard and the client share; the first-in-catalog-order rule it replaced put a ship beside one star into its neighbor's system. Whether a shell this much larger than the spacing still suits [03-world-model.md](03-world-model.md)'s other uses of it is open. |
+| Game-master changes | Where authored contents and events added after publishing are stored, and how they reach clients. Listing them in the manifest beside the chunks would let anyone read them from the CDN before discovering them; the shard handing them out through the knowledge path would not. |
+| Replacing an unseen chunk | Whether a published chunk that no craft has charted, resolved or visited may be rebaked, so that freezing applies once a chunk is seen rather than once it is published. Tier-A stars are seen from everywhere, so this could apply to tier B only. |
 | Published tier-B volume | How far ahead of play to publish. Sets CDN storage, which grows with exploration rather than with the galaxy. |
 | Nebulae | Authored as dust and gas fields with a young population inside. How they render and occlude is a separate design. |
 | The universe layout | Who owns the file that places shards relative to one another, and whether a shard's galaxies can be seen from another in more than a skybox picture. |
