@@ -77,3 +77,18 @@ fn a_region_with_an_edge_near_a_face_bakes_what_a_whole_bake_does() {
         assert_eq!(got, want, "region {lo}..{hi}");
     }
 }
+
+/// Each chunk file holds one tier, and a tier-A star and a tier-B star of the same chunk land in
+/// separate files.
+#[test]
+fn a_chunk_file_holds_one_tier() {
+    use lc_world::sky::galaxy::Tier;
+    let t = phase_three();
+    let c = t.compile(t.len(), None);
+    let b = lc_galaxy::bake(&c, t.seed, c.bounds(), 4).unwrap();
+    let chunks = lc_galaxy::publish::chunks(&c, &b, 0).unwrap();
+    for (tier, ch) in &chunks {
+        assert!(ch.records.iter().all(|r| r.tier_a() == (*tier == Tier::A)), "chunk {:?} mixes tiers", ch.chunk);
+    }
+    assert!(chunks.iter().any(|(t, _)| *t == Tier::A) && chunks.iter().any(|(t, _)| *t == Tier::B));
+}

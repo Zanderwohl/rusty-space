@@ -314,21 +314,34 @@ pub fn content_hash(bytes: &[u8]) -> String {
     format!("{h:016x}")
 }
 
-pub const MANIFEST_FORMAT: u32 = 1;
+pub const MANIFEST_FORMAT: u32 = 2;
 
-/// What a publish wrote: the chunks of one galaxy, and the graph version they were baked from.
+/// Which layer of the galaxy a chunk file holds. A file holds one, so an unseen tier-B chunk can
+/// be replaced while the tier-A stars in the same space stay as published.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Tier {
+    A,
+    B,
+}
+
+/// The chunks of one galaxy. A publish onto an earlier manifest keeps its chunks and names it as
+/// `parent`, so each chunk carries the graph version it was baked under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     pub format: u32,
     pub name: String,
-    /// The graph version, as 16 hex digits.
-    pub graph: String,
+    /// The content hash of the manifest this one was built from.
+    #[serde(default)]
+    pub parent: Option<String>,
     pub chunks: Vec<ManifestChunk>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ManifestChunk {
     pub chunk: (i32, i32, i32),
+    pub tier: Tier,
+    /// The graph version the chunk was baked under, as 16 hex digits.
+    pub graph: String,
     /// Relative to the manifest.
     pub file: String,
     pub hash: String,
@@ -350,11 +363,28 @@ impl ManifestChunk {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, GalaxyError> {
+        // The format alone first, so an old manifest is refused by its number rather than by
+        // whichever field it lacks.
+        #[derive(Deserialize)]
+        #[serde(rename = "Manifest")]
+        struct Format {
+            format: u32,
+        }
+        let Format { format } = ron::from_str(text).map_err(|e| GalaxyError::Manifest(e.to_string()))?;
+        if format != MANIFEST_FORMAT {
+            return Err(GalaxyError::Manifest(format!("format {format}, but this build reads {MANIFEST_FORMAT}; republish it")));
+        }
         let m: Self = ron::from_str(text).map_err(|e| GalaxyError::Manifest(e.to_string()))?;
-        if m.format > MANIFEST_FORMAT {
-            return Err(GalaxyError::Manifest(format!("format {} is newer than {MANIFEST_FORMAT}", m.format)));
+        let mut seen = std::collections::HashSet::new();
+        if let Some(c) = m.chunks.iter().find(|c| !seen.insert((c.chunk, c.tier))) {
+            return Err(GalaxyError::Manifest(format!("chunk {:?} tier {:?} is listed twice", c.chunk, c.tier)));
         }
         Ok(m)
+    }
+
+    /// What names the manifest's own file, `<hash>.galaxy`.
+    pub fn hash(&self) -> String {
+        content_hash(self.write().as_bytes())
     }
 
     pub fn write(&self) -> String {
@@ -387,7 +417,12 @@ impl Manifest {
             if content_hash(b) != entry.hash {
                 return Err(GalaxyError::HashMismatch { file: entry.file.clone() });
             }
-            chunks.push(GalaxyChunk::decode(b)?);
+            let chunk = GalaxyChunk::decode(b)?;
+            let [x, y, z] = chunk.chunk;
+            if (x, y, z) != entry.chunk || chunk.records.iter().any(|r| r.tier_a() != (entry.tier == Tier::A)) {
+                return Err(GalaxyError::Manifest(format!("{} is not chunk {:?} tier {:?}", entry.file, entry.chunk, entry.tier)));
+            }
+            chunks.push(chunk);
         }
         Ok(GalaxyProvider::new(self.name.clone(), &chunks))
     }

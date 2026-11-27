@@ -1,15 +1,17 @@
-//! A local publish: bake a whole timeline, cut it into chunks, and write them with a manifest.
+//! A local publish: bake a whole timeline, cut it into chunks of one tier each, and write them
+//! with a manifest.
 //!
 //! Refuses a timeline with any unread line or any problem: a bake that skipped a feature would
-//! publish a different galaxy than the file describes. The CDN upload is Phase III.
+//! publish a different galaxy than the file describes.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, MANIFEST_FORMAT, Manifest, ManifestChunk, chunk_of, content_hash};
+use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, MANIFEST_FORMAT, Manifest, ManifestChunk, Tier, chunk_of, content_hash};
 use lc_world::sky::generate::SystemProfile;
 
 use crate::attributes::{State, kinematics};
+use crate::sample::Tier as BakedTier;
 use crate::{Bake, BakedStar, Compiled, Row, StarId, Timeline, bake, codec};
 
 /// Bumped whenever the generator would bake a different galaxy from the same timeline.
@@ -52,19 +54,20 @@ pub fn shells(stars: &[BakedStar]) -> Vec<f64> {
     out
 }
 
-/// The bake cut into chunks, each brightest first, each with its table of system profiles and
+/// The bake cut into chunks, one file per chunk and tier, each brightest first, each with its table of system profiles and
 /// each star's shell. A region published alone would clamp its edge stars against nothing
 /// outside it, so publish whole graphs, or regions with a margin of twice `MAX_SHELL_LY`.
-pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Result<Vec<GalaxyChunk>, String> {
+pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Result<Vec<(Tier, GalaxyChunk)>, String> {
     let shell: HashMap<StarId, f64> = bake.stars.iter().map(|s| s.id).zip(shells(&bake.stars)).collect();
     let populations: Vec<_> = compiled.populations.keys().map(|id| kinematics(compiled, *id).expect("a compiled population has its frame")).collect();
-    let mut by_chunk: BTreeMap<[i32; 3], Vec<_>> = BTreeMap::new();
+    let mut by_chunk: BTreeMap<([i32; 3], Tier), Vec<_>> = BTreeMap::new();
     for s in &bake.stars {
-        by_chunk.entry(chunk_of(s.key.cell.0.to_array())).or_default().push(s);
+        let tier = if s.tier == BakedTier::A { Tier::A } else { Tier::B };
+        by_chunk.entry((chunk_of(s.key.cell.0.to_array()), tier)).or_default().push(s);
     }
     by_chunk
         .into_iter()
-        .map(|(chunk, mut stars)| {
+        .map(|((chunk, tier), mut stars)| {
             stars.sort_by(|a, b| b.attributes.luminosity_solar.total_cmp(&a.attributes.luminosity_solar).then(a.id.cmp(&b.id)));
             let mut profiles = vec![SystemProfile::default()];
             let mut records = Vec::with_capacity(stars.len());
@@ -81,12 +84,14 @@ pub fn chunks(compiled: &Compiled, bake: &Bake, graph: u64) -> Result<Vec<Galaxy
                 }
                 records.push(GalaxyRecord { profile: index as u8, ..s.attributes.record }.with_shell(shell[&s.id]));
             }
-            Ok(GalaxyChunk { graph, chunk, populations: populations.clone(), profiles, records })
+            Ok((tier, GalaxyChunk { graph, chunk, populations: populations.clone(), profiles, records }))
         })
         .collect()
 }
 
-/// Bakes `timeline` and writes `out/manifest.galaxy` and `out/chunks/<hash>.lcg`.
+/// Bakes `timeline` and writes `out/chunks/<hash>.lcg`, the manifest as `out/<hash>.galaxy`, and
+/// the same manifest as `out/manifest.galaxy` for a local shard or client to name. Files a
+/// previous publish left in `out` are removed.
 pub fn publish(timeline: &Timeline, name: &str, out: &Path, threads: usize) -> Result<Manifest, String> {
     let compiled = timeline.compile(timeline.len(), None);
     let refused = refusals(timeline, &compiled);
@@ -97,13 +102,13 @@ pub fn publish(timeline: &Timeline, name: &str, out: &Path, threads: usize) -> R
     let baked = bake(&compiled, timeline.seed, compiled.bounds(), threads).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out.join("chunks")).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut entries = Vec::new();
-    for chunk in chunks(&compiled, &baked, graph)? {
+    for (tier, chunk) in chunks(&compiled, &baked, graph)? {
         let bytes = chunk.encode().map_err(|e| e.to_string())?;
         let hash = content_hash(&bytes);
         let file = format!("chunks/{hash}.lcg");
         std::fs::write(out.join(&file), &bytes).map_err(|e| format!("{file}: {e}"))?;
         let [x, y, z] = chunk.chunk;
-        entries.push(ManifestChunk { chunk: (x, y, z), file, hash, stars: chunk.records.len() as u32 });
+        entries.push(ManifestChunk { chunk: (x, y, z), tier, graph: format!("{graph:016x}"), file, hash, stars: chunk.records.len() as u32 });
     }
     let current: std::collections::BTreeSet<String> = entries.iter().map(|e| format!("{}.lcg", e.hash)).collect();
     for entry in std::fs::read_dir(out.join("chunks")).map_err(|e| format!("chunks: {e}"))?.flatten() {
@@ -112,7 +117,16 @@ pub fn publish(timeline: &Timeline, name: &str, out: &Path, threads: usize) -> R
             std::fs::remove_file(entry.path()).map_err(|e| format!("chunks/{name}: {e}"))?;
         }
     }
-    let manifest = Manifest { format: MANIFEST_FORMAT, name: name.into(), graph: format!("{graph:016x}"), chunks: entries };
-    std::fs::write(out.join("manifest.galaxy"), manifest.write()).map_err(|e| format!("manifest: {e}"))?;
+    let manifest = Manifest { format: MANIFEST_FORMAT, name: name.into(), parent: None, chunks: entries };
+    let own = format!("{}.galaxy", manifest.hash());
+    for entry in std::fs::read_dir(out).map_err(|e| format!("{}: {e}", out.display()))?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".galaxy") && name != own && name != "manifest.galaxy" {
+            std::fs::remove_file(entry.path()).map_err(|e| format!("{name}: {e}"))?;
+        }
+    }
+    for file in [own.as_str(), "manifest.galaxy"] {
+        std::fs::write(out.join(file), manifest.write()).map_err(|e| format!("{file}: {e}"))?;
+    }
     Ok(manifest)
 }

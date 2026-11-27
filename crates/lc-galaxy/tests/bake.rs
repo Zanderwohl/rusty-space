@@ -170,7 +170,7 @@ fn a_published_galaxy_loads_as_baked() {
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
     let chunks = lc_galaxy::publish::chunks(&c, &b, 7).unwrap();
     assert!(chunks.len() > 1, "the ball straddles the origin, so several chunks");
-    let decoded: Vec<_> = chunks.iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let decoded: Vec<_> = chunks.iter().map(|(_, ch)| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = lc_world::sky::galaxy::GalaxyProvider::new("t".into(), &decoded);
     use lc_galaxy::attributes::State;
     // The loader leaves out neutron stars and black holes, which give the sky nothing.
@@ -216,6 +216,13 @@ fn republishing_removes_chunks_the_manifest_no_longer_names() {
     on_disk.sort();
     listed.sort();
     assert_eq!(on_disk, listed);
+    let manifests: Vec<String> = std::fs::read_dir(&out)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".galaxy"))
+        .collect();
+    assert_eq!(manifests.len(), 2, "{manifests:?}");
+    assert!(manifests.contains(&format!("{}.galaxy", m.hash())));
     std::fs::remove_dir_all(&out).unwrap();
 }
 
@@ -228,7 +235,7 @@ fn in_phase_one_a_ship_beside_a_star_is_in_its_system() {
     use lc_world::sky::galaxy::{GalaxyChunk, GalaxyProvider};
     let (t, c) = phase_one();
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
-    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|(_, ch)| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = GalaxyProvider::new("phase-1".into(), &chunks);
     let stars = provider.stars();
     use lc_world::sky::shells::nominal_ly;
@@ -292,7 +299,7 @@ fn system_fields_reach_the_loaded_star() {
     let c = t.compile(t.len(), None);
     assert!(c.problems.is_empty(), "{:?}", c.problems);
     let b = bake(&c, t.seed, c.bounds(), 4).unwrap();
-    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|ch| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
+    let chunks: Vec<_> = lc_galaxy::publish::chunks(&c, &b, 0).unwrap().iter().map(|(_, ch)| GalaxyChunk::decode(&ch.encode().unwrap()).unwrap()).collect();
     let provider = GalaxyProvider::new("t".into(), &chunks);
     let (mut inside, mut outside) = (0, 0);
     for s in provider.stars() {

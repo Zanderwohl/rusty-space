@@ -86,7 +86,7 @@ fn main() -> ExitCode {
             match publish::publish(&timeline, &name, &PathBuf::from(&out), threads) {
                 Ok(m) => {
                     let stars: u32 = m.chunks.iter().map(|c| c.stars).sum();
-                    println!("{name}: {stars} stars in {} chunk(s), graph {}, to {out}", m.chunks.len(), m.graph);
+                    println!("{name}: {stars} stars in {} chunk file(s), graph {:016x}, manifest {}, to {out}", m.chunks.len(), publish::graph_version(&timeline), m.hash());
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

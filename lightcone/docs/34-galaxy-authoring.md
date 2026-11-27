@@ -592,8 +592,10 @@ and frozen. Physics derived from the stored draws may be retuned like any other 
 
 As built (`lc_world::sky::galaxy`), a chunk file is a header — the graph version, the chunk's
 coordinates, and each population's frame, rotation curve and dispersion — then its records,
-brightest first. Files are named by their content hash, and a `manifest.galaxy` in RON lists
-them with their hashes; the loader refuses a chunk whose bytes do not match. Remnants that emit
+brightest first. A file holds one tier. Files are named by their content hash, and a manifest
+in RON (format 2) lists each with its chunk, tier, graph version and hash; the loader refuses a
+chunk whose bytes, coordinates or tier do not match its entry. A publish writes the manifest as
+`<hash>.galaxy` and again as `manifest.galaxy`. Remnants that emit
 nothing are left out of the sky on load.
 
 Velocity, luminosity, temperature, radius and `mu` are computed on load, by the same code the
@@ -645,8 +647,11 @@ by making **published files the truth** and the graph only the way unpublished s
 - **Publish** bakes a region under the current graph version, uploads its chunk files to the CDN
   under their content hashes, and records them in the shard's manifest table. The CDN never
   overwrites ([14-hosting.md](14-hosting.md)), so a published chunk is immutable by construction.
-- **A published chunk is never rebaked.** A later graph version applies only to unpublished
-  cells. Where a new cell borders a published one, the published stars are fixed: a new
+- **A published chunk is never rebaked once a craft has seen it.** A tier-B chunk that no craft
+  has charted, resolved or visited (its discovery level is *unseen*, see
+  [In the administration console](#in-the-administration-console)) may be rebaked and replaced
+  under a later graph version. A tier-A chunk is never replaced, since tier-A stars are seen from
+  everywhere. Otherwise a later graph version applies only to unpublished cells. Where a new cell borders a published one, the published stars are fixed: a new
   candidate within the exclusion distance of a published star, or inside its shell, is dropped,
   and new stars' shells are clamped against published neighbors. This needs only the stored
   files, never the generator that baked them. A region baked alone still equals the same region
@@ -669,10 +674,13 @@ Phase III, and republishing everything stays the default until launch.
 
 ### As planned
 
+- **A chunk file holds one tier** (built). Tier A and tier B of the same 256 ly chunk are separate
+  files with separate manifest entries, so an unseen tier-B chunk can be replaced while the tier-A
+  stars in the same space stay as published.
 - **Manifests are layered.** Each chunk in a manifest carries the graph version it was baked
-  under, and a manifest names the hash of the manifest it was built from. A publish is the
-  previous manifest's chunks plus new ones. A manifest is stored under its own content hash, like
-  a chunk.
+  under, and a manifest is stored under its own content hash, like a chunk (both built). A
+  manifest names the hash of the manifest it was built from in `parent`, and a publish onto it is
+  that manifest's chunks plus new ones (not built: it needs the bake around published stars).
 - **Galaxies live on the CDN apart from builds**, at `galaxy/<name>/`. `tools/publish-galaxy.sh`
   copies a published directory there as `tools/publish-build.sh` copies a build. A file that is
   already there with the same bytes is skipped; one with different bytes under the same name is
@@ -896,7 +904,6 @@ before the full galaxy forces it.
 | Chunk delivery | Range requests on immutable CDN files are assumed to work through the CDN in [14-hosting.md](14-hosting.md); unverified. |
 | Shell overlap at 1 ly spacing | Shells overlap wherever stars are closer than 3.2 ly, which Phase I's 1.3–1.9 ly spacing already does. A position belongs to the *nearest* star within the shell (`lc_world::system::holding`), which the shard and the client share; the first-in-catalog-order rule it replaced put a ship beside one star into its neighbor's system. Whether a shell this much larger than the spacing still suits [03-world-model.md](03-world-model.md)'s other uses of it is open. |
 | Game-master changes | Where authored contents and events added after publishing are stored, and how they reach clients. Listing them in the manifest beside the chunks would let anyone read them from the CDN before discovering them; the shard handing them out through the knowledge path would not. |
-| Replacing an unseen chunk | Whether a published chunk that no craft has charted, resolved or visited may be rebaked, so that freezing applies once a chunk is seen rather than once it is published. Tier-A stars are seen from everywhere, so this could apply to tier B only. |
 | Published tier-B volume | How far ahead of play to publish. Sets CDN storage, which grows with exploration rather than with the galaxy. |
 | Nebulae | Authored as dust and gas fields with a young population inside. How they render and occlude is a separate design. |
 | The universe layout | Who owns the file that places shards relative to one another, and whether a shard's galaxies can be seen from another in more than a skybox picture. |

@@ -81,8 +81,8 @@ fn the_manifest_checks_each_chunk_and_skips_dark_remnants() {
     let manifest = Manifest {
         format: MANIFEST_FORMAT,
         name: "test".into(),
-        graph: "000000000000feed".into(),
-        chunks: vec![ManifestChunk { chunk: (-1, -1, -1), file: "a.lcg".into(), hash: content_hash(&bytes), stars: 3 }],
+        parent: None,
+        chunks: vec![entry((-1, -1, -1), tier_of(&chunk()), "a.lcg", content_hash(&bytes))],
     };
     let again = Manifest::parse(&manifest.write()).unwrap();
     assert_eq!(again, manifest);
@@ -121,10 +121,10 @@ fn a_record_whose_cell_leaves_its_chunk_is_refused() {
 
 #[test]
 fn a_manifest_names_only_files_beside_it() {
-    let entry = |file: &str| ManifestChunk { chunk: (0, 0, 0), file: file.into(), hash: String::new(), stars: 0 };
-    assert!(entry("chunks/a.lcg").checked_file().is_ok());
+    let named = |file: &str| entry((0, 0, 0), Tier::B, file, String::new());
+    assert!(named("chunks/a.lcg").checked_file().is_ok());
     for bad in ["../a.lcg", "chunks/../../a.lcg", "/etc/hosts", "./a.lcg", ""] {
-        assert!(entry(bad).checked_file().is_err(), "{bad}");
+        assert!(named(bad).checked_file().is_err(), "{bad}");
     }
 }
 
@@ -142,4 +142,37 @@ fn a_record_carries_its_system_profile() {
     }
     c.records[0].profile = 2;
     assert!(GalaxyChunk::decode(&c.encode().unwrap()).is_err(), "an index past the table is refused");
+}
+
+fn entry(chunk: (i32, i32, i32), tier: Tier, file: &str, hash: String) -> ManifestChunk {
+    ManifestChunk { chunk, tier, graph: "000000000000feed".into(), file: file.into(), hash, stars: 3 }
+}
+
+/// The test chunk's tier, read from its first record.
+fn tier_of(c: &GalaxyChunk) -> Tier {
+    if c.records[0].tier_a() { Tier::A } else { Tier::B }
+}
+
+/// A manifest of the previous format is refused by its number, and so is one that lists a chunk
+/// and tier twice or whose entry names the wrong tier for its file.
+#[test]
+fn a_manifest_is_refused_for_its_format_a_repeat_or_a_wrong_tier() {
+    let old = "(format: 1, name: \"x\", graph: \"0\", chunks: [])";
+    assert!(matches!(Manifest::parse(old), Err(GalaxyError::Manifest(why)) if why.contains("format 1")));
+
+    let c = chunk();
+    let bytes = c.encode().unwrap();
+    let tier = tier_of(&c);
+    let twice = Manifest {
+        format: MANIFEST_FORMAT,
+        name: "test".into(),
+        parent: Some("00000000000000aa".into()),
+        chunks: vec![entry((-1, -1, -1), tier, "a.lcg", content_hash(&bytes)), entry((-1, -1, -1), tier, "b.lcg", content_hash(&bytes))],
+    };
+    assert!(Manifest::parse(&twice.write()).is_err());
+
+    let other = if tier == Tier::A { Tier::B } else { Tier::A };
+    let wrong = Manifest { chunks: vec![entry((-1, -1, -1), other, "a.lcg", content_hash(&bytes))], ..twice };
+    let wrong = Manifest::parse(&wrong.write()).unwrap();
+    assert!(matches!(wrong.load(&[bytes]), Err(GalaxyError::Manifest(_))));
 }
