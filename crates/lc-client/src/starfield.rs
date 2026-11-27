@@ -112,16 +112,17 @@ pub const KNOBS: [(&str, fn(&mut PointStyle) -> &mut f32, f32, f32); 15] = [
     ("corona flow", |s| &mut s.corona_flow, 0.0, 40.0),
 ];
 
-/// The background. Small, tight, and it must stay readable as a field of thousands.
+/// The background. Small, tight, and it must stay readable as a field of thousands. Its point
+/// laws come from [`em_spectra::point::DISTANT`], which Galaxy Forge's pictures draw with too.
 pub const DISTANT: PointStyle = PointStyle {
-    min_px: 1.0,
-    max_px: 3.0,
-    glow_radius_gain: 0.12,
-    overflow_gain: 0.25,
-    brightness: 1.2,
-    halo_gain: 0.25,
+    min_px: em_spectra::point::DISTANT.min_px,
+    max_px: em_spectra::point::DISTANT.max_px,
+    glow_radius_gain: em_spectra::point::DISTANT.glow_radius_gain,
+    overflow_gain: em_spectra::point::DISTANT.overflow_gain,
+    brightness: em_spectra::point::DISTANT.brightness,
+    halo_gain: em_spectra::point::DISTANT.halo_gain,
     // Nothing three pixels across has visible structure, and noise at that size is a shimmer.
-    halo_falloff: 1.9,
+    halo_falloff: em_spectra::point::DISTANT.halo_falloff,
     corona_strength: 0.0,
     corona_reach_min: 0.2,
     corona_reach_span: 0.5,

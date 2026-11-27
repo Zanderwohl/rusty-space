@@ -348,12 +348,18 @@ impl Picture {
     /// its light has at full brightness, times `saturation`. Mapped in sRGB, a dim warm pixel
     /// came out brown and a dim pale one gray; in OKLCh it stays the color it is, only darker.
     pub fn to_rgba8(&self, decades: f64, saturation: f64) -> Vec<u8> {
+        encode(&self.display(decades, saturation).0)
+    }
+
+    /// [`Picture::to_rgba8`] before encoding: linear display colors, for drawing stars over, and
+    /// the luminance at the top of the window.
+    pub fn display(&self, decades: f64, saturation: f64) -> (Vec<[f64; 3]>, f64) {
         use em_spectra::oklab;
         let luminance = |p: &[f32; 3]| 0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2]);
         let mut lit: Vec<f64> = self.pixels.iter().map(luminance).filter(|&l| l > 0.0).collect();
         lit.sort_by(f64::total_cmp);
         let peak = lit.get(((lit.len() as f64 * 0.999) as usize).min(lit.len().saturating_sub(1))).copied().unwrap_or(1.0);
-        let mut out = Vec::with_capacity(self.pixels.len() * 4);
+        let mut out = Vec::with_capacity(self.pixels.len());
         for p in &self.pixels {
             let y = luminance(p);
             // The square root lifts the middle of the range as sRGB's encoding lifted it before,
@@ -368,12 +374,82 @@ impl Picture {
                 let scale = saturation * lightness / l0.max(1e-6);
                 in_gamut([lightness, a0 * scale, b0 * scale])
             };
-            for c in rgb {
-                out.push((em_spectra::cie::encode_srgb(c) * 255.0).round() as u8);
-            }
-            out.push(255);
+            out.push(rgb);
         }
-        out
+        (out, peak)
+    }
+}
+
+/// RGBA, sRGB-encoded, from linear display colors; above 1 clips to white.
+pub fn encode(display: &[[f64; 3]]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(display.len() * 4);
+    for c in display {
+        for v in c {
+            out.push((em_spectra::cie::encode_srgb(v.clamp(0.0, 1.0)) * 255.0).round() as u8);
+        }
+        out.push(255);
+    }
+    out
+}
+
+/// Doc 34's `L_A`, L☉: stars brighter than this are seen from across the galaxy, so a picture
+/// draws them as points over the light of the rest.
+pub const BRIGHT_LUMINOSITY: f64 = 100.0;
+
+/// A star a picture draws as a point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bright {
+    pub position_ly: DVec3,
+    pub luminosity_solar: f64,
+    pub teff_k: f64,
+}
+
+/// Draws `stars` over `display`, a `width` × `height` picture seen through `view`, as the game's
+/// sky draws distant stars ([`em_spectra::point::DISTANT`]), in the game's colors
+/// ([`em_spectra::presets::natural`]).
+///
+/// Exposed as the picture is: a star's light falls into one pixel, so it reads as its
+/// luminosity over the pixel's area against `peak`, the luminance at the top of the picture's
+/// window, shifted by `exposure` stops. The brightest stars are then many stops over and glare,
+/// as they do in the sky. `screen_px` is screen pixels per picture pixel, since a sprite's size
+/// is in screen pixels.
+#[allow(clippy::too_many_arguments)]
+pub fn sprinkle(display: &mut [[f64; 3]], width: u32, height: u32, view: &View, stars: &[Bright], peak: f64, exposure: f64, screen_px: f64) {
+    use em_spectra::point::DISTANT;
+    let mapping = em_spectra::presets::natural();
+    let area = view.ly_per_px * view.ly_per_px;
+    let shown: Vec<(&Bright, [f32; 3])> = stars
+        .iter()
+        .filter(|s| s.luminosity_solar >= BRIGHT_LUMINOSITY && s.teff_k > 0.0)
+        .map(|s| {
+            // Band light per unit of output, times the output: a star's light at any one distance.
+            let per_band = em_spectra::blackbody::per_band(s.teff_k);
+            let total = em_spectra::blackbody::radiant_exitance(s.teff_k) / std::f64::consts::PI;
+            (s, mapping.apply_f64(&per_band).map(|c| (c / total * s.luminosity_solar / area) as f32))
+        })
+        .collect();
+    let reference = (peak * 2f64.powf(-exposure)) as f32;
+    let (_, right, up) = view.basis();
+    for (star, linear) in shown {
+        let Some(sprite) = DISTANT.sprite(linear, reference) else { continue };
+        let d = star.position_ly - view.target;
+        let (sx, sy) = (f64::from(width) * 0.5 + d.dot(right) / view.ly_per_px, f64::from(height) * 0.5 - d.dot(up) / view.ly_per_px);
+        // At least most of a pixel, so a star in a coarse picture still lands somewhere.
+        let radius = (f64::from(sprite.radius_px) / screen_px).max(0.7);
+        let (x0, x1) = ((sx - radius).floor().max(0.0) as i64, (sx + radius).ceil().min(f64::from(width)) as i64);
+        let (y0, y1) = ((sy - radius).floor().max(0.0) as i64, (sy + radius).ceil().min(f64::from(height)) as i64);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let r = ((x as f64 + 0.5 - sx).hypot(y as f64 + 0.5 - sy) / radius) as f32;
+                let w = f64::from(DISTANT.profile(&sprite, r));
+                if w > 0.0 {
+                    let px = &mut display[(y as u32 * width + x as u32) as usize];
+                    for k in 0..3 {
+                        px[k] += f64::from(sprite.color[k]) * w;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -415,5 +491,24 @@ mod tests {
             assert!(forward.distance(toward) < 1e-12, "{}: {forward}", side.label());
             assert!((right.length() - 1.0).abs() < 1e-12 && right.dot(forward).abs() < 1e-12 && (up.length() - 1.0).abs() < 1e-12);
         }
+    }
+
+    /// A bright star lands at its projected pixel, brighter with exposure, and a star under
+    /// [`BRIGHT_LUMINOSITY`] is not drawn.
+    #[test]
+    fn bright_stars_land_where_they_project() {
+        let view = View { target: DVec3::ZERO, yaw: -std::f64::consts::FRAC_PI_2, pitch: std::f64::consts::FRAC_PI_2, ly_per_px: 1.0 };
+        let draw = |l: f64, exposure: f64| {
+            let mut display = vec![[0.0; 3]; 21 * 21];
+            let star = Bright { position_ly: DVec3::new(4.0, 2.0, 0.0), luminosity_solar: l, teff_k: 20_000.0 };
+            sprinkle(&mut display, 21, 21, &view, &[star], 100.0, exposure, 1.0);
+            display
+        };
+        let at = |d: &[[f64; 3]], x: usize, y: usize| d[y * 21 + x].iter().sum::<f64>();
+        // +X right and +Y up from +Z: (4, 2) is four right of center and two up.
+        let (dim, bright) = (draw(1000.0, 0.0), draw(1000.0, 8.0));
+        assert!(at(&dim, 14, 8) > 0.0 && at(&dim, 10, 10) == 0.0, "the star is not at its pixel");
+        assert!(at(&bright, 14, 8) > at(&dim, 14, 8));
+        assert!(draw(50.0, 8.0).iter().all(|p| p.iter().sum::<f64>() == 0.0), "a faint star was drawn");
     }
 }

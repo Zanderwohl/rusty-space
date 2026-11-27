@@ -3,7 +3,7 @@
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
 //! lc-galaxy picture <timeline.ron> --out <png> [--side +x|-x|+y|-y|+z|-z] [--size <w>x<h>]
-//!                   [--resolution <voxels>] [--decades <n>] [--saturation <k>]
+//!                   [--resolution <voxels>] [--decades <n>] [--saturation <k>] [--star-exposure <stops>|off]
 //! ```
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation" | "--star-exposure")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
         eprintln!("usage: lc-galaxy check|stats|publish|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
         return ExitCode::FAILURE;
@@ -113,7 +113,7 @@ fn main() -> ExitCode {
 }
 
 fn picture(timeline: &lc_galaxy::Timeline, after: &dyn Fn(&str) -> Option<String>) -> Result<String, String> {
-    use lc_galaxy::picture::{Side, View, Volume, march};
+    use lc_galaxy::picture::{Bright, Side, View, Volume, march, sprinkle};
     let out = after("--out").ok_or("picture needs --out <png>")?;
     let side = match after("--side") {
         Some(s) => Side::named(&s).ok_or(format!("--side {s}: not one of +x, -x, +y, -y, +z, -z"))?,
@@ -136,7 +136,14 @@ fn picture(timeline: &lc_galaxy::Timeline, after: &dyn Fn(&str) -> Option<String
     }
     let volume = Volume::of(&compiled, resolution, default_threads());
     let view = View::fitting(side, volume.bounds(), width, height);
-    let rgba = march(&volume, &view, width, height, default_threads()).to_rgba8(decades, saturation);
+    let (mut display, peak) = march(&volume, &view, width, height, default_threads()).display(decades, saturation);
+    if after("--star-exposure").as_deref() != Some("off") {
+        let exposure = number("--star-exposure", 0.0)?;
+        let baked = lc_galaxy::bake(&compiled, timeline.seed, compiled.bounds(), default_threads()).map_err(|e| e.to_string())?;
+        let stars: Vec<Bright> = baked.stars.iter().map(|s| Bright { position_ly: s.position_ly, luminosity_solar: s.attributes.luminosity_solar, teff_k: s.attributes.teff_k }).collect();
+        sprinkle(&mut display, width, height, &view, &stars, peak, exposure, 1.0);
+    }
+    let rgba = lc_galaxy::picture::encode(&display);
     let file = std::fs::File::create(&out).map_err(|e| format!("{out}: {e}"))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);

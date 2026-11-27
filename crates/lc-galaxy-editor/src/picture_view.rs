@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use bevy_egui::egui::{self, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use glam::DVec3;
 use lc_galaxy::Compiled;
-use lc_galaxy::picture::{Progress, Side, View, Volume, lights, march_exact, march_until};
+use lc_galaxy::picture::{BRIGHT_LUMINOSITY, Bright, Progress, Side, View, Volume, encode, lights, march_exact, march_until, sprinkle};
 use lc_galaxy::sample::default_threads;
 
 use crate::doc::Doc;
@@ -98,6 +98,8 @@ struct ImageKey {
     saturation: f64,
     /// Through the graph rather than the volume.
     exact: bool,
+    /// Stops of exposure for the bright stars drawn over the light; `None` draws none.
+    stars: Option<f64>,
 }
 
 struct Marched {
@@ -112,6 +114,8 @@ pub struct PictureView {
     refit: bool,
     decades: f64,
     saturation: f64,
+    stars: bool,
+    star_exposure: f64,
     volume: Job<VolumeKey, Arc<Volume>>,
     image: Job<ImageKey, Marched>,
     texture: Option<TextureHandle>,
@@ -131,6 +135,8 @@ impl Default for PictureView {
             refit: true,
             decades: 3.0,
             saturation: 1.2,
+            stars: true,
+            star_exposure: 0.0,
             volume: Job::default(),
             image: Job::default(),
             texture: None,
@@ -162,6 +168,11 @@ impl PictureView {
         ui.add(egui::DragValue::new(&mut self.decades).range(0.5..=8.0).speed(0.05).suffix(" dex"));
         ui.label("saturation");
         ui.add(egui::DragValue::new(&mut self.saturation).range(0.0..=3.0).speed(0.01));
+        ui.separator();
+        ui.toggle_value(&mut self.stars, "stars");
+        if self.stars {
+            ui.add(egui::DragValue::new(&mut self.star_exposure).range(-12.0..=12.0).speed(0.05).suffix(" stops"));
+        }
     }
 
     pub fn show(&mut self, ui: &egui::Ui, painter: &egui::Painter, rect: Rect, response: &egui::Response, doc: &Doc) {
@@ -203,7 +214,7 @@ impl PictureView {
             let cost = m.took.as_secs_f64() / pixels;
             self.cost = Some(self.cost.map_or(cost, |c| 0.5 * c + 0.5 * cost));
         }
-        let current = |k: &ImageKey| k.camera == camera && k.volume == volume_key && k.screen == screen && k.decades == self.decades && k.saturation == self.saturation;
+        let current = |k: &ImageKey| k.camera == camera && k.volume == volume_key && k.screen == screen && k.decades == self.decades && k.saturation == self.saturation && k.stars == self.stars.then_some(self.star_exposure);
         self.downsample = if moving {
             let pixels = f64::from(screen[0]) * f64::from(screen[1]);
             self.cost.map_or(8.0, |c| (pixels * c / MOVING_BUDGET_S).sqrt()).clamp(1.0, MAX_DOWNSAMPLE)
@@ -216,14 +227,20 @@ impl PictureView {
         };
         let finest = volume_key.1 + 1 == VOLUME_LEVELS.len();
         let exact = !moving && finest && self.downsample <= 1.0 && self.image.done.as_ref().is_some_and(|(k, _)| current(k) && k.downsample <= 1.0);
-        let key = ImageKey { volume: volume_key, camera, downsample: self.downsample, screen, decades: self.decades, saturation: self.saturation, exact };
+        let key = ImageKey { volume: volume_key, camera, downsample: self.downsample, screen, decades: self.decades, saturation: self.saturation, exact, stars: self.stars.then_some(self.star_exposure) };
         let stale = |r: &Running<ImageKey, Marched>| r.key.volume != key.volume || r.key.downsample < key.downsample;
         let done_here = self.image.done.as_ref().is_some_and(|(k, _)| *k == key);
         let running_here = self.image.running.as_ref().is_some_and(|r| r.key == key);
         if !done_here && !running_here && self.image.running.as_ref().is_none_or(stale) {
             // Only the exact march reads it, and cloning it is cheap beside any march.
             let compiled = result.compiled.clone();
-            self.image.start(key.clone(), move |stop| march(&volume, &compiled, &key, stop));
+            let bright: Vec<Bright> = doc
+                .stars()
+                .iter()
+                .filter(|s| s.attributes.luminosity_solar >= BRIGHT_LUMINOSITY)
+                .map(|s| Bright { position_ly: s.position_ly, luminosity_solar: s.attributes.luminosity_solar, teff_k: s.attributes.teff_k })
+                .collect();
+            self.image.start(key.clone(), move |stop| march(&volume, &compiled, &bright, &key, stop));
         }
 
         if let Some((k, m)) = &self.image.done
@@ -278,7 +295,7 @@ impl PictureView {
     }
 }
 
-fn march(volume: &Volume, compiled: &Compiled, key: &ImageKey, progress: &Progress) -> Option<Marched> {
+fn march(volume: &Volume, compiled: &Compiled, bright: &[Bright], key: &ImageKey, progress: &Progress) -> Option<Marched> {
     let start = Instant::now();
     let size = key.screen.map(|n| ((f64::from(n) / key.downsample).round() as u32).max(1));
     let c = key.camera;
@@ -288,7 +305,11 @@ fn march(volume: &Volume, compiled: &Compiled, key: &ImageKey, progress: &Progre
     } else {
         march_until(volume, &view, size[0], size[1], default_threads(), progress)?
     };
-    let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &picture.to_rgba8(key.decades, key.saturation));
+    let (mut display, peak) = picture.display(key.decades, key.saturation);
+    if let Some(exposure) = key.stars {
+        sprinkle(&mut display, size[0], size[1], &view, bright, peak, exposure, key.downsample);
+    }
+    let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &encode(&display));
     Some(Marched { image, took: start.elapsed() })
 }
 

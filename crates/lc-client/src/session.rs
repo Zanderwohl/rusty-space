@@ -999,8 +999,7 @@ fn build_target(star: &CatalogStar) -> Target {
     Target::new(SystemFrame::new(origin), model)
 }
 
-/// Stops of brightness a star field spreads over, beyond the tone map's own window.
-pub const POINT_STOPS: f32 = 14.0;
+pub use em_spectra::point::POINT_STOPS;
 
 /// How large a star should be drawn: its brightness across [`POINT_STOPS`], plus any glow.
 pub fn point_size(shaded: &Shaded, base: f32) -> f32 {
