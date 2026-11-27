@@ -5,11 +5,32 @@
 //! Emission only: the graph carries no dust field yet, so nothing absorbs. Light is linear sRGB,
 //! as [`crate::light`] defines it.
 
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
 use glam::{DVec3, UVec3};
 
 use crate::compiled::{Aabb, Compiled};
 use crate::light::{self, Rgb};
 use crate::sample::par_map;
+
+/// A worker's progress through a volume or a march, in slabs or rows, and a flag that stops it.
+#[derive(Debug, Default)]
+pub struct Progress {
+    pub done: AtomicU32,
+    pub total: AtomicU32,
+    pub stop: AtomicBool,
+}
+
+impl Progress {
+    /// `(done, total)`.
+    pub fn read(&self) -> (u32, u32) {
+        (self.done.load(Ordering::Relaxed), self.total.load(Ordering::Relaxed))
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+}
 
 /// The graph's light on a grid of cubic voxels, sampled at their centers.
 #[derive(Clone, Debug)]
@@ -27,11 +48,12 @@ impl Volume {
     /// A point sample per voxel misses structure thinner than a voxel; at full galaxy scale a
     /// disc is, and the volume will want to average over each voxel then.
     pub fn of(compiled: &Compiled, resolution: usize, threads: usize) -> Self {
-        Self::of_until(compiled, resolution, threads, &|| false).expect("never stopped")
+        Self::of_until(compiled, resolution, threads, &Progress::default()).expect("never stopped")
     }
 
-    /// [`Volume::of`], giving up with `None` once `stop` says so; it is asked once per slab.
-    pub fn of_until(compiled: &Compiled, resolution: usize, threads: usize, stop: &(dyn Fn() -> bool + Sync)) -> Option<Self> {
+    /// [`Volume::of`], counting slabs into `progress` and giving up with `None` once its flag is
+    /// set.
+    pub fn of_until(compiled: &Compiled, resolution: usize, threads: usize, progress: &Progress) -> Option<Self> {
         let bounds = compiled.bounds();
         if bounds.is_empty() || resolution == 0 {
             return Some(Self { min: DVec3::ZERO, dims: UVec3::ZERO, voxel_ly: 1.0, emission: Vec::new() });
@@ -42,8 +64,9 @@ impl Volume {
         let lights: Vec<Rgb> = compiled.populations.iter().map(|(id, p)| light::mean_light(p, u64::from(id.0))).collect();
         let half_diagonal = voxel_ly * 3f64.sqrt() * 0.5;
         let slabs: Vec<u32> = (0..dims.z).collect();
+        progress.total.store(dims.z, Ordering::Relaxed);
         let emission = par_map(&slabs, threads, |&z| {
-            if stop() {
+            if progress.stopped() {
                 return None;
             }
             let mut slab = Vec::with_capacity((dims.x * dims.y) as usize);
@@ -64,6 +87,7 @@ impl Volume {
                     slab.push(e.map(|v| v as f32));
                 }
             }
+            progress.done.fetch_add(1, Ordering::Relaxed);
             Some(slab)
         });
         let emission: Option<Vec<Vec<[f32; 3]>>> = emission.into_iter().collect();
@@ -197,17 +221,18 @@ pub struct Picture {
 
 /// Integrates `volume` along each pixel's ray, in steps of half a voxel.
 pub fn march(volume: &Volume, view: &View, width: u32, height: u32, threads: usize) -> Picture {
-    march_until(volume, view, width, height, threads, &|| false).expect("never stopped")
+    march_until(volume, view, width, height, threads, &Progress::default()).expect("never stopped")
 }
 
-/// [`march`], giving up with `None` once `stop` says so; it is asked once per row.
-pub fn march_until(volume: &Volume, view: &View, width: u32, height: u32, threads: usize, stop: &(dyn Fn() -> bool + Sync)) -> Option<Picture> {
+/// [`march`], counting rows into `progress` and giving up with `None` once its flag is set.
+pub fn march_until(volume: &Volume, view: &View, width: u32, height: u32, threads: usize, progress: &Progress) -> Option<Picture> {
     let (forward, right, up) = view.basis();
     let b = volume.bounds();
     let step = volume.voxel_ly * 0.5;
     let rows: Vec<u32> = (0..height).collect();
+    progress.total.store(height, Ordering::Relaxed);
     let pixels = par_map(&rows, threads, |&y| {
-        if stop() {
+        if progress.stopped() {
             return None;
         }
         let row = (0..width)
@@ -227,6 +252,7 @@ pub fn march_until(volume: &Volume, view: &View, width: u32, height: u32, thread
                 sum.map(|s| (s * step) as f32)
             })
             .collect::<Vec<_>>();
+        progress.done.fetch_add(1, Ordering::Relaxed);
         Some(row)
     });
     let pixels: Option<Vec<Vec<[f32; 3]>>> = pixels.into_iter().collect();

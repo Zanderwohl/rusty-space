@@ -6,13 +6,13 @@
 //! [`MOVING_BUDGET_S`], and once the view rests it halves the downsampling each march until it
 //! reaches the screen's. Work that a newer edit or a move makes stale is stopped.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use bevy_egui::egui::{self, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use glam::DVec3;
-use lc_galaxy::picture::{Side, View, Volume, march_until};
+use lc_galaxy::picture::{Progress, Side, View, Volume, march_until};
 use lc_galaxy::sample::default_threads;
 
 use crate::doc::Doc;
@@ -32,7 +32,7 @@ const MAX_DOWNSAMPLE: f64 = 32.0;
 struct Running<K, T> {
     key: K,
     slot: Arc<OnceLock<Option<T>>>,
-    stop: Arc<AtomicBool>,
+    progress: Arc<Progress>,
 }
 
 /// A keyed computation on a worker: the newest finished result, and the run in progress.
@@ -58,18 +58,18 @@ impl<K: Clone, T: Send + Sync + 'static> Job<K, T> {
         }
     }
 
-    /// Stops any run in progress and starts `work`, which should return `None` once its flag is
-    /// set.
-    fn start(&mut self, key: K, work: impl FnOnce(&AtomicBool) -> Option<T> + Send + 'static) {
+    /// Stops any run in progress and starts `work`, which should count into its [`Progress`] and
+    /// return `None` once the stop flag is set.
+    fn start(&mut self, key: K, work: impl FnOnce(&Progress) -> Option<T> + Send + 'static) {
         if let Some(r) = self.running.take() {
-            r.stop.store(true, Ordering::Relaxed);
+            r.progress.stop.store(true, Ordering::Relaxed);
         }
-        let (slot, stop) = (Arc::new(OnceLock::new()), Arc::new(AtomicBool::new(false)));
-        let (out, flag) = (slot.clone(), stop.clone());
+        let (slot, progress) = (Arc::new(OnceLock::new()), Arc::new(Progress::default()));
+        let (out, counted) = (slot.clone(), progress.clone());
         std::thread::spawn(move || {
-            let _ = out.set(work(&flag));
+            let _ = out.set(work(&counted));
         });
-        self.running = Some(Running { key, slot, stop });
+        self.running = Some(Running { key, slot, progress });
     }
 }
 
@@ -240,24 +240,33 @@ impl PictureView {
             return;
         }
         let compiled = compiled.clone();
-        self.volume.start(want, move |stop| {
-            Volume::of_until(&compiled, VOLUME_LEVELS[want.1], default_threads(), &|| stop.load(Ordering::Relaxed)).map(Arc::new)
-        });
+        self.volume.start(want, move |progress| Volume::of_until(&compiled, VOLUME_LEVELS[want.1], default_threads(), progress).map(Arc::new));
     }
 
     fn draw(&self, painter: &egui::Painter, rect: Rect) {
         if let Some(t) = &self.texture {
             painter.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
+        // The volume on screen, and the finer one being sampled.
+        let shown = self.shown.as_ref().map(|k| format!("{} voxels", VOLUME_LEVELS[k.volume.1]));
+        let building = self.volume.running.as_ref().map(|r| {
+            let (done, total) = r.progress.read();
+            format!("{} voxels {done}/{total} in progress", VOLUME_LEVELS[r.key.1])
+        });
+        let text = [shown, building].into_iter().flatten().collect::<Vec<_>>().join("    ");
+        if !text.is_empty() {
+            let at = rect.right_bottom() - egui::vec2(10.0, 8.0);
+            painter.text(at, egui::Align2::RIGHT_BOTTOM, text, egui::FontId::monospace(12.0), palette::UNREAD);
+        }
     }
 }
 
-fn march(volume: &Volume, key: &ImageKey, stop: &AtomicBool) -> Option<Marched> {
+fn march(volume: &Volume, key: &ImageKey, progress: &Progress) -> Option<Marched> {
     let start = Instant::now();
     let size = key.screen.map(|n| ((f64::from(n) / key.downsample).round() as u32).max(1));
     let c = key.camera;
     let view = View { target: c.target, yaw: c.yaw, pitch: c.pitch, ly_per_px: c.ly_per_screen_px * f64::from(key.screen[0]) / f64::from(size[0]) };
-    let picture = march_until(volume, &view, size[0], size[1], default_threads(), &|| stop.load(Ordering::Relaxed))?;
+    let picture = march_until(volume, &view, size[0], size[1], default_threads(), progress)?;
     let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &picture.to_rgba8(key.decades));
     Some(Marched { image, took: start.elapsed() })
 }
