@@ -1,7 +1,7 @@
 //! Galaxy Forge: the editor for the Lightcone galaxy. See `lightcone/docs/34-galaxy-authoring.md`.
 //!
 //! ```text
-//! lc-galaxy-editor [timeline.ron] [--view region|sky] [--camera +x|-x|+y|-y|+z|-z] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh|ocean-feh|ocean-mass]
+//! lc-galaxy-editor [timeline.ron] [--view region|sky|picture] [--camera +x|-x|+y|-y|+z|-z] [--select <row>] [--pick <star>] [--chart hr|mass|age|feh|ocean-feh|ocean-mass]
 //!                  [--shot <png> [--frames <n>]]
 //! ```
 
@@ -12,6 +12,7 @@ mod doc;
 mod files;
 mod palette;
 mod params_panel;
+mod picture_view;
 mod stats_panel;
 mod system_panel;
 mod timeline_panel;
@@ -51,6 +52,7 @@ fn args() -> Args {
             "--view" => {
                 a.view = Some(match value().as_str() {
                     "sky" => View::Sky,
+                    "picture" => View::Picture,
                     _ => View::Region,
                 })
             }

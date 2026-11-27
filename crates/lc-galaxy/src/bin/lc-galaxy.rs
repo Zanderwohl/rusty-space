@@ -2,6 +2,8 @@
 //! lc-galaxy check   <timeline.ron>
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
+//! lc-galaxy picture <timeline.ron> --out <png> [--side +x|-x|+y|-y|+z|-z] [--size <w>x<h>]
+//!                   [--resolution <voxels>] [--decades <n>]
 //! ```
 
 use std::path::PathBuf;
@@ -14,9 +16,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
-        eprintln!("usage: lc-galaxy check|stats|publish <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <dir>] [--name <name>] [--threads <n>]");
+        eprintln!("usage: lc-galaxy check|stats|publish|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
         return ExitCode::FAILURE;
     };
     let text = match std::fs::read_to_string(path) {
@@ -93,11 +95,53 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "picture" => match picture(&timeline, &after) {
+            Ok(line) => {
+                println!("{line}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        },
         other => {
             eprintln!("unknown command {other}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn picture(timeline: &lc_galaxy::Timeline, after: &dyn Fn(&str) -> Option<String>) -> Result<String, String> {
+    use lc_galaxy::picture::{Side, View, Volume, march};
+    let out = after("--out").ok_or("picture needs --out <png>")?;
+    let side = match after("--side") {
+        Some(s) => Side::named(&s).ok_or(format!("--side {s}: not one of +x, -x, +y, -y, +z, -z"))?,
+        None => Side::named("+z").unwrap(),
+    };
+    let (width, height) = match after("--size") {
+        Some(s) => {
+            let (w, h) = s.split_once('x').ok_or(format!("--size {s}: needs <width>x<height>"))?;
+            (w.parse::<u32>().map_err(|e| format!("--size {s}: {e}"))?, h.parse::<u32>().map_err(|e| format!("--size {s}: {e}"))?)
+        }
+        None => (800, 800),
+    };
+    let number = |flag: &str, default: f64| after(flag).map_or(Ok(default), |v| v.parse::<f64>().map_err(|e| format!("{flag} {v}: {e}")));
+    let resolution = number("--resolution", 192.0)? as usize;
+    let decades = number("--decades", 3.0)?;
+    let compiled = timeline.compile(timeline.len(), None);
+    if !compiled.problems.is_empty() {
+        return Err(format!("{} features have problems; `lc-galaxy check` lists them", compiled.problems.len()));
+    }
+    let volume = Volume::of(&compiled, resolution, default_threads());
+    let view = View::fitting(side, volume.bounds(), width, height);
+    let rgba = march(&volume, &view, width, height, default_threads()).to_rgba8(decades);
+    let file = std::fs::File::create(&out).map_err(|e| format!("{out}: {e}"))?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().and_then(|mut w| w.write_image_data(&rgba)).map_err(|e| format!("{out}: {e}"))?;
+    Ok(format!("{out}: {width}x{height} from {}, {} ly per pixel, volume {}x{}x{} at {:.2} ly", side.label(), view.ly_per_px, volume.dims.x, volume.dims.y, volume.dims.z, volume.voxel_ly))
 }
 
 /// `x0,y0,z0:x1,y1,z1` in ly, the corners in either order.

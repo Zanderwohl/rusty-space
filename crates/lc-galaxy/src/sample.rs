@@ -260,7 +260,7 @@ pub fn cells_in(region: Aabb) -> Vec<Cell> {
 }
 
 /// Keeps input order, which the bake's determinism depends on.
-fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = threads.max(1).min(items.len().max(1));
     let chunk = items.len().div_ceil(threads).max(1);
     std::thread::scope(|scope| {

@@ -22,8 +22,11 @@ each with a distance whose Lipschitz bound a test checks, then `boolean` (`kinds
 and `path` (`kinds/path.rs`), whose control points Galaxy Forge lists in the Parameters panel and
 drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise in
 `crates/lc-galaxy/src/noise.rs` whose values a test pins), and a draft Phase III galaxy in
-`crates/lc-galaxy/galaxies/phase-3.ron`. Masks, the ray marcher, tier A and the CDN path are not
-started. The shipped sky is still the
+`crates/lc-galaxy/galaxies/phase-3.ron`. The CPU marcher is built (`crates/lc-galaxy/src/light.rs`,
+`picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
+the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
+from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
+graph has no dust field yet. Masks, the GPU marcher, tier A and the CDN path are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.

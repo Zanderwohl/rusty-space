@@ -5073,9 +5073,11 @@ dependencies = [
 name = "lc-galaxy"
 version = "0.1.0"
 dependencies = [
+ "em-spectra",
  "glam",
  "lc-world",
  "libm",
+ "png 0.18.1",
  "ron 0.12.2",
  "serde",
 ]

@@ -22,6 +22,7 @@ use crate::palette;
 pub enum View {
     Region,
     Sky,
+    Picture,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -76,46 +77,13 @@ pub struct Camera {
     pub ortho: bool,
 }
 
-/// The side of the galaxy's axes the camera looks from: `+Z` is face-on from galactic north,
-/// `-Y` edge-on with +X to the right.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Side {
-    /// 0, 1, 2 for X, Y, Z.
-    pub axis: usize,
-    pub positive: bool,
-}
-
-impl Side {
-    pub const ALL: [Side; 6] = [
-        Side { axis: 0, positive: true },
-        Side { axis: 1, positive: true },
-        Side { axis: 2, positive: true },
-        Side { axis: 0, positive: false },
-        Side { axis: 1, positive: false },
-        Side { axis: 2, positive: false },
-    ];
-
-    pub fn label(self) -> String {
-        format!("{}{}", if self.positive { '+' } else { '-' }, ["X", "Y", "Z"][self.axis])
-    }
-
-    pub fn named(name: &str) -> Option<Self> {
-        Side::ALL.into_iter().find(|s| s.label().eq_ignore_ascii_case(name))
-    }
-}
+pub use lc_galaxy::picture::Side;
 
 impl Camera {
     /// Looks at the target from `side`, orthographic. The side views keep +Z up; the views from
     /// ±Z keep +X to the right.
     pub fn look_from(&mut self, side: Side) {
-        use std::f64::consts::{FRAC_PI_2, PI};
-        (self.yaw, self.pitch) = match (side.axis, side.positive) {
-            (0, true) => (0.0, 0.0),
-            (0, false) => (PI, 0.0),
-            (1, true) => (FRAC_PI_2, 0.0),
-            (1, false) => (-FRAC_PI_2, 0.0),
-            (_, positive) => (-FRAC_PI_2, if positive { FRAC_PI_2 } else { -FRAC_PI_2 }),
-        };
+        (self.yaw, self.pitch) = side.angles();
         self.ortho = true;
     }
 
@@ -217,6 +185,7 @@ pub struct ViewState {
     marks: Option<Marks>,
     /// The control point of the selected path being dragged in the region view.
     handle: Option<usize>,
+    pub picture: crate::picture_view::PictureView,
 }
 
 impl ViewState {
@@ -246,6 +215,7 @@ impl Default for ViewState {
             pins: 0,
             marks: None,
             handle: None,
+            picture: Default::default(),
         }
     }
 }
@@ -254,6 +224,7 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
     ui.horizontal_wrapped(|ui| {
         ui.selectable_value(&mut state.view, View::Region, "Region");
         ui.selectable_value(&mut state.view, View::Sky, "Sky");
+        ui.selectable_value(&mut state.view, View::Picture, "Picture");
         ui.separator();
         egui::ComboBox::from_id_salt("color by").selected_text(state.color_by.label()).show_ui(ui, |ui| {
             for c in ColorBy::ALL {
@@ -291,7 +262,9 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
             }
         }
         ui.separator();
-        if state.view == View::Region {
+        if state.view == View::Picture {
+            state.picture.toolbar(ui);
+        } else if state.view == View::Region {
             ui.toggle_value(&mut state.show_cells, "cells");
             ui.toggle_value(&mut state.show_supports, "supports");
             ui.toggle_value(&mut state.show_exclusion, "exclusion");
@@ -328,6 +301,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ViewState, doc: &mut Doc) {
     match state.view {
         View::Region => region(ui, &painter, rect, &response, state, doc, bounds),
         View::Sky => sky(ui, &painter, rect, &response, state, doc, bounds),
+        View::Picture => state.picture.show(ui, &painter, rect, &response, doc),
     }
 }
 

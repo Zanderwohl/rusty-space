@@ -12,5 +12,9 @@ lc-world = { path = "../lc-world", default-features = false }
 glam = { version = "0.32", features = ["serde"] }
 # The bake's transcendentals, so a star's existence does not depend on the platform's libm.
 libm = "0.2"
+# Band shares of a star's light, for pictures; the same blackbody the client draws with.
+em-spectra = { path = "../em-spectra" }
 ron = "0.12"
 serde = { version = "1.0.215", features = ["derive"] }
+# `lc-galaxy picture` writes a PNG.
+png = "0.18"
