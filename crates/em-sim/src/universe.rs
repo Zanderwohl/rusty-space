@@ -14,21 +14,13 @@ use glam::DVec3;
 /// State for a tag: a group of bodies.
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::prelude::Resource))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default)]
 pub struct TagState {
     pub shown: bool,
     pub trajectory: bool,
     pub members: HashSet<String>,
 }
 
-impl Default for TagState {
-    fn default() -> Self {
-        Self {
-            shown: false,
-            trajectory: false,
-            members: HashSet::new(),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct UniverseFileContents {
@@ -151,12 +143,11 @@ impl ViewSettings {
     }
     
     pub fn body_scale_factor(&self, radius: f64) -> f32 {
-        let n = if self.logarithmic_body_scale {
+        (if self.logarithmic_body_scale {
             mappings::log_scale(radius, self.logarithmic_body_base) * self.body_scale
         } else {
             radius * self.body_scale
-        } as f32;
-        n
+        } as f32)
     }
 }
 
@@ -177,21 +168,21 @@ pub enum SomeBody {
 impl SomeBody {
     pub fn id(&self) -> String {
         match self {
-            SomeBody::FixedEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::NewtonEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::KeplerEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::CompoundEntry(entry) => (&entry.info.id).clone(),
-            SomeBody::CompoundMotiveEntry(entry) => (&entry.info.id).clone(),
+            SomeBody::FixedEntry(entry) => entry.info.id.clone(),
+            SomeBody::NewtonEntry(entry) => entry.info.id.clone(),
+            SomeBody::KeplerEntry(entry) => entry.info.id.clone(),
+            SomeBody::CompoundEntry(entry) => entry.info.id.clone(),
+            SomeBody::CompoundMotiveEntry(entry) => entry.info.id.clone(),
         }
     }
 
     pub fn name(&self) -> String {
         match self {
-            SomeBody::FixedEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::NewtonEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::KeplerEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::CompoundEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
-            SomeBody::CompoundMotiveEntry(entry) => (&entry.info.name).clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::FixedEntry(entry) => entry.info.name.clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::NewtonEntry(entry) => entry.info.name.clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::KeplerEntry(entry) => entry.info.name.clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::CompoundEntry(entry) => entry.info.name.clone().unwrap_or(format!("body_{}", self.id())).clone(),
+            SomeBody::CompoundMotiveEntry(entry) => entry.info.name.clone().unwrap_or(format!("body_{}", self.id())).clone(),
         }
     }
 

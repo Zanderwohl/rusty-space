@@ -449,11 +449,9 @@ mod tests {
         map.insert(b, "second");
         assert_eq!(map.len(), 1, "-0.0 and 0.0 must hash to the same slot");
 
-        let mut v = vec![
-            Instant::from_seconds_since_j2000(5.0),
+        let mut v = [Instant::from_seconds_since_j2000(5.0),
             Instant::from_seconds_since_j2000(-3.0),
-            Instant::from_seconds_since_j2000(1.0),
-        ];
+            Instant::from_seconds_since_j2000(1.0)];
         v.sort();
         assert_eq!(v[0].to_j2000_seconds(), -3.0);
         assert_eq!(v[2].to_j2000_seconds(), 5.0);

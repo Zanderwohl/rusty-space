@@ -397,11 +397,10 @@ fn shoot(
             shot_body.rad_per_px =
                 crate::starfield::radians_per_pixel(shot.field_rad as f32, shot.side_px as f32);
             let back = beauty.front.map_or(0, |(i, _)| 1 - i);
-            if images.get(&beauty.images[back]).is_some_and(|i| i.width() != shot.side_px) {
-                if let Some(mut image) = images.get_mut(&beauty.images[back]) {
+            if images.get(&beauty.images[back]).is_some_and(|i| i.width() != shot.side_px)
+                && let Some(mut image) = images.get_mut(&beauty.images[back]) {
                     *image = target_image(shot.side_px);
                 }
-            }
             if frames > 0 {
                 beauty.phase = Phase::Aiming { subject, frames: frames - 1, since_s, queued };
                 return;

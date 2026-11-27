@@ -58,11 +58,10 @@ pub fn viewer_window(
             ui.separator();
             breadcrumb(ui, &system.0, index, &mut focused);
 
-            if let Some(entity) = body_entities.map.get(&system.0.id(index)).copied() {
-                if ui.button("Go to").on_hover_text("Point the camera at this body").clicked() {
+            if let Some(entity) = body_entities.map.get(&system.0.id(index)).copied()
+                && ui.button("Go to").on_hover_text("Point the camera at this body").clicked() {
                     go_to.write(GoTo { entity, frame: None, source: GoToSource::UiButton });
                 }
-            }
 
             warn_unresolved(ui, &system.0, index);
             ui.separator();

@@ -491,7 +491,7 @@ fn halved(level: &[u8], side: usize) -> Vec<u8> {
 
 fn covered_share(level: &[u8], scale: f32) -> f32 {
     let texels = level.len() / 4;
-    level.chunks_exact(4).filter(|t| t[3] as f32 * scale >= 127.5).count() as f32 / texels as f32
+    level.as_chunks::<4>().0.iter().filter(|t| t[3] as f32 * scale >= 127.5).count() as f32 / texels as f32
 }
 
 fn preserve_coverage(level: &mut [u8], target: f32) {
@@ -507,7 +507,7 @@ fn preserve_coverage(level: &mut [u8], target: f32) {
             hi = mid;
         }
     }
-    for t in level.chunks_exact_mut(4) {
+    for t in level.as_chunks_mut::<4>().0 {
         t[3] = (t[3] as f32 * hi).min(255.0).round() as u8;
     }
 }

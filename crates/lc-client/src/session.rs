@@ -290,7 +290,7 @@ impl Session {
     /// [`Session::advance`] by a span of coordinate time.
     pub fn advance_us(&mut self, micros: i64) {
         let elapsed = micros as f64 * 1e-6;
-        self.observer.t = self.observer.t + Span::new(micros);
+        self.observer.t += Span::new(micros);
         let now = self.coordinate_time_s();
         // Before anything is placed against it: a station and a conic are both positions in a
         // system, and one propagated to last frame would put the ship a frame behind.

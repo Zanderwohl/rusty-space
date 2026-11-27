@@ -66,8 +66,8 @@ impl CurvePlot {
             span: (samples[0].0, samples[samples.len() - 1].0),
             size: (w, h),
         };
-        if self.drawn.is_none_or(|drawn| drawn.stale(&now)) || self.texture.is_none() {
-            if let Some(image) = render(samples, w, h) {
+        if (self.drawn.is_none_or(|drawn| drawn.stale(&now)) || self.texture.is_none())
+            && let Some(image) = render(samples, w, h) {
                 match &mut self.texture {
                     Some(handle) => handle.set(image, egui::TextureOptions::LINEAR),
                     None => {
@@ -77,7 +77,6 @@ impl CurvePlot {
                 }
                 self.drawn = Some(now);
             }
-        }
         if let Some(texture) = &self.texture {
             ui.add(egui::Image::new(texture).fit_to_exact_size(size));
         }

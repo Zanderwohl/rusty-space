@@ -355,7 +355,7 @@ pub struct Settled {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fitting::{FIELD_ANCHOR_ME, RATED_LOAD_AU, STARTING_ENVELOPE_M2};
+    use crate::fitting::RATED_LOAD_AU;
     use crate::form::capacity::Capacities;
     use crate::form::grid::FormGrid;
     use crate::form::Form;

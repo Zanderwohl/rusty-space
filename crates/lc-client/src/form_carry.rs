@@ -172,7 +172,7 @@ impl Float {
         let depth = self.depth_m.unwrap_or(lens.orbit.distance * lens.extent.size_m());
         let middle = origin + direction * depth / direction.dot(forward).max(1e-6);
         let turn = Pose { position: middle, rotation: self.rotation };
-        self.pieces.iter().map(|p| Piece { pose: turn.then(&p.pose), ..p.clone() }).collect()
+        self.pieces.iter().map(|p| Piece { pose: turn.then(&p.pose), ..*p }).collect()
     }
 }
 
@@ -187,7 +187,7 @@ impl Carry {
         let (_, own) = crate::form_handles::original(sdf, id)?;
         let about = own.pose;
         let inverse = Pose { position: about.rotation.transpose() * -about.position, rotation: about.rotation.transpose() };
-        let pieces = sdf.pieces().iter().filter(|p| subtree.contains(&p.part)).map(|p| Piece { pose: inverse.then(&p.pose), ..p.clone() }).collect();
+        let pieces = sdf.pieces().iter().filter(|p| subtree.contains(&p.part)).map(|p| Piece { pose: inverse.then(&p.pose), ..*p }).collect();
         let depth_m = lens.project(about.position).map(|(_, depth)| depth);
         let placement = part.placement?;
         let Mount::Attached { anchor, seated, .. } = placement.mount else { return None };
@@ -519,7 +519,7 @@ mod tests {
 
     fn placed(draft: &Draft, id: PartId) -> Piece {
         let sdf = Sdf::new(&draft.form, &B).unwrap();
-        original(&sdf, id).unwrap().1.clone()
+        *original(&sdf, id).unwrap().1
     }
 
     #[test]

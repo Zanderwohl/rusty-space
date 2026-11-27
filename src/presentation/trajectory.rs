@@ -470,14 +470,13 @@ pub fn update_trajectory_material_brightness(
                     || m.glow_gain != glow_gain
             })
             .unwrap_or(false);
-        if needs_update {
-            if let Some(mut material) = materials.get_mut(&handle.0) {
+        if needs_update
+            && let Some(mut material) = materials.get_mut(&handle.0) {
                 material.front = front;
                 material.back = back;
                 material.exposure = exposure;
                 material.glow_gain = glow_gain;
             }
-        }
     }
 }
 
@@ -700,7 +699,7 @@ pub fn update_mouse_hit_marker(
 
     // Compute true anomaly using Newton refinement (20 iterations in fourier_expansion)
     let Some(true_anomaly) = refine_true_anomaly_newton(
-        &kepler,
+        kepler,
         mu,
         hit_data.start_time,
         hit_data.end_time,
@@ -713,7 +712,7 @@ pub fn update_mouse_hit_marker(
 
     // Calculate next and previous times for this true anomaly position
     let event_times = compute_anomaly_event_times(
-        &kepler,
+        kepler,
         mu,
         true_anomaly,
         period_seconds,

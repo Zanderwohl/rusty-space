@@ -245,7 +245,7 @@ pub fn sync_rotations(
 }
 
 /// A body's index, resolved for this frame.
-pub fn resolve<'a>(system: &'a System, body: &BodyRef) -> Option<em_sim::id::BodyIndex> {
+pub fn resolve(system: &System, body: &BodyRef) -> Option<em_sim::id::BodyIndex> {
     system.index_of(body.0)
 }
 

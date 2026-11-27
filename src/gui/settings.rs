@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::gui::util::ensure_toml;
 
 #[derive(Serialize, Deserialize, Debug, Resource)]
+#[derive(Default)]
 pub struct Settings {
     #[serde(default)]
     pub display: DisplaySettings,
@@ -17,19 +18,9 @@ pub struct Settings {
     pub simulation: SimulationSettings,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            display: DisplaySettings::default(),
-            sound: SoundSettings::default(),
-            ui: UiSettings::default(),
-            windows: WindowSelections::default(),
-            simulation: SimulationSettings::default(),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Default)]
 pub struct SimulationSettings {
     /// Enable Newtonian physics integration (gravity affecting free-flying bodies).
     /// When disabled, skips Newtonian sub-steps and only positions bodies once per frame.
@@ -37,13 +28,6 @@ pub struct SimulationSettings {
     pub newtonian: bool,
 }
 
-impl Default for SimulationSettings {
-    fn default() -> Self {
-        Self {
-            newtonian: false,
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct DisplaySettings {

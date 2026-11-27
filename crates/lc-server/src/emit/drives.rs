@@ -160,13 +160,12 @@ impl<J: Journal> Server<J> {
             }
         }
         let boost = lit.iter_mut().find(|l| boosting(l, t));
-        if let (Some(lighting), Some(power_w)) = (boost, wanted.boost_w) {
-            if stepped(lighting.power_w, power_w) {
+        if let (Some(lighting), Some(power_w)) = (boost, wanted.boost_w)
+            && stepped(lighting.power_w, power_w) {
                 lighting.power_w = power_w;
                 let lighting = *lighting;
                 self.light_event(id, &lighting, t, power_w, events);
             }
-        }
         if !lit.is_empty() {
             self.emissions.emitting.insert(id, lit);
         }

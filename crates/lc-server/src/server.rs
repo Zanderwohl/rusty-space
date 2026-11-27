@@ -597,7 +597,7 @@ impl<J: Journal> Server<J> {
         self.pending = events;
         self.state_the_clock(wire);
         self.tell_learned(wire);
-        if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
+        if self.ticks.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
             self.tell_doing(wire);
         }
         self.stages.mark("tell");
@@ -1073,11 +1073,10 @@ impl<J: Journal> Server<J> {
             payload,
         };
         // Charged from storage, not heat: a dish is not an engine (31 §Radio).
-        if transmitted || matches!(event.payload, Payload::Transmit { .. }) {
-            if let Some(craft) = self.fleet.get_mut(id) {
+        if (transmitted || matches!(event.payload, Payload::Transmit { .. }))
+            && let Some(craft) = self.fleet.get_mut(id) {
                 craft.drain(power_w * crate::radio::TRANSMISSION_S, at as f64 * 1.0e-6);
             }
-        }
         let event_id = event.id;
         if let Some(said) = &utterance {
             self.remember(event_id, id, at, said);
@@ -1191,7 +1190,7 @@ impl<J: Journal> Server<J> {
 
         // Once a second rather than every tick: the sweep walks every loaded system, and what
         // it is looking for takes a survey rotation to become true.
-        if self.ticks % u64::from(TICKS_PER_SECOND) == 0 {
+        if self.ticks.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
             // The fleet is the record of who is in what, so it is what pins a system. Read
             // after placement, or a craft that has just arrived is not counted as being there.
             // A system under survey is pinned too: past the cap, surveys would otherwise evict
@@ -1214,7 +1213,7 @@ impl<J: Journal> Server<J> {
     /// nearly stops. Without a statement to come back to, that divergence is permanent, and a
     /// client that disagrees about *when* the ship is disagrees about where it is.
     fn state_the_clock(&mut self, wire: &mut impl Transport) {
-        if self.ticks % u64::from(TICKS_PER_SECOND) != 0 {
+        if !self.ticks.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
             return;
         }
         let (now_t, rate) = (self.now_t, self.rate);

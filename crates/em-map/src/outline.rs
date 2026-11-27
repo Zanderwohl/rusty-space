@@ -108,7 +108,7 @@ mod tests {
         let curves = torus(DVec3::ZERO, DVec3::Z, belt());
         for p in curves.iter().flatten() {
             let r = p.length();
-            assert!(r >= 2.0 - 1e-9 && r <= 3.0 + 1e-9, "{r} is outside [2, 3]");
+            assert!((2.0 - 1e-9..=3.0 + 1e-9).contains(&r), "{r} is outside [2, 3]");
         }
     }
 

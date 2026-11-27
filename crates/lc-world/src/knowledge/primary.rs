@@ -505,15 +505,14 @@ impl FitJob {
         // An orbit about the star is only as good as the star's place; a moon's frame carries
         // its planet's, star and all, in `depth`.
         let toward_star = -looks.iter().map(|l| l.from_m).sum::<DVec3>().normalize_or_zero();
-        if about.is_none() && arc::sound(self.star_sigma_m) {
-            if let Some(extra) = super::settle::origin_covariance(&fitted, &looks, toward_star * self.star_sigma_m) {
+        if about.is_none() && arc::sound(self.star_sigma_m)
+            && let Some(extra) = super::settle::origin_covariance(&fitted, &looks, toward_star * self.star_sigma_m) {
                 orbit.covariance = orbit.covariance.map(|c| c.with(&extra));
                 let (au, sigma) = orbit.semi_major_au;
                 orbit.semi_major_au = (au, sigma.hypot(au * extra[0][0].sqrt()));
                 let (period, sigma) = orbit.period_s;
                 orbit.period_s = (period, sigma.hypot(period * extra[6][6].sqrt()));
             }
-        }
         Some(Solved { subject: self.subject, about, fitted, orbit, taken_s: self.taken_s, offered })
     }
 }

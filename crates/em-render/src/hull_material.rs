@@ -534,7 +534,7 @@ mod tests {
         let mut albedo = Vec::new();
         let mut lights = Vec::new();
         for i in 0..texels * texels {
-            let on = (i + i / texels) % 2 == 0;
+            let on = (i + i / texels).is_multiple_of(2);
             let v = if on { 255 } else { 0 };
             albedo.extend_from_slice(&[v, v, v, 255]);
             lights.push(v);

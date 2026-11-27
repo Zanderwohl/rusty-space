@@ -352,7 +352,7 @@ pub fn spawn_right_drawer(mut commands: Commands, right_panels: Res<RightPanels>
             border: UiRect::left(Val::Px(1.0)),
             ..default()
         },
-        BackgroundColor(vfd::PANEL_BG.into()),
+        BackgroundColor(vfd::PANEL_BG),
         BorderColor::all(vfd::BUTTON_BORDER),
     )).with_children(|parent| {
         // Scroll container that fills the drawer
@@ -443,7 +443,7 @@ pub fn sync_panel_zones(
                     border: UiRect::all(Val::Px(1.0)),
                     ..default()
                 },
-                BackgroundColor(vfd::BUTTON_BG.into()),
+                BackgroundColor(vfd::BUTTON_BG),
                 BorderColor::all(vfd::BUTTON_BORDER),
             )).with_children(|parent| {
                 parent.spawn((
@@ -452,7 +452,7 @@ pub fn sync_panel_zones(
                         font_size: FontSize::Px(14.0),
                         ..default()
                     },
-                    TextColor(vfd::TEXT.into()),
+                    TextColor(vfd::TEXT),
                 ));
             }).id();
 

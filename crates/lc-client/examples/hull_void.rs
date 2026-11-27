@@ -382,7 +382,7 @@ fn sphere(radius: f32, center: usize) -> Mesh {
     // Charted as a part would be: a sphere is a capsule of no length, two domes about its poles.
     let ball = PartShape::Capsule { radius: radius as f64, length: 0.0 };
     let (mut charts, mut bounds, mut tangents) = (Vec::new(), Vec::new(), Vec::new());
-    for corners in positions.chunks_exact(3) {
+    for corners in positions.as_chunks::<3>().0 {
         let at = [0, 1, 2].map(|k| Vec3::from(corners[k]).as_dvec3());
         let (chart, laid) = lay_out(&ball, at, false);
         for (k, (here, _)) in laid.iter().enumerate() {

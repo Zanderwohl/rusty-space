@@ -248,7 +248,7 @@ impl Knowledge {
     pub fn analyze(&mut self) {
         let owner = self.owner;
         for (subject, file) in self.files.iter() {
-            if !file.retained && file.series.iter().any(|s| s.witness == owner && s.len() > 0) {
+            if !file.retained && file.series.iter().any(|s| s.witness == owner && !s.is_empty()) {
                 self.analyzing.insert(*subject);
                 self.unread.insert(*subject);
             }

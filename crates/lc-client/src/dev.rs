@@ -478,10 +478,7 @@ pub(crate) fn frame_the_cast(
     // Everybody the camera is *not* on. Watching from another craft, the interesting thing is
     // the ship you left; watching from your own, it is the cast. Aiming at the hull the boom is
     // attached to would be aiming at the middle of the screen.
-    let anchored = match ui.perspective {
-        Some(crate::ui::CameraPerspective::Pov(ship_id)) => Some(ship_id),
-        None => None,
-    };
+    let anchored = ui.perspective.map(|crate::ui::CameraPerspective::Pov(ship_id)| ship_id);
     let here = match anchored.and_then(|id| uplink.contacts.iter().find(|c| c.ship_id == id)) {
         Some(contact) => contact.position_ly,
         None => game.ship.motion.position_ly,
@@ -861,7 +858,7 @@ pub(crate) fn photograph(
     *frames += 1;
     let (burst, every) = (dev.burst.max(1), dev.burst_every.max(1));
     let into = frames.wrapping_sub(dev.after_frames);
-    if *frames >= dev.after_frames && into % every == 0 && into / every < burst {
+    if *frames >= dev.after_frames && into.is_multiple_of(every) && into / every < burst {
         // Consecutive frames of one run, which is the only way to see a flicker: two runs
         // stopped at frame n and frame n+1 have accumulated different wall time and are not
         // consecutive at all.

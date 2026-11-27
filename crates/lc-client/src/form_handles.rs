@@ -740,7 +740,7 @@ mod tests {
     fn handles(draft: &Draft, sdf: &Sdf, lens: &Lens, id: u16) -> (Part, Piece, Handles) {
         let part = *draft.part(PartId(id)).unwrap();
         let (_, piece) = original(sdf, part.id).unwrap();
-        (part, piece.clone(), Handles::of(&part, piece, sdf, lens).unwrap())
+        (part, *piece, Handles::of(&part, piece, sdf, lens).unwrap())
     }
 
     fn px(lens: &Lens, p: DVec3) -> Vec2 {

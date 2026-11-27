@@ -492,7 +492,7 @@ pub fn lines(session: &Session, ui: &UiState, collapse: &mut Collapse) -> Hud {
                 left / YEAR_S,
             )
         }),
-        coasting: session.coast().map(|coast| arc(&coast, &session.body_label(&coast.primary))),
+        coasting: session.coast().map(|coast| arc(coast, &session.body_label(&coast.primary))),
         // Anything but the design rate is said on screen rather than left to look normal —
         // whether the player set it offline or a shard staging a scene stated it. The clock
         // running sixty times over is exactly when a readout of how fast earns its place.

@@ -1350,12 +1350,11 @@ mod tests {
     fn relief_scale_holds(g: &Graph) {
         let mut series = 0;
         for layer in &g.layers {
-            if let texture_graph_core::LayerKind::Craters(c) = &layer.kind {
-                if c.output == texture_graph_core::CraterOutput::Height {
+            if let texture_graph_core::LayerKind::Craters(c) = &layer.kind
+                && c.output == texture_graph_core::CraterOutput::Height {
                     assert_eq!(c.relief, RELIEF_SCALE, "{}", layer.name);
                     series += 1;
                 }
-            }
         }
         assert_eq!(series, 3);
     }

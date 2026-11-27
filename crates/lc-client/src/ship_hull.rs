@@ -215,16 +215,15 @@ impl Rolls {
         if let Some(&roll) = self.ready.get(&hash) {
             return Some(roll);
         }
-        if !self.pending.contains_key(&hash) {
+        self.pending.entry(hash).or_insert_with(|| {
             let form = form.clone();
-            let task = AsyncComputeTaskPool::get().spawn(async move {
+            AsyncComputeTaskPool::get().spawn(async move {
                 match lc_world::form::grid::FormGrid::new(&form, &balance) {
                     Ok(grid) => lc_world::solar::roll_rad(&grid.geometry(1.0)),
                     Err(_) => 0.0,
                 }
-            });
-            self.pending.insert(hash, task);
-        }
+            })
+        });
         None
     }
 

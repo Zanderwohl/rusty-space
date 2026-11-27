@@ -864,7 +864,7 @@ mod tests {
     fn buffers_carry_every_attribute_and_face_their_normals() {
         let b = mesh_form(&Builtin::Cluster.form(), &B, 32).unwrap();
         let n = b.positions.len();
-        assert!(n > 0 && b.indices.len() % 3 == 0);
+        assert!(n > 0 && b.indices.len().is_multiple_of(3));
         assert_eq!((b.normals.len(), b.regions.len(), b.faces.len(), b.charts.len(), b.chart_bounds.len(), b.tangents.len()), (n, n, n, n, n, n));
         assert!(b.indices.iter().all(|&i| (i as usize) < n));
         let against = b

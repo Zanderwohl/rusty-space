@@ -175,7 +175,7 @@ impl Filed {
         }
         if next.places.len() > MOST_PLACES {
             let latest = next.places.len() - 1;
-            next.places = next.places.iter().enumerate().filter(|(k, _)| (latest - k) % 2 == 0).map(|(_, p)| *p).collect();
+            next.places = next.places.iter().enumerate().filter(|(k, _)| (latest - k).is_multiple_of(2)).map(|(_, p)| *p).collect();
         }
         if refile || self.strayed(place, sigma_ly) {
             next.emitted_s = place.at_s;

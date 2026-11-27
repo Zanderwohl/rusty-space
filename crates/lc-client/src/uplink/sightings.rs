@@ -88,7 +88,7 @@ pub(super) fn fold(
                 // talking is the news; what they said to each other is theirs, and repeating
                 // it into this ship's own events box reads as if it had been said here.
                 let faction = spoken.under.map(|key| match uplink.chat.faction(key) {
-                    Some(chat) => crate::radio_panel::faction_label(&uplink, key, chat, false),
+                    Some(chat) => crate::radio_panel::faction_label(uplink, key, chat, false),
                     None => crate::chat::key_mark(key),
                 });
                 let notice = match (&spoken.body, uplink.chat.filing(spoken.to)) {

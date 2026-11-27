@@ -43,7 +43,7 @@ pub fn parse(text: &str) -> Option<f64> {
 impl NumberField {
     /// Unless it is being typed in.
     pub fn show(&mut self, editable: &mut EditableText, focused: bool, text: &str) {
-        if focused || (self.shown == text && editable.value().to_string() == text) {
+        if focused || (self.shown == text && editable.value() == text) {
             return;
         }
         self.shown = text.to_owned();

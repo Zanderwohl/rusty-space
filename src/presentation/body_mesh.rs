@@ -361,12 +361,11 @@ pub fn update_terminator_meshes(
             let radius_ratio = tube_radius / mat.target_tube_radius;
             let radius_changed = radius_ratio < 0.95 || radius_ratio > 1.05;
 
-            if emission_changed || radius_changed {
-                if let Some(mut mat) = materials.get_mut(material_handle.id()) {
+            if (emission_changed || radius_changed)
+                && let Some(mut mat) = materials.get_mut(material_handle.id()) {
                     mat.emission_strength = new_emission;
                     mat.target_tube_radius = tube_radius;
                 }
-            }
         }
     }
 }
@@ -473,15 +472,14 @@ pub fn update_wireframe_lighting(
             false
         };
 
-        if needs_update {
-            if let Some(mut mat) = materials.get_mut(material_handle.id()) {
+        if needs_update
+            && let Some(mut mat) = materials.get_mut(material_handle.id()) {
                 mat.num_suns = num_suns;
                 mat.sun_dir_0 = sun_dirs[0];
                 mat.sun_dir_1 = sun_dirs[1];
                 mat.sun_dir_2 = sun_dirs[2];
                 mat.sun_dir_3 = sun_dirs[3];
             }
-        }
     }
 }
 
@@ -523,15 +521,14 @@ pub fn update_occluder_lighting(
             false
         };
 
-        if needs_update {
-            if let Some(mut mat) = materials.get_mut(material_handle.id()) {
+        if needs_update
+            && let Some(mut mat) = materials.get_mut(material_handle.id()) {
                 mat.num_suns = num_suns;
                 mat.sun_pos_0 = sun_positions[0];
                 mat.sun_pos_1 = sun_positions[1];
                 mat.sun_pos_2 = sun_positions[2];
                 mat.sun_pos_3 = sun_positions[3];
             }
-        }
     }
 }
 
@@ -568,10 +565,9 @@ pub fn update_wireframe_thickness(
             })
             .unwrap_or(false);
 
-        if needs_update {
-            if let Some(mut mat) = materials.get_mut(material_handle.id()) {
+        if needs_update
+            && let Some(mut mat) = materials.get_mut(material_handle.id()) {
                 mat.target_tube_radius = required_radius;
             }
-        }
     }
 }

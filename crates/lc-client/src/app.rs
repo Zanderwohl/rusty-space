@@ -759,6 +759,22 @@ fn observe(ui: Res<Ui>, mut game: ResMut<Game>) {
     game.tick_instruments(integration);
 }
 
+/// The desktop sign-in, or nothing at all in a browser.
+///
+/// A plugin group of one rather than a `#[cfg]` inside `build`, so the browser build does not
+/// carry a branch about a thing it cannot do.
+struct SigninPlugins;
+
+impl Plugin for SigninPlugins {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn build(&self, app: &mut App) {
+        app.add_plugins(crate::signin_ui::SigninPlugin);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn build(&self, _app: &mut App) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1025,20 +1041,4 @@ mod tests {
         }
         assert_eq!(app.world().resource::<Game>().coordinate_time_s(), before);
     }
-}
-
-/// The desktop sign-in, or nothing at all in a browser.
-///
-/// A plugin group of one rather than a `#[cfg]` inside `build`, so the browser build does not
-/// carry a branch about a thing it cannot do.
-struct SigninPlugins;
-
-impl Plugin for SigninPlugins {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn build(&self, app: &mut App) {
-        app.add_plugins(crate::signin_ui::SigninPlugin);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn build(&self, _app: &mut App) {}
 }

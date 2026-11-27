@@ -79,7 +79,7 @@ pub fn has_save_path(universe: &Universe) -> bool {
     universe
         .path
         .as_ref()
-        .map_or(false, |p| p.starts_with("data/saves"))
+        .is_some_and(|p| p.starts_with("data/saves"))
 }
 
 fn file_exists(name: &str) -> bool {
@@ -161,11 +161,10 @@ pub fn handle_escape_key(
         return;
     }
 
-    if let Ok(ctx) = contexts.ctx_mut() {
-        if ctx.egui_wants_keyboard_input() {
+    if let Ok(ctx) = contexts.ctx_mut()
+        && ctx.egui_wants_keyboard_input() {
             return;
         }
-    }
 
     match current_state.get() {
         EscMenuState::Closed => {
@@ -206,7 +205,7 @@ fn spawn_overlay(commands: &mut Commands) -> Entity {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(vfd::OVERLAY_BACKDROP.into()),
+            BackgroundColor(vfd::OVERLAY_BACKDROP),
             EscMenuOverlay,
             GlobalZIndex(100),
         ))
@@ -286,8 +285,8 @@ pub fn handle_main_menu_buttons(
                 context.came_from_save_nag = false;
                 
                 if has_save_path(&universe) {
-                    if let Some(path) = universe.path.clone() {
-                        if perform_save(
+                    if let Some(path) = universe.path.clone()
+                        && perform_save(
                             &sim_time,
                             &physics,
                             &view_settings,
@@ -297,7 +296,6 @@ pub fn handle_main_menu_buttons(
                         ).is_ok() {
                             unsaved.0 = false;
                         }
-                    }
                     next_esc_state.set(EscMenuState::Closed);
                 } else {
                     next_esc_state.set(EscMenuState::Naming);
@@ -371,8 +369,8 @@ pub fn handle_save_nag_buttons(
                 context.restore_playing_on_close = false;
                 
                 if has_save_path(&universe) {
-                    if let Some(path) = universe.path.clone() {
-                        if perform_save(
+                    if let Some(path) = universe.path.clone()
+                        && perform_save(
                             &sim_time,
                             &physics,
                             &view_settings,
@@ -382,7 +380,6 @@ pub fn handle_save_nag_buttons(
                         ).is_ok() {
                             unsaved.0 = false;
                         }
-                    }
                     ui_state.current_save = None;
                     next_esc_state.set(EscMenuState::Closed);
                     next_app_state.set(AppState::MainMenu);
@@ -441,7 +438,7 @@ pub fn setup_naming(mut commands: Commands, mut context: ResMut<EscMenuContext>)
                 justify_content: JustifyContent::FlexStart,
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.05, 0.12, 0.08).into()),
+            BackgroundColor(Color::srgb(0.05, 0.12, 0.08)),
             BorderColor::all(vfd::BUTTON_BORDER),
             FileNameInput,
         ))
