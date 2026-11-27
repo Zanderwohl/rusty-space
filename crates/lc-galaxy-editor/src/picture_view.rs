@@ -1,27 +1,43 @@
 //! The Picture view: the galaxy's light marched through a coarse volume, from any direction.
 //!
-//! The volume rebuilds on a worker after each rebuild of the document, and the picture re-marches
-//! on a worker whenever the view or the volume changes. One of each runs at a time, and the last
-//! finished picture stays on screen until the next one lands.
+//! Both halves refine. The volume rebuilds on a worker after each edit at [`VOLUME_LEVELS`]'s
+//! first resolution, then at each finer one in turn. The picture is marched on a worker at a
+//! resolution chosen from the last march's cost so a moving view updates within
+//! [`MOVING_BUDGET_S`], and once the view rests it halves the downsampling each march until it
+//! reaches the screen's. Work that a newer edit or a move makes stale is stopped.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use bevy_egui::egui::{self, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use glam::DVec3;
-use lc_galaxy::picture::{Side, View, Volume, march};
+use lc_galaxy::picture::{Side, View, Volume, march_until};
 use lc_galaxy::sample::default_threads;
 
 use crate::doc::Doc;
 use crate::palette;
 
-/// Voxels along the volume's longest side. Coarse, because it rebuilds on every edit.
-const VOLUME_RESOLUTION: usize = 96;
-/// Screen pixels per marched pixel along each axis.
-const DOWNSAMPLE: f32 = 2.0;
+/// Voxels along the volume's longest side, coarsest first. The last bounds memory: 192 is about
+/// 65 MB for a flattened galaxy.
+const VOLUME_LEVELS: [usize; 3] = [64, 128, 192];
+/// How long a march may take while the view moves, s.
+const MOVING_BUDGET_S: f64 = 1.0 / 30.0;
+/// How long after the last move the view counts as moving, so a pause between drags does not
+/// start a full-resolution march.
+const SETTLE: Duration = Duration::from_millis(250);
+/// The coarsest a moving picture gets: screen pixels per marched pixel along each axis.
+const MAX_DOWNSAMPLE: f64 = 32.0;
 
-/// The newest result of a keyed computation, and the one running if any.
+struct Running<K, T> {
+    key: K,
+    slot: Arc<OnceLock<Option<T>>>,
+    stop: Arc<AtomicBool>,
+}
+
+/// A keyed computation on a worker: the newest finished result, and the run in progress.
 struct Job<K, T> {
-    running: Option<(K, Arc<OnceLock<T>>)>,
+    running: Option<Running<K, T>>,
     done: Option<(K, T)>,
 }
 
@@ -31,36 +47,34 @@ impl<K, T> Default for Job<K, T> {
     }
 }
 
-impl<K: PartialEq + Clone, T: Send + Sync + 'static> Job<K, T> {
-    /// Collects a finished run, then starts `work` for `key` unless that is done or running, or
-    /// another run is still going.
-    fn want(&mut self, key: &K, work: impl FnOnce() -> T + Send + 'static) {
-        if let Some((k, slot)) = &self.running
-            && slot.get().is_some()
-        {
-            let k = k.clone();
-            let slot = self.running.take().unwrap().1;
-            self.done = Some((k, Arc::try_unwrap(slot).ok().and_then(OnceLock::into_inner).unwrap()));
+impl<K: Clone, T: Send + Sync + 'static> Job<K, T> {
+    /// Moves a finished run to `done`; a stopped one leaves nothing.
+    fn poll(&mut self) {
+        if self.running.as_ref().is_some_and(|r| r.slot.get().is_some()) {
+            let r = self.running.take().unwrap();
+            if let Some(Some(t)) = Arc::try_unwrap(r.slot).ok().and_then(OnceLock::into_inner) {
+                self.done = Some((r.key, t));
+            }
         }
-        let fresh = self.done.as_ref().is_some_and(|(k, _)| k == key);
-        if fresh || self.running.is_some() {
-            return;
-        }
-        let slot = Arc::new(OnceLock::new());
-        let out = slot.clone();
-        std::thread::spawn(move || {
-            let _ = out.set(work());
-        });
-        self.running = Some((key.clone(), slot));
     }
 
-    fn busy(&self) -> bool {
-        self.running.is_some()
+    /// Stops any run in progress and starts `work`, which should return `None` once its flag is
+    /// set.
+    fn start(&mut self, key: K, work: impl FnOnce(&AtomicBool) -> Option<T> + Send + 'static) {
+        if let Some(r) = self.running.take() {
+            r.stop.store(true, Ordering::Relaxed);
+        }
+        let (slot, stop) = (Arc::new(OnceLock::new()), Arc::new(AtomicBool::new(false)));
+        let (out, flag) = (slot.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let _ = out.set(work(&flag));
+        });
+        self.running = Some(Running { key, slot, stop });
     }
 }
 
-/// Where the picture looks from. The scale is per screen pixel so resizing the view keeps the
-/// field.
+/// Where the picture looks from. The scale is per screen pixel, so resizing or downsampling
+/// keeps the field.
 #[derive(Clone, Copy, PartialEq)]
 struct Camera {
     target: DVec3,
@@ -69,12 +83,21 @@ struct Camera {
     ly_per_screen_px: f64,
 }
 
+/// Which edit, and which of [`VOLUME_LEVELS`].
+type VolumeKey = (u64, usize);
+
 #[derive(Clone, PartialEq)]
 struct ImageKey {
-    volume: u64,
-    view: View,
-    size: [u32; 2],
+    volume: VolumeKey,
+    camera: Camera,
+    downsample: f64,
+    screen: [u32; 2],
     decades: f64,
+}
+
+struct Marched {
+    image: ColorImage,
+    took: Duration,
 }
 
 pub struct PictureView {
@@ -83,10 +106,15 @@ pub struct PictureView {
     side: Side,
     refit: bool,
     decades: f64,
-    volume: Job<u64, Arc<Volume>>,
-    image: Job<ImageKey, ColorImage>,
+    volume: Job<VolumeKey, Arc<Volume>>,
+    image: Job<ImageKey, Marched>,
     texture: Option<TextureHandle>,
     shown: Option<ImageKey>,
+    last_camera: Option<Camera>,
+    last_move: Option<Instant>,
+    downsample: f64,
+    /// Seconds per marched pixel, smoothed over recent marches.
+    cost: Option<f64>,
 }
 
 impl Default for PictureView {
@@ -100,6 +128,10 @@ impl Default for PictureView {
             image: Job::default(),
             texture: None,
             shown: None,
+            last_camera: None,
+            last_move: None,
+            downsample: 8.0,
+            cost: None,
         }
     }
 }
@@ -125,51 +157,109 @@ impl PictureView {
 
     pub fn show(&mut self, ui: &egui::Ui, painter: &egui::Painter, rect: Rect, response: &egui::Response, doc: &Doc) {
         let Some(result) = &doc.result else { return };
-        let generation = doc.generation;
-        let compiled = result.compiled.clone();
-        self.volume.want(&generation, move || Arc::new(Volume::of(&compiled, VOLUME_RESOLUTION, default_threads())));
-        let Some((volume_generation, volume)) = self.volume.done.as_ref().map(|(g, v)| (*g, v.clone())) else {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "sampling the volume", egui::FontId::proportional(14.0), palette::UNREAD);
+        self.refine_volume(doc.generation, &result.compiled);
+        let Some((volume_key, volume)) = self.volume.done.as_ref().filter(|(k, _)| k.0 == doc.generation).map(|(k, v)| (*k, v.clone())) else {
+            self.draw(painter, rect);
+            if self.texture.is_none() {
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, "sampling the volume", egui::FontId::proportional(14.0), palette::UNREAD);
+            }
             ui.ctx().request_repaint();
             return;
         };
 
-        let size = [((rect.width() / DOWNSAMPLE) as u32).max(1), ((rect.height() / DOWNSAMPLE) as u32).max(1)];
+        let screen = [rect.width().max(1.0) as u32, rect.height().max(1.0) as u32];
         if self.refit || self.camera.is_none() {
-            let mut v = View::fitting(self.side, volume.bounds(), size[0], size[1]);
+            let mut v = View::fitting(self.side, volume.bounds(), screen[0], screen[1]);
             if let Some(c) = self.camera {
                 (v.yaw, v.pitch) = (c.yaw, c.pitch);
-                v.fit(volume.bounds(), size[0], size[1]);
+                v.fit(volume.bounds(), screen[0], screen[1]);
             }
-            self.camera = Some(Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, ly_per_screen_px: v.ly_per_px / f64::from(DOWNSAMPLE) });
+            self.camera = Some(Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, ly_per_screen_px: v.ly_per_px });
             self.refit = false;
         }
         let camera = self.camera.as_mut().unwrap();
         steer(ui, response, camera);
-        let view = View { target: camera.target, yaw: camera.yaw, pitch: camera.pitch, ly_per_px: camera.ly_per_screen_px * f64::from(DOWNSAMPLE) };
+        let camera = *camera;
+        if self.last_camera != Some(camera) {
+            self.last_move = Some(Instant::now());
+            self.last_camera = Some(camera);
+        }
+        let moving = self.last_move.is_some_and(|t| t.elapsed() < SETTLE);
 
-        let key = ImageKey { volume: volume_generation, view, size, decades: self.decades };
-        let decades = self.decades;
-        self.image.want(&key, move || {
-            let rgba = march(&volume, &view, size[0], size[1], default_threads()).to_rgba8(decades);
-            ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &rgba)
-        });
-        if let Some((k, image)) = &self.image.done
+        self.image.poll();
+        if let Some((k, m)) = &self.image.done
+            && self.shown.as_ref() != Some(k)
+        {
+            let pixels = (m.image.size[0] * m.image.size[1]).max(1) as f64;
+            let cost = m.took.as_secs_f64() / pixels;
+            self.cost = Some(self.cost.map_or(cost, |c| 0.5 * c + 0.5 * cost));
+        }
+        self.downsample = if moving {
+            let pixels = f64::from(screen[0]) * f64::from(screen[1]);
+            self.cost.map_or(8.0, |c| (pixels * c / MOVING_BUDGET_S).sqrt()).clamp(1.0, MAX_DOWNSAMPLE)
+        } else {
+            let current = |k: &ImageKey| k.camera == camera && k.volume == volume_key && k.screen == screen && k.decades == self.decades;
+            match &self.image.done {
+                // Finer by half each march once the last one at this view has landed.
+                Some((k, _)) if current(k) && k.downsample <= self.downsample => (self.downsample / 2.0).max(1.0),
+                _ => self.downsample,
+            }
+        };
+        let key = ImageKey { volume: volume_key, camera, downsample: self.downsample, screen, decades: self.decades };
+        let stale = |r: &Running<ImageKey, Marched>| r.key.volume != key.volume || r.key.downsample < key.downsample;
+        let done_here = self.image.done.as_ref().is_some_and(|(k, _)| *k == key);
+        let running_here = self.image.running.as_ref().is_some_and(|r| r.key == key);
+        if !done_here && !running_here && self.image.running.as_ref().is_none_or(stale) {
+            self.image.start(key.clone(), move |stop| march(&volume, &key, stop));
+        }
+
+        if let Some((k, m)) = &self.image.done
             && self.shown.as_ref() != Some(k)
         {
             match &mut self.texture {
-                Some(t) => t.set(image.clone(), TextureOptions::LINEAR),
-                None => self.texture = Some(ui.ctx().load_texture("picture", image.clone(), TextureOptions::LINEAR)),
+                Some(t) => t.set(m.image.clone(), TextureOptions::LINEAR),
+                None => self.texture = Some(ui.ctx().load_texture("picture", m.image.clone(), TextureOptions::LINEAR)),
             }
             self.shown = Some(k.clone());
         }
-        if let Some(t) = &self.texture {
-            painter.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
-        }
-        if self.image.busy() || self.volume.busy() {
+        self.draw(painter, rect);
+        if self.image.running.is_some() || self.volume.running.is_some() || moving || self.downsample > 1.0 {
             ui.ctx().request_repaint();
         }
     }
+
+    /// Starts the coarsest volume after an edit, and each finer one once the last has landed.
+    fn refine_volume(&mut self, generation: u64, compiled: &lc_galaxy::Compiled) {
+        self.volume.poll();
+        let want = match &self.volume.done {
+            Some(((g, level), _)) if *g == generation => (level + 1 < VOLUME_LEVELS.len()).then_some((generation, level + 1)),
+            _ => Some((generation, 0)),
+        };
+        let Some(want) = want else { return };
+        if self.volume.running.as_ref().is_some_and(|r| r.key == want) {
+            return;
+        }
+        let compiled = compiled.clone();
+        self.volume.start(want, move |stop| {
+            Volume::of_until(&compiled, VOLUME_LEVELS[want.1], default_threads(), &|| stop.load(Ordering::Relaxed)).map(Arc::new)
+        });
+    }
+
+    fn draw(&self, painter: &egui::Painter, rect: Rect) {
+        if let Some(t) = &self.texture {
+            painter.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
+        }
+    }
+}
+
+fn march(volume: &Volume, key: &ImageKey, stop: &AtomicBool) -> Option<Marched> {
+    let start = Instant::now();
+    let size = key.screen.map(|n| ((f64::from(n) / key.downsample).round() as u32).max(1));
+    let c = key.camera;
+    let view = View { target: c.target, yaw: c.yaw, pitch: c.pitch, ly_per_px: c.ly_per_screen_px * f64::from(key.screen[0]) / f64::from(size[0]) };
+    let picture = march_until(volume, &view, size[0], size[1], default_threads(), &|| stop.load(Ordering::Relaxed))?;
+    let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &picture.to_rgba8(key.decades));
+    Some(Marched { image, took: start.elapsed() })
 }
 
 /// Orbit on the primary button, pan on the others, zoom on the wheel.

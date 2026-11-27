@@ -1,13 +1,14 @@
 //! What a population's stars shine with on average, so pictures of the galaxy integrate light
 //! without drawing a star. See `34-galaxy-authoring.md`, "Signed distances and ray marching".
 //!
-//! Light is in the B, V and R bands, in solar luminosities, which [`em_spectra::presets::natural`]
-//! shows as blue, green and red: the client's starfield draws a star through the same mapping.
+//! Light is visible light as linear sRGB: each star's blackbody through the CIE 1931 observer,
+//! in solar luminosities times the share of a star's output the eye weighs. Not the starfield's
+//! B, V, R mapping, which oversaturates near white and turns a Sun-like disc pink.
 
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
-use em_spectra::{Band, blackbody};
+use em_spectra::{blackbody, cie};
 use lc_world::rng;
 use lc_world::sky::galaxy::FEH_STEP;
 
@@ -19,7 +20,7 @@ use crate::kinds::MAX_AGE_GYR;
 /// by its rare massive stars, so this is large.
 const DRAWS: u64 = 20_000;
 
-/// R, V and B light, L☉, in that order so it reads as display red, green, blue.
+/// Linear sRGB red, green, blue.
 pub type Rgb = [f64; 3];
 
 /// Mean light per star of `population`. Ignores the `[Fe/H]` gradient and offsets, which move a
@@ -40,7 +41,7 @@ pub fn mean_light(population: &Population, salt: u64) -> Rgb {
         let feh = population.feh.zero_age + population.feh.per_gyr * age;
         let step = (feh / FEH_STEP).round().clamp(-128.0, 127.0) as i8;
         let e = tracks::evolve_step(initial, age, step);
-        let share = band_shares(e.teff_k);
+        let share = visible(e.teff_k);
         for (s, f) in sum.iter_mut().zip(share) {
             *s += e.luminosity_solar * f;
         }
@@ -48,12 +49,13 @@ pub fn mean_light(population: &Population, salt: u64) -> Rgb {
     sum.map(|s| s / DRAWS as f64)
 }
 
-/// Log2 kelvin that [`band_shares`] tabulates; outside it clamps.
+/// Log2 kelvin that [`visible`] tabulates; outside it clamps.
 const LOG_T: (f64, f64) = (9.0, 17.0);
 const SAMPLES: usize = 512;
 
-/// The share of a blackbody's output in R, V and B: band radiance over `σT⁴ / π`.
-pub fn band_shares(teff_k: f64) -> Rgb {
+/// A blackbody's visible light as linear sRGB, per unit of its total output: CIE XYZ of its
+/// spectrum over `σT⁴ / π`. Colors outside the sRGB gamut lose their negative component.
+pub fn visible(teff_k: f64) -> Rgb {
     static TABLE: OnceLock<Vec<Rgb>> = OnceLock::new();
     let (lo, hi) = LOG_T;
     let table = TABLE.get_or_init(|| {
@@ -61,7 +63,9 @@ pub fn band_shares(teff_k: f64) -> Rgb {
             .map(|i| {
                 let t = libm::exp2(lo + (hi - lo) * i as f64 / (SAMPLES - 1) as f64);
                 let total = blackbody::radiant_exitance(t) / PI;
-                [Band::R, Band::V, Band::B].map(|b| blackbody::band_radiance(b, t) / total)
+                // The sum steps one nanometer at a time.
+                let xyz = cie::xyz_from_blackbody(t).map(|v| v * 1e-9 / total);
+                cie::linear_srgb_from_xyz(xyz).map(|v| v.max(0.0))
             })
             .collect()
     });
@@ -99,9 +103,14 @@ mod tests {
         assert!(young[2] / young[0] > old[2] / old[0], "young {young:?} is not bluer than old {old:?}");
     }
 
+    /// A Sun-like star is near white, warmer than blue; a cool one is red, a hot one blue.
     #[test]
-    fn the_sun_puts_a_few_tenths_of_its_light_in_each_band() {
-        let s = band_shares(5772.0);
-        assert!(s.iter().all(|&f| (0.05..0.4).contains(&f)), "{s:?}");
+    fn colors_run_from_red_through_white_to_blue() {
+        let ratio = |t: f64| {
+            let c = visible(t);
+            c[2] / c[0]
+        };
+        assert!((0.7..1.0).contains(&ratio(5772.0)), "the Sun's blue over red is {}", ratio(5772.0));
+        assert!(ratio(3000.0) < 0.3 && ratio(20_000.0) > 1.3, "{} {}", ratio(3000.0), ratio(20_000.0));
     }
 }

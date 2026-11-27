@@ -2,8 +2,8 @@
 //! volume, then integrated along parallel rays. See `34-galaxy-authoring.md`, "Signed distances
 //! and ray marching".
 //!
-//! Emission only: the graph carries no dust field yet, so nothing absorbs. Light is R, V and B in
-//! solar luminosities, as [`crate::light`] defines it.
+//! Emission only: the graph carries no dust field yet, so nothing absorbs. Light is linear sRGB,
+//! as [`crate::light`] defines it.
 
 use glam::{DVec3, UVec3};
 
@@ -17,7 +17,7 @@ pub struct Volume {
     pub min: DVec3,
     pub dims: UVec3,
     pub voxel_ly: f64,
-    /// L☉ per ly³ in R, V, B, `x` fastest, then `y`, then `z`.
+    /// light per ly³ as linear sRGB, `x` fastest, then `y`, then `z`.
     pub emission: Vec<[f32; 3]>,
 }
 
@@ -27,9 +27,14 @@ impl Volume {
     /// A point sample per voxel misses structure thinner than a voxel; at full galaxy scale a
     /// disc is, and the volume will want to average over each voxel then.
     pub fn of(compiled: &Compiled, resolution: usize, threads: usize) -> Self {
+        Self::of_until(compiled, resolution, threads, &|| false).expect("never stopped")
+    }
+
+    /// [`Volume::of`], giving up with `None` once `stop` says so; it is asked once per slab.
+    pub fn of_until(compiled: &Compiled, resolution: usize, threads: usize, stop: &(dyn Fn() -> bool + Sync)) -> Option<Self> {
         let bounds = compiled.bounds();
         if bounds.is_empty() || resolution == 0 {
-            return Self { min: DVec3::ZERO, dims: UVec3::ZERO, voxel_ly: 1.0, emission: Vec::new() };
+            return Some(Self { min: DVec3::ZERO, dims: UVec3::ZERO, voxel_ly: 1.0, emission: Vec::new() });
         }
         let voxel_ly = bounds.size().max_element() / resolution as f64;
         let dims = (bounds.size() / voxel_ly).ceil().as_uvec3().max(UVec3::ONE);
@@ -38,6 +43,9 @@ impl Volume {
         let half_diagonal = voxel_ly * 3f64.sqrt() * 0.5;
         let slabs: Vec<u32> = (0..dims.z).collect();
         let emission = par_map(&slabs, threads, |&z| {
+            if stop() {
+                return None;
+            }
             let mut slab = Vec::with_capacity((dims.x * dims.y) as usize);
             for y in 0..dims.y {
                 for x in 0..dims.x {
@@ -56,9 +64,10 @@ impl Volume {
                     slab.push(e.map(|v| v as f32));
                 }
             }
-            slab
+            Some(slab)
         });
-        Self { min, dims, voxel_ly, emission: emission.into_iter().flatten().collect() }
+        let emission: Option<Vec<Vec<[f32; 3]>>> = emission.into_iter().collect();
+        Some(Self { min, dims, voxel_ly, emission: emission?.into_iter().flatten().collect() })
     }
 
     pub fn bounds(&self) -> Aabb {
@@ -86,7 +95,7 @@ impl Volume {
         out
     }
 
-    /// `∫ emission dV` over the voxels, L☉.
+    /// `∫ emission dV` over the voxels.
     pub fn total(&self) -> Rgb {
         let dv = self.voxel_ly.powi(3);
         let mut out = [0.0; 3];
@@ -178,7 +187,7 @@ impl View {
     }
 }
 
-/// Surface brightness, L☉ per ly² in R, V, B, row by row from the top.
+/// Surface brightness, light per ly² as linear sRGB, row by row from the top.
 #[derive(Clone, Debug)]
 pub struct Picture {
     pub width: u32,
@@ -188,12 +197,20 @@ pub struct Picture {
 
 /// Integrates `volume` along each pixel's ray, in steps of half a voxel.
 pub fn march(volume: &Volume, view: &View, width: u32, height: u32, threads: usize) -> Picture {
+    march_until(volume, view, width, height, threads, &|| false).expect("never stopped")
+}
+
+/// [`march`], giving up with `None` once `stop` says so; it is asked once per row.
+pub fn march_until(volume: &Volume, view: &View, width: u32, height: u32, threads: usize, stop: &(dyn Fn() -> bool + Sync)) -> Option<Picture> {
     let (forward, right, up) = view.basis();
     let b = volume.bounds();
     let step = volume.voxel_ly * 0.5;
     let rows: Vec<u32> = (0..height).collect();
     let pixels = par_map(&rows, threads, |&y| {
-        (0..width)
+        if stop() {
+            return None;
+        }
+        let row = (0..width)
             .map(|x| {
                 let off = (f64::from(x) + 0.5 - f64::from(width) * 0.5) * right + (f64::from(height) * 0.5 - f64::from(y) - 0.5) * up;
                 let Some((t0, t1)) = through(b, view.target + off * view.ly_per_px, forward) else { return [0.0; 3] };
@@ -209,9 +226,11 @@ pub fn march(volume: &Volume, view: &View, width: u32, height: u32, threads: usi
                 }
                 sum.map(|s| (s * step) as f32)
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        Some(row)
     });
-    Picture { width, height, pixels: pixels.into_iter().flatten().collect() }
+    let pixels: Option<Vec<Vec<[f32; 3]>>> = pixels.into_iter().collect();
+    Some(Picture { width, height, pixels: pixels?.into_iter().flatten().collect() })
 }
 
 /// Where the line `origin + t·dir` is inside `b`, for any `t`, as `(entry, exit)`.
@@ -232,7 +251,7 @@ fn through(b: Aabb, origin: DVec3, dir: DVec3) -> Option<(f64, f64)> {
 }
 
 impl Picture {
-    /// `∫ brightness dA`, L☉: the light the picture caught.
+    /// `∫ brightness dA`: the light the picture caught.
     pub fn total(&self, ly_per_px: f64) -> Rgb {
         let da = ly_per_px * ly_per_px;
         let mut out = [0.0; 3];
