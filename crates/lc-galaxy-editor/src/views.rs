@@ -25,6 +25,7 @@ pub enum View {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ColorBy {
+    Camera,
     Temperature,
     Population,
     Metallicity,
@@ -34,7 +35,8 @@ pub enum ColorBy {
 }
 
 impl ColorBy {
-    pub const ALL: [ColorBy; 10] = [
+    pub const ALL: [ColorBy; 11] = [
+        ColorBy::Camera,
         ColorBy::Temperature,
         ColorBy::Population,
         ColorBy::Metallicity,
@@ -49,6 +51,7 @@ impl ColorBy {
 
     pub fn label(self) -> String {
         match self {
+            ColorBy::Camera => "camera".into(),
             ColorBy::Temperature => "temperature".into(),
             ColorBy::Population => "population".into(),
             ColorBy::Metallicity => "[Fe/H]".into(),
@@ -155,7 +158,7 @@ impl Default for ViewState {
     fn default() -> Self {
         Self {
             view: View::Region,
-            color_by: ColorBy::Temperature,
+            color_by: ColorBy::Camera,
             show_cells: true,
             show_exclusion: false,
             show_supports: true,
@@ -250,8 +253,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut ViewState, doc: &mut Doc) {
 fn star_color(s: &BakedStar, by: ColorBy, doc: &Doc) -> Color32 {
     let a = &s.attributes;
     match by {
+        ColorBy::Camera if a.teff_k > 0.0 => palette::camera(a.teff_k),
         ColorBy::Temperature if a.teff_k > 0.0 => palette::blackbody(a.teff_k),
-        ColorBy::Temperature => Color32::from_gray(90),
+        ColorBy::Camera | ColorBy::Temperature => Color32::from_gray(90),
         ColorBy::Population => {
             let i = a
                 .population

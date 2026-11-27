@@ -1,6 +1,7 @@
 //! Colors the panels and views share.
 
 use bevy_egui::egui::Color32;
+use em_spectra::{blackbody, cie, presets};
 
 pub const SELECTED: Color32 = Color32::from_rgb(40, 62, 92);
 pub const ROLLBACK: Color32 = Color32::from_rgb(150, 110, 40);
@@ -36,6 +37,34 @@ pub const POPULATIONS: [Color32; 6] = [
     Color32::from_rgb(150, 140, 240),
 ];
 
+/// Temperatures [`camera`] tabulates, as log2 kelvin; outside them it clamps.
+const CAMERA_LOG_T: (f64, f64) = (9.0, 17.0);
+const CAMERA_SAMPLES: usize = 512;
+
+/// The hue the client's starfield gives a blackbody at `kelvin` through the default mapping:
+/// band radiance through [`presets::natural`], divided by its brightest channel, as
+/// `starfield.wgsl` does. At rest, so no Doppler shift, and without the warm re-emission of a
+/// population or the display tone map.
+pub fn camera(kelvin: f64) -> Color32 {
+    // Integrating Planck's law per band is too slow to repeat for every star every frame.
+    static TABLE: std::sync::OnceLock<Vec<Color32>> = std::sync::OnceLock::new();
+    let (lo, hi) = CAMERA_LOG_T;
+    let table = TABLE.get_or_init(|| {
+        let mapping = presets::natural();
+        (0..CAMERA_SAMPLES)
+            .map(|i| {
+                let t = (lo + (hi - lo) * i as f64 / (CAMERA_SAMPLES - 1) as f64).exp2();
+                let linear = mapping.apply_f64(&blackbody::per_band(t));
+                let peak = linear.iter().copied().fold(0.0, f64::max);
+                let c = |v: f64| (cie::encode_srgb((v / peak).clamp(0.0, 1.0)) * 255.0).round() as u8;
+                if peak > 0.0 { Color32::from_rgb(c(linear[0]), c(linear[1]), c(linear[2])) } else { Color32::BLACK }
+            })
+            .collect()
+    });
+    let at = ((kelvin.max(1.0).log2() - lo) / (hi - lo) * (CAMERA_SAMPLES - 1) as f64).round();
+    table[at.clamp(0.0, (CAMERA_SAMPLES - 1) as f64) as usize]
+}
+
 /// Approximate color of a blackbody at `kelvin`, after Tanner Helland's fit.
 pub fn blackbody(kelvin: f64) -> Color32 {
     let t = (kelvin / 100.0).clamp(10.0, 400.0);
@@ -67,4 +96,21 @@ pub fn sequential(t: f64) -> Color32 {
     let (a, b) = ([60.0, 40.0, 120.0], [250.0, 230.0, 90.0]);
     let m = |i: usize| (a[i] + (b[i] - a[i]) * t) as u8;
     Color32::from_rgb(m(0), m(1), m(2))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn camera_reddens_cool_stars_and_blues_hot_ones() {
+        let [r, _, b, _] = camera(3000.0).to_array();
+        assert!(r > b, "3000 K: {:?}", camera(3000.0));
+        let [r, _, b, _] = camera(30000.0).to_array();
+        assert!(b > r, "30000 K: {:?}", camera(30000.0));
+        for k in [3000.0, 5772.0, 30000.0] {
+            let [r, g, b, _] = camera(k).to_array();
+            assert_eq!(r.max(g).max(b), 255, "{k} K is not at full value");
+        }
+    }
 }

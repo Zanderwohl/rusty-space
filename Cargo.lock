@@ -5087,6 +5087,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "em-plot",
+ "em-spectra",
  "em-ui",
  "glam",
  "lc-galaxy",
