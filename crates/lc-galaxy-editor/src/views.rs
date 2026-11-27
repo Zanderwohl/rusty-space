@@ -327,7 +327,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut ViewState, doc: &mut Doc) {
     }
     match state.view {
         View::Region => region(ui, &painter, rect, &response, state, doc, bounds),
-        View::Sky if state.sky_style == SkyStyle::Shader => sky_shaded(ui, &painter, rect, &response, state, doc, bounds),
+        // The shader draws every star in its own color, so a difference, which colors stars by
+        // how they changed, shows as dots.
+        View::Sky if state.sky_style == SkyStyle::Shader && !state.difference => sky_shaded(ui, &painter, rect, &response, state, doc, bounds),
         View::Sky => sky(ui, &painter, rect, &response, state, doc, bounds),
         View::Picture => state.picture.show(ui, &painter, rect, &response, doc),
     }
@@ -630,8 +632,12 @@ fn horizon(painter: &egui::Painter, rect: Rect, proj: &Projector, eye: DVec3) {
 fn sky_shaded(ui: &egui::Ui, painter: &egui::Painter, rect: Rect, response: &egui::Response, state: &mut ViewState, doc: &Doc, bounds: Aabb) {
     let (eye, own, proj) = steer_sky(ui, rect, response, state, doc, bounds);
     let scale = ui.ctx().pixels_per_point();
+    let shown = compare::marks(&mut state.marks, doc, state.solo, None).shown.clone();
     state.sky_request = Some(crate::sky_shader::SkyRequest {
         size: [(rect.width() * scale) as u32, (rect.height() * scale) as u32],
+        scale,
+        solo: state.solo,
+        shown,
         eye_ly: eye,
         own,
         yaw: state.look_yaw,

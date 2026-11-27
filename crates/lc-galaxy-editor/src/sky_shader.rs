@@ -30,6 +30,8 @@ use crate::doc::Doc;
 pub struct SkyRequest {
     /// Physical pixels.
     pub size: [u32; 2],
+    /// Physical pixels per logical one: the style's sizes are logical, as the game's are.
+    pub scale: f32,
     pub eye_ly: DVec3,
     /// The star the sky is seen from, left out of it: from inside its system it would fill the
     /// screen.
@@ -41,6 +43,10 @@ pub struct SkyRequest {
     /// Stops above the automatic exposure.
     pub exposure: f64,
     pub generation: u64,
+    /// What the toolbar solos, which picks the stars drawn; with `shown` it keys the rebuild.
+    pub solo: Option<crate::compare::Solo>,
+    /// Per baked star, whether solo keeps it.
+    pub shown: Vec<bool>,
 }
 
 #[derive(Component)]
@@ -52,7 +58,7 @@ pub struct SkyScene {
     mesh: Handle<Mesh>,
     material: Handle<RelativisticStarfieldMaterial>,
     /// The request the mesh and exposure were built for, apart from where the camera looks.
-    built: Option<(u64, DVec3, Option<usize>)>,
+    built: Option<(u64, DVec3, Option<usize>, Option<crate::compare::Solo>)>,
     reference: f32,
 }
 
@@ -130,18 +136,20 @@ pub fn drive(
     }
 
     let mapping = em_spectra::presets::natural();
-    let key = (r.generation, r.eye_ly, r.own);
+    let key = (r.generation, r.eye_ly, r.own, r.solo);
     if scene.built != Some(key) {
         let stars = doc.stars();
         let points: Vec<StarPoint> = stars
             .iter()
             .enumerate()
-            .filter(|(i, s)| Some(*i) != r.own && s.attributes.luminosity_solar > 0.0 && s.attributes.teff_k > 0.0)
+            .filter(|(i, s)| Some(*i) != r.own && r.shown.get(*i).copied().unwrap_or(true) && s.attributes.luminosity_solar > 0.0 && s.attributes.teff_k > 0.0)
             .map(|(_, s)| StarPoint {
                 position_ly: s.position_ly,
                 teff_k: s.attributes.teff_k as f32,
                 radius_m: (s.attributes.radius_solar * 6.957e8) as f32,
-                seed: (s.id.get() >> 40) as f32 * 1.0e-3,
+                // Mixed first, as the game's are: the id's top bits are its cell, which every
+                // star in the cell shares.
+                seed: (lc_world::rng::mix(s.id.get()) >> 40) as f32 * 1.0e-3,
                 warm: [0.0; 4],
             })
             .collect();
@@ -159,14 +167,17 @@ pub fn drive(
     if let Projection::Perspective(p) = projection {
         p.fov = r.fov as f32;
     }
+    // The style's sizes are logical pixels and the shader rescales by physical ones, as the
+    // game's sky does, so a star is the same size here as there on any display.
     let rad_per_px = 2.0 * (r.fov as f32 * 0.5).tan() / size[1] as f32;
+    let rad_per_logical_px = rad_per_px * r.scale.max(1.0);
     if let Some(mut material) = materials.get_mut(&scene.material) {
         material.uniforms = RelativisticStarfieldUniform {
             band_to_display: band_columns(&mapping),
             reference: scene.reference * 2f32.powf(-(r.exposure as f32)),
             point_stops: POINT_STOPS,
-            min_radius_rad: DISTANT.min_px * rad_per_px,
-            max_radius_rad: DISTANT.max_px * rad_per_px,
+            min_radius_rad: DISTANT.min_px * rad_per_logical_px,
+            max_radius_rad: DISTANT.max_px * rad_per_logical_px,
             glow_radius_gain: DISTANT.glow_radius_gain,
             brightness: DISTANT.brightness,
             overflow_gain: DISTANT.overflow_gain,
