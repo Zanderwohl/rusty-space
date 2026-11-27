@@ -72,9 +72,45 @@ pub struct Camera {
     pub pitch: f64,
     pub distance: f64,
     pub fov: f64,
+    /// Orthographic, at the scale perspective has at the target.
+    pub ortho: bool,
+}
+
+/// A camera direction that shows a galaxy's shape: from above its north pole, or from its plane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    FaceOn,
+    EdgeOn,
+}
+
+impl Preset {
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "face-on" => Some(Preset::FaceOn),
+            "edge-on" => Some(Preset::EdgeOn),
+            _ => None,
+        }
+    }
 }
 
 impl Camera {
+    /// Looks along the galaxy's axes, orthographic. Face-on puts +X right and +Y up; edge-on
+    /// looks along +Y with +X right and +Z up.
+    pub fn preset(&mut self, preset: Preset) {
+        (self.yaw, self.pitch) = match preset {
+            Preset::FaceOn => (0.0, std::f64::consts::FRAC_PI_2),
+            Preset::EdgeOn => (-std::f64::consts::FRAC_PI_2, 0.0),
+        };
+        self.ortho = true;
+    }
+
+    fn projector(&self, rect: Rect) -> Projector {
+        let eye = self.eye();
+        let mut proj = Projector::new(eye, self.target - eye, self.fov, rect);
+        proj.ortho = self.ortho.then_some(self.distance);
+        proj
+    }
+
     fn eye(&self) -> DVec3 {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
@@ -98,6 +134,8 @@ struct Projector {
     up: DVec3,
     focal: f64,
     center: Pos2,
+    /// The depth whose scale an orthographic projection uses everywhere; `None` is perspective.
+    ortho: Option<f64>,
 }
 
 impl Projector {
@@ -106,17 +144,22 @@ impl Projector {
         let right = forward.cross(DVec3::Z).try_normalize().unwrap_or(DVec3::X);
         let up = right.cross(forward);
         let focal = rect.height() as f64 * 0.5 / (fov * 0.5).tan();
-        Self { eye, forward, right, up, focal, center: rect.center() }
+        Self { eye, forward, right, up, focal, center: rect.center(), ortho: None }
+    }
+
+    /// Pixels per ly at depth `z`.
+    fn px_per_ly(&self, z: f64) -> f64 {
+        self.focal / self.ortho.unwrap_or(z)
     }
 
     /// Screen position and depth along the view axis, ly.
     fn project(&self, p: DVec3) -> Option<(Pos2, f64)> {
         let rel = p - self.eye;
         let z = rel.dot(self.forward);
-        if z <= 1e-3 {
+        if z <= 1e-3 && self.ortho.is_none() {
             return None;
         }
-        let s = self.focal / z;
+        let s = self.px_per_ly(z);
         Some((pos2(self.center.x + (rel.dot(self.right) * s) as f32, self.center.y - (rel.dot(self.up) * s) as f32), z))
     }
 
@@ -165,7 +208,7 @@ impl Default for ViewState {
             show_cells: true,
             show_exclusion: false,
             show_supports: true,
-            camera: Camera { target: DVec3::ZERO, yaw: 0.6, pitch: 0.45, distance: 20.0, fov: 50f64.to_radians() },
+            camera: Camera { target: DVec3::ZERO, yaw: 0.6, pitch: 0.45, distance: 20.0, fov: 50f64.to_radians(), ortho: false },
             look_yaw: 0.0,
             look_pitch: 0.0,
             sky_fov: 90f64.to_radians(),
@@ -228,6 +271,14 @@ pub fn toolbar(ui: &mut egui::Ui, state: &mut ViewState, doc: &Doc) {
             if ui.button("Fit").clicked() {
                 state.fitted = false;
             }
+            ui.separator();
+            if ui.button("face-on").clicked() {
+                state.camera.preset(Preset::FaceOn);
+            }
+            if ui.button("edge-on").clicked() {
+                state.camera.preset(Preset::EdgeOn);
+            }
+            ui.toggle_value(&mut state.camera.ortho, "ortho");
         } else {
             let from = doc.picked_star().map_or("from the center".to_string(), |(i, _)| format!("from star {i}"));
             ui.label(from);
@@ -295,7 +346,7 @@ fn region(
 ) {
     let path = selected_path(doc);
     if response.drag_started_by(egui::PointerButton::Primary) {
-        let before = Projector::new(state.camera.eye(), state.camera.target - state.camera.eye(), state.camera.fov, rect);
+        let before = state.camera.projector(rect);
         let at = ui.input(|i| i.pointer.press_origin());
         state.handle = path.as_ref().zip(at).and_then(|((_, frame, points), at)| nearest_handle(&before, frame, points, at));
     }
@@ -303,7 +354,7 @@ fn region(
     if response.dragged_by(egui::PointerButton::Primary) {
         let d = response.drag_delta();
         if let (Some(i), Some((id, frame, points))) = (state.handle, &path) {
-            let before = Projector::new(cam.eye(), cam.target - cam.eye(), cam.fov, rect);
+            let before = cam.projector(rect);
             drag_point(doc, &before, *id, frame, points, i, d);
         } else {
             cam.yaw -= d.x as f64 * 0.008;
@@ -313,8 +364,7 @@ fn region(
     if response.drag_stopped() {
         state.handle = None;
     }
-    let eye = cam.eye();
-    let proj = Projector::new(eye, cam.target - eye, cam.fov, rect);
+    let proj = cam.projector(rect);
     if response.dragged_by(egui::PointerButton::Secondary) || response.dragged_by(egui::PointerButton::Middle) {
         let d = response.drag_delta();
         let per_px = cam.distance / proj.focal;
@@ -374,7 +424,7 @@ fn region(
             painter.circle_filled(p, r, color);
         }
         if state.show_exclusion {
-            let px = (s.exclusion_ly * proj.focal / z) as f32;
+            let px = (s.exclusion_ly * proj.px_per_ly(z)) as f32;
             painter.circle_stroke(p, px, Stroke::new(1.0, color.gamma_multiply(0.35)));
         }
         if picked == Some(i) {
@@ -432,7 +482,7 @@ fn nearest_handle(proj: &Projector, frame: &Frame, points: &[PathPoint], at: Pos
 fn drag_point(doc: &mut Doc, proj: &Projector, id: FeatureId, frame: &Frame, points: &[PathPoint], i: usize, d: egui::Vec2) {
     let Some(p) = points.get(i) else { return };
     let Some((_, depth)) = proj.project(frame.to_galaxy(DVec3::from(p.at_ly))) else { return };
-    let world = (proj.right * d.x as f64 - proj.up * d.y as f64) * depth / proj.focal;
+    let world = (proj.right * d.x as f64 - proj.up * d.y as f64) / proj.px_per_ly(depth);
     let local = frame.axes.transpose() * world;
     if let Some(path) = doc.timeline.feature_mut(id).and_then(|f| f.get_mut::<PathKind>())
         && let Some(point) = path.points.get_mut(i)
