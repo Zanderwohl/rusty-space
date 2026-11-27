@@ -2,7 +2,7 @@
 //! shine with, a picture catches all of it, and threads change nothing.
 
 use lc_galaxy::light::mean_light;
-use lc_galaxy::picture::{Side, View, Volume, march};
+use lc_galaxy::picture::{Progress, Side, View, Volume, lights, march, march_exact};
 use lc_galaxy::{Compiled, Registry, codec, stats};
 
 fn phase_three() -> Compiled {
@@ -47,4 +47,16 @@ fn threads_change_nothing() {
     assert_eq!(one.emission, many.emission);
     let view = View::fitting(Side::ALL[2], one.bounds(), 64, 48);
     assert_eq!(march(&one, &view, 64, 48, 1).pixels, march(&many, &view, 64, 48, 5).pixels);
+}
+
+
+/// Marching the graph itself catches the same light as marching its volume.
+#[test]
+fn an_exact_picture_catches_the_light_a_volume_picture_does() {
+    let c = phase_three();
+    let volume = Volume::of(&c, 64, 4);
+    let view = View::fitting(Side::ALL[2], volume.bounds(), 120, 120);
+    let from_volume = march(&volume, &view, 120, 120, 4).total(view.ly_per_px);
+    let exact = march_exact(&c, &lights(&c), &view, 120, 120, volume.voxel_ly, 4, &Progress::default()).unwrap().total(view.ly_per_px);
+    assert!(close(exact, from_volume, 0.05), "exact {exact:?}, volume {from_volume:?}");
 }

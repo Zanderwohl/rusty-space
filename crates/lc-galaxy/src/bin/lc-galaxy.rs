@@ -3,7 +3,7 @@
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
 //! lc-galaxy picture <timeline.ron> --out <png> [--side +x|-x|+y|-y|+z|-z] [--size <w>x<h>]
-//!                   [--resolution <voxels>] [--decades <n>]
+//!                   [--resolution <voxels>] [--decades <n>] [--saturation <k>]
 //! ```
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
         eprintln!("usage: lc-galaxy check|stats|publish|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
         return ExitCode::FAILURE;
@@ -129,13 +129,14 @@ fn picture(timeline: &lc_galaxy::Timeline, after: &dyn Fn(&str) -> Option<String
     let number = |flag: &str, default: f64| after(flag).map_or(Ok(default), |v| v.parse::<f64>().map_err(|e| format!("{flag} {v}: {e}")));
     let resolution = number("--resolution", 192.0)? as usize;
     let decades = number("--decades", 3.0)?;
+    let saturation = number("--saturation", 1.2)?;
     let compiled = timeline.compile(timeline.len(), None);
     if !compiled.problems.is_empty() {
         return Err(format!("{} features have problems; `lc-galaxy check` lists them", compiled.problems.len()));
     }
     let volume = Volume::of(&compiled, resolution, default_threads());
     let view = View::fitting(side, volume.bounds(), width, height);
-    let rgba = march(&volume, &view, width, height, default_threads()).to_rgba8(decades);
+    let rgba = march(&volume, &view, width, height, default_threads()).to_rgba8(decades, saturation);
     let file = std::fs::File::create(&out).map_err(|e| format!("{out}: {e}"))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgba);

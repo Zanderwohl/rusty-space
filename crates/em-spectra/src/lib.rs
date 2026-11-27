@@ -25,6 +25,7 @@ pub mod cie;
 pub mod color_index;
 pub mod extinction;
 pub mod mapping;
+pub mod oklab;
 pub mod stellar;
 
 pub use bands::{BANDS, Band, BandMask, PerBand};

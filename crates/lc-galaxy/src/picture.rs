@@ -61,7 +61,7 @@ impl Volume {
         let voxel_ly = bounds.size().max_element() / resolution as f64;
         let dims = (bounds.size() / voxel_ly).ceil().as_uvec3().max(UVec3::ONE);
         let min = bounds.center() - dims.as_dvec3() * voxel_ly * 0.5;
-        let lights: Vec<Rgb> = compiled.populations.iter().map(|(id, p)| light::mean_light(p, u64::from(id.0))).collect();
+        let lights = lights(compiled);
         let half_diagonal = voxel_ly * 3f64.sqrt() * 0.5;
         let slabs: Vec<u32> = (0..dims.z).collect();
         progress.total.store(dims.z, Ordering::Relaxed);
@@ -77,13 +77,7 @@ impl Volume {
                         slab.push([0.0; 3]);
                         continue;
                     }
-                    let density = compiled.sample(center).density;
-                    let mut e = [0.0f64; 3];
-                    for (n, l) in density.iter().zip(&lights) {
-                        for k in 0..3 {
-                            e[k] += n * l[k];
-                        }
-                    }
+                    let e = emission(compiled, &lights, center);
                     slab.push(e.map(|v| v as f32));
                 }
             }
@@ -130,6 +124,65 @@ impl Volume {
         }
         out
     }
+}
+
+/// Each population's mean light per star, in `compiled.populations` order.
+pub fn lights(compiled: &Compiled) -> Vec<Rgb> {
+    compiled.populations.iter().map(|(id, p)| light::mean_light(p, u64::from(id.0))).collect()
+}
+
+fn emission(compiled: &Compiled, lights: &[Rgb], p: DVec3) -> Rgb {
+    let mut e = [0.0f64; 3];
+    for (n, l) in compiled.sample(p).density.iter().zip(lights) {
+        for k in 0..3 {
+            e[k] += n * l[k];
+        }
+    }
+    e
+}
+
+/// [`march`] straight through the graph instead of a volume: each step samples the field
+/// itself, so edges are as sharp as the shapes make them rather than blurred over a voxel.
+/// Outside every density-raising support it skips ahead by [`Compiled::reach`]. `step_ly` sets
+/// the resolution along the ray only; across it, each pixel is exact.
+#[allow(clippy::too_many_arguments)]
+pub fn march_exact(compiled: &Compiled, lights: &[Rgb], view: &View, width: u32, height: u32, step_ly: f64, threads: usize, progress: &Progress) -> Option<Picture> {
+    let (forward, right, up) = view.basis();
+    let b = compiled.bounds();
+    let rows: Vec<u32> = (0..height).collect();
+    progress.total.store(height, Ordering::Relaxed);
+    let pixels = par_map(&rows, threads, |&y| {
+        if progress.stopped() {
+            return None;
+        }
+        let row = (0..width)
+            .map(|x| {
+                let off = (f64::from(x) + 0.5 - f64::from(width) * 0.5) * right + (f64::from(height) * 0.5 - f64::from(y) - 0.5) * up;
+                let origin = view.target + off * view.ly_per_px;
+                let Some((t0, t1)) = through(b, origin, forward) else { return [0.0; 3] };
+                let mut sum = [0.0; 3];
+                let mut t = t0 + step_ly * 0.5;
+                while t < t1 {
+                    let p = origin + forward * t;
+                    let skip = compiled.reach(p);
+                    if skip > step_ly {
+                        t += skip;
+                        continue;
+                    }
+                    let e = emission(compiled, lights, p);
+                    for k in 0..3 {
+                        sum[k] += e[k];
+                    }
+                    t += step_ly;
+                }
+                sum.map(|s| (s * step_ly) as f32)
+            })
+            .collect::<Vec<_>>();
+        progress.done.fetch_add(1, Ordering::Relaxed);
+        Some(row)
+    });
+    let pixels: Option<Vec<Vec<[f32; 3]>>> = pixels.into_iter().collect();
+    Some(Picture { width, height, pixels: pixels?.into_iter().flatten().collect() })
 }
 
 /// The six sides of the galaxy's axes a camera can look from: `+Z` is face-on from galactic
@@ -289,26 +342,56 @@ impl Picture {
         out
     }
 
-    /// RGBA, sRGB-encoded. Brightness is logarithmic over `decades` below the brightest pixels
-    /// (the 99.9th percentile, so a lone hot pixel does not darken the rest), and each pixel keeps
-    /// its own color by dividing by its brightest channel, as the starfield does.
-    pub fn to_rgba8(&self, decades: f64) -> Vec<u8> {
-        let lum = |p: &[f32; 3]| f64::from(p[0] + p[1] + p[2]);
-        let mut lit: Vec<f64> = self.pixels.iter().map(lum).filter(|&l| l > 0.0).collect();
+    /// RGBA, sRGB-encoded, mapped in OKLCh. A pixel's lightness is the square root of a level
+    /// logarithmic in its luminance over `decades` below the brightest pixels (the 99.9th percentile, so a lone hot pixel does
+    /// not darken the rest); its hue is its light's; and its chroma keeps the ratio to lightness
+    /// its light has at full brightness, times `saturation`. Mapped in sRGB, a dim warm pixel
+    /// came out brown and a dim pale one gray; in OKLCh it stays the color it is, only darker.
+    pub fn to_rgba8(&self, decades: f64, saturation: f64) -> Vec<u8> {
+        use em_spectra::oklab;
+        let luminance = |p: &[f32; 3]| 0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2]);
+        let mut lit: Vec<f64> = self.pixels.iter().map(luminance).filter(|&l| l > 0.0).collect();
         lit.sort_by(f64::total_cmp);
         let peak = lit.get(((lit.len() as f64 * 0.999) as usize).min(lit.len().saturating_sub(1))).copied().unwrap_or(1.0);
         let mut out = Vec::with_capacity(self.pixels.len() * 4);
         for p in &self.pixels {
-            let l = lum(p);
-            let level = if l > 0.0 { (1.0 + (l / peak).log10() / decades).clamp(0.0, 1.0) } else { 0.0 };
-            let top = p.iter().copied().fold(0.0f32, f32::max).max(f32::MIN_POSITIVE);
-            for &c in p {
-                out.push((em_spectra::cie::encode_srgb(f64::from(c / top) * level) * 255.0).round() as u8);
+            let y = luminance(p);
+            // The square root lifts the middle of the range as sRGB's encoding lifted it before,
+            // so a disc an order of magnitude below the arms is not drawn near black.
+            let level = if y > 0.0 { (1.0 + (y / peak).log10() / decades).clamp(0.0, 1.0) } else { 0.0 };
+            let lightness = level.sqrt();
+            let top = f64::from(p.iter().copied().fold(0.0f32, f32::max));
+            let rgb = if lightness == 0.0 || top <= 0.0 {
+                [0.0; 3]
+            } else {
+                let [l0, a0, b0] = oklab::from_linear_srgb(p.map(|c| f64::from(c) / top));
+                let scale = saturation * lightness / l0.max(1e-6);
+                in_gamut([lightness, a0 * scale, b0 * scale])
+            };
+            for c in rgb {
+                out.push((em_spectra::cie::encode_srgb(c) * 255.0).round() as u8);
             }
             out.push(255);
         }
         out
     }
+}
+
+/// Linear sRGB for an OKLab color, its chroma reduced by bisection until it fits the gamut.
+fn in_gamut([l, a, b]: [f64; 3]) -> [f64; 3] {
+    let fits = |k: f64| {
+        let c = em_spectra::oklab::to_linear_srgb([l, a * k, b * k]);
+        c.iter().all(|v| (-1e-9..=1.0 + 1e-9).contains(v)).then_some(c)
+    };
+    if let Some(c) = fits(1.0) {
+        return c;
+    }
+    let (mut lo, mut hi) = (0.0, 1.0);
+    for _ in 0..12 {
+        let mid = 0.5 * (lo + hi);
+        if fits(mid).is_some() { lo = mid } else { hi = mid }
+    }
+    fits(lo).unwrap_or([l.clamp(0.0, 1.0); 3]).map(|v| v.clamp(0.0, 1.0))
 }
 
 #[cfg(test)]

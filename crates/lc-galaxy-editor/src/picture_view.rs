@@ -4,7 +4,8 @@
 //! first resolution, then at each finer one in turn. The picture is marched on a worker at a
 //! resolution chosen from the last march's cost so a moving view updates within
 //! [`MOVING_BUDGET_S`], and once the view rests it halves the downsampling each march until it
-//! reaches the screen's. Work that a newer edit or a move makes stale is stopped.
+//! reaches the screen's. Last, with the finest volume in, it marches the graph itself, whose edges
+//! no voxel blurs. Work that a newer edit or a move makes stale is stopped.
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
@@ -12,7 +13,8 @@ use std::time::{Duration, Instant};
 
 use bevy_egui::egui::{self, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use glam::DVec3;
-use lc_galaxy::picture::{Progress, Side, View, Volume, march_until};
+use lc_galaxy::Compiled;
+use lc_galaxy::picture::{Progress, Side, View, Volume, lights, march_exact, march_until};
 use lc_galaxy::sample::default_threads;
 
 use crate::doc::Doc;
@@ -93,6 +95,9 @@ struct ImageKey {
     downsample: f64,
     screen: [u32; 2],
     decades: f64,
+    saturation: f64,
+    /// Through the graph rather than the volume.
+    exact: bool,
 }
 
 struct Marched {
@@ -106,6 +111,7 @@ pub struct PictureView {
     side: Side,
     refit: bool,
     decades: f64,
+    saturation: f64,
     volume: Job<VolumeKey, Arc<Volume>>,
     image: Job<ImageKey, Marched>,
     texture: Option<TextureHandle>,
@@ -124,6 +130,7 @@ impl Default for PictureView {
             side: Side::named("+z").unwrap(),
             refit: true,
             decades: 3.0,
+            saturation: 1.2,
             volume: Job::default(),
             image: Job::default(),
             texture: None,
@@ -153,6 +160,8 @@ impl PictureView {
         ui.separator();
         ui.label("range");
         ui.add(egui::DragValue::new(&mut self.decades).range(0.5..=8.0).speed(0.05).suffix(" dex"));
+        ui.label("saturation");
+        ui.add(egui::DragValue::new(&mut self.saturation).range(0.0..=3.0).speed(0.01));
     }
 
     pub fn show(&mut self, ui: &egui::Ui, painter: &egui::Painter, rect: Rect, response: &egui::Response, doc: &Doc) {
@@ -194,23 +203,27 @@ impl PictureView {
             let cost = m.took.as_secs_f64() / pixels;
             self.cost = Some(self.cost.map_or(cost, |c| 0.5 * c + 0.5 * cost));
         }
+        let current = |k: &ImageKey| k.camera == camera && k.volume == volume_key && k.screen == screen && k.decades == self.decades && k.saturation == self.saturation;
         self.downsample = if moving {
             let pixels = f64::from(screen[0]) * f64::from(screen[1]);
             self.cost.map_or(8.0, |c| (pixels * c / MOVING_BUDGET_S).sqrt()).clamp(1.0, MAX_DOWNSAMPLE)
         } else {
-            let current = |k: &ImageKey| k.camera == camera && k.volume == volume_key && k.screen == screen && k.decades == self.decades;
             match &self.image.done {
                 // Finer by half each march once the last one at this view has landed.
                 Some((k, _)) if current(k) && k.downsample <= self.downsample => (self.downsample / 2.0).max(1.0),
                 _ => self.downsample,
             }
         };
-        let key = ImageKey { volume: volume_key, camera, downsample: self.downsample, screen, decades: self.decades };
+        let finest = volume_key.1 + 1 == VOLUME_LEVELS.len();
+        let exact = !moving && finest && self.downsample <= 1.0 && self.image.done.as_ref().is_some_and(|(k, _)| current(k) && k.downsample <= 1.0);
+        let key = ImageKey { volume: volume_key, camera, downsample: self.downsample, screen, decades: self.decades, saturation: self.saturation, exact };
         let stale = |r: &Running<ImageKey, Marched>| r.key.volume != key.volume || r.key.downsample < key.downsample;
         let done_here = self.image.done.as_ref().is_some_and(|(k, _)| *k == key);
         let running_here = self.image.running.as_ref().is_some_and(|r| r.key == key);
         if !done_here && !running_here && self.image.running.as_ref().is_none_or(stale) {
-            self.image.start(key.clone(), move |stop| march(&volume, &key, stop));
+            // Only the exact march reads it, and cloning it is cheap beside any march.
+            let compiled = result.compiled.clone();
+            self.image.start(key.clone(), move |stop| march(&volume, &compiled, &key, stop));
         }
 
         if let Some((k, m)) = &self.image.done
@@ -248,12 +261,16 @@ impl PictureView {
             painter.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
         // The volume on screen, and the finer one being sampled.
-        let shown = self.shown.as_ref().map(|k| format!("{} voxels", VOLUME_LEVELS[k.volume.1]));
+        let shown = self.shown.as_ref().map(|k| if k.exact { "exact".to_string() } else { format!("{} voxels", VOLUME_LEVELS[k.volume.1]) });
         let building = self.volume.running.as_ref().map(|r| {
             let (done, total) = r.progress.read();
             format!("{} voxels {done}/{total} in progress", VOLUME_LEVELS[r.key.1])
         });
-        let text = [shown, building].into_iter().flatten().collect::<Vec<_>>().join("    ");
+        let exact = self.image.running.as_ref().filter(|r| r.key.exact).map(|r| {
+            let (done, total) = r.progress.read();
+            format!("exact {done}/{total} in progress")
+        });
+        let text = [shown, building, exact].into_iter().flatten().collect::<Vec<_>>().join("    ");
         if !text.is_empty() {
             let at = rect.right_bottom() - egui::vec2(10.0, 8.0);
             painter.text(at, egui::Align2::RIGHT_BOTTOM, text, egui::FontId::monospace(12.0), palette::UNREAD);
@@ -261,13 +278,17 @@ impl PictureView {
     }
 }
 
-fn march(volume: &Volume, key: &ImageKey, progress: &Progress) -> Option<Marched> {
+fn march(volume: &Volume, compiled: &Compiled, key: &ImageKey, progress: &Progress) -> Option<Marched> {
     let start = Instant::now();
     let size = key.screen.map(|n| ((f64::from(n) / key.downsample).round() as u32).max(1));
     let c = key.camera;
     let view = View { target: c.target, yaw: c.yaw, pitch: c.pitch, ly_per_px: c.ly_per_screen_px * f64::from(key.screen[0]) / f64::from(size[0]) };
-    let picture = march_until(volume, &view, size[0], size[1], default_threads(), progress)?;
-    let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &picture.to_rgba8(key.decades));
+    let picture = if key.exact {
+        march_exact(compiled, &lights(compiled), &view, size[0], size[1], volume.voxel_ly, default_threads(), progress)?
+    } else {
+        march_until(volume, &view, size[0], size[1], default_threads(), progress)?
+    };
+    let image = ColorImage::from_rgba_unmultiplied([size[0] as usize, size[1] as usize], &picture.to_rgba8(key.decades, key.saturation));
     Some(Marched { image, took: start.elapsed() })
 }
 

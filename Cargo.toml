@@ -19,6 +19,12 @@ default-run = "exotic-matters"
 [profile.dev.package."*"]
 opt-level = 3
 
+# The bake, its volumes and its pictures are the heavy numeric code CLAUDE.md's dev-profile note
+# assumes the workspace's crates are not; unoptimized, Galaxy Forge rebakes and re-pictures far
+# slower than it draws. Optimization leaves `f64` results unchanged: Rust contracts no FMA.
+[profile.dev.package.lc-galaxy]
+opt-level = 3
+
 [profile.release]
 lto = true
 opt-level = 3

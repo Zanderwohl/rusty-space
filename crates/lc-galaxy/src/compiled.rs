@@ -421,6 +421,15 @@ impl Compiled {
             .fold(Aabb::EMPTY, |b, s| b.union(s.bounds()))
     }
 
+    /// A lower bound on the distance from `p` to where any population's density can be nonzero,
+    /// ly; zero or less inside.
+    pub fn reach(&self, p: DVec3) -> f64 {
+        self.raising()
+            .filter_map(|t| self.shapes.get(&t.shape))
+            .map(|s| s.distance(p) / s.lipschitz())
+            .fold(f64::INFINITY, f64::min)
+    }
+
     /// Whether any density-raising shape's support reaches within `radius` of `p`. The bake's
     /// test for skipping a cell, exact up to each shape's Lipschitz bound.
     pub fn may_reach(&self, p: DVec3, radius: f64) -> bool {
