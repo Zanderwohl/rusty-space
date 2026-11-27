@@ -78,7 +78,7 @@ pub fn parse(line: &str) -> Result<Parsed, ParseError> {
 
 /// One token from `at`, which is on its first character. Leaves `at` past it.
 fn token(chars: &[char], at: &mut usize) -> Result<(Arg, bool), ParseError> {
-    if chars[*at] == '"' {
+    if chars.get(*at) == Some(&'"') {
         let value = quoted(chars, at)?;
         return Ok((Arg { key: None, value }, true));
     }
@@ -88,7 +88,7 @@ fn token(chars: &[char], at: &mut usize) -> Result<(Arg, bool), ParseError> {
         return Ok((Arg { key: None, value: word }, false));
     }
     if word.is_empty() || !word.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return Err(ParseError::BadKey(chars[start..*at].iter().collect()));
+        return Err(ParseError::BadKey(chars.get(start..*at).unwrap_or_default().iter().collect()));
     }
     let colon = *at;
     *at += 1;
@@ -119,7 +119,7 @@ fn bare(chars: &[char], at: &mut usize) -> Result<String, ParseError> {
         }
         *at += 1;
     }
-    Ok(chars[start..*at].iter().collect())
+    Ok(chars.get(start..*at).unwrap_or_default().iter().collect())
 }
 
 /// A quoted value, with `at` on its opening quote. Leaves `at` past the closing one, which must

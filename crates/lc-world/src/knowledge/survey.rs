@@ -525,7 +525,7 @@ impl Plan {
     /// The middle of a field: the inverse of [`Plan::field_of`].
     pub fn center_of(&self, field: u64) -> Option<DVec3> {
         let j = self.rings.iter().rposition(|&(offset, _)| offset <= field)?;
-        let (offset, n) = self.rings[j];
+        let &(offset, n) = self.rings.get(j)?;
         if field >= offset + n {
             return None;
         }

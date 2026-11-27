@@ -30,6 +30,7 @@ impl Coefficients {
     }
 
     /// Myr. Eq. 5.
+    #[allow(clippy::approx_constant)] // 0.30103 is the paper's coefficient as printed, not log10(2)
     pub fn t_ms(&self, m: f64) -> f64 {
         let x = f64::max(0.95, f64::min(0.95 - 0.03 * (self.zeta + 0.30103), 0.99));
         f64::max(self.t_hook(m), x * self.t_bgb(m))

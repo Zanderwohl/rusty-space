@@ -261,8 +261,8 @@ impl Whereabouts {
             .take_while(|(_, held)| held.emitted_s >= floor_s)
             .find(|(_, held)| held.same_moment(&sighting))
             .map(|(at, _)| at);
-        if let Some(at) = same {
-            let changed = stay.sightings[at].merge(sighting);
+        if let Some(held) = same.and_then(|at| stay.sightings.get_mut(at)) {
+            let changed = held.merge(sighting);
             stay.sightings.sort_by(|a, b| a.emitted_s.total_cmp(&b.emitted_s));
             return changed;
         }

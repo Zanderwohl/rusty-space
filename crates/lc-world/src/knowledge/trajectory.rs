@@ -112,7 +112,7 @@ fn conic(system: &LocalSystem, about: em_sim::id::BodyIndex, places: &[Place], s
         local.push(((p.position_ly - system.origin_ly) * M_PER_LY - center_m, p.at_s));
     }
     let mid = local.len() / 2;
-    let epoch_s = local[mid].1;
+    let epoch_s = local.get(mid)?.1;
     let start = match seed {
         Some(seed) => {
             let ahead = 1.0;
@@ -121,8 +121,8 @@ fn conic(system: &LocalSystem, about: em_sim::id::BodyIndex, places: &[Place], s
             [here, (at(epoch_s + ahead)? - here) / ahead]
         }
         None => {
-            let (before, after) = (local[mid - 1], local[mid + 1]);
-            [local[mid].0, (after.0 - before.0) / (after.1 - before.1)]
+            let (before, here, after) = (local.get(mid.checked_sub(1)?)?, local.get(mid)?, local.get(mid + 1)?);
+            [here.0, (after.0 - before.0) / (after.1 - before.1)]
         }
     };
     let misses = |x: &[DVec3; 2]| -> Option<Vec<DVec3>> {
@@ -134,25 +134,24 @@ fn conic(system: &LocalSystem, about: em_sim::id::BodyIndex, places: &[Place], s
         let res = misses(&x)?;
         let mut columns = Vec::with_capacity(6);
         for k in 0..6 {
-            let (which, axis) = (k / 3, k % 3);
-            let step = (x[which].length() * 1e-7).max(if which == 0 { 1e-3 } else { 1e-6 });
+            let step = (x.get(k / 3)?.length() * 1e-7).max(if k < 3 { 1e-3 } else { 1e-6 });
             let mut nudged = x;
-            nudged[which][axis] += step;
+            *component(&mut nudged, k)? += step;
             let moved = misses(&nudged)?;
             columns.push(moved.iter().zip(&res).map(|(m, r)| (*m - *r) / step).collect::<Vec<DVec3>>());
         }
         let mut normal = [[0.0; 6]; 6];
         let mut rhs = [0.0; 6];
-        for i in 0..6 {
-            for j in 0..6 {
-                normal[i][j] = columns[i].iter().zip(&columns[j]).map(|(a, b)| a.dot(*b)).sum();
+        for ((row, rhs), ci) in normal.iter_mut().zip(rhs.iter_mut()).zip(&columns) {
+            for (n, cj) in row.iter_mut().zip(&columns) {
+                *n = ci.iter().zip(cj).map(|(a, b)| a.dot(*b)).sum();
             }
-            rhs[i] = -columns[i].iter().zip(&res).map(|(a, r)| a.dot(*r)).sum::<f64>();
+            *rhs = -ci.iter().zip(&res).map(|(a, r)| a.dot(*r)).sum::<f64>();
         }
         let delta = solve6(normal, rhs)?;
         let mut next = x;
-        for k in 0..6 {
-            next[k / 3][k % 3] += delta[k];
+        for (k, d) in delta.iter().enumerate() {
+            *component(&mut next, k)? += d;
         }
         let Some(after) = misses(&next).map(|m| m.iter().map(|m| m.length_squared()).sum::<f64>()) else { break };
         if !(after < cost) {
@@ -167,7 +166,13 @@ fn conic(system: &LocalSystem, about: em_sim::id::BodyIndex, places: &[Place], s
     Some(Trajectory::Conic { about: BodyId::of(system.star, system.sim().name(about)), mu, position_m: x[0], velocity_m_s: x[1], epoch_s })
 }
 
+/// Element `k` of a position and velocity read as one six-vector.
+fn component(x: &mut [DVec3; 2], k: usize) -> Option<&mut f64> {
+    x.get_mut(k / 3)?.as_mut().get_mut(k % 3)
+}
+
 /// `a x = b` by Gaussian elimination with partial pivoting. `None` when `a` is singular.
+#[allow(clippy::indexing_slicing)] // every index runs over 0..6 into [_; 6] arrays
 fn solve6(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
     for col in 0..6 {
         let pivot = (col..6).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;

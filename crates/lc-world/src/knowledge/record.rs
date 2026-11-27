@@ -439,7 +439,9 @@ impl Covariance {
         let mut upper = [0.0; 28];
         for (i, row) in matrix.iter().enumerate() {
             for (j, x) in row.iter().enumerate().skip(i) {
-                upper[Self::index(i, j)] = *x;
+                if let Some(slot) = upper.get_mut(Self::index(i, j)) {
+                    *slot = *x;
+                }
             }
         }
         Self(upper)
@@ -454,7 +456,9 @@ impl Covariance {
         let mut out = self;
         for (i, row) in other.iter().enumerate() {
             for (j, x) in row.iter().enumerate().skip(i) {
-                out.0[Self::index(i, j)] += *x;
+                if let Some(slot) = out.0.get_mut(Self::index(i, j)) {
+                    *slot += *x;
+                }
             }
         }
         out
@@ -463,7 +467,9 @@ impl Covariance {
     /// The whole orbit scaled by a fraction with this sigma, as an error in its primary's
     /// distance scales everything fitted about it.
     pub fn scaled_by(mut self, fraction: f64) -> Self {
-        self.0[Self::index(0, 0)] += fraction * fraction;
+        if let Some(slot) = self.0.get_mut(Self::index(0, 0)) {
+            *slot += fraction * fraction;
+        }
         self
     }
 }
