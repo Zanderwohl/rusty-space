@@ -19,7 +19,9 @@ use crate::num::Num;
 /// What a mask reads.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MaskField {
-    /// A population's stars per ly³, from every term before the mask.
+    /// A population's stars per ly³, from every term before the mask. At least one of them must
+    /// raise it, or the mask is a problem: moving or suppressing the rows that feed a density
+    /// would otherwise empty the mask without a word.
     Density(FeatureId),
     /// Another shape's weight, 0 to 1.
     Weight(ShapeRef),
@@ -48,10 +50,16 @@ enum Field {
 impl Field {
     fn at(&self, p: DVec3) -> f64 {
         match self {
-            Field::Density(terms) => terms.iter().fold(0.0, |n, (op, s)| {
-                let w = s.weight(p);
-                if w == 0.0 { n } else { op.apply(n, w) }
-            }).max(0.0),
+            Field::Density(terms) => terms
+                .iter()
+                // Outside its box a shape weighs nothing; the box test is far cheaper than a
+                // warped or combined shape's weight.
+                .filter(|(_, s)| s.bounds().contains(p))
+                .fold(0.0, |n, (op, s)| {
+                    let w = s.weight(p);
+                    if w == 0.0 { n } else { op.apply(n, w) }
+                })
+                .max(0.0),
             Field::Weight(s) => s.weight(p),
         }
     }
@@ -140,12 +148,13 @@ impl FeatureKind for MaskKind {
             MaskField::Density(pop) => {
                 super::population(out, pop)?;
                 // Only the terms that move this population's density, as they stand now.
-                let terms = out
+                let terms: Vec<(Op, Arc<dyn Shape>)> = out
                     .terms
                     .iter()
                     .filter(|t| t.target == Target::Density(pop))
                     .filter_map(|t| Some((t.op, out.shapes.get(&t.shape)?.clone())))
                     .collect();
+                require(terms.iter().any(|(op, _)| matches!(op, Op::Add(_) | Op::Set(_))), &format!("no feature before this adds to {pop}'s density"))?;
                 Field::Density(terms)
             }
             MaskField::Weight(r) => Field::Weight(shape::operand(out, r.0)?),

@@ -60,6 +60,12 @@ fn every_kind() -> Vec<(&'static str, Compiled)> {
 /// ellipsoid where the disc is dense (or, inverted, sparse), adding `STARS` to a second
 /// population.
 fn masked(invert: bool) -> (Timeline, Compiled) {
+    let (t, c, _) = masked_with_blob(invert);
+    (t, c)
+}
+
+/// [`masked`], with the ellipsoid's id.
+fn masked_with_blob(invert: bool) -> (Timeline, Compiled, FeatureId) {
     let mut t = Timeline::new(3);
     let frame = t.push(Box::new(FrameKind { tilt_deg: 20.0, ..FrameKind::new() }), None);
     let disc_pop = t.push(Box::new(PopulationKind { frame, ..PopulationKind::new() }), None);
@@ -72,7 +78,7 @@ fn masked(invert: bool) -> (Timeline, Compiled) {
     t.push(Box::new(mask), None);
     let c = t.compile(t.len(), None);
     assert!(c.problems.is_empty(), "{:?}", c.problems);
-    (t, c)
+    (t, c, blob)
 }
 
 /// An ellipsoid as construction geometry, and noise over it adding `STARS`.
@@ -291,18 +297,19 @@ fn modulation_keeps_the_edge_and_a_warp_moves_it() {
 /// and a feature after the mask does not change what it keeps.
 #[test]
 fn a_mask_keeps_its_shape_only_where_the_field_passes() {
-    let (mut t, c) = masked(false);
+    let (mut t, c, blob_id) = masked_with_blob(false);
     let mask_id = t.features().last().unwrap().id;
     let weights = |c: &Compiled| -> Vec<f64> {
         let mask = c.shapes.iter().find(|(k, _)| k.feature == mask_id).unwrap().1.clone();
         (0..400).map(|i| mask.weight(DVec3::new(-5.0 + i as f64 * 0.1, 0.0, 0.0))).collect()
     };
     let disc_pop = *c.populations.keys().next().unwrap();
-    let blob = c.shapes.iter().find(|(k, _)| k.feature.0 == 4).unwrap().1.clone();
+    let blob = c.shapes.iter().find(|(k, _)| k.feature == blob_id).unwrap().1.clone();
+    let masked = weights(&c);
     let mut kept = 0;
-    for i in 0..400 {
+    for (i, &w) in masked.iter().enumerate() {
         let p = DVec3::new(-5.0 + i as f64 * 0.1, 0.0, 0.0);
-        let (w, b, n) = (weights(&c)[i], blob.weight(p), c.sample(p).density[c.population_index(disc_pop).unwrap()]);
+        let (b, n) = (blob.weight(p), c.sample(p).density[c.population_index(disc_pop).unwrap()]);
         if n >= 0.2 {
             assert!((w - b).abs() < 1e-12, "dense at {p}: mask {w}, shape {b}");
             kept += usize::from(w > 0.0);
@@ -315,5 +322,9 @@ fn a_mask_keeps_its_shape_only_where_the_field_passes() {
     let frame = c.frames.keys().next().copied().unwrap();
     let more = vec![Contribution(Target::Density(disc_pop), OpSpec::Add(Num::Lit(5000.0)))];
     t.push(Box::new(ExponentialDisc { frame, contributes: more, ..ExponentialDisc::new() }), None);
-    assert_eq!(weights(&c), weights(&t.compile(t.len(), None)));
+    assert_eq!(masked, weights(&t.compile(t.len(), None)));
+    // With nothing before it feeding the density, the mask is a problem rather than empty.
+    let disc = t.features().find(|f| f.get::<ExponentialDisc>().is_some()).unwrap().id;
+    t.feature_mut(disc).unwrap().enabled = false;
+    assert!(t.compile(t.len(), None).problems.contains_key(&mask_id));
 }
