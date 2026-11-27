@@ -10,8 +10,9 @@ and `plummer` kinds, placement on the fixed grid, attributes and a local publish
 published chunks into the shard (`--sky <manifest>.galaxy`) and the client (a `.galaxy` asset).
 Galaxy Forge's Charts panel (an HR diagram over the zero-age main sequence, and mass, age and
 `[Fe/H]` histograms against the IMF and age distributions they were drawn from) is built ahead of
-Phase II, with a draft Phase II galaxy in `crates/lc-galaxy/galaxies/phase-2.ron`. Phase I is under way: since 2026-11-24 the dev shard and the promoted browser build run the
-Phase I galaxy (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, solo and
+Phase II, with a draft Phase II galaxy in `crates/lc-galaxy/galaxies/phase-2.ron`. Phase II is under way: since 2026-11-25 the dev shard and the promoted browser build run the
+Phase II galaxy, 467 stars in chunk format 3 (build `832dbd40` since 2026-11-26). Phase I ran
+from 2026-11-24 (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, solo and
 difference in both views, per-star shells with their histogram, and authored system contents
 ([35-system-contents.md](35-system-contents.md)), `lc-galaxy stats` and the separate-process
 determinism test (`crates/lc-galaxy/tests/cli.rs`, publishing with one thread and with seven) are
