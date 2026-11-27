@@ -16,8 +16,11 @@ from 2026-11-24 (build `fbb9423f`). Of Phase II's additions, the Hurley tracks, 
 difference in both views, per-star shells with their histogram, and authored system contents
 ([35-system-contents.md](35-system-contents.md)), `lc-galaxy stats` and the separate-process
 determinism test (`crates/lc-galaxy/tests/cli.rs`, publishing with one thread and with seven) are
-built. Tier A and the CDN path of
-Phase III are not started. The shipped sky is still the
+built. Of Phase III, the shape kinds are built (`crates/lc-galaxy/src/kinds/{profiles,regions,spiral}.rs`):
+`exponential_disc`, `sersic`, `power_halo`, `king`, `ellipsoid`, `ring`, `bar` and `log_spiral`,
+each with a distance whose Lipschitz bound a test checks, and a draft Phase III galaxy in
+`crates/lc-galaxy/galaxies/phase-3.ron`. `path`, `boolean`, `noise`, the ray marcher, tier A and
+the CDN path are not started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -351,10 +354,10 @@ list is construction geometry, drawn grayed, that only booleans and masks read.
 | `variable` | a named number | Century's `Variable`, numbers only |
 | `frame` | a frame | origin in ly, tilt and azimuth in degrees, rotation curve; a galaxy or a companion |
 | `population` | a population | IMF, age distribution, age–metallicity relation, binary fraction, age–velocity dispersion |
-| `exponential_disc`, `sersic`, `power_halo` | one shape | analytic profiles, with a truncation radius and edge width so the support is finite |
+| `exponential_disc`, `sersic`, `power_halo` | one shape | analytic profiles, with a truncation radius and edge width so the support is finite; `Add` on any shape's density counts stars, across all of a feature's outputs |
 | `plummer`, `king` | one shape | clusters |
 | `log_spiral` | one shape per arm | `Output { index, of }` names an arm |
-| `bar`, `ring`, `ellipsoid`, `path` | one shape | |
+| `bar`, `ring`, `ellipsoid`, `path` | one shape | a bar is a Ferrers ellipsoid, `(1 - m²)²`; an `edge_ly` on a ring or ellipsoid is measured along its shortest semi-axis |
 | `noise` | one shape | warps or modulates another shape's weight; raises its `lipschitz` |
 | `boolean` | one shape | union, intersection or difference of shapes, with a blend width in ly |
 | `object` | a point object | a black hole, a pulsar, a hand-placed star; inserted before thinning |

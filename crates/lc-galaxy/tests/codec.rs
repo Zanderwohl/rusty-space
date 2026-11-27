@@ -1,5 +1,5 @@
 use lc_galaxy::codec::{self, ReadError};
-use lc_galaxy::kinds::{FrameKind, Plummer, PopulationKind, Variable};
+use lc_galaxy::kinds::{Bar, Ellipsoid, ExponentialDisc, FrameKind, King, LogSpiral, Plummer, PopulationKind, PowerHalo, Ring, Sersic, Variable};
 use lc_galaxy::{FeatureId, FeatureKind, Num, Registry, Row, Unread};
 
 const PHASE_1: &str = include_str!("../galaxies/phase-1.ron");
@@ -40,6 +40,14 @@ fn fields_name_exactly_what_each_kind_serializes() {
     check::<FrameKind>();
     check::<PopulationKind>();
     check::<Plummer>();
+    check::<King>();
+    check::<ExponentialDisc>();
+    check::<Sersic>();
+    check::<PowerHalo>();
+    check::<Ellipsoid>();
+    check::<Ring>();
+    check::<Bar>();
+    check::<LogSpiral>();
 }
 
 fn with_line(line: &str) -> lc_galaxy::Timeline {
@@ -49,7 +57,7 @@ fn with_line(line: &str) -> lc_galaxy::Timeline {
 #[test]
 fn an_unknown_kind_or_a_newer_version_is_kept_verbatim() {
     for line in [
-        r#"Feature(id: 4, kind: "log_spiral", version: 1, enabled: true, params: (arms: 2))"#,
+        r#"Feature(id: 4, kind: "path", version: 1, enabled: true, params: (points: []))"#,
         r#"Feature(id: 4, kind: "plummer", version: 9, enabled: true, params: (whatever: 1))"#,
     ] {
         let t = with_line(line);

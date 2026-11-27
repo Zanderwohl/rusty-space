@@ -3,8 +3,9 @@ use std::sync::Arc;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
-use crate::compiled::{Aabb, Compiled, Op, OpSpec, Shape, Target, Term};
-use crate::feature::{FeatureId, FeatureKind, Output, Problem};
+use super::shape::{self, Field, ShapeKind, Unit, simpson, smoothstep};
+use crate::compiled::{Aabb, Compiled, OpSpec, Shape, Target};
+use crate::feature::{FeatureId, FeatureKind, Problem};
 use crate::num::Num;
 
 /// What a shape does to a field, as written: `(Density(1), Add(10))`.
@@ -12,9 +13,6 @@ use crate::num::Num;
 pub struct Contribution(pub Target, pub OpSpec);
 
 /// A Plummer sphere, `ρ ∝ (1 + r²/a²)^(-5/2)`, truncated at `radius_ly` over `edge_ly`.
-///
-/// **`Add` on a density counts stars**, not stars per ly³: the cluster's total is what a
-/// designer knows, and the peak density follows from it and the profile.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Plummer {
     pub frame: FeatureId,
@@ -42,20 +40,11 @@ impl FeatureKind for Plummer {
     }
 
     fn depends_on(&self) -> Vec<FeatureId> {
-        let mut deps = vec![self.frame];
-        deps.extend(self.contributes.iter().filter_map(|c| c.0.population()));
-        deps.sort();
-        deps.dedup();
-        deps
+        shape::depends_on(self.frame, &self.contributes)
     }
 
     fn variables(&self) -> Vec<String> {
-        [&self.core_ly, &self.radius_ly, &self.edge_ly]
-            .into_iter()
-            .filter_map(Num::variable)
-            .chain(self.contributes.iter().filter_map(|c| c.1.variable()))
-            .map(String::from)
-            .collect()
+        shape::variables(&[&self.core_ly, &self.radius_ly, &self.edge_ly], &self.contributes)
     }
 
     fn summary(&self) -> String {
@@ -71,22 +60,27 @@ impl FeatureKind for Plummer {
         }
         let (x, y, z) = self.center_ly;
         let shape = PlummerShape { center: frame.to_galaxy(DVec3::new(x, y, z)), core, radius, edge };
-        let b = shape.bounds();
-        if !(crate::compiled::in_box(b.min) && crate::compiled::in_box(b.max)) {
-            return Err(Problem::Invalid(format!("reaches outside the ±{} ly box", crate::compiled::BOX_HALF_LY)));
-        }
-        let mut terms = Vec::new();
-        for Contribution(target, op) in &self.contributes {
-            super::check_target(out, *target)?;
-            let op = match (target, op.resolve(v)?) {
-                (Target::Density(_), Op::Add(stars)) => Op::Add(stars / shape.volume()),
-                (_, op) => op,
-            };
-            terms.push(Term { source: id, target: *target, op, shape: Output::only(id) });
-        }
-        out.shapes.insert(Output::only(id), Arc::new(shape));
-        out.terms.extend(terms);
-        Ok(())
+        let volume = shape.volume();
+        shape::contribute(id, out, &self.contributes, vec![(Arc::new(shape), volume)])
+    }
+}
+
+impl ShapeKind for Plummer {
+    fn frame_mut(&mut self) -> &mut FeatureId {
+        &mut self.frame
+    }
+
+    fn contributes_mut(&mut self) -> &mut Vec<Contribution> {
+        &mut self.contributes
+    }
+
+    fn fields(&mut self) -> Vec<Field<'_>> {
+        vec![
+            Field::Vec3("center", &mut self.center_ly),
+            Field::Num("core", &mut self.core_ly, Unit::Ly),
+            Field::Num("radius", &mut self.radius_ly, Unit::Ly),
+            Field::Num("edge", &mut self.edge_ly, Unit::Ly),
+        ]
     }
 }
 
@@ -105,24 +99,16 @@ impl PlummerShape {
         }
         let q = 1.0 + (r * r) / (self.core * self.core);
         let profile = 1.0 / (q * q * libm::sqrt(q));
+        // Not `shape::taper`: its arithmetic differs in the last bit, and published Phase I and II
+        // stars must not move.
         let taper = if self.edge > 0.0 { smoothstep(((self.radius - r) / self.edge).min(1.0)) } else { 1.0 };
         profile * taper
     }
 
     /// `∫ weight dV` in ly³: the peak density that puts one star in the cluster is `1 / volume`.
     pub fn volume(&self) -> f64 {
-        // Simpson's rule on a smooth integrand that vanishes at both ends.
-        const STEPS: usize = 512;
-        let h = self.radius / STEPS as f64;
-        let f = |r: f64| 4.0 * std::f64::consts::PI * r * r * self.weight_at(r);
-        let inner: f64 = (1..STEPS).map(|i| f(i as f64 * h) * if i % 2 == 1 { 4.0 } else { 2.0 }).sum();
-        (f(0.0) + inner + f(self.radius)) * h / 3.0
+        simpson(|r| 4.0 * std::f64::consts::PI * r * r * self.weight_at(r), 0.0, self.radius, 512)
     }
-}
-
-fn smoothstep(t: f64) -> f64 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 impl Shape for PlummerShape {

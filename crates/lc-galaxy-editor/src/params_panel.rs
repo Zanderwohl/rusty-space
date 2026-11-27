@@ -2,7 +2,7 @@
 
 use bevy_egui::egui::{self, DragValue, RichText};
 use lc_galaxy::compiled::{Age, Dispersion, Feh, Imf, OpSpec, Rotation, SystemField};
-use lc_galaxy::kinds::{Contribution, FrameKind, Plummer, PopulationKind, Variable};
+use lc_galaxy::kinds::{self, Contribution, Field, FrameKind, PopulationKind, ShapeKind, Unit, Variable};
 use lc_galaxy::{FeatureId, Num, Params, Row, Target, Timeline, Unread, codec};
 
 use crate::doc::Doc;
@@ -106,18 +106,18 @@ pub fn seed_references(params: &mut dyn Params, t: &Timeline, at: usize) {
     let refs = Refs::before(t, at.min(t.len()));
     let frame = refs.frames.last().map(|f| f.0);
     let pop = refs.populations.last().map(|p| p.0);
-    let any = params.as_any_mut();
-    if let Some(p) = any.downcast_mut::<PopulationKind>() {
+    if let Some(p) = params.as_any_mut().downcast_mut::<PopulationKind>() {
         p.frame = frame.unwrap_or(p.frame);
-    } else if let Some(p) = any.downcast_mut::<Plummer>() {
-        p.frame = frame.unwrap_or(p.frame);
+    } else if let Some(s) = kinds::as_shape(params) {
+        *s.frame_mut() = frame.unwrap_or(*s.frame_mut());
         if let Some(pop) = pop {
-            p.contributes = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(10.0)))];
+            *s.contributes_mut() = vec![Contribution(Target::Density(pop), OpSpec::Add(Num::Lit(10.0)))];
         }
     }
 }
 
 fn kind_fields(ui: &mut egui::Ui, params: &mut dyn Params, refs: &Refs) {
+    let kind = params.kind();
     let any = params.as_any_mut();
     if let Some(v) = any.downcast_mut::<Variable>() {
         variable(ui, v);
@@ -125,8 +125,8 @@ fn kind_fields(ui: &mut egui::Ui, params: &mut dyn Params, refs: &Refs) {
         frame(ui, f);
     } else if let Some(p) = any.downcast_mut::<PopulationKind>() {
         population(ui, p, refs);
-    } else if let Some(p) = any.downcast_mut::<Plummer>() {
-        plummer(ui, p, refs);
+    } else if let Some(s) = kinds::as_shape(params) {
+        shape(ui, kind, s, refs);
     }
 }
 
@@ -257,21 +257,35 @@ fn population(ui: &mut egui::Ui, p: &mut PopulationKind, refs: &Refs) {
     });
 }
 
-fn plummer(ui: &mut egui::Ui, p: &mut Plummer, refs: &Refs) {
-    grid(ui, "plummer", |ui| {
-        reference(ui, "frame", &mut p.frame, &refs.frames);
-        vec3(ui, "center", &mut p.center_ly, " ly");
-        for (label, n) in [("core", &mut p.core_ly), ("radius", &mut p.radius_ly), ("edge", &mut p.edge_ly)] {
-            ui.label(label);
-            num(ui, label, n, &refs.variables, " ly");
-            ui.end_row();
+fn shape(ui: &mut egui::Ui, kind: &str, s: &mut dyn ShapeKind, refs: &Refs) {
+    grid(ui, kind, |ui| {
+        reference(ui, "frame", s.frame_mut(), &refs.frames);
+        for field in s.fields() {
+            match field {
+                Field::Num(label, n, unit) => {
+                    ui.label(label);
+                    let suffix = match unit {
+                        Unit::Ly => " ly",
+                        Unit::Deg => "°",
+                        Unit::Plain => "",
+                    };
+                    num(ui, label, n, &refs.variables, suffix);
+                    ui.end_row();
+                }
+                Field::Vec3(label, v) => vec3(ui, label, v, " ly"),
+                Field::Count(label, c) => {
+                    ui.label(label);
+                    ui.add(DragValue::new(c).range(1..=kinds::MAX_ARMS));
+                    ui.end_row();
+                }
+            }
         }
     });
     ui.separator();
-    contributions(ui, &mut p.contributes, refs, true);
+    contributions(ui, s.contributes_mut(), refs);
 }
 
-fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs, adds_count_stars: bool) {
+fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs) {
     ui.label(RichText::new("contributes").strong());
     let mut remove = None;
     for (i, Contribution(target, op)) in list.iter_mut().enumerate() {
@@ -280,7 +294,7 @@ fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs, a
                 target_picker(ui, target, refs);
                 op_picker(ui, op);
                 let unit = match (&target, &op) {
-                    (Target::Density(_), OpSpec::Add(_)) if adds_count_stars => " stars",
+                    (Target::Density(_), OpSpec::Add(_)) => " stars",
                     (Target::FeH(_), OpSpec::Add(_) | OpSpec::Set(_)) => " dex",
                     (Target::System(f), OpSpec::Add(_) | OpSpec::Set(_)) if f.in_dex() => " dex",
                     _ => "",
