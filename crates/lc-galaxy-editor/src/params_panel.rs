@@ -387,6 +387,9 @@ fn path_points(ui: &mut egui::Ui, points: &mut Vec<PathPoint>) {
     if let Some(i) = remove {
         points.remove(i);
     }
+    if points.is_empty() && ui.button("+").clicked() {
+        points.push(PathPoint { at_ly: (0.0, 0.0, 0.0), radius_ly: 2.0 });
+    }
 }
 
 fn contributions(ui: &mut egui::Ui, list: &mut Vec<Contribution>, refs: &Refs) {

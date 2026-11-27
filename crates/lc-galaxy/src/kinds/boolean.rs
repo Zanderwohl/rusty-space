@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use super::plummer::Contribution;
 use super::shape::{self, require, resolve, smoothstep};
-use crate::compiled::{Aabb, Compiled, Shape};
+use crate::compiled::{Aabb, Compiled, OpSpec, Shape, Target};
 use crate::feature::{FeatureId, FeatureKind, Output, Problem};
 use crate::num::Num;
 
@@ -202,7 +202,16 @@ impl FeatureKind for Boolean {
         let operands = self
             .of
             .iter()
-            .map(|r| out.shapes.get(&r.0).cloned().ok_or(Problem::Missing(r.0.feature)))
+            .map(|r| {
+                out.shapes.get(&r.0).cloned().ok_or_else(|| {
+                    let o = r.0;
+                    if out.shapes.keys().any(|k| k.feature == o.feature) {
+                        Problem::Invalid(format!("{} has no shape {} of {}", o.feature, o.index + 1, o.of))
+                    } else {
+                        Problem::Missing(o.feature)
+                    }
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let bounds = match self.op {
             BoolOp::Union => operands.iter().fold(Aabb::EMPTY, |b, s| b.union(s.bounds())),
@@ -211,7 +220,9 @@ impl FeatureKind for Boolean {
         };
         require(!bounds.is_empty(), "the shapes do not overlap")?;
         let shape = Combined { op: self.op, blend, operands, bounds };
-        let volume = shape.volume();
+        // The sum is the costly part of a compile, and only an `Add` on a density reads it.
+        let counts = self.contributes.iter().any(|c| matches!((c.0, &c.1), (Target::Density(_), OpSpec::Add(_))));
+        let volume = if counts { shape.volume() } else { 0.0 };
         shape::contribute(id, out, &self.contributes, vec![(Arc::new(shape), volume)])
     }
 }

@@ -35,7 +35,8 @@ pub struct PathKind {
 }
 
 /// The curve through `points` as straight pieces, with the radius at each node: uniform
-/// Catmull-Rom for the position, so it passes through every point, and linear for the radius.
+/// Catmull-Rom for the position, so it passes through every point, and the radius linear in
+/// length along each span, so a span's taper is the same on every piece of it.
 /// The ends are extended by reflection, so the curve leaves an end toward its neighbor.
 pub fn curve(points: &[(DVec3, f64)]) -> Vec<(DVec3, f64)> {
     let n = points.len();
@@ -52,11 +53,18 @@ pub fn curve(points: &[(DVec3, f64)]) -> Vec<(DVec3, f64)> {
     let mut out = Vec::with_capacity((n - 1) * PIECES_PER_SPAN + 1);
     for s in 0..n - 1 {
         let (p0, p1, p2, p3) = (at(s as isize - 1), at(s as isize), at(s as isize + 1), at(s as isize + 2));
+        let span: Vec<DVec3> = (0..=PIECES_PER_SPAN)
+            .map(|k| {
+                let t = k as f64 / PIECES_PER_SPAN as f64;
+                let (t2, t3) = (t * t, t * t * t);
+                0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3)
+            })
+            .collect();
+        let length: f64 = span.windows(2).map(|w| w[0].distance(w[1])).sum();
+        let mut along = 0.0;
         for k in 0..PIECES_PER_SPAN {
-            let t = k as f64 / PIECES_PER_SPAN as f64;
-            let (t2, t3) = (t * t, t * t * t);
-            let p = 0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3);
-            out.push((p, points[s].1 + (points[s + 1].1 - points[s].1) * t));
+            out.push((span[k], points[s].1 + (points[s + 1].1 - points[s].1) * along / length.max(1e-12)));
+            along += span[k].distance(span[k + 1]);
         }
     }
     out.push(points[n - 1]);

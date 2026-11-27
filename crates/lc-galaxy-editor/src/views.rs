@@ -407,7 +407,7 @@ fn region(
     }
 }
 
-/// Screen radius of a path's control point, px; a press this close to one drags it.
+/// Screen radius of a path's control point, px; a press within twice this drags it.
 const HANDLE_PX: f32 = 6.0;
 
 /// The selected feature when it is a path, with its frame and points.
