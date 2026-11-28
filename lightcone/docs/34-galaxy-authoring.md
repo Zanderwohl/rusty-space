@@ -26,9 +26,9 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 `picture.rs`): each population's mean light per star in R, V and B from its IMF, ages and tracks,
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
-graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. Galaxies on the CDN, the shard naming its galaxy to clients, `diff` and the Published
-panel are built; publishing onto a manifest, baking around published stars and the console's
-Galaxy section are planned in [Publishing and freezing](#publishing-and-freezing) and not
+graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. Galaxies on the CDN, the shard naming its galaxy to clients, `diff`, the Published
+panel, publishing onto a manifest and baking around published stars are built; the console's
+Galaxy section is planned in [Publishing and freezing](#publishing-and-freezing) and not
 started. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
@@ -682,7 +682,7 @@ Phase III, and republishing everything stays the default until launch.
 - **Manifests are layered.** Each chunk in a manifest carries the graph version it was baked
   under, and a manifest is stored under its own content hash, like a chunk (both built). A
   manifest names the hash of the manifest it was built from in `parent`, and a publish onto it is
-  that manifest's chunks plus new ones (not built: it needs the bake around published stars).
+  that manifest's chunks plus new ones (built: `publish --onto <manifest>`).
 - **Galaxies live on the CDN apart from builds** (built), at `galaxy/<name>/`. `tools/publish-galaxy.sh`
   copies a published directory there as `tools/publish-build.sh` copies a build. A file that is
   already there with the same bytes is skipped; one with different bytes under the same name is
@@ -700,8 +700,19 @@ Phase III, and republishing everything stays the default until launch.
   any chunk differs. The Published panel shows the same table and outlines each chunk in the
   region view in the color of its worse tier. Comparing star by star against the published
   records in the difference view is not built.
-- **`publish --region <box>`** becomes safe once a bake treats published stars as fixed, since a
-  region's edge stars are then clamped against what is stored beside them.
+- **`publish --region <box>`** (built) bakes only the chunks the box touches, widened to whole
+  chunks so none is published half baked. Its edge stars' shells are clamped against nothing
+  outside it, and a later publish onto it clamps the new neighbors' shells instead.
+- **Baking around published stars** (built: `sample::Frozen` and `bake_around`,
+  `publish::publish_with`). Publishing onto a manifest keeps every chunk file it lists. Tier A is
+  frozen in every chunk the parent published in either tier, a chunk with no tier-A stars
+  included; tier B is frozen in the same chunks less those named by `--rebake x,y,z`. A frozen
+  tier is not drawn, and the candidates a bake would draw there take no part in thinning: the
+  stored records stand in for them. A new candidate is dropped within its own exclusion distance
+  of a stored record or inside a stored shell, and a new shell is clamped to the room a stored
+  shell leaves. `--rebake` trusts its caller that the chunk is unseen; the console's discovery
+  levels are what will check it. Over Phase III, publishing the west half and then the rest onto
+  it gives 9 945 stars against a whole bake's 9 953.
 
 ## In the administration console
 

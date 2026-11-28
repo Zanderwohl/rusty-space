@@ -22,7 +22,8 @@ use std::f64::consts::PI;
 use glam::{DVec3, IVec3};
 use lc_world::rng;
 use lc_world::sky::StarId;
-use lc_world::sky::galaxy::{cell_in_grid, pack_cell, star_id};
+use lc_world::sky::galaxy::{cell_in_grid, chunk_of, pack_cell, star_id};
+use lc_world::sky::shells::MAX_SHELL_LY;
 
 use crate::attributes::{self, Attributes, L_A};
 use crate::compiled::{Aabb, Compiled, Sample};
@@ -363,9 +364,67 @@ fn candidates_a(compiled: &Compiled, seed: u64, cell: ACell, shares: &[f64]) -> 
     Err(BakeError::Unbounded { cell: cell.first() })
 }
 
+/// Stars already published, which a bake around them leaves as they are. See
+/// `34-galaxy-authoring.md`, "Publishing and freezing".
+///
+/// A frozen chunk's tier is not drawn, and the candidates a bake would have drawn there take no
+/// part in thinning its neighbors: the stored stars stand in for them. A new candidate within its
+/// exclusion distance of a stored star, or inside a stored star's shell, is dropped.
+#[derive(Debug, Default)]
+pub struct Frozen {
+    a: std::collections::HashSet<[i32; 3]>,
+    b: std::collections::HashSet<[i32; 3]>,
+    /// Every stored record, dark remnants included, as position and shell (NaN for a star the
+    /// sky leaves out), by the tier-B cell holding it.
+    stored: std::collections::HashMap<Cell, Vec<(DVec3, f64)>>,
+}
+
+impl Frozen {
+    /// `chunks` are the chunk and tier pairs kept; `stored` every record they hold.
+    pub fn new(chunks: impl IntoIterator<Item = ([i32; 3], Tier)>, stored: impl IntoIterator<Item = (DVec3, f64)>) -> Self {
+        let mut f = Self::default();
+        for (c, tier) in chunks {
+            if tier == Tier::A { f.a.insert(c) } else { f.b.insert(c) };
+        }
+        for (p, shell) in stored {
+            f.stored.entry(Cell::containing(p)).or_default().push((p, shell));
+        }
+        f
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.a.is_empty() && self.b.is_empty()
+    }
+
+    pub fn holds(&self, cell: Cell, tier: Tier) -> bool {
+        let chunk = chunk_of(cell.0.to_array());
+        if tier == Tier::A { self.a.contains(&chunk) } else { self.b.contains(&chunk) }
+    }
+
+    /// Stored stars within `reach` of `p`, as position and shell.
+    pub fn near(&self, p: DVec3, reach: f64) -> impl Iterator<Item = (DVec3, f64)> + '_ {
+        let span = (reach / CELL_LY).ceil() as i32;
+        let at = Cell::containing(p).0;
+        (-span..=span)
+            .flat_map(move |x| (-span..=span).flat_map(move |y| (-span..=span).map(move |z| Cell(at + IVec3::new(x, y, z)))))
+            .filter_map(|c| self.stored.get(&c))
+            .flatten()
+            .copied()
+            .filter(move |(q, _)| q.distance_squared(p) < reach * reach)
+    }
+
+    /// Whether a new star at `p` keeps clear of every stored one.
+    fn clear(&self, p: DVec3, exclusion_ly: f64) -> bool {
+        self.stored.is_empty() || !self.near(p, exclusion_ly.max(MAX_SHELL_LY)).any(|(q, shell)| {
+            let d = q.distance(p);
+            d < exclusion_ly || d < shell
+        })
+    }
+}
+
 /// Tier A's survivors within one tier-B cell of `cells`, which is as far as any exclusion reaches
 /// into them, and how many tier-A candidates fell in `cells`.
-fn tier_a(compiled: &Compiled, seed: u64, cells: &[Cell], shares: &[f64], threads: usize) -> Result<(Vec<Candidate>, usize), BakeError> {
+fn tier_a(compiled: &Compiled, seed: u64, cells: &[Cell], shares: &[f64], frozen: &Frozen, threads: usize) -> Result<(Vec<Candidate>, usize), BakeError> {
     // From the cells' bounds, not the region's: a region cell's neighbors reach a cell past it.
     let covered = cells.iter().fold(Aabb::EMPTY, |b, c| b.union(c.bounds()));
     let near = Aabb { min: covered.min - DVec3::splat(CELL_LY), max: covered.max + DVec3::splat(CELL_LY) };
@@ -385,7 +444,8 @@ fn tier_a(compiled: &Compiled, seed: u64, cells: &[Cell], shares: &[f64], thread
     let survivors = owned
         .iter()
         .flat_map(|cell| {
-            let neighbors: Vec<&Candidate> = cell.neighborhood().filter_map(|c| by_cell.get(&c)).flatten().collect();
+            let neighbors: Vec<&Candidate> =
+                cell.neighborhood().filter_map(|c| by_cell.get(&c)).flatten().filter(|b| !frozen.holds(b.key.cell, Tier::A)).collect();
             by_cell.get(cell).into_iter().flatten().filter(move |a| {
                 !neighbors.iter().any(|b| {
                     b.key != a.key && (b.mark, b.key) < (a.mark, a.key) && a.position.distance_squared(b.position) < pair_radius(a, b).powi(2)
@@ -429,13 +489,22 @@ pub fn default_threads() -> usize {
 }
 
 pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Result<Bake, BakeError> {
-    let cells = cells_in(region);
+    bake_around(compiled, seed, region, &Frozen::default(), threads)
+}
+
+/// [`bake`], leaving `frozen` as it is: its chunks' tiers are not drawn, and new stars keep clear
+/// of its stars.
+pub fn bake_around(compiled: &Compiled, seed: u64, region: Aabb, frozen: &Frozen, threads: usize) -> Result<Bake, BakeError> {
+    let all = cells_in(region);
+    let cells: Vec<Cell> = all.iter().copied().filter(|&c| !frozen.holds(c, Tier::B)).collect();
     let ring = cells_in(Aabb { min: region.min - DVec3::splat(CELL_LY), max: region.max + DVec3::splat(CELL_LY) });
     if let Some(&cell) = ring.iter().find(|c| !c.in_grid()) {
         return Err(BakeError::OutsideGrid { cell });
     }
     let shares: Vec<f64> = compiled.populations.iter().map(|(id, p)| attributes::luminous_share(p, u64::from(id.0))).collect();
-    let (luminous, luminous_candidates) = if cells.is_empty() { (Vec::new(), 0) } else { tier_a(compiled, seed, &cells, &shares, threads)? };
+    let (luminous, luminous_candidates) = if all.is_empty() { (Vec::new(), 0) } else { tier_a(compiled, seed, &all, &shares, frozen, threads)? };
+    // Tier A where it is frozen is the stored stars, which `frozen.clear` stands for.
+    let luminous: Vec<Candidate> = luminous.into_iter().filter(|a| !frozen.holds(a.key.cell, Tier::A) && frozen.clear(a.position, a.exclusion_ly)).collect();
     let mut luminous_near: std::collections::HashMap<Cell, Vec<&Candidate>> = std::collections::HashMap::new();
     for a in &luminous {
         luminous_near.entry(a.key.cell).or_default().push(a);
@@ -448,7 +517,7 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
     }
     let survivors = par_map(&cells, threads, |&cell| {
         let Some(own) = by_cell.get(&cell) else { return Vec::new() };
-        let neighbors: Vec<&Candidate> = neighborhood(cell).filter_map(|c| by_cell.get(&c)).flatten().collect();
+        let neighbors: Vec<&Candidate> = neighborhood(cell).filter(|&c| !frozen.holds(c, Tier::B)).filter_map(|c| by_cell.get(&c)).flatten().collect();
         own.iter()
             .filter(|a| {
                 !neighbors.iter().any(|b| {
@@ -464,6 +533,7 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
                     .flatten()
                     .any(|a| a.position.distance_squared(b.position) < pair_radius(a, b).powi(2))
             })
+            .filter(|b| frozen.clear(b.position, b.exclusion_ly))
             .filter_map(|c| {
                 let attributes = attributes::draw(compiled, seed, c.key, c.position, Tier::B, &shares)?;
                 // A luminous star is tier A's to place.
@@ -482,7 +552,7 @@ pub fn bake(compiled: &Compiled, seed: u64, region: Aabb, threads: usize) -> Res
             })
             .collect::<Vec<_>>()
     });
-    let in_region: std::collections::HashSet<Cell> = cells.iter().copied().collect();
+    let in_region: std::collections::HashSet<Cell> = all.iter().copied().collect();
     let mut luminous: Vec<&Candidate> = luminous.iter().filter(|a| in_region.contains(&a.key.cell)).collect();
     luminous.sort_by_key(|a| a.key);
     let bright = par_map(&luminous, threads, |a| {

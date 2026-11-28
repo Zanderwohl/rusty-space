@@ -2,6 +2,7 @@
 //! lc-galaxy check   <timeline.ron>
 //! lc-galaxy stats   <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy publish <timeline.ron> --out <dir> [--name <name>] [--threads <n>]
+//!                   [--onto <manifest.galaxy> [--rebake <x,y,z>]...] [--region <x0,y0,z0:x1,y1,z1>]
 //! lc-galaxy diff    <timeline.ron> --against <manifest.galaxy> [--threads <n>]
 //! lc-galaxy picture <timeline.ron> --out <png> [--side +x|-x|+y|-y|+z|-z] [--size <w>x<h>]
 //!                   [--resolution <voxels>] [--decades <n>] [--saturation <k>] [--star-exposure <stops>|off]
@@ -17,7 +18,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // The first argument after the command that is neither a flag nor a flag's value.
-    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--against" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation" | "--star-exposure")).map(|(_, a)| a);
+    let path = args.iter().enumerate().skip(1).find(|(i, a)| !a.starts_with("--") && !matches!(args[i - 1].as_str(), "--out" | "--name" | "--against" | "--onto" | "--region" | "--rebake" | "--box" | "--threads" | "--side" | "--size" | "--resolution" | "--decades" | "--saturation" | "--star-exposure")).map(|(_, a)| a);
     let (Some(command), Some(path)) = (args.first(), path) else {
         eprintln!("usage: lc-galaxy check|stats|publish|diff|picture <timeline.ron> [--box <x0,y0,z0:x1,y1,z1>] [--out <path>] [--against <manifest>] [--name <name>] [--threads <n>] [--side <side>] [--size <w>x<h>] [--resolution <n>] [--decades <n>]");
         return ExitCode::FAILURE;
@@ -84,7 +85,31 @@ fn main() -> ExitCode {
                 }
                 None => default_threads(),
             };
-            match publish::publish(&timeline, &name, &PathBuf::from(&out), threads) {
+            let region = match after("--region").map(|b| parse_box(&b)) {
+                Some(Ok(r)) => Some(r),
+                Some(Err(e)) => {
+                    eprintln!("--region: {e}");
+                    return ExitCode::FAILURE;
+                }
+                None => None,
+            };
+            let mut rebake = Vec::new();
+            for value in args.windows(2).filter(|w| w[0] == "--rebake").map(|w| &w[1]) {
+                match value.split(',').map(|v| v.trim().parse::<i32>()).collect::<Result<Vec<_>, _>>() {
+                    Ok(v) if v.len() == 3 => rebake.push([v[0], v[1], v[2]]),
+                    _ => {
+                        eprintln!("--rebake {value}: not a chunk x,y,z");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            let onto = after("--onto").map(PathBuf::from);
+            if onto.is_none() && !rebake.is_empty() {
+                eprintln!("--rebake needs --onto <manifest.galaxy>");
+                return ExitCode::FAILURE;
+            }
+            let options = publish::Options { onto, region, rebake };
+            match publish::publish_with(&timeline, &name, &PathBuf::from(&out), threads, &options) {
                 Ok(m) => {
                     let stars: u32 = m.chunks.iter().map(|c| c.stars).sum();
                     println!("{name}: {stars} stars in {} chunk file(s), graph {:016x}, manifest {}, to {out}", m.chunks.len(), publish::graph_version(&timeline), m.hash());
