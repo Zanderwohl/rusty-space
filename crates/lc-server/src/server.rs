@@ -522,7 +522,7 @@ impl<J: Journal> Server<J> {
         self.ticks += 1;
         let span_us = self.span_us(real);
         let after_t = self.now_t;
-        self.now_t += span_us;
+        self.now_t = self.now_t.saturating_add(span_us);
         let now_s = self.now_t as f64 * 1.0e-6;
         let mut events = Vec::new();
         // First, so what earlier light does as it lands this tick is known before anything acts
@@ -688,7 +688,7 @@ impl<J: Journal> Server<J> {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
                 // cursor back is the whole of catch-up within the retention window; from further
                 // back the archive is read first, a page a flush, until the window is reached.
-                let cutoff = retention_cutoff(self.now_t);
+                let cutoff = retention_cutoff(self.now_t, self.rate);
                 if let Some(state) = self.clients.get_mut(&from) {
                     state.resolved_t = state.resolved_t.max(state.cursor_t);
                     state.cursor_t = arrive_t.min(self.now_t);
@@ -1321,7 +1321,7 @@ impl<J: Journal> Server<J> {
         let now = self.now_t;
         // Retention archives up to here as the clock moves on, so a catch-up runs to the cutoff of
         // now, not of when it began: the live read that follows sees only the live table.
-        let cutoff = retention_cutoff(now);
+        let cutoff = retention_cutoff(now, self.rate);
         for &id in clients {
             let Some(state) = self.clients.get(&id) else { continue };
             let (ship, after_t, Some(until_t)) = (state.ship, state.cursor_t, state.catching_up) else { continue };
@@ -1469,12 +1469,12 @@ impl<J: Journal> Server<J> {
 /// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
 /// Where retention has archived deliveries up to, at `now_t`: a resume from before it is caught up
 /// from the archive. `None` for a shard that keeps nothing, and so archives nothing.
-fn retention_cutoff(now_t: i64) -> Option<i64> {
+fn retention_cutoff(now_t: i64, rate: f64) -> Option<i64> {
     #[cfg(feature = "storage")]
-    return Some(now_t.saturating_sub(crate::journal::RETENTION.kept_us));
+    return Some(now_t.saturating_sub(crate::journal::retention_at(rate).kept_us));
     #[cfg(not(feature = "storage"))]
     {
-        let _ = now_t;
+        let _ = (now_t, rate);
         None
     }
 }

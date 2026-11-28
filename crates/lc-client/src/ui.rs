@@ -458,9 +458,9 @@ pub fn rate_step(rate: f64, up: bool) -> f64 {
 
 /// The clock multiplier a session starts at: **the design rate**, one Julian year an hour.
 ///
-/// The same number a shard runs at, and the same one [`crate::uplink::SERVER_RATE`] names. A
-/// single-player session is a server with one player, so it has no business running at a
-/// different speed from one — and the offline default used to be sixty times the server's,
+/// The same number a shard runs at by default, and the same one [`crate::uplink::SERVER_RATE`]
+/// names. A joined client runs at whatever rate its shard states instead. A single-player session
+/// is a server with one player, so it has no business running at a different speed from one — and the offline default used to be sixty times the server's,
 /// which is the whole of the bug behind "clock corrected by 140 hours" firing every second at
 /// a client that had joined without touching a key.
 ///

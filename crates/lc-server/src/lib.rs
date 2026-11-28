@@ -38,6 +38,7 @@ pub(crate) mod instruments;
 pub mod journal;
 pub mod launch;
 pub mod library;
+pub mod pace;
 pub mod park;
 #[cfg(feature = "storage")]
 pub mod persist;

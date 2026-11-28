@@ -590,7 +590,9 @@ collapse whose light has arrived.
   is taken, which is when its hull leaves the contacts: the shard sends it once its light has arrived
   by the shard's clock, and this client's may be behind. Its flash lasts half a real second, and its
   debris spreads and cools from its arrival in coordinate time or as the afterglow plays at the
-  design rate, whichever is further on, so a clock slowed for watching does not hold it still. A
+  design rate, whichever is further on, so a clock slowed for watching does not hold it still.
+  Joined to a shard, the debris keeps to the shard's clock alone, since a shard's `--rate` may be
+  below the design rate. A
   wreck's light still in flight shows it facing as it ended (`Craft::end` keeps the nose), not along
   its last order's attitude. **The spike lands on each neighbor** as a hot
   spot toward the wreck when the light of it, off that neighbor, reaches this ship:

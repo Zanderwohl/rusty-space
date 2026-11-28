@@ -283,20 +283,27 @@ impl Journal for Memory {
 
 /// How far ahead of `now` the tick keeps partitions made.
 ///
-/// One span is about a real hour at the design rate. The tick prepares before it writes, so two
-/// spans is slack rather than a deadline.
+/// One span is about a real hour at the design rate and six real minutes at
+/// [`crate::pace::MAX_RATE`]. The tick prepares before it writes, so two spans is slack rather
+/// than a deadline.
 pub const PREPARE_AHEAD_US: i64 = 2 * lc_store::store::PARTITION_SPAN_US;
 
 /// Coordinate microseconds in a real hour at the design rate: a Julian year.
 pub const DESIGN_HOUR_US: i64 = crate::server::TICK_US * crate::server::TICKS_PER_SECOND as i64 * 3_600;
 
-/// What the shard keeps live behind its clock: a real day at the design rate, so a client back
-/// after a day away is sent every sighting it missed. The light-crossing time of the playable
+/// What the shard keeps live behind its clock at the design rate: a real day, so a client back
+/// after a day away is sent every sighting it missed. [`retention_at`] is the same at any rate. The light-crossing time of the playable
 /// volume, `02-event-store.md`'s first tier, is for the light-cone cursor, which the shard does not
 /// run.
 #[cfg(feature = "storage")]
 pub const RETENTION: lc_store::retention::Policy =
     lc_store::retention::Policy { kept_us: 24 * DESIGN_HOUR_US, most: 64 };
+
+/// [`RETENTION`] for a world running at `rate` times the design rate, so it still keeps a real day.
+#[cfg(feature = "storage")]
+pub fn retention_at(rate: f64) -> lc_store::retention::Policy {
+    lc_store::retention::Policy { kept_us: (RETENTION.kept_us as f64 * rate) as i64, ..RETENTION }
+}
 
 
 #[cfg(test)]

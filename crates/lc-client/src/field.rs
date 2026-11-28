@@ -485,18 +485,26 @@ pub struct Wreck {
     shown_at: Option<(f32, f32)>,
     /// Real seconds its spike was first drawn on each neighbor.
     landed: HashMap<Option<ShipId>, f32>,
+    /// The slowest rate its afterglow plays at, as a multiple of the design rate. See [`slowest`].
+    floor: f64,
+}
+
+/// The design rate offline, where a slowed clock is for watching and should not hold the debris
+/// still. Nothing on a shard, whose rate is the world's and may be below the design rate.
+fn slowest(remote: bool) -> f64 {
+    if remote { 0.0 } else { crate::ui::DESIGN_TIME_RATE }
 }
 
 impl Wreck {
     /// [`FieldUniform::collapse`], once its light has arrived: stamped on the frame it is first
     /// drawn, `(real, wrapped)` being `Time`'s two readings, and the same every frame after while
     /// the clock's `rate` holds. The afterglow is its game duration at that rate, played no slower
-    /// than at the design rate, as [`Wreck::cooled`] has it.
+    /// than its `floor`, as [`Wreck::cooled`] has it.
     fn collapse(&mut self, now_s: f64, (real_s, wrapped_s): (f32, f32), rate: f64, afterglow_s: f64) -> Option<Vec4> {
         if now_s + self.ahead_s < self.arrive_s {
             return None;
         }
-        let afterglow_real = played_s(afterglow_s, rate);
+        let afterglow_real = self.played_s(afterglow_s, rate);
         // Back-dated by however long ago its light landed, which for a client that joined after
         // it did is past the flash and partway through the afterglow. Held to the afterglow so
         // the wrapped clock is not pushed back by a collapse long over.
@@ -508,16 +516,22 @@ impl Wreck {
     /// Real seconds since light that landed at coordinate `at_s` reached this ship, as the clock
     /// at `rate` plays them.
     fn late_real(&self, now_s: f64, at_s: f64, rate: f64) -> f32 {
-        played_s((now_s + self.ahead_s - at_s).max(0.0), rate) as f32
+        self.played_s((now_s + self.ahead_s - at_s).max(0.0), rate) as f32
     }
 
-    /// How far through the afterglow, by the coordinate clock or as it plays at the design rate,
+    /// Real seconds `game_s` of coordinate time plays over with the clock at `rate` times the
+    /// design rate, and never slower than its `floor`.
+    fn played_s(&self, game_s: f64, rate: f64) -> f64 {
+        game_s / (crate::session::TIME_RATE * rate.max(self.floor).max(f64::MIN_POSITIVE))
+    }
+
+    /// How far through the afterglow, by the coordinate clock or as it plays at its `floor`,
     /// whichever is further: a clock slowed for watching would otherwise hold the debris still.
     fn cooled(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> f64 {
         let afterglow_s = afterglow_s.max(f64::MIN_POSITIVE);
         let by_clock = (now_s + self.ahead_s - self.arrive_s) / afterglow_s;
-        let by_design = self.shown_at.map_or(0.0, |(at, _)| f64::from(real_s - at) * crate::session::TIME_RATE / afterglow_s);
-        by_clock.max(by_design)
+        let by_floor = self.shown_at.map_or(0.0, |(at, _)| f64::from(real_s - at) * crate::session::TIME_RATE * self.floor / afterglow_s);
+        by_clock.max(by_floor)
     }
 
     fn over(&self, now_s: f64, real_s: f32, afterglow_s: f64) -> bool {
@@ -552,11 +566,6 @@ impl Wreck {
     }
 }
 
-/// Real seconds `game_s` of coordinate time plays over with the clock at `rate` times the design
-/// rate, and never slower than the design rate.
-fn played_s(game_s: f64, rate: f64) -> f64 {
-    game_s / (crate::session::TIME_RATE * rate.max(crate::ui::DESIGN_TIME_RATE))
-}
 
 /// Collapses whose light has arrived, and what the craft they end were last seen as.
 #[derive(Resource, Default)]
@@ -613,9 +622,9 @@ impl Wrecks {
 
     /// Every wreck drawn as a point whose light has arrived, at `real_s`.
     pub fn far<'a>(&'a self, real_s: f32, rate: f64, afterglow_s: f64, debris: impl Fn(i64) -> bool + 'a) -> impl Iterator<Item = Far> + 'a {
-        let fade_s = played_s(afterglow_s, rate) as f32;
         self.fell.iter().filter(move |w| !debris(w.event_id)).filter_map(move |w| {
             let (real, wrapped) = w.shown_at?;
+            let fade_s = w.played_s(afterglow_s, rate) as f32;
             Some(Far { at_ly: w.at_ly, released_j: w.released_j, clock: Vec3::new(wrapped, FLASH_S, fade_s), since_s: real_s - real })
         })
     }
@@ -669,6 +678,7 @@ pub fn collapses(
             spike_w: balance.collapse_spike_fraction * fallen.released_j / SPIKE_S,
             shown_at: None,
             landed: HashMap::new(),
+            floor: slowest(game.0.remote),
         });
     }
     for sighting in uplink.seen.iter().filter(|s| s.kind == lc_proto::kind::COLLAPSE) {
@@ -703,6 +713,7 @@ pub fn collapses(
             spike_w: balance.collapse_spike_fraction * released_j / SPIKE_S,
             shown_at: None,
             landed: HashMap::new(),
+            floor: slowest(game.0.remote),
         });
     }
     let seen: HashSet<i64> = uplink.seen.iter().map(|s| s.event_id).collect();
@@ -1239,7 +1250,7 @@ mod tests {
         let (real_s, rate) = (100.0, 0.0);
         let drawn = wreck.collapse(now_s, (real_s, real_s), rate, afterglow_s).expect("its light is here");
         let behind = real_s - drawn.x;
-        assert!((f64::from(behind) - played_s(0.25 * afterglow_s, rate)).abs() < 1e-3, "started {behind} real seconds ago");
+        assert!((f64::from(behind) - wreck.played_s(0.25 * afterglow_s, rate)).abs() < 1e-3, "started {behind} real seconds ago");
         assert!(behind > FLASH_S, "the flash went by before it joined");
         let cooled = wreck.cooled(now_s, real_s, afterglow_s);
         assert!((cooled - 0.25).abs() < 1e-3, "a quarter cooled, not {cooled}");
@@ -1322,6 +1333,22 @@ mod tests {
         let half = wreck.cooled(20.0 + 1e-6, 1.0 + 0.5 * design_s, afterglow_s);
         assert!((half - 0.5).abs() < 1e-3, "{half} of the afterglow");
         assert!(wreck.over(20.0 + 1e-6, 1.0 + 1.01 * design_s, afterglow_s));
+    }
+
+    /// Joined to a shard running below the design rate, the debris keeps to the shard's clock.
+    #[test]
+    fn a_slow_shard_plays_the_debris_at_its_own_rate() {
+        let mut wrecks = Wrecks::default();
+        wrecks.last.insert(ShipId(5), last("Aster"));
+        let mut world = collapsing(vec![sighting(1, 5, 10_000_000, 20_000_000)], wrecks, 20.0);
+        let mut wreck = world.resource_mut::<Wrecks>().fell.remove(0);
+        wreck.floor = slowest(true);
+        let (afterglow_s, rate) = (B.collapse_afterglow_s, 0.06);
+        let shard_s = (afterglow_s / (crate::session::TIME_RATE * rate)) as f32;
+        let drawn = wreck.collapse(20.0, (1.0, 1.0), rate, afterglow_s).unwrap();
+        assert!((drawn.z - shard_s).abs() < 1e-2, "the shader plays it over {} s", drawn.z);
+        let design_s = (afterglow_s / crate::session::TIME_RATE) as f32;
+        assert!(!wreck.over(20.0 + 1e-6, 1.0 + 1.01 * design_s, afterglow_s), "over at the design rate's pace");
     }
 
     /// Taken while this client's clock is behind the shard's, a collapse is drawn at once, where
