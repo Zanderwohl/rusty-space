@@ -33,12 +33,15 @@ use std::sync::Arc;
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
 
+/// Coordinate seconds a real second covers at a rate of one: a Julian year an hour.
+pub const DESIGN_RATE: i64 = 8766;
+
 /// Coordinate microseconds a tick covers: fifty milliseconds at the design rate.
 ///
 /// Only step 1 of the tick is affected by this, and it affects nothing, because bodies are
 /// propagated analytically. A server that drops to 10 Hz produces identical world state with
 /// coarser event timestamps -- the step never enters an integrator, so it cannot accumulate.
-pub const TICK_US: i64 = TICK_MS * 8766 * 1_000;
+pub const TICK_US: i64 = TICK_MS * DESIGN_RATE * 1_000;
 
 /// Ticks in a real second, for the window the rate counters measure over.
 pub const TICKS_PER_SECOND: u32 = (1_000 / TICK_MS) as u32;
@@ -318,10 +321,8 @@ impl<J: Journal> Server<J> {
 
     /// How fast this world runs, as a multiple of the design rate.
     ///
-    /// One for a shard, and one is the only value a deployment has any business at: the rate
-    /// is the game's, not a dial. What it is here for is a development shard staging a scene,
-    /// where sixty — one Julian year a minute — turns a three-month chase into fifteen seconds
-    /// of watching.
+    /// Set at boot from `--rate`, and again by staging a scene, where sixty — one Julian year a
+    /// minute — turns a three-month chase into fifteen seconds of watching.
     ///
     /// Nothing about the world depends on it. Every motive is a closed form evaluated at a
     /// coordinate time, so a faster tick buys coarser event timestamps and nothing else; the

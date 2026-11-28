@@ -1025,6 +1025,12 @@ mod tests {
         session
     }
 
+    /// The wire carries the rate as a multiple of this, so the two ends must agree on what one is.
+    #[test]
+    fn a_rate_of_one_is_the_servers_design_rate() {
+        assert_eq!(TIME_RATE, lc_server::server::DESIGN_RATE as f64);
+    }
+
     /// An authored galaxy arrives in its provider's order and is not trimmed, but the session
     /// still sorts it, or the search lands on another star's system.
     #[test]

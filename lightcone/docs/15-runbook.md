@@ -677,6 +677,12 @@ A checkpoint keeps no history, so after a restart a distant observer loses sight
 until light that left it after the save arrives: up to `d / c` for an observer at distance `d`.
 Keep restarts rare. [08-networking.md](08-networking.md#after-a-restart) has the details.
 
+**The world's rate** is `--rate`, or `LC_RATE` in `shard.env`: coordinate seconds per real
+second, 8766 (a Julian year an hour) when neither is given. The flag wins over the variable. It
+is read at boot and not saved, so a restart without it goes back to 8766. Clients take the rate
+from the shard and cannot change it. Staging a scene replaces it with the scene's rate until the
+next restart.
+
 **Restarting the database restarts the shard.** Its connections do not reopen, so on finding one
 closed the shard exits with an error and `--restart unless-stopped` brings it back from its last
 checkpoint, retrying until the database answers. Nothing needs doing by hand. A write that merely

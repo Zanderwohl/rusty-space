@@ -9,7 +9,7 @@ use std::time::Duration;
 use lc_proto::ClientId;
 use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::{Memory, Postgres, Store};
-use lc_server::server::{Server, TICK_MS, TICKS_PER_SECOND};
+use lc_server::server::{DESIGN_RATE, Server, TICK_MS, TICKS_PER_SECOND};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
@@ -29,6 +29,9 @@ lightcone-server — one shard
   --admin-bind <addr> a read-only surface for the administration console, on its own port.
                       Needs --db and --jwks. Never publish a route to it: it is reached
                       over the container network by name and by nothing else.
+  --rate <s>          coordinate seconds the world advances per real second (or LC_RATE;
+                      default 8766, one Julian year an hour). Clients adopt it on joining.
+                      Staging a scene replaces it with the scene's own until restart.
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
 
 Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops —
@@ -77,6 +80,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Store::Ephemeral(Memory::default()),
     };
     let mut server = Server::new(journal, 0, shard_id as u64);
+    let stated = after("--rate")
+        .map(|t| ("--rate", t))
+        .or_else(|| std::env::var("LC_RATE").ok().map(|t| ("LC_RATE", t)));
+    let rate = match stated {
+        Some((from, text)) => match text.parse::<f64>() {
+            Ok(rate) if rate.is_finite() && rate > 0.0 => rate,
+            // Refused rather than defaulted: `set_rate` would quietly run the design rate.
+            _ => return Err(format!("{from}={text}: not a positive number of seconds").into()),
+        },
+        None => DESIGN_RATE as f64,
+    };
+    server.set_rate(rate / DESIGN_RATE as f64);
+    eprintln!("rate: {rate} coordinate seconds per real second");
 
     let mut admin_keys: Option<Trusted> = None;
     match after("--jwks") {
