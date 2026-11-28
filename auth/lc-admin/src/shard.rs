@@ -139,12 +139,82 @@ pub struct ShipDetail {
 
 /// Why there is nothing to show. Distinct, because a card that says "unavailable" for every
 /// cause is one people learn to ignore.
+/// Mirrors `lc_server::galaxy::Level`, in the same order: most known last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub enum Level {
+    Unseen,
+    Charted,
+    Resolved,
+    Visited,
+}
+
+impl Level {
+    pub fn slug(self) -> &'static str {
+        match self {
+            Level::Unseen => "unseen",
+            Level::Charted => "charted",
+            Level::Resolved => "resolved",
+            Level::Visited => "visited",
+        }
+    }
+}
+
+/// Mirrors `lc_server::galaxy::ChunkRow`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ChunkRow {
+    pub chunk: (i32, i32, i32),
+    pub tier: String,
+    pub graph: String,
+    pub hash: String,
+    pub stars: u32,
+    pub charted: u32,
+    pub resolved: u32,
+    pub visited: u32,
+    pub craft: u32,
+    pub level: Level,
+}
+
+/// Mirrors `lc_server::galaxy::Overview`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Galaxy {
+    pub source: String,
+    pub url: Option<String>,
+    pub name: String,
+    pub parent: Option<String>,
+    pub chunks: Vec<ChunkRow>,
+}
+
+/// Mirrors `lc_server::galaxy::StarRow`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct StarRow {
+    pub id: u64,
+    pub position_ly: (f64, f64, f64),
+    pub population: u8,
+    pub initial_mass_solar: f64,
+    pub age_gyr: f64,
+    pub feh: f64,
+    pub shell_ly: f64,
+    pub mass_solar: Option<f64>,
+    pub teff_k: Option<f64>,
+    pub luminosity_solar: Option<f64>,
+    pub level: Level,
+}
+
+/// Mirrors `lc_server::galaxy::ChunkStars`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ChunkStars {
+    pub chunk: (i32, i32, i32),
+    pub tier: String,
+    pub stars: Vec<StarRow>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Missing {
     NotConfigured,
     NoShip,
     NoSystem,
     NoSuchShip,
+    NoChunk,
     Unreachable(String),
 }
 
@@ -155,6 +225,7 @@ impl Missing {
             Missing::NoShip => "This account flies no ship.".to_owned(),
             Missing::NoSuchShip => "This shard has no record of a ship with that identifier.".to_owned(),
             Missing::NoSystem => "This shard holds no system with that identifier.".to_owned(),
+            Missing::NoChunk => "The shard's galaxy has no such chunk.".to_owned(),
             Missing::Unreachable(why) => format!("The shard did not answer: {why}"),
         }
     }
@@ -201,6 +272,17 @@ impl Shard<'_> {
 
     pub async fn ship(&self, acting: &str, id: i64) -> Result<ShipDetail, Missing> {
         self.fetch(acting, &format!("/admin/ships/{id}"), Missing::NoSuchShip).await
+    }
+
+    /// `None` for a shard whose sky is not an authored galaxy.
+    pub async fn galaxy(&self, acting: &str) -> Result<Option<Galaxy>, Missing> {
+        let absent = Missing::Unreachable("it has no galaxy route".to_owned());
+        self.fetch(acting, "/admin/galaxy", absent).await
+    }
+
+    /// `key` is `x,y,z,A` or `x,y,z,B`.
+    pub async fn galaxy_chunk(&self, acting: &str, key: &str) -> Result<ChunkStars, Missing> {
+        self.fetch(acting, &format!("/admin/galaxy/chunks/{key}"), Missing::NoChunk).await
     }
 
     /// The account's standing after a ban or a lift: `None` when no ban is in force. The shard
@@ -444,5 +526,21 @@ mod tests {
             "two absences read alike: {said:?}"
         );
         assert!(said[3].contains("connection refused"), "{}", said[3]);
+    }
+
+    /// Captured from `lc_server::galaxy`'s serializer, as `FROM_THE_SHARD` is.
+    const GALAXY_FROM_THE_SHARD: &str = r#"Some((source:"x.galaxy",url:None,name:"test",parent:None,chunks:[(chunk:(0,0,0),tier:"B",graph:"0000000000000001",hash:"",stars:3,charted:1,resolved:0,visited:0,craft:1,level:Charted),(chunk:(0,0,0),tier:"A",graph:"0000000000000001",hash:"",stars:1,charted:0,resolved:0,visited:0,craft:0,level:Unseen),(chunk:(1,0,0),tier:"B",graph:"0000000000000001",hash:"",stars:2,charted:0,resolved:0,visited:0,craft:0,level:Unseen)]))"#;
+
+    const CHUNK_FROM_THE_SHARD: &str = r#"(chunk:(0,0,0),tier:"B",stars:[(id:9223935021167935489,position_ly:(1.00006103515625,1.00006103515625,1.00006103515625),population:0,initial_mass_solar:0.9999623791991231,age_gyr:1.0000183108262761,feh:0.0,shell_ly:0.0,mass_solar:None,teff_k:None,luminosity_solar:None,level:Charted),(id:9223935021167935553,position_ly:(1.00006103515625,1.00006103515625,1.00006103515625),population:0,initial_mass_solar:0.9999623791991231,age_gyr:1.0000183108262761,feh:0.0,shell_ly:0.0,mass_solar:None,teff_k:None,luminosity_solar:None,level:Unseen)])"#;
+
+    #[test]
+    fn parses_the_galaxy_the_shard_sends() {
+        let galaxy: Option<Galaxy> = ron::from_str(GALAXY_FROM_THE_SHARD).expect("the shard's shape");
+        let galaxy = galaxy.unwrap();
+        assert_eq!(galaxy.chunks.len(), 3);
+        assert_eq!((galaxy.chunks[0].level, galaxy.chunks[0].craft), (Level::Charted, 1));
+        let chunk: ChunkStars = ron::from_str(CHUNK_FROM_THE_SHARD).expect("the shard's shape");
+        assert_eq!(chunk.stars[0].level, Level::Charted);
+        assert_eq!(chunk.stars[1].id, 9223935021167935553);
     }
 }

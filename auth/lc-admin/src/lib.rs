@@ -16,6 +16,7 @@ pub mod cdn;
 pub mod config;
 pub mod detail;
 pub mod fleet;
+pub mod galaxy;
 pub mod listing;
 pub mod routes;
 pub mod session;

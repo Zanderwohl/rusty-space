@@ -114,6 +114,7 @@ pub fn router(state: AppState) -> Router {
         .route(crate::assets::ROUTE, get(crate::assets::serve))
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readyz))
+        .merge(crate::galaxy::routes())
         .fallback(not_found)
         .with_state(state)
 }

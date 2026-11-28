@@ -5,6 +5,7 @@
 //! prevents it where a convention about remembering would not.
 
 pub mod cdn;
+pub mod galaxy;
 pub mod index;
 pub mod ship;
 pub mod ships;
@@ -56,6 +57,7 @@ pub fn shell(assets: &Assets, head: Head<'_>, admin: Option<&Admin>, body: Marku
                         a href=(crate::routes::USERS) { "Users" }
                         a href=(crate::routes::SHIPS) { "Ships" }
                         a href=(crate::routes::SYSTEMS) { "Systems" }
+                        a href=(crate::galaxy::GALAXY) { "Galaxy" }
                         a href=(crate::routes::CDN) { "CDN" }
                     }
                     @if let Some(admin) = admin {

@@ -54,3 +54,50 @@
   display: block;
   color: var(--ink-dim);
 }
+
+// What craft know of a chunk or a star. Unseen is the one a game master may still change.
+.badge-unseen {
+  border-color: var(--ok-dim);
+  color: var(--ok);
+}
+
+.badge-charted {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.badge-resolved {
+  border-color: var(--danger-dim);
+  color: var(--danger);
+}
+
+.badge-visited {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.discovery-map {
+  margin: 0;
+
+  svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .unseen {
+    fill: var(--ok-dim);
+  }
+
+  .charted {
+    fill: var(--accent-dim);
+  }
+
+  .resolved {
+    fill: var(--danger-dim);
+  }
+
+  .visited {
+    fill: var(--danger);
+  }
+}

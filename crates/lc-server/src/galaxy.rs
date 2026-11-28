@@ -260,4 +260,5 @@ mod tests {
         assert!(chunk_stars(&p, "0,0,0,C", &[], &Known::default()).is_none());
         assert!(chunk_stars(&p, "9,9,9,B", &[], &Known::default()).is_none());
     }
+
 }

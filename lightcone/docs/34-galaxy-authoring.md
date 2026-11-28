@@ -27,9 +27,9 @@ drags in the region view, `noise` (`kinds/noise.rs`, over `f64` gradient noise i
 the graph's light sampled into a coarse volume, and orthographic pictures marched through it,
 from `lc-galaxy picture` and Galaxy Forge's Picture view. It integrates emission only, since the
 graph has no dust field yet. Masks are built (`kinds/mask.rs`), and so is the tier split (`crates/lc-galaxy/src/sample.rs`). The GPU marcher is not started. Galaxies on the CDN, the shard naming its galaxy to clients, `diff`, the Published
-panel, publishing onto a manifest and baking around published stars are built; the console's
-Galaxy section is planned in [Publishing and freezing](#publishing-and-freezing) and not
-started. The shipped sky is still the
+panel, publishing onto a manifest, baking around published stars and the console's Galaxy
+section are built ([Publishing and freezing](#publishing-and-freezing)); game-master changes
+to unseen regions are not. The shipped sky is still the
 HYG catalog through `lc_world::sky::HygProvider`, and [03-world-model.md](03-world-model.md) records that the shipped
 game is a fictional galaxy and that phase 4 of [12-buildout.md](12-buildout.md) only made one
 possible. Every number below is a first estimate.
@@ -735,6 +735,15 @@ CDN views are.
 
   Shown as a table and as a face-on map of chunk boxes colored by level, drawn as SVG on the
   server, since the console runs no script.
+
+As built (`auth/lc-admin/src/galaxy.rs`, `crates/lc-server/src/galaxy.rs`): the console's Galaxy
+page lists every `galaxy/<name>/<hash>.galaxy` on the CDN and marks the one the shard loaded; a
+manifest's page reads its RON and links its parent; the loaded galaxy's chunks come from the
+shard's `/admin/galaxy`, with levels, and a chunk's stars from `/admin/galaxy/chunks/x,y,z,T`,
+each linking to its system page. The shard decodes the chunks, since the console may not link
+`lc-world`. Two parts of the levels are not as specified above: *visited* is a craft inside the
+shell now, since the checkpoint keeps no history of where craft have been, and *unseen* does not
+yet check the client's load range.
 
 The discovery levels are what let game masters change a region after it is published. Authored
 system contents ([35-system-contents.md](35-system-contents.md)) and events can be added to a star
