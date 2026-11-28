@@ -456,16 +456,10 @@ pub fn rate_step(rate: f64, up: bool) -> f64 {
     RATE_LADDER[next.min(RATE_LADDER.len() - 1)].0
 }
 
-/// The clock multiplier a session starts at: **the design rate**, one Julian year an hour.
+/// The clock multiplier a session starts at: the design rate, one Julian year an hour.
 ///
-/// The same number a shard runs at, and the same one [`crate::uplink::SERVER_RATE`] names. A
-/// single-player session is a server with one player, so it has no business running at a
-/// different speed from one — and the offline default used to be sixty times the server's,
-/// which is the whole of the bug behind "clock corrected by 140 hours" firing every second at
-/// a client that had joined without touching a key.
-///
-/// Speeding it up is what `--rate` is for, and what the ladder in the interface is for. Both
-/// are development affordances, and a shard refuses them: the rate is the world's.
+/// Offline only. A joined client runs at the rate its shard states, and refuses the client's
+/// `--rate` and the interface's ladder.
 pub const DESIGN_TIME_RATE: f64 = 1.0;
 
 #[derive(Clone, Debug)]

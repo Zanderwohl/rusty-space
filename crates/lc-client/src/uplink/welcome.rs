@@ -8,16 +8,8 @@ use lc_proto::{Outbound, PROTOCOL_VERSION};
 
 use super::{Joined, Placement, State, Uplink};
 
-/// The rate a shard runs at, and what a server that says nothing is taken to mean.
-///
-/// One, because `session::TIME_RATE` — the coordinate seconds a multiplier of 1 buys per real
-/// second — is the same 8766 the server advances by every tick. The client's own default is
-/// sixty times that, which is a development convenience whose own constant says "the server
-/// owns the rate in a real session and this multiplier does not exist there".
-///
-/// It no longer exists there because of this constant, which would only ever have been a guess
-/// that happened to be right. The rate arrives in the welcome and is restated with the clock;
-/// this is the value a deployment sends, not the value a client assumes.
+/// A shard's default rate, as a multiple of `session::TIME_RATE`. The client never assumes it:
+/// it takes the rate from the welcome and from each clock statement.
 pub const SERVER_RATE: f64 = 1.0;
 
 /// The most a slew changes the clock's rate by, as a fraction of it. Too little to see a moon's

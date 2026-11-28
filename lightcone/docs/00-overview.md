@@ -1,8 +1,9 @@
 # Overview
 
 **Status: reference.** The premise, scope and rate the numbered documents assume, kept current
-against them. The design rate is compiled into `lc_server::server::TICK_US`; a shard runs at a
-multiple of it (`Server::set_rate`), which it states to clients in `Welcome` and `Clock`.
+against them. The design rate is `lc_server::server::DESIGN_RATE`, 8766 coordinate seconds per
+real second. A shard runs at the rate its `--rate` (or `LC_RATE`) names, 8766 by default, and
+states it to clients in `Welcome` and `Clock` as a multiple of the design rate.
 
 ## What the game is
 

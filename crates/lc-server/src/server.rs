@@ -33,12 +33,15 @@ use std::sync::Arc;
 /// Real milliseconds a tick covers.
 pub const TICK_MS: i64 = 50;
 
+/// Coordinate seconds a real second covers at a rate of one: a Julian year an hour.
+pub const DESIGN_RATE: i64 = 8766;
+
 /// Coordinate microseconds a tick covers: fifty milliseconds at the design rate.
 ///
 /// Only step 1 of the tick is affected by this, and it affects nothing, because bodies are
 /// propagated analytically. A server that drops to 10 Hz produces identical world state with
 /// coarser event timestamps -- the step never enters an integrator, so it cannot accumulate.
-pub const TICK_US: i64 = TICK_MS * 8766 * 1_000;
+pub const TICK_US: i64 = TICK_MS * DESIGN_RATE * 1_000;
 
 /// Ticks in a real second, for the window the rate counters measure over.
 pub const TICKS_PER_SECOND: u32 = (1_000 / TICK_MS) as u32;
@@ -316,17 +319,12 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// How fast this world runs, as a multiple of the design rate.
+    /// How fast this world runs, as a multiple of the design rate. Set at boot from `--rate`, and
+    /// again by staging a scene.
     ///
-    /// One for a shard, and one is the only value a deployment has any business at: the rate
-    /// is the game's, not a dial. What it is here for is a development shard staging a scene,
-    /// where sixty — one Julian year a minute — turns a three-month chase into fifteen seconds
-    /// of watching.
-    ///
-    /// Nothing about the world depends on it. Every motive is a closed form evaluated at a
-    /// coordinate time, so a faster tick buys coarser event timestamps and nothing else; the
-    /// step never enters an integrator, so it cannot accumulate. What *does* depend on it is
-    /// the clock the client runs between statements, which is why the rate is on the wire.
+    /// Every motive is a closed form in coordinate time, so a faster tick only coarsens event
+    /// timestamps. The client runs its own clock between statements at this rate, which is why
+    /// the rate is on the wire.
     pub fn set_rate(&mut self, rate: f64) {
         self.rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
     }
@@ -521,7 +519,7 @@ impl<J: Journal> Server<J> {
         self.ticks += 1;
         let span_us = self.span_us(real);
         let after_t = self.now_t;
-        self.now_t += span_us;
+        self.now_t = self.now_t.saturating_add(span_us);
         let now_s = self.now_t as f64 * 1.0e-6;
         let mut events = Vec::new();
         // First, so what earlier light does as it lands this tick is known before anything acts
@@ -687,7 +685,7 @@ impl<J: Journal> Server<J> {
                 // A client that missed an hour missed eight thousand in-game hours. Winding its
                 // cursor back is the whole of catch-up within the retention window; from further
                 // back the archive is read first, a page a flush, until the window is reached.
-                let cutoff = retention_cutoff(self.now_t);
+                let cutoff = retention_cutoff(self.now_t, self.rate);
                 if let Some(state) = self.clients.get_mut(&from) {
                     state.resolved_t = state.resolved_t.max(state.cursor_t);
                     state.cursor_t = arrive_t.min(self.now_t);
@@ -1320,7 +1318,7 @@ impl<J: Journal> Server<J> {
         let now = self.now_t;
         // Retention archives up to here as the clock moves on, so a catch-up runs to the cutoff of
         // now, not of when it began: the live read that follows sees only the live table.
-        let cutoff = retention_cutoff(now);
+        let cutoff = retention_cutoff(now, self.rate);
         for &id in clients {
             let Some(state) = self.clients.get(&id) else { continue };
             let (ship, after_t, Some(until_t)) = (state.ship, state.cursor_t, state.catching_up) else { continue };
@@ -1468,12 +1466,12 @@ impl<J: Journal> Server<J> {
 /// is the thing a worldline belongs to, and `motion` predates the fleet that owns them.
 /// Where retention has archived deliveries up to, at `now_t`: a resume from before it is caught up
 /// from the archive. `None` for a shard that keeps nothing, and so archives nothing.
-fn retention_cutoff(now_t: i64) -> Option<i64> {
+fn retention_cutoff(now_t: i64, rate: f64) -> Option<i64> {
     #[cfg(feature = "storage")]
-    return Some(now_t.saturating_sub(crate::journal::RETENTION.kept_us));
+    return Some(now_t.saturating_sub(crate::journal::retention_at(rate).kept_us));
     #[cfg(not(feature = "storage"))]
     {
-        let _ = now_t;
+        let _ = (now_t, rate);
         None
     }
 }

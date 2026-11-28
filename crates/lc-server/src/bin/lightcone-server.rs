@@ -9,7 +9,7 @@ use std::time::Duration;
 use lc_proto::ClientId;
 use tokio::signal::unix::{SignalKind, signal};
 use lc_server::journal::{Memory, Postgres, Store};
-use lc_server::server::{Server, TICK_MS, TICKS_PER_SECOND};
+use lc_server::server::{DESIGN_RATE, Server, TICK_MS, TICKS_PER_SECOND};
 use lc_server::ticket::Trusted;
 use lc_server::websocket::WebSocketServer;
 use lc_server::world::World;
@@ -29,6 +29,10 @@ lightcone-server — one shard
   --admin-bind <addr> a read-only surface for the administration console, on its own port.
                       Needs --db and --jwks. Never publish a route to it: it is reached
                       over the container network by name and by nothing else.
+  --rate <s>          coordinate seconds the world advances per real second (or LC_RATE;
+                      default 8766, one Julian year an hour, at most 87660). Unlike the
+                      client's --rate, this is not a multiple. Clients adopt it on joining.
+                      Staging a scene replaces it with the scene's own until restart.
   --open              admit connections with no valid ticket — DEVELOPMENT ONLY
 
 Without --db a shard is a sandcastle: it runs, and everything in it is gone when it stops —
@@ -77,6 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Store::Ephemeral(Memory::default()),
     };
     let mut server = Server::new(journal, 0, shard_id as u64);
+    let rate_flag = after("--rate");
+    let rate_env = std::env::var("LC_RATE").ok();
+    let rate = lc_server::pace::stated(flag("--rate").then_some(rate_flag.as_deref()), rate_env.as_deref())?;
+    server.set_rate(rate / DESIGN_RATE as f64);
+    eprintln!("rate: {rate} coordinate seconds per real second");
 
     let mut admin_keys: Option<Trusted> = None;
     match after("--jwks") {
@@ -285,7 +294,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     if let Some(client) = &store {
-        catch_up(client, server.now_t()).await;
+        catch_up(client, server.now_t(), server.rate()).await;
     }
     // After the craft are adopted, so a line can name any of them. Run on the first tick, and
     // again by every restart that keeps the flag: a one-off belongs in a one-off container.
@@ -374,10 +383,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // The snapshot is taken here, on the tick, so it is the shard at one tick; only the
             // writing is moved off it. It used to hold the tick for the whole transaction.
             let taken = take(&mut server);
+            let rate = server.rate();
             saving = Some(tokio::spawn(async move {
                 let written = write(client, shard_id, taken).await;
                 if written.2.is_ok() {
-                    retire(&written.0, written.1.checkpoint.now_t).await;
+                    retire(&written.0, written.1.checkpoint.now_t, rate).await;
                 }
                 written
             }));
@@ -491,8 +501,8 @@ async fn write(mut client: tokio_postgres::Client, shard_id: i64, taken: Taken) 
 
 /// Retention, off the tick, by the clock just written. This shard's clock alone, because one shard
 /// writes a world's tables.
-async fn retire(client: &tokio_postgres::Client, now_t: i64) {
-    match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+async fn retire(client: &tokio_postgres::Client, now_t: i64, rate: f64) {
+    match lc_store::retention::sweep(client, now_t, lc_server::journal::retention_at(rate)).await {
         Ok(swept) if swept.is_empty() => {}
         Ok(swept) => eprintln!(
             "retention: archived {} delivery and {} event partitions, forgot {} faded fronts",
@@ -506,11 +516,11 @@ async fn retire(client: &tokio_postgres::Client, now_t: i64) {
 
 /// Work off a retention backlog before serving anyone: until it is gone, every tick's read is
 /// planned against thousands of partitions and asks for a lock on each.
-async fn catch_up(client: &tokio_postgres::Client, now_t: i64) {
+async fn catch_up(client: &tokio_postgres::Client, now_t: i64, rate: f64) {
     let started = std::time::Instant::now();
     let (mut sweeps, mut deliveries, mut archived) = (0, 0, 0);
     loop {
-        match lc_store::retention::sweep(client, now_t, lc_server::journal::RETENTION).await {
+        match lc_store::retention::sweep(client, now_t, lc_server::journal::retention_at(rate)).await {
             Ok(swept) if swept.is_empty() => break,
             Ok(swept) => {
                 sweeps += 1;
