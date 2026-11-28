@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     }
 
+    let mut published = None;
     let stars = match after("--sky") {
         // An authored galaxy: a manifest and the chunks beside it, on disk or on the CDN.
         Some(source) if source.ends_with(".galaxy") => {
@@ -147,8 +148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     read_bytes(&if dir.is_empty() { file.to_string() } else { format!("{dir}/{file}") })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let provider = manifest.load(&bytes).map_err(|why| format!("{source}: {why}"))?;
+            let chunks = manifest.decode(&bytes).map_err(|why| format!("{source}: {why}"))?;
+            let provider = lc_world::sky::galaxy::GalaxyProvider::new(manifest.name.clone(), &chunks);
             eprintln!("sky: {} stars from {source}, {} dark remnants left out", provider.stars().len(), provider.skipped);
+            published = Some(std::sync::Arc::new(lc_server::galaxy::Published { source: source.clone(), url: server.sky_url.clone(), manifest, chunks }));
             provider.into_stars()
         }
         Some(source) => {
@@ -182,12 +185,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let client = std::sync::Arc::new(connect(url).await?);
         admin_db = Some(client.clone());
-        let api = lc_server::admin::Api::new(
+        let mut api = lc_server::admin::Api::new(
             client,
             catalog.clone(),
             std::sync::Arc::new(keys),
             standings,
         );
+        api.galaxy = published.clone();
         let listener = tokio::net::TcpListener::bind(addr).await?;
         eprintln!("administration surface on {addr}, for audience {audience}");
         tokio::spawn(async move {

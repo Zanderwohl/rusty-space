@@ -44,6 +44,13 @@ pub const SHIPS: &str = "/admin/ships";
 /// `{id}` is a ship id.
 pub const SHIP: &str = "/admin/ships/{id}";
 
+/// The loaded galaxy's manifest and each chunk's discovery level; `None` for a shard with no
+/// authored galaxy. See [`crate::galaxy`].
+pub const GALAXY: &str = "/admin/galaxy";
+
+/// `{key}` is `x,y,z,A` or `x,y,z,B`: one chunk's stars.
+pub const GALAXY_CHUNK: &str = "/admin/galaxy/chunks/{key}";
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShipRow {
     pub ship_id: i64,
@@ -80,6 +87,8 @@ pub struct Api {
     /// Shared, not copied: the largest thing in the process.
     pub stars: Arc<Vec<CatalogStar>>,
     pub trusted: Arc<Trusted>,
+    /// What `--sky` loaded, when it named a galaxy.
+    pub galaxy: Option<Arc<crate::galaxy::Published>>,
     spent: Arc<Mutex<Spent>>,
     standings: tokio::sync::mpsc::UnboundedSender<crate::standing::Stated>,
 }
@@ -95,6 +104,7 @@ impl Api {
             db,
             stars,
             trusted,
+            galaxy: None,
             spent: Arc::new(Mutex::new(Spent::default())),
             standings,
         }
@@ -108,6 +118,8 @@ pub fn router(api: Api) -> Router {
         .route(SYSTEM, get(system))
         .route(SHIPS, get(ships))
         .route(SHIP, get(ship))
+        .route(GALAXY, get(galaxy))
+        .route(GALAXY_CHUNK, get(galaxy_chunk))
         .route(STANDING, post(standing))
         .route("/admin/health", get(|| async { "ok" }))
         .with_state(api)
@@ -194,6 +206,47 @@ async fn systems(
     let page = crate::systems::page(&api.stars, &tally, &query);
 
     ron_response(&page, "systems")
+}
+
+/// Every file's ship and subject, and how many craft are in each system now.
+async fn known(api: &Api) -> Result<crate::galaxy::Known, String> {
+    let ships = lc_store::ships::load_ships(&api.db).await.map_err(|e| e.to_string())?;
+    let at: Vec<glam::DVec3> = ships.iter().filter_map(|ship| crate::persist::decode(ship).ok()).map(|saved| saved.motion.at_ly.into()).collect();
+    let files = lc_store::knowledge::load_files(&api.db).await.map_err(|e| e.to_string())?;
+    let subjects = files.iter().filter_map(|f| Some((f.ship_id, lc_proto::decode::<lc_world::knowledge::Subject>(&f.subject).ok()?)));
+    Ok(crate::galaxy::Known::new(subjects, crate::systems::tally(&at, &api.stars)))
+}
+
+async fn galaxy(State(api): State<Api>, headers: HeaderMap) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(published) = &api.galaxy else { return ron_response(&None::<crate::galaxy::Overview>, "galaxy") };
+    match known(&api).await {
+        Ok(known) => ron_response(&Some(crate::galaxy::overview(published, &known)), "galaxy"),
+        Err(why) => {
+            eprintln!("admin galaxy: the store did not answer: {why}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn galaxy_chunk(State(api): State<Api>, headers: HeaderMap, Path(key): Path<String>) -> Response {
+    if admitted(&api, &headers).await.is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(published) = &api.galaxy else { return (StatusCode::NOT_FOUND, "None").into_response() };
+    let known = match known(&api).await {
+        Ok(known) => known,
+        Err(why) => {
+            eprintln!("admin galaxy chunk: the store did not answer: {why}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    match crate::galaxy::chunk_stars(published, &key, &api.stars, &known) {
+        Some(stars) => ron_response(&stars, "galaxy chunk"),
+        None => (StatusCode::NOT_FOUND, "None").into_response(),
+    }
 }
 
 async fn system(State(api): State<Api>, headers: HeaderMap, Path(id): Path<String>) -> Response {
