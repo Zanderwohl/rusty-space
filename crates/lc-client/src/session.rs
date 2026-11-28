@@ -1025,7 +1025,7 @@ mod tests {
         session
     }
 
-    /// The wire carries the rate as a multiple of this, so the two ends must agree on what one is.
+    /// The wire carries the rate as a multiple of this.
     #[test]
     fn a_rate_of_one_is_the_servers_design_rate() {
         assert_eq!(TIME_RATE, lc_server::server::DESIGN_RATE as f64);

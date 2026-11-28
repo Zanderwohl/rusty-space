@@ -8,11 +8,8 @@ use lc_proto::{Outbound, PROTOCOL_VERSION};
 
 use super::{Joined, Placement, State, Uplink};
 
-/// The design rate, which a shard runs at unless its `--rate` says otherwise.
-///
-/// One, because `session::TIME_RATE` — the coordinate seconds a multiplier of 1 buys per real
-/// second — is the server's `DESIGN_RATE`. The client never assumes it: the rate arrives in the
-/// welcome and is restated with the clock, and the client takes whatever it is told.
+/// A shard's default rate, as a multiple of `session::TIME_RATE`. The client never assumes it:
+/// it takes the rate from the welcome and from each clock statement.
 pub const SERVER_RATE: f64 = 1.0;
 
 /// The most a slew changes the clock's rate by, as a fraction of it. Too little to see a moon's

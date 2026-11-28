@@ -485,12 +485,12 @@ pub struct Wreck {
     shown_at: Option<(f32, f32)>,
     /// Real seconds its spike was first drawn on each neighbor.
     landed: HashMap<Option<ShipId>, f32>,
-    /// The slowest rate its afterglow plays at, as a multiple of the design rate. See [`slowest`].
+    /// Slowest rate its afterglow plays at, as a multiple of the design rate. See [`slowest`].
     floor: f64,
 }
 
-/// The design rate offline, where a slowed clock is for watching and should not hold the debris
-/// still. Nothing on a shard, whose rate is the world's and may be below the design rate.
+/// Offline, the design rate, so a clock slowed for watching still moves the debris. On a shard,
+/// none, because the shard's own rate may be below the design rate.
 fn slowest(remote: bool) -> f64 {
     if remote { 0.0 } else { crate::ui::DESIGN_TIME_RATE }
 }
@@ -519,8 +519,7 @@ impl Wreck {
         self.played_s((now_s + self.ahead_s - at_s).max(0.0), rate) as f32
     }
 
-    /// Real seconds `game_s` of coordinate time plays over with the clock at `rate` times the
-    /// design rate, and never slower than its `floor`.
+    /// Real seconds that `game_s` coordinate seconds take at `rate` times the design rate.
     fn played_s(&self, game_s: f64, rate: f64) -> f64 {
         game_s / (crate::session::TIME_RATE * rate.max(self.floor).max(f64::MIN_POSITIVE))
     }
@@ -1335,7 +1334,7 @@ mod tests {
         assert!(wreck.over(20.0 + 1e-6, 1.0 + 1.01 * design_s, afterglow_s));
     }
 
-    /// Joined to a shard running below the design rate, the debris keeps to the shard's clock.
+    /// On a shard below the design rate, the debris keeps to the shard's clock.
     #[test]
     fn a_slow_shard_plays_the_debris_at_its_own_rate() {
         let mut wrecks = Wrecks::default();

@@ -2,20 +2,16 @@
 
 use crate::server::DESIGN_RATE;
 
-/// The fastest a shard may be told to run, in coordinate seconds per real second: ten times the
-/// design rate.
+/// Coordinate seconds per real second: ten times the design rate.
 ///
-/// The clock is `i64` microseconds, which holds about 292,000 coordinate years: 33 real years
-/// from zero at the design rate and 3.3 at this. Faster would overflow it within a deployment's
-/// life. At this rate retention keeps about 240 partitions per table live, and the two spans the
-/// tick prepares ahead are about twelve real minutes of slack.
+/// The clock is `i64` microseconds, about 292,000 coordinate years: 33 real years from zero at
+/// the design rate and 3.3 at this. At this rate retention keeps about 240 partitions per table.
 pub const MAX_RATE: f64 = 10.0 * DESIGN_RATE as f64;
 
-/// Coordinate seconds per real second, from the flag and the environment variable.
+/// Coordinate seconds per real second.
 ///
-/// `flag` is `None` when `--rate` was not given and `Some(None)` when it was given with nothing
-/// after it. An empty `LC_RATE` is taken as unset, which is what a compose file passing through a
-/// variable nobody set produces.
+/// `flag` is `Some(None)` for a `--rate` with nothing after it. An empty `LC_RATE` counts as
+/// unset, because a compose file passes an unset variable through as empty.
 pub fn stated(flag: Option<Option<&str>>, env: Option<&str>) -> Result<f64, String> {
     let (from, text) = match (flag, env.filter(|t| !t.trim().is_empty())) {
         (Some(None), _) => return Err("--rate needs a value".into()),
@@ -61,7 +57,6 @@ mod tests {
         assert!(stated(Some(None), Some("526")).is_err());
     }
 
-    /// The reason for the ceiling: a new world at it still has years before the clock overflows.
     #[test]
     fn the_clock_holds_years_at_the_ceiling() {
         let real_years = i64::MAX as f64 * 1e-6 / MAX_RATE / lc_world::flight::JULIAN_YEAR_S;

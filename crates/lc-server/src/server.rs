@@ -319,15 +319,12 @@ impl<J: Journal> Server<J> {
         }
     }
 
-    /// How fast this world runs, as a multiple of the design rate.
+    /// How fast this world runs, as a multiple of the design rate. Set at boot from `--rate`, and
+    /// again by staging a scene.
     ///
-    /// Set at boot from `--rate`, and again by staging a scene, where sixty — one Julian year a
-    /// minute — turns a three-month chase into fifteen seconds of watching.
-    ///
-    /// Nothing about the world depends on it. Every motive is a closed form evaluated at a
-    /// coordinate time, so a faster tick buys coarser event timestamps and nothing else; the
-    /// step never enters an integrator, so it cannot accumulate. What *does* depend on it is
-    /// the clock the client runs between statements, which is why the rate is on the wire.
+    /// Every motive is a closed form in coordinate time, so a faster tick only coarsens event
+    /// timestamps. The client runs its own clock between statements at this rate, which is why
+    /// the rate is on the wire.
     pub fn set_rate(&mut self, rate: f64) {
         self.rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
     }
