@@ -503,7 +503,31 @@ docker --context rocinante start lightcone-db
 
 ---
 
-## The broker and a shard, on rocinante
+## The stack, with compose
+
+Since 2026-11-28 the whole rocinante stack is `deploy/compose.yaml`: the database, the CDN, the
+proxy, the broker, the site, the console and the shard, on the existing `lightcone` network and
+volumes. One command builds every image at the current commit and brings the stack up:
+
+```bash
+tools/deploy.sh                 # everything
+tools/deploy.sh shard admin     # only these, leaving what they depend on alone
+```
+
+Every setting is in one file on the host, `~/.config/lightcone/lightcone.env`, mode 600, which
+`deploy/lightcone.env.example` lists. A value two services must agree on is one variable there:
+`IDENTITY_EXCHANGE_SECRET` is the broker's exchange secret and the site's and console's identity
+secret, and `RELEASE_READ_TOKEN` is the site's read token and the console's. Every public URL is
+derived from `LC_DOMAIN`. The galaxy the shard runs is `SKY_PATH`, the path
+`tools/publish-galaxy.sh` prints.
+
+Images are built from a laptop by `deploy/compose.build.yaml` on the rocinante docker context,
+which needs the source and no secrets. `compose.yaml` is copied to `~/.config/lightcone/` and run
+there over ssh, because compose reads `--env-file` on the machine that invokes it.
+
+The per-service `*.env` files beside it are what the stack ran on before; nothing reads them now.
+The sections below still describe what each service is and needs.
+
 
 Three containers beside the site, all on the `lightcone` network.
 

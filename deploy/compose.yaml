@@ -1,0 +1,151 @@
+# The Lightcone development stack on rocinante, as it runs. Images only: they are built from a
+# laptop by `compose.build.yaml`, and this file is copied to the host and run there, because
+# compose reads `--env-file` on the machine that invokes it and the secrets stay on the host.
+#
+#   tools/deploy.sh            # builds, copies this file, brings the stack up
+#
+# Every setting comes from one file on the host, `~/.config/lightcone/lightcone.env`, which
+# `lightcone.env.example` lists. A value two services must agree on is one variable there, and
+# every public URL is derived from LC_DOMAIN. See lightcone/docs/15-runbook.md.
+#
+# The network and volumes predate this file and hold the database, the CDN's contents and the
+# proxy's certificates, so they are external: `compose down` never removes them.
+
+name: lightcone
+
+x-service: &restart
+  restart: unless-stopped
+
+services:
+  db:
+    <<: *restart
+    image: postgres:17-bookworm
+    container_name: lightcone-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # On the host so a laptop can reach it over the LAN for one-off queries.
+    ports: ["3102:5432"]
+    volumes: ["db-data:/var/lib/postgresql/data"]
+
+  cdn:
+    <<: *restart
+    image: lightcone-cdn:${TAG}
+    container_name: lightcone-cdn
+    environment:
+      CDN_ALLOW_ORIGIN: https://${LC_DOMAIN}
+      # bcrypt of CDN_LIST_PASSWORD, for the listing on 3103. Single-quoted in the env file,
+      # since a bcrypt hash is full of `$`.
+      CDN_LIST_HASH: ${CDN_LIST_HASH}
+    # 3101 only. 3103 lists everything and stays on the docker network.
+    ports: ["3101:3101"]
+    volumes: ["cdn-data:/srv/cdn"]
+
+  proxy:
+    <<: *restart
+    image: lightcone-proxy:${TAG}
+    container_name: lightcone-proxy
+    environment:
+      LC_DOMAIN: ${LC_DOMAIN}
+      ACME_CA: ${ACME_CA}
+      ACME_EMAIL: ${ACME_EMAIL}
+      NAMECHEAP_USER: ${NAMECHEAP_USER}
+      NAMECHEAP_API_KEY: ${NAMECHEAP_API_KEY}
+      NAMECHEAP_CLIENT_IP: ${NAMECHEAP_CLIENT_IP}
+    ports: ["80:80", "443:443"]
+    volumes: ["proxy-data:/data"]
+
+  identity:
+    <<: *restart
+    image: lightcone-identity:${TAG}
+    container_name: lightcone-identity
+    depends_on: [db]
+    environment:
+      DATABASE_URL: ${IDENTITY_DATABASE_URL}
+      LC_IDENTITY_PUBLIC_URL: https://accounts.${LC_DOMAIN}
+      LC_IDENTITY_ISSUER: https://accounts.${LC_DOMAIN}
+      LC_IDENTITY_RETURN_TO: https://${LC_DOMAIN}/auth/return,https://admin.${LC_DOMAIN}/auth/return
+      LC_IDENTITY_LOOPBACK_PATHS: /return
+      LC_IDENTITY_AUDIENCES: ${SHARD_AUDIENCE}
+      LC_IDENTITY_PROVIDERS: ${LC_IDENTITY_PROVIDERS}
+      LC_IDENTITY_EXCHANGE_SECRET: ${IDENTITY_EXCHANGE_SECRET}
+      LC_IDENTITY_SIGNING_SEED: ${LC_IDENTITY_SIGNING_SEED}
+
+  web:
+    <<: *restart
+    image: lightcone-web:${TAG}
+    container_name: lightcone-web
+    depends_on: [db, identity]
+    environment:
+      DATABASE_URL: ${SITE_DATABASE_URL}
+      BASE_URL: https://${LC_DOMAIN}
+      CDN_BASE: https://cdn.${LC_DOMAIN}
+      FALLBACK_BUILD_ID: ${FALLBACK_BUILD_ID}
+      RELEASE_TOKEN: ${RELEASE_TOKEN}
+      RELEASE_READ_TOKEN: ${RELEASE_READ_TOKEN}
+      LC_IDENTITY_BASE: https://accounts.${LC_DOMAIN}
+      LC_IDENTITY_API: http://lightcone-identity:3200
+      LC_IDENTITY_SECRET: ${IDENTITY_EXCHANGE_SECRET}
+      SITE_SESSION_KEY: ${SITE_SESSION_KEY}
+      LC_SHARD: ${SHARD_AUDIENCE}
+      LC_SHARD_URL: wss://${LC_DOMAIN}/ws
+    # On the host so tools/release.sh works with LC_SITE=http://<host>:3100 when LAN DNS fails.
+    ports: ["3100:3100"]
+
+  admin:
+    <<: *restart
+    image: lightcone-admin:${TAG}
+    container_name: lightcone-admin
+    # The console migrates nothing; the broker applies the schema it reads.
+    depends_on: [identity]
+    environment:
+      DATABASE_URL: ${IDENTITY_DATABASE_URL}
+      LC_ADMIN_PUBLIC_URL: https://admin.${LC_DOMAIN}
+      LC_ADMIN_IDENTITY_BASE: https://accounts.${LC_DOMAIN}
+      LC_ADMIN_IDENTITY_API: http://lightcone-identity:3200
+      LC_ADMIN_IDENTITY_SECRET: ${IDENTITY_EXCHANGE_SECRET}
+      LC_ADMIN_SESSION_KEY: ${ADMIN_SESSION_KEY}
+      LC_ADMIN_SHARD_API: http://lightcone-shard:3400
+      LC_ADMIN_SHARD_AUDIENCE: ${SHARD_AUDIENCE}
+      LC_ADMIN_CDN_LIST: http://lightcone-cdn:3103
+      LC_ADMIN_CDN_LIST_PASSWORD: ${CDN_LIST_PASSWORD}
+      LC_ADMIN_SITE_API: http://lightcone-web:3100
+      LC_ADMIN_RELEASE_READ_TOKEN: ${RELEASE_READ_TOKEN}
+
+  shard:
+    <<: *restart
+    image: lightcone-shard:${TAG}
+    container_name: lightcone-shard
+    depends_on: [db, identity, cdn]
+    environment:
+      # A libpq key=value string, not a URL.
+      LC_SHARD_DB: ${LC_SHARD_DB}
+    # SKY_PATH is the galaxy's manifest under the CDN root, as tools/publish-galaxy.sh prints
+    # it. The shard reads it over the docker network and tells clients the public address.
+    command: [
+      "--bind", "0.0.0.0:8080",
+      "--audience", "${SHARD_AUDIENCE}",
+      "--jwks", "http://lightcone-identity:3200/.well-known/jwks.json",
+      "--sky", "http://lightcone-cdn:3101/${SKY_PATH}",
+      "--sky-url", "https://cdn.${LC_DOMAIN}/${SKY_PATH}",
+      "--library", "/app/books.toml",
+      "--shelf-base", "https://cdn.${LC_DOMAIN}/library/",
+      "--admin-bind", "0.0.0.0:3400",
+    ]
+
+networks:
+  default:
+    name: lightcone
+    external: true
+
+volumes:
+  db-data:
+    name: lightcone-db-data
+    external: true
+  cdn-data:
+    name: lightcone-cdn-data
+    external: true
+  proxy-data:
+    name: lightcone-proxy-data
+    external: true

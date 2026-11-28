@@ -1,0 +1,40 @@
+# Builds every image `compose.yaml` runs, on the rocinante docker context, from a laptop's
+# checkout. Separate from `compose.yaml` because building needs the source and no secrets, and
+# running needs the secrets and no source.
+#
+#   TAG=$(git rev-parse --short HEAD) docker --context rocinante compose -f deploy/compose.build.yaml build
+#
+# Paths are relative to this file.
+
+name: lightcone-build
+
+services:
+  cdn:
+    image: lightcone-cdn:${TAG}
+    build: ../tools/dev-cdn
+  proxy:
+    image: lightcone-proxy:${TAG}
+    build: ../tools/proxy
+  identity:
+    image: lightcone-identity:${TAG}
+    build:
+      context: ../auth
+      dockerfile: Dockerfile
+  admin:
+    image: lightcone-admin:${TAG}
+    build:
+      context: ../auth
+      dockerfile: Dockerfile.admin
+      additional_contexts:
+        books: ../crates/lc-client/assets/books
+  web:
+    image: lightcone-web:${TAG}
+    build:
+      context: ../web
+      args:
+        SITE_BUILD: ${TAG}
+  shard:
+    image: lightcone-shard:${TAG}
+    build:
+      context: ..
+      dockerfile: crates/lc-server/Dockerfile
