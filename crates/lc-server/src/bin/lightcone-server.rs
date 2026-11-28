@@ -120,9 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     server.sky_url = after("--sky-url").or_else(|| std::env::var("LC_SKY_URL").ok());
     match (after("--sky"), &server.sky_url) {
         (Some(sky), Some(url)) => {
-            let file = |s: &str| s.rsplit('/').next().unwrap_or(s).to_owned();
-            if !sky.ends_with(".galaxy") || file(&sky) != file(url) {
-                return Err(format!("--sky-url {url} must name the same manifest file as --sky {sky}").into());
+            // The galaxy's directory and the manifest's file: `manifest.galaxy` alone names any galaxy.
+            let tail = |s: &str| s.rsplitn(3, '/').take(2).map(str::to_owned).collect::<Vec<_>>();
+            if !sky.ends_with(".galaxy") || tail(&sky) != tail(url) {
+                return Err(format!("--sky-url {url} must name the same galaxy and manifest file as --sky {sky}").into());
             }
         }
         (None, Some(_)) => return Err("--sky-url needs --sky, or the shard and its clients load different skies".into()),

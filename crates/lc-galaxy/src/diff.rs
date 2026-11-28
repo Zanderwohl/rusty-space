@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, ManifestChunk, Tier};
+use lc_world::sky::galaxy::{GalaxyChunk, GalaxyRecord, Kinematics, ManifestChunk, Tier};
 
 use crate::{Bake, Compiled, StarId};
 
@@ -112,15 +112,23 @@ fn compare(chunk: [i32; 3], tier: Tier, graph: Option<String>, was: Option<&Gala
     let (rb, ra) = (records(was), records(now));
     let mean_feh = |rs: &[GalaxyRecord]| rs.iter().map(GalaxyRecord::feh).sum::<f64>() / rs.len() as f64;
     let feh_shift = if rb.is_empty() || ra.is_empty() { 0.0 } else { mean_feh(&ra) - mean_feh(&rb) };
-    let shares = |rs: &[GalaxyRecord]| {
-        let mut n = [0.0f64; 16];
-        for r in rs {
-            n[r.population() as usize & 15] += 1.0;
+    // Keyed by the population's kinematics, since a record's population is an index into its own
+    // chunk's table and the table's order follows the graph's population list.
+    let shares = |c: Option<&GalaxyChunk>| {
+        let mut n: Vec<(Kinematics, f64)> = Vec::new();
+        let Some(c) = c else { return n };
+        for r in &c.records {
+            let Some(k) = c.populations.get(r.population() as usize) else { continue };
+            match n.iter_mut().find(|(p, _)| p == k) {
+                Some((_, count)) => *count += 1.0 / c.records.len() as f64,
+                None => n.push((k.clone(), 1.0 / c.records.len() as f64)),
+            }
         }
-        n.map(|k| if rs.is_empty() { 0.0 } else { k / rs.len() as f64 })
+        n
     };
-    let (sb, sa) = (shares(&rb), shares(&ra));
-    let share_shift = sb.iter().zip(sa).map(|(b, a)| (a - b).abs()).fold(0.0, f64::max);
+    let (sb, sa) = (shares(was), shares(now));
+    let share_of = |s: &[(Kinematics, f64)], k: &Kinematics| s.iter().find(|(p, _)| p == k).map_or(0.0, |(_, v)| *v);
+    let share_shift = sb.iter().chain(&sa).map(|(k, _)| (share_of(&sa, k) - share_of(&sb, k)).abs()).fold(0.0, f64::max);
     let (published, count) = (rb.len(), ra.len());
     let status = if was.is_none() {
         Status::Unpublished
@@ -128,7 +136,10 @@ fn compare(chunk: [i32; 3], tier: Tier, graph: Option<String>, was: Option<&Gala
         Status::Same
     } else {
         let allowed = (tolerance.count_fraction * published as f64).max(tolerance.min_count as f64);
-        let close = (count as f64 - published as f64).abs() <= allowed && feh_shift.abs() <= tolerance.feh_dex && share_shift <= tolerance.share;
+        // An emptied chunk has no [Fe/H] or mix to compare, and a small one is within the count
+        // floor of empty.
+        let emptied = published > 0 && count == 0;
+        let close = !emptied && (count as f64 - published as f64).abs() <= allowed && feh_shift.abs() <= tolerance.feh_dex && share_shift <= tolerance.share;
         if close { Status::Close } else { Status::Differs }
     };
     ChunkDiff { chunk, tier, status, graph, published, now: count, kept, changed, feh_shift, share_shift }

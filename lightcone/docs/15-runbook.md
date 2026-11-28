@@ -651,8 +651,10 @@ page. See [16-identity.md](16-identity.md).
 ```bash
 docker --context rocinante build -f auth/Dockerfile -t lightcone-identity:<tag> auth
 # Same build context, different Dockerfile: the console shares the broker's workspace and
-# lockfile, and adds a node stage that compiles its TypeScript.
-docker --context rocinante build -f auth/Dockerfile.admin -t lightcone-admin:<tag> auth
+# lockfile, and adds a node stage that compiles its TypeScript. `books` is the shelf catalog
+# it bakes in.
+docker --context rocinante build -f auth/Dockerfile.admin \
+    --build-context books=crates/lc-client/assets/books -t lightcone-admin:<tag> auth
 docker --context rocinante build -f crates/lc-server/Dockerfile -t lightcone-shard:<tag> .
 
 # Over ssh, because --env-file is read by the CLI you invoke and that file is on rocinante.

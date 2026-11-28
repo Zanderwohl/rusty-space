@@ -108,6 +108,12 @@ pub async fn load_files(client: &Client) -> Result<Vec<Filed>, Error> {
         .collect())
 }
 
+/// Every file's craft and subject, without the file.
+pub async fn subjects(client: &Client) -> Result<Vec<(i64, Vec<u8>)>, Error> {
+    let rows = client.query("SELECT ship_id, subject FROM lc_knowledge", &[]).await?;
+    Ok(rows.iter().map(|row| (row.get(0), row.get(1))).collect())
+}
+
 /// Every craft's file on one subject.
 ///
 /// A scan: the key leads with the craft. Fine for a console page; an index on `subject` is the

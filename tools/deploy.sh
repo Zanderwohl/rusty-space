@@ -37,7 +37,7 @@ export TAG
 
 # The database runs a stock image and has nothing to build.
 BUILT=()
-for s in "${SERVICES[@]}"; do [ "$s" = db ] || BUILT+=("$s"); done
+for s in ${SERVICES[@]+"${SERVICES[@]}"}; do [ "$s" = db ] || BUILT+=("$s"); done
 
 if [ -n "$BUILD" ] && { [ ${#SERVICES[@]} -eq 0 ] || [ ${#BUILT[@]} -gt 0 ]; }; then
   echo "==> building $TAG on $CONTEXT"

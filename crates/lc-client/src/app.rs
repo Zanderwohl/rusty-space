@@ -115,6 +115,11 @@ struct LoadingSky(Handle<crate::sky_asset::Sky>);
 #[derive(Resource)]
 struct AwaitingSky(f64);
 
+/// The shard's manifest the session was built from, or `None` for the packed sky. A shard that
+/// names its galaxy after the fallback to the packed sky sends the client back to loading.
+#[derive(Resource, Default)]
+struct SkySource(Option<String>);
+
 /// How long a shard that is named but not yet connecting is waited for. It covers the frames
 /// before `uplink::connect` runs; a desktop with no ticket yet can stay unconnected for good.
 const UNCONNECTED_GRACE_S: f64 = 2.0;
@@ -188,7 +193,9 @@ impl Plugin for ClientPlugin {
             // Chained, so the editor's camera is never the first created.
             .add_systems(Startup, ((spawn_camera, crate::form_view::spawn_camera).chain(), no_lights,
                 (crate::parts::adopt_fixture, crate::construction::adopt_demo).chain()))
+            .init_resource::<SkySource>()
             .add_systems(OnEnter(AppState::Loading), begin_load)
+            .add_systems(Update, follow_shard_sky.run_if(in_state(AppState::InGame)))
             .add_systems(OnExit(AppState::InGame), (crate::map_panel::release_world_frame, leave_scene))
             .add_systems(OnEnter(AppState::InGame), spawn_sky)
             .add_systems(Update, crate::parts::fit_fixture.after(crate::dev::place_on_station).run_if(in_state(AppState::InGame)))
@@ -571,8 +578,10 @@ fn begin_load(
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
     uplink: Res<crate::uplink::Uplink>,
+    mut source: ResMut<SkySource>,
     mut next: ResMut<NextState<AppState>>,
 ) {
+    source.0 = uplink.sky.clone();
     if let Some(manifest) = &uplink.sky {
         commands.insert_resource(LoadingSky(assets.load(manifest.clone())));
         return;
@@ -633,6 +642,7 @@ fn finish_load(
     mut game: ResMut<Game>,
     mut ui: ResMut<Ui>,
     uplink: Res<crate::uplink::Uplink>,
+    mut source: ResMut<SkySource>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     if let Some(awaiting) = awaiting {
@@ -643,6 +653,7 @@ fn finish_load(
             _ => false,
         };
         if let Some(manifest) = &uplink.sky {
+            source.0 = Some(manifest.clone());
             commands.insert_resource(LoadingSky(assets.load(manifest.clone())));
         } else if waiting {
             return;
@@ -667,6 +678,20 @@ fn finish_load(
         ui.notify("sky failed to load; using the sample", 0.0);
         enter_game(&mut game, &mut ui, &mut next, &AuthoredStars::sample(), &uplink, dev.charted);
         commands.remove_resource::<LoadingSky>();
+    }
+}
+
+/// Reloads when the shard names a galaxy the session was not built from, as when the link opened
+/// after [`UNCONNECTED_GRACE_S`] and the packed sky had already loaded.
+fn follow_shard_sky(
+    uplink: Res<crate::uplink::Uplink>,
+    source: Res<SkySource>,
+    mut ui: ResMut<Ui>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    if uplink.sky.is_some() && uplink.sky != source.0 {
+        ui.screen = Screen::Loading;
+        next.set(AppState::Loading);
     }
 }
 

@@ -212,8 +212,8 @@ async fn systems(
 async fn known(api: &Api) -> Result<crate::galaxy::Known, String> {
     let ships = lc_store::ships::load_ships(&api.db).await.map_err(|e| e.to_string())?;
     let at: Vec<glam::DVec3> = ships.iter().filter_map(|ship| crate::persist::decode(ship).ok()).map(|saved| saved.motion.at_ly.into()).collect();
-    let files = lc_store::knowledge::load_files(&api.db).await.map_err(|e| e.to_string())?;
-    let subjects = files.iter().filter_map(|f| Some((f.ship_id, lc_proto::decode::<lc_world::knowledge::Subject>(&f.subject).ok()?)));
+    let files = lc_store::knowledge::subjects(&api.db).await.map_err(|e| e.to_string())?;
+    let subjects = files.iter().filter_map(|(ship, subject)| Some((*ship, lc_proto::decode::<lc_world::knowledge::Subject>(subject).ok()?)));
     Ok(crate::galaxy::Known::new(subjects, crate::systems::tally(&at, &api.stars)))
 }
 
